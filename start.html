@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New tab</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #11111b;
+    color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+  }
+  #clock {
+    font-size: 64px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: #cdd6f4;
+  }
+  #date {
+    color: #6c7086;
+    font-size: 15px;
+    margin-top: -18px;
+  }
+  form {
+    background: rgba(30, 30, 46, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 16px;
+    padding: 4px 6px;
+    width: min(520px, 86vw);
+    display: flex;
+    transition: border-color .15s;
+  }
+  form:focus-within { border-color: #89b4fa; }
+  input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 15px;
+    padding: 10px 14px;
+  }
+  input::placeholder { color: #6c7086; }
+  .links { display: flex; gap: 12px; }
+  .links a {
+    background: rgba(30, 30, 46, 0.85);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    color: #a6adc8;
+    text-decoration: none;
+    padding: 9px 18px;
+    font-size: 13px;
+    transition: all .15s;
+  }
+  .links a:hover {
+    color: #89b4fa;
+    border-color: rgba(137, 180, 250, 0.4);
+    transform: translateY(-2px);
+  }
+</style>
+</head>
+<body>
+  <div id="clock">--:--</div>
+  <div id="date"></div>
+  <form action="https://www.google.com/search">
+    <input name="q" placeholder="Search Google" autofocus autocomplete="off">
+  </form>
+  <div class="links">
+    <a href="https://www.youtube.com">YouTube</a>
+    <a href="https://modrinth.com">Modrinth</a>
+    <a href="https://github.com">GitHub</a>
+    <a href="https://finance.yahoo.com">Stocks</a>
+  </div>
+<script>
+  function tick() {
+    const now = new Date();
+    document.getElementById("clock").textContent =
+      now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    document.getElementById("date").textContent =
+      now.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+  }
+  tick();
+  setInterval(tick, 1000);
+</script>
+</body>
+</html>

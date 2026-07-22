@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1e2e"/>
+      <stop offset="1" stop-color="#11111b"/>
+    </linearGradient>
+    <linearGradient id="planet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#89b4fa"/>
+      <stop offset="1" stop-color="#cba6f7"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#89b4fa" stop-opacity="0.15"/>
+      <stop offset="0.5" stop-color="#89dceb"/>
+      <stop offset="1" stop-color="#cba6f7" stop-opacity="0.9"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.55" stop-color="#89b4fa" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#89b4fa" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- squircle background -->
+  <rect x="16" y="16" width="480" height="480" rx="118" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="118" fill="none"
+        stroke="#89b4fa" stroke-opacity="0.25" stroke-width="6"/>
+
+  <!-- soft glow behind planet -->
+  <circle cx="256" cy="256" r="200" fill="url(#glow)"/>
+
+  <!-- back half of orbit ring (behind planet) -->
+  <g transform="rotate(-24 256 256)">
+    <path d="M 66 256 A 190 64 0 0 1 446 256" fill="none"
+          stroke="url(#ring)" stroke-width="17" stroke-linecap="round" opacity="0.55"/>
+  </g>
+
+  <!-- planet -->
+  <circle cx="256" cy="256" r="128" fill="url(#planet)"/>
+  <!-- meridian + parallels, globe hint -->
+  <g stroke="#11111b" stroke-opacity="0.55" stroke-width="10" fill="none">
+    <ellipse cx="256" cy="256" rx="52" ry="126"/>
+    <path d="M 136 212 A 260 260 0 0 1 376 212"/>
+    <path d="M 132 300 A 260 260 0 0 0 380 300"/>
+  </g>
+  <!-- highlight -->
+  <circle cx="215" cy="212" r="34" fill="#ffffff" fill-opacity="0.28"/>
+
+  <!-- front half of orbit ring (over planet) -->
+  <g transform="rotate(-24 256 256)">
+    <path d="M 446 256 A 190 64 0 0 1 66 256" fill="none"
+          stroke="url(#ring)" stroke-width="17" stroke-linecap="round"/>
+  </g>
+
+  <!-- little moon on the ring -->
+  <g transform="rotate(-24 256 256)">
+    <circle cx="98" cy="286" r="17" fill="#89dceb"/>
+  </g>
+</svg>
