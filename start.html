@@ -27,7 +27,7 @@
     font-size: 15px;
     margin-top: -18px;
   }
-  form {
+  form.search {
     background: rgba(30, 30, 46, 0.9);
     border: 1px solid rgba(137, 180, 250, 0.25);
     border-radius: 16px;
@@ -36,8 +36,8 @@
     display: flex;
     transition: border-color .15s;
   }
-  form:focus-within { border-color: #89b4fa; }
-  input {
+  form.search:focus-within { border-color: #89b4fa; }
+  form.search input {
     flex: 1;
     background: transparent;
     border: none;
@@ -48,8 +48,16 @@
     padding: 10px 14px;
   }
   input::placeholder { color: #6c7086; }
-  .links { display: flex; gap: 12px; }
+
+  .links {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 86vw;
+  }
   .links a {
+    position: relative;
     background: rgba(30, 30, 46, 0.85);
     border: 1px solid transparent;
     border-radius: 12px;
@@ -64,19 +72,169 @@
     border-color: rgba(137, 180, 250, 0.4);
     transform: translateY(-2px);
   }
+  .links a .rm {
+    position: absolute;
+    top: -7px;
+    right: -7px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #f38ba8;
+    color: #11111b;
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
+    display: none;
+    cursor: pointer;
+  }
+  .links a:hover .rm { display: block; }
+
+  #addbtn {
+    background: rgba(30, 30, 46, 0.85);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 50%;
+    width: 38px;
+    height: 38px;
+    color: #89b4fa;
+    font-size: 19px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  #addbtn:hover {
+    border-color: #89b4fa;
+    background: #313244;
+    transform: translateY(-2px);
+  }
+
+  #addform {
+    display: none;
+    background: rgba(30, 30, 46, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 14px;
+    padding: 10px;
+    gap: 8px;
+  }
+  #addform.open { display: flex; }
+  #addform input {
+    background: #11111b;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    border-radius: 9px;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 11px;
+    outline: none;
+    width: 150px;
+  }
+  #addform input:focus { border-color: #89b4fa; }
+  #addform button {
+    background: #89b4fa;
+    border: none;
+    border-radius: 9px;
+    color: #11111b;
+    font: inherit;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 7px 15px;
+    cursor: pointer;
+  }
+  #addform button:hover { background: #b4d0fb; }
 </style>
 </head>
 <body>
   <div id="clock">--:--</div>
   <div id="date"></div>
-  <form action="https://www.google.com/search">
+  <form class="search" action="https://www.google.com/search">
     <input name="q" placeholder="Search Google" autofocus autocomplete="off">
   </form>
-  <div class="links">
-    <a href="https://github.com">GitHub</a>
-    <a href="https://www.youtube.com">YouTube</a>
-  </div>
+  <div class="links" id="links"></div>
+  <form id="addform" autocomplete="off">
+    <input id="addurl" placeholder="wikipedia.org" list="sites">
+    <input id="addname" placeholder="Name (e.g. Wikipedia)" maxlength="20">
+    <button type="submit">Add</button>
+  </form>
+  <datalist id="sites">
+    <option value="wikipedia.org"><option value="youtube.com">
+    <option value="github.com"><option value="google.com">
+    <option value="reddit.com"><option value="amazon.de">
+    <option value="ebay.de"><option value="netflix.com">
+    <option value="spotify.com"><option value="twitch.tv">
+    <option value="instagram.com"><option value="tiktok.com">
+    <option value="discord.com"><option value="translate.google.com">
+    <option value="maps.google.com"><option value="web.de">
+    <option value="gmx.net"><option value="modrinth.com">
+  </datalist>
 <script>
+  const DEFAULTS = [
+    { name: "GitHub", url: "https://github.com" },
+    { name: "YouTube", url: "https://www.youtube.com" },
+  ];
+  let links = JSON.parse(localStorage.getItem("quicklinks") || "null") || DEFAULTS;
+
+  function save() { localStorage.setItem("quicklinks", JSON.stringify(links)); }
+
+  function render() {
+    const box = document.getElementById("links");
+    box.innerHTML = "";
+    links.forEach((l, i) => {
+      const a = document.createElement("a");
+      a.href = l.url;
+      a.textContent = l.name;
+      const rm = document.createElement("span");
+      rm.className = "rm";
+      rm.textContent = "✕";
+      rm.title = "Remove";
+      rm.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        links.splice(i, 1);
+        save();
+        render();
+      };
+      a.appendChild(rm);
+      box.appendChild(a);
+    });
+    const plus = document.createElement("button");
+    plus.id = "addbtn";
+    plus.textContent = "+";
+    plus.title = "Add a link";
+    plus.onclick = () => {
+      document.getElementById("addform").classList.toggle("open");
+      document.getElementById("addname").focus();
+    };
+    box.appendChild(plus);
+  }
+
+  // auto-fill the name from the address: "wikipedia.org" -> "Wikipedia"
+  document.getElementById("addurl").addEventListener("input", () => {
+    const nameBox = document.getElementById("addname");
+    if (nameBox.dataset.touched === "1") return;
+    let host = document.getElementById("addurl").value.trim()
+      .replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+    const base = host.split(".")[0];
+    nameBox.value = base ? base.charAt(0).toUpperCase() + base.slice(1) : "";
+  });
+  document.getElementById("addname").addEventListener("input", (e) => {
+    e.target.dataset.touched = e.target.value ? "1" : "";
+  });
+
+  document.getElementById("addform").onsubmit = (e) => {
+    e.preventDefault();
+    const name = document.getElementById("addname").value.trim();
+    let url = document.getElementById("addurl").value.trim();
+    if (!name || !url) return;
+    if (!url.includes("://")) url = "https://" + url;
+    links.push({ name, url });
+    save();
+    document.getElementById("addname").value = "";
+    document.getElementById("addname").dataset.touched = "";
+    document.getElementById("addurl").value = "";
+    document.getElementById("addform").classList.remove("open");
+    render();
+  };
+
+  render();
+
   function tick() {
     const now = new Date();
     document.getElementById("clock").textContent =

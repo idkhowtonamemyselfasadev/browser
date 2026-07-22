@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """A minimal, island-styled web browser. Tabs, search bar, start page."""
+import json
 import os
 import sys
 from pathlib import Path
@@ -10,22 +11,35 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
     os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     + " --blink-settings=preferredColorScheme=0")
 
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QStringListModel, QTimer, QUrl, QUrlQuery
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut, QGuiApplication
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QCompleter, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QTabWidget, QTabBar, QToolButton,
 )
 from PyQt6.QtWebEngineCore import (
     QWebEngineProfile, QWebEnginePage, QWebEngineSettings,
 )
-from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+from PyQt6.QtNetwork import (
+    QLocalServer, QLocalSocket, QNetworkAccessManager, QNetworkRequest,
+)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 APP_DIR = Path(__file__).resolve().parent
 START_PAGE = QUrl.fromLocalFile(str(APP_DIR / "start.html"))
 SEARCH_URL = "https://www.google.com/search?q={}"
+SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
 DOWNLOAD_DIR = Path.home() / "Downloads"
+HOSTS_FILE = Path.home() / ".local/share/browser/hosts.json"
+
+# domain guesses for the address bar ("wiki" -> wikipedia.org);
+# visited sites are remembered and suggested too
+COMMON_SITES = [
+    "wikipedia.org", "youtube.com", "github.com", "google.com",
+    "reddit.com", "amazon.de", "ebay.de", "netflix.com", "spotify.com",
+    "twitch.tv", "instagram.com", "tiktok.com", "discord.com",
+    "translate.google.com", "maps.google.com", "web.de", "gmx.net",
+]
 
 STYLE = """
 * { font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif; font-size: 13px; }
@@ -123,6 +137,35 @@ class Browser(QMainWindow):
         self.urlbar = QLineEdit(objectName="urlbar")
         self.urlbar.setPlaceholderText("Search or enter address")
         self.urlbar.returnPressed.connect(self._navigate)
+
+        # suggestions dropdown: domain guesses + Google search suggestions
+        try:
+            self.known_hosts = set(json.loads(HOSTS_FILE.read_text()))
+        except Exception:
+            self.known_hosts = set()
+        self.suggest_model = QStringListModel(self)
+        self.completer = QCompleter(self.suggest_model, self)
+        self.completer.setCompletionMode(
+            QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        self.urlbar.setCompleter(self.completer)
+        self.completer.activated.connect(
+            lambda _: QTimer.singleShot(0, self._navigate))
+        self.completer.popup().setStyleSheet("""
+            QListView {
+                background: #1e1e2e; color: #cdd6f4;
+                border: 1px solid rgba(137, 180, 250, 100);
+                border-radius: 10px; padding: 4px; outline: 0;
+            }
+            QListView::item { padding: 6px 10px; border-radius: 7px; }
+            QListView::item:selected { background: #313244; color: #89b4fa; }
+        """)
+        self._nam = QNetworkAccessManager(self)
+        self._suggest_reply = None
+        self._suggest_timer = QTimer(self)
+        self._suggest_timer.setSingleShot(True)
+        self._suggest_timer.setInterval(150)
+        self._suggest_timer.timeout.connect(self._fetch_suggestions)
+        self.urlbar.textEdited.connect(lambda _t: self._suggest_timer.start())
 
         back = QToolButton(text="‹")
         fwd = QToolButton(text="›")
@@ -234,8 +277,59 @@ class Browser(QMainWindow):
         self.urlbar.setFocus()
         self.urlbar.selectAll()
 
+    # ---- suggestions ----
+    def _fetch_suggestions(self):
+        text = self.urlbar.text().strip().lower()
+        if len(text) < 2 or "://" in text or not self.urlbar.hasFocus():
+            return
+        domains = [d for d in COMMON_SITES + sorted(self.known_hosts)
+                   if d.startswith(text) or d.split(".")[0].startswith(text)
+                   or d.startswith("www." + text)]
+        domains = list(dict.fromkeys(domains))
+        domains = [d for d in domains
+                   if not (d.startswith("www.") and d[4:] in domains)][:3]
+        if self._suggest_reply is not None:
+            self._suggest_reply.abort()
+        url = QUrl(SUGGEST_URL)
+        q = QUrlQuery()
+        q.addQueryItem("client", "firefox")
+        q.addQueryItem("q", text)
+        url.setQuery(q)
+        reply = self._nam.get(QNetworkRequest(url))
+        self._suggest_reply = reply
+        reply.finished.connect(
+            lambda r=reply, t=text, d=domains: self._got_suggestions(r, t, d))
+
+    def _got_suggestions(self, reply, text, domains):
+        if reply is self._suggest_reply:
+            self._suggest_reply = None
+        searches = []
+        try:
+            searches = json.loads(bytes(reply.readAll()).decode())[1]
+        except Exception:
+            pass
+        reply.deleteLater()
+        if self.urlbar.text().strip().lower() != text:
+            return  # user typed on; a newer request is coming
+        items = domains + [s for s in searches if s not in domains][:6]
+        self.suggest_model.setStringList(items)
+        if items and self.urlbar.hasFocus():
+            self.completer.complete()
+
+    def _remember_host(self, url):
+        host = url.host()
+        if url.scheme() in ("http", "https") and host and host not in self.known_hosts:
+            self.known_hosts.add(host)
+            try:
+                HOSTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                HOSTS_FILE.write_text(json.dumps(sorted(self.known_hosts)))
+            except OSError:
+                pass
+
     def _url_changed(self, view, url):
-        if view is self.current():
+        self._remember_host(url)
+        # never clobber the bar while the user is typing in it
+        if view is self.current() and not self.urlbar.hasFocus():
             self.urlbar.setText("" if url == START_PAGE else url.toString())
             self.urlbar.setCursorPosition(0)
 
