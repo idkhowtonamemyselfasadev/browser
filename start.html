@@ -272,6 +272,46 @@
   #clearhist:hover { color: #f38ba8; border-color: #f38ba8; }
   .hint { font-size: 11px; color: #6c7086; }
 
+
+  /* first-run setup wizard */
+  #wizard {
+    position: fixed;
+    top: 42px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid rgba(108, 112, 134, 0.5);
+    padding: 18px 24px;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+    z-index: 5;
+    max-width: 86vw;
+  }
+  #wizard.open { display: flex; }
+  #wizard h2 { font-size: 17px; font-weight: 600; color: #cdd6f4; }
+  #wizard p { font-size: 13px; color: #6c7086; text-align: center; }
+  .wizbtns { display: flex; gap: 8px; margin-top: 4px; }
+  #wizard button {
+    background: #000000;
+    border: 1px solid rgba(108, 112, 134, 0.5);
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 16px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  #wizard button:hover { border-color: #a6adc8; color: #ffffff; }
+  #wizard button.primary { background: #cdd6f4; color: #000000; font-weight: bold; border: 1px solid #cdd6f4; }
+  #wizard button.primary:hover { background: #ffffff; }
+  #wizthumbs { display: grid; grid-template-columns: repeat(3, 110px); gap: 10px; }
+  #wizthumbs .thumb { height: 62px; }
+  body.dragging form.search { cursor: move; }
+  body.dragging form.search input { pointer-events: none; }
+  form.search.custompos { position: fixed; margin: 0; }
+
 </style>
 </head>
 <body>
@@ -298,6 +338,13 @@
     <option value="gmx.net"><option value="modrinth.com">
   </datalist>
 
+  <div id="wizard">
+    <h2 id="wiztitle"></h2>
+    <p id="wiztext"></p>
+    <div id="wizthumbs" hidden></div>
+    <div class="wizbtns" id="wizbtns"></div>
+  </div>
+
   <button id="gear" title="Customize">⚙</button>
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <div id="settings">
@@ -315,6 +362,10 @@
         <button type="button" id="viewhist">View history</button>
         <button type="button" id="clearhist">Clear history</button>
       </div>
+    </div>
+    <h3>Setup</h3>
+    <div class="privbtns">
+      <button type="button" id="rerunsetup">Run setup again</button>
     </div>
   </div>
 <script>
@@ -407,8 +458,8 @@
     }
   }
 
-  function renderThumbs() {
-    const box = document.getElementById("thumbs");
+  function renderThumbs(boxId = "thumbs") {
+    const box = document.getElementById(boxId);
     box.innerHTML = "";
     const current = localStorage.getItem("bg") || "";
     const mk = (label, value, image) => {
@@ -420,7 +471,7 @@
       t.onclick = () => {
         localStorage.setItem("bg", value);
         applyBg();
-        renderThumbs();
+        renderThumbs(boxId);
       };
       return t;
     };
@@ -457,6 +508,8 @@
       }
       applyBg();
       renderThumbs();
+      if (document.getElementById("wizard").classList.contains("open"))
+        renderThumbs("wizthumbs");
     };
     img.src = URL.createObjectURL(file);
   };
@@ -480,6 +533,96 @@
   }
 
   applyBg();
+
+
+  // ---- movable search bar (position set in the setup wizard) ----
+  const searchForm = document.querySelector("form.search");
+  function applySearchPos() {
+    const pos = JSON.parse(localStorage.getItem("searchpos") || "null");
+    if (!pos) {
+      searchForm.classList.remove("custompos");
+      searchForm.style.left = searchForm.style.top = "";
+      return;
+    }
+    searchForm.classList.add("custompos");
+    const w = searchForm.offsetWidth, h = searchForm.offsetHeight;
+    searchForm.style.left = Math.round(pos.xp * Math.max(0, innerWidth - w)) + "px";
+    searchForm.style.top = Math.round(pos.yp * Math.max(0, innerHeight - h)) + "px";
+  }
+  window.addEventListener("resize", applySearchPos);
+  applySearchPos();
+
+  let dragging = null;
+  searchForm.addEventListener("pointerdown", (e) => {
+    if (!document.body.classList.contains("dragging")) return;
+    const r = searchForm.getBoundingClientRect();
+    dragging = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    searchForm.classList.add("custompos");
+    searchForm.style.left = r.left + "px";
+    searchForm.style.top = r.top + "px";
+    e.preventDefault();
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const w = searchForm.offsetWidth, h = searchForm.offsetHeight;
+    searchForm.style.left =
+      Math.min(Math.max(0, e.clientX - dragging.dx), innerWidth - w) + "px";
+    searchForm.style.top =
+      Math.min(Math.max(0, e.clientY - dragging.dy), innerHeight - h) + "px";
+  });
+  window.addEventListener("pointerup", () => {
+    if (!dragging) return;
+    dragging = null;
+    const w = searchForm.offsetWidth, h = searchForm.offsetHeight;
+    localStorage.setItem("searchpos", JSON.stringify({
+      xp: (parseInt(searchForm.style.left) || 0) / Math.max(1, innerWidth - w),
+      yp: (parseInt(searchForm.style.top) || 0) / Math.max(1, innerHeight - h),
+    }));
+  });
+
+  // ---- first-run setup wizard ----
+  function wizStep(step) {
+    const wiz = document.getElementById("wizard");
+    const btns = document.getElementById("wizbtns");
+    const thumbs = document.getElementById("wizthumbs");
+    wiz.classList.add("open");
+    btns.innerHTML = "";
+    const btn = (label, cls, fn) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      if (cls) b.className = cls;
+      b.onclick = fn;
+      btns.appendChild(b);
+    };
+    if (step === 1) {
+      document.body.classList.add("dragging");
+      document.getElementById("wiztitle").textContent = "Welcome! Let's set things up";
+      document.getElementById("wiztext").textContent =
+        "Grab the search bar and drag it wherever you want it.";
+      thumbs.hidden = true;
+      btn("Center it again", "", () => {
+        localStorage.removeItem("searchpos");
+        applySearchPos();
+      });
+      btn("Next \u2192", "primary", () => wizStep(2));
+    } else {
+      document.body.classList.remove("dragging");
+      document.getElementById("wiztitle").textContent = "Wallpaper";
+      document.getElementById("wiztext").textContent =
+        "Pick a wallpaper for your start page.";
+      thumbs.hidden = false;
+      renderThumbs("wizthumbs");
+      btn("Finish", "primary", () => {
+        localStorage.setItem("setupDone", "1");
+        wiz.classList.remove("open");
+      });
+    }
+  }
+  document.getElementById("rerunsetup").onclick = () => {
+    document.getElementById("settings").classList.remove("open");
+    wizStep(1);
+  };
+  if (!localStorage.getItem("setupDone")) wizStep(1);
 
   // ---- privacy / history (talks to the browser via QWebChannel) ----
   let bridge = null;
