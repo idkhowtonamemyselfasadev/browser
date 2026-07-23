@@ -27,6 +27,8 @@ and nothing else. The whole browser is a single readable `browser.py`.
   cleared from the start page's privacy panel
 - **Single instance** — opening a link from another app lands as a new tab
   in the running window; works as the system default browser
+- **Built-in updates** — a Check-for-updates button in the settings panel
+  pulls the newest version from this repository
 - **Fullscreen video**, background tabs (middle-click), Chrome-style shortcuts
 
 ## Screenshots
