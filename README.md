@@ -1,8 +1,8 @@
 # browser
 
 A minimal, dark, keyboard-friendly web browser for Linux. One Python file,
-Chromium rendering (Qt WebEngine), styled after a Catppuccin Mocha desktop —
-sharp corners, floating dark islands, no clutter.
+Chromium rendering (Qt WebEngine), pitch-black with Catppuccin Mocha text
+colors — sharp corners, thin outlines, no clutter. Even Google is black.
 
 ![Start page](screenshots/start-page.png)
 
@@ -81,7 +81,8 @@ There is no configuration file — the sources are short and meant to be edited:
 | `history.html` | History page. |
 | `backgrounds/` | Bundled background images. |
 
-The color scheme follows [Catppuccin Mocha](https://catppuccin.com/palette/).
+The theme is pitch black (#000000) with
+[Catppuccin Mocha](https://catppuccin.com/palette/) text colors.
 User data (history, settings, cookies) is stored under `~/.local/share/browser/`.
 
 ## Uninstall

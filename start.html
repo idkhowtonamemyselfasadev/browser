@@ -7,7 +7,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
   body {
-    background: #11111b;
+    background: #000000;
     color: #cdd6f4;
     font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
     display: flex;
@@ -28,15 +28,15 @@
     margin-top: -18px;
   }
   form.search {
-    background: rgba(30, 30, 46, 0.9);
-    border: 1px solid rgba(137, 180, 250, 0.25);
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid rgba(108, 112, 134, 0.45);
     border-radius: 0;
     padding: 4px 6px;
     width: min(520px, 86vw);
     display: flex;
     transition: border-color .15s;
   }
-  form.search:focus-within { border-color: #89b4fa; }
+  form.search:focus-within { border-color: #a6adc8; }
   form.search input {
     flex: 1;
     background: transparent;
@@ -58,8 +58,8 @@
   }
   .links a {
     position: relative;
-    background: rgba(30, 30, 46, 0.85);
-    border: 1px solid transparent;
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(137, 180, 250, 0.15);
     border-radius: 12px;
     color: #a6adc8;
     text-decoration: none;
@@ -80,7 +80,7 @@
     height: 18px;
     border-radius: 50%;
     background: #f38ba8;
-    color: #11111b;
+    color: #000000;
     font-size: 11px;
     line-height: 18px;
     text-align: center;
@@ -90,7 +90,7 @@
   .links a:hover .rm { display: block; }
 
   #addbtn {
-    background: rgba(30, 30, 46, 0.85);
+    background: rgba(0, 0, 0, 0.85);
     border: 1px solid rgba(137, 180, 250, 0.25);
     border-radius: 50%;
     width: 38px;
@@ -102,13 +102,13 @@
   }
   #addbtn:hover {
     border-color: #89b4fa;
-    background: #313244;
+    background: #16161d;
     transform: translateY(-2px);
   }
 
   #addform {
     display: none;
-    background: rgba(30, 30, 46, 0.9);
+    background: rgba(0, 0, 0, 0.9);
     border: 1px solid rgba(137, 180, 250, 0.25);
     border-radius: 14px;
     padding: 10px;
@@ -116,7 +116,7 @@
   }
   #addform.open { display: flex; }
   #addform input {
-    background: #11111b;
+    background: #000000;
     border: 1px solid rgba(108, 112, 134, 0.4);
     border-radius: 9px;
     color: #cdd6f4;
@@ -131,7 +131,7 @@
     background: #89b4fa;
     border: none;
     border-radius: 9px;
-    color: #11111b;
+    color: #000000;
     font: inherit;
     font-size: 13px;
     font-weight: bold;
@@ -149,7 +149,7 @@
     content: "";
     position: fixed;
     inset: 0;
-    background: rgba(17, 17, 27, 0.45);
+    background: rgba(0, 0, 0, 0.5);
     z-index: 0;
   }
   body > * { z-index: 1; }
@@ -164,7 +164,7 @@
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: rgba(30, 30, 46, 0.85);
+    background: rgba(0, 0, 0, 0.85);
     border: 1px solid rgba(137, 180, 250, 0.25);
     color: #6c7086;
     font-size: 18px;
@@ -184,7 +184,7 @@
     display: none;
     flex-direction: column;
     gap: 10px;
-    background: rgba(30, 30, 46, 0.95);
+    background: rgba(0, 0, 0, 0.95);
     border: 1px solid rgba(137, 180, 250, 0.25);
     border-radius: 14px;
     padding: 14px;
@@ -206,7 +206,7 @@
   .thumb {
     height: 52px;
     border-radius: 9px;
-    background-color: #11111b;
+    background-color: #000000;
     background-size: cover;
     background-position: center;
     border: 2px solid transparent;
@@ -237,7 +237,7 @@
     width: 34px;
     height: 19px;
     border-radius: 10px;
-    background: #45475a;
+    background: #a6adc8;
     position: relative;
     transition: background .15s;
     flex-shrink: 0;
@@ -250,15 +250,15 @@
     width: 14px;
     height: 14px;
     border-radius: 50%;
-    background: #cdd6f4;
+    background: #000000;
     transition: transform .15s;
   }
-  .switchrow input:checked + .slider { background: #89b4fa; }
+  .switchrow input:checked + .slider { background: #ffffff; }
   .switchrow input:checked + .slider::after { transform: translateX(14px); }
   .privbtns { display: flex; gap: 8px; }
   .privbtns button {
     flex: 1;
-    background: #11111b;
+    background: #000000;
     border: 1px solid rgba(108, 112, 134, 0.4);
     border-radius: 9px;
     color: #a6adc8;
@@ -270,6 +270,7 @@
   }
   .privbtns button:hover { color: #89b4fa; border-color: #89b4fa; }
   #clearhist:hover { color: #f38ba8; border-color: #f38ba8; }
+  .hint { font-size: 11px; color: #6c7086; }
 
 </style>
 </head>
@@ -465,6 +466,19 @@
     renderThumbs();
   };
 
+  // Esc closes the settings panel
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape")
+      document.getElementById("settings").classList.remove("open");
+  });
+
+  // coming back from the history page: reopen the panel
+  if (sessionStorage.getItem("reopenSettings")) {
+    sessionStorage.removeItem("reopenSettings");
+    document.getElementById("settings").classList.add("open");
+    renderThumbs();
+  }
+
   applyBg();
 
   // ---- privacy / history (talks to the browser via QWebChannel) ----
@@ -472,15 +486,25 @@
   if (typeof qt !== "undefined") {
     new QWebChannel(qt.webChannelTransport, (ch) => {
       bridge = ch.objects.bridge;
-      bridge.historyEnabled((v) => {
-        document.getElementById("histtoggle").checked = v;
-      });
+      syncSettings();
     });
   }
+  function syncSettings() {
+    if (!bridge) return;
+    bridge.historyEnabled((v) => {
+      document.getElementById("histtoggle").checked = v;
+    });
+  }
+  // tabs opened earlier would show stale switches; re-sync when shown
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) syncSettings();
+  });
   document.getElementById("histtoggle").onchange = (e) => {
     if (bridge) bridge.setHistoryEnabled(e.target.checked);
   };
   document.getElementById("viewhist").onclick = () => {
+    // so Esc on the history page brings you back into this panel
+    sessionStorage.setItem("reopenSettings", "1");
     location.href = "history.html";
   };
   document.getElementById("clearhist").onclick = (e) => {

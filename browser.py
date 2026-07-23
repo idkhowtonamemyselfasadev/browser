@@ -6,6 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+CONFIG_FILE = Path.home() / ".local/share/browser/config.json"
+
 # sites see prefers-color-scheme: dark and serve their native dark theme
 # (0 = dark); must be set before Qt WebEngine starts
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
@@ -26,7 +28,7 @@ from PyQt6.QtWidgets import (
     QToolButton,
 )
 from PyQt6.QtWebEngineCore import (
-    QWebEngineProfile, QWebEnginePage, QWebEngineSettings,
+    QWebEngineProfile, QWebEnginePage, QWebEngineScript, QWebEngineSettings,
 )
 from PyQt6.QtNetwork import (
     QLocalServer, QLocalSocket, QNetworkAccessManager, QNetworkRequest,
@@ -34,14 +36,17 @@ from PyQt6.QtNetwork import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 APP_DIR = Path(__file__).resolve().parent
+# version query defeats the renderer's cache of local pages, so a new
+# tab always shows the current start.html, not a stale cached copy
 START_PAGE = QUrl.fromLocalFile(str(APP_DIR / "start.html"))
+START_PAGE.setQuery("v=%d" % (APP_DIR / "start.html").stat().st_mtime)
 SEARCH_URL = "https://www.google.com/search?q={}"
 SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
 DOWNLOAD_DIR = Path.home() / "Downloads"
 HOSTS_FILE = Path.home() / ".local/share/browser/hosts.json"
 HISTORY_FILE = Path.home() / ".local/share/browser/history.json"
-CONFIG_FILE = Path.home() / ".local/share/browser/config.json"
 HISTORY_PAGE = QUrl.fromLocalFile(str(APP_DIR / "history.html"))
+HISTORY_PAGE.setQuery("v=%d" % (APP_DIR / "history.html").stat().st_mtime)
 HISTORY_MAX = 3000
 
 # sites that ship their own dark theme (served via preferredColorScheme):
@@ -51,6 +56,20 @@ NATIVE_DARK_SITES = {
     "netflix.com", "spotify.com", "tiktok.com", "instagram.com",
     "modrinth.com", "duckduckgo.com",
 }
+
+# Google's native dark theme is gray (#202124); repaint it true black
+# so search pages match the rest of the UI
+GOOGLE_BLACK_JS = r"""
+(function () {
+  if (!/(^|\.)google\.[a-z.]+$/.test(location.hostname)) return;
+  var s = document.createElement("style");
+  s.textContent =
+    "html, body { background: #000 !important; }" +
+    ".sfbg, .minidiv, #searchform, #appbar, #sfcnt, #footcnt, #fbar," +
+    " #footer, .appbar { background: #000 !important; }";
+  (document.head || document.documentElement).appendChild(s);
+})();
+"""
 
 # domain guesses for the address bar ("wiki" -> wikipedia.org);
 # visited sites are remembered and suggested too
@@ -63,33 +82,33 @@ COMMON_SITES = [
 
 STYLE = """
 * { font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif; font-size: 13px; }
-QMainWindow, #chrome { background: #11111b; }
+QMainWindow, #chrome { background: #000000; }
 
 QLineEdit#urlbar {
-    background: rgba(30, 30, 46, 230);
+    background: rgba(13, 13, 18, 230);
     color: #cdd6f4;
-    border: 1px solid rgba(137, 180, 250, 60);
+    border: 1px solid rgba(108, 112, 134, 70);
     border-radius: 0px;
     padding: 7px 16px;
-    selection-background-color: #89b4fa;
-    selection-color: #11111b;
+    selection-background-color: #45475a;
+    selection-color: #ffffff;
 }
-QLineEdit#urlbar:focus { border: 1px solid #89b4fa; }
+QLineEdit#urlbar:focus { border: 1px solid #a6adc8; }
 
 QToolButton {
-    background: rgba(30, 30, 46, 230);
+    background: rgba(13, 13, 18, 230);
     color: #cdd6f4;
     border: none;
     border-radius: 12px;
     padding: 5px 11px;
     font-weight: bold;
 }
-QToolButton:hover { background: #313244; color: #89b4fa; }
+QToolButton:hover { background: #16161d; color: #ffffff; }
 
 QTabWidget::pane { border: none; }
 QTabBar { background: transparent; }
 QTabBar::tab {
-    background: rgba(30, 30, 46, 200);
+    background: rgba(13, 13, 18, 200);
     color: #a6adc8;
     border-radius: 0px;
     padding: 7px 6px 7px 14px;
@@ -98,18 +117,18 @@ QTabBar::tab {
     max-width: 240px;
 }
 QTabBar::tab:selected {
-    background: #313244;
+    background: #16161d;
     color: #cdd6f4;
-    border: 1px solid rgba(137, 180, 250, 70);
+    border: 1px solid rgba(108, 112, 134, 90);
 }
-QTabBar::tab:hover { color: #89b4fa; }
+QTabBar::tab:hover { color: #cdd6f4; }
 
-#dlbar { background: #11111b; border-top: 1px solid rgba(137, 180, 250, 40); }
-#dlitem { background: rgba(30, 30, 46, 230); border-radius: 12px; }
+#dlbar { background: #000000; border-top: 1px solid rgba(108, 112, 134, 50); }
+#dlitem { background: rgba(13, 13, 18, 230); border-radius: 12px; }
 QLabel#dlname { color: #cdd6f4; }
 QLabel#dlinfo { color: #6c7086; font-size: 11px; }
 QProgressBar {
-    background: #313244;
+    background: #16161d;
     border: none;
     border-radius: 3px;
     max-height: 6px;
@@ -312,6 +331,14 @@ class Browser(QMainWindow):
         # auto-darken pages that have no dark theme of their own
         s.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
 
+        script = QWebEngineScript()
+        script.setName("google-black")
+        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+        script.setRunsOnSubFrames(False)
+        script.setSourceCode(GOOGLE_BLACK_JS)
+        self.profile.scripts().insert(script)
+
         # top island bar: nav buttons + url bar
         self.urlbar = QLineEdit(objectName="urlbar")
         self.urlbar.setPlaceholderText("Search or enter address")
@@ -331,12 +358,12 @@ class Browser(QMainWindow):
             lambda _: QTimer.singleShot(0, self._navigate))
         self.completer.popup().setStyleSheet("""
             QListView {
-                background: #1e1e2e; color: #cdd6f4;
-                border: 1px solid rgba(137, 180, 250, 100);
+                background: #0d0d12; color: #cdd6f4;
+                border: 1px solid rgba(108, 112, 134, 110);
                 border-radius: 10px; padding: 4px; outline: 0;
             }
             QListView::item { padding: 6px 10px; border-radius: 7px; }
-            QListView::item:selected { background: #313244; color: #89b4fa; }
+            QListView::item:selected { background: #16161d; color: #ffffff; }
         """)
         self._nam = QNetworkAccessManager(self)
         self._suggest_reply = None
