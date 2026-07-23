@@ -61,6 +61,9 @@ Requirements: Python 3 and PyQt6 WebEngine.
 
 ## Keyboard shortcuts
 
+All shortcuts are built into the browser itself — they work the same on any
+desktop or window manager, no system configuration needed.
+
 | Key | Action |
 |-----|--------|
 | Ctrl+T | New tab |
