@@ -146,6 +146,9 @@ QToolButton#tabclose {
     font-weight: normal;
 }
 QToolButton#tabclose:hover { background: rgba(243, 139, 168, 70); color: #f38ba8; }
+
+#toast { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 110); }
+#toast QLabel { color: #cdd6f4; }
 """
 
 
@@ -464,7 +467,91 @@ class Browser(QMainWindow):
         }.items():
             QShortcut(QKeySequence(key), self).activated.connect(fn)
 
+        self.bridge.updateFinished.connect(self._toast_result)
+        QTimer.singleShot(3000, self._check_updates)
+        self._toast = None
+
         self.new_tab(url=initial_url)
+
+    # ---- updates ----
+    def _check_updates(self):
+        """Quietly look for a newer version on GitHub at startup."""
+        if not (APP_DIR / ".git").exists():
+            return
+        fetch = QProcess(self)
+        fetch.setWorkingDirectory(str(APP_DIR))
+        fetch.finished.connect(lambda *_: (fetch.deleteLater(),
+                                           self._count_behind()))
+        fetch.start("git", ["fetch", "--quiet"])
+
+    def _count_behind(self):
+        proc = QProcess(self)
+        proc.setWorkingDirectory(str(APP_DIR))
+
+        def done(*_):
+            out = bytes(proc.readAllStandardOutput()).decode().strip()
+            proc.deleteLater()
+            if proc.exitCode() == 0 and out.isdigit() and int(out) > 0:
+                self._show_toast()
+        proc.finished.connect(done)
+        proc.start("git", ["rev-list", "--count", "HEAD..@{u}"])
+
+    def _show_toast(self):
+        if self._toast:
+            return
+        toast = QWidget(self, objectName="toast")
+        toast.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        lay = QHBoxLayout(toast)
+        lay.setContentsMargins(14, 8, 8, 8)
+        lay.setSpacing(10)
+        self._toast_label = QLabel("Update available")
+        update = QToolButton(text="Update now")
+        close = QToolButton(text="\u2715", objectName="tabclose")
+        lay.addWidget(self._toast_label)
+        lay.addWidget(update)
+        lay.addWidget(close)
+
+        self._toast = toast
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.setInterval(5000)
+        self._toast_timer.timeout.connect(self._hide_toast)
+
+        close.clicked.connect(self._hide_toast)
+        update.clicked.connect(lambda: (
+            self._toast_timer.stop(),
+            update.hide(),
+            self._toast_label.setText("Updating\u2026"),
+            self.bridge.runUpdate(),
+        ))
+
+        self._place_toast()
+        toast.show()
+        toast.raise_()
+        self._toast_timer.start()
+
+    def _place_toast(self):
+        if self._toast:
+            self._toast.adjustSize()
+            self._toast.move(self.width() - self._toast.width() - 16, 54)
+
+    def _hide_toast(self):
+        if self._toast:
+            self._toast_timer.stop()
+            self._toast.deleteLater()
+            self._toast = None
+
+    def _toast_result(self, msg):
+        if not self._toast:
+            return
+        self._toast_label.setText(msg)
+        self._place_toast()
+        self._toast_timer.setInterval(8000)
+        self._toast_timer.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._place_toast()
 
     # ---- tabs ----
     def current(self):
