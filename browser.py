@@ -44,6 +44,14 @@ CONFIG_FILE = Path.home() / ".local/share/browser/config.json"
 HISTORY_PAGE = QUrl.fromLocalFile(str(APP_DIR / "history.html"))
 HISTORY_MAX = 3000
 
+# sites that ship their own dark theme (served via preferredColorScheme):
+# force-dark would only slow them down repainting an already-dark page
+NATIVE_DARK_SITES = {
+    "github.com", "youtube.com", "reddit.com", "twitch.tv", "discord.com",
+    "netflix.com", "spotify.com", "tiktok.com", "instagram.com",
+    "modrinth.com", "duckduckgo.com",
+}
+
 # domain guesses for the address bar ("wiki" -> wikipedia.org);
 # visited sites are remembered and suggested too
 COMMON_SITES = [
@@ -61,7 +69,7 @@ QLineEdit#urlbar {
     background: rgba(30, 30, 46, 230);
     color: #cdd6f4;
     border: 1px solid rgba(137, 180, 250, 60);
-    border-radius: 14px;
+    border-radius: 0px;
     padding: 7px 16px;
     selection-background-color: #89b4fa;
     selection-color: #11111b;
@@ -83,7 +91,7 @@ QTabBar { background: transparent; }
 QTabBar::tab {
     background: rgba(30, 30, 46, 200);
     color: #a6adc8;
-    border-radius: 11px;
+    border-radius: 0px;
     padding: 7px 6px 7px 14px;
     margin: 4px 3px 6px 3px;
     min-width: 160px;
@@ -509,6 +517,11 @@ class Browser(QMainWindow):
 
     def _url_changed(self, view, url):
         self._remember_host(url)
+        host = url.host().removeprefix("www.")
+        native_dark = any(host == d or host.endswith("." + d)
+                          for d in NATIVE_DARK_SITES)
+        view.page().settings().setAttribute(
+            QWebEngineSettings.WebAttribute.ForceDarkMode, not native_dark)
         # never clobber the bar while the user is typing in it
         if view is self.current() and not self.urlbar.hasFocus():
             self.urlbar.setText("" if url == START_PAGE else url.toString())
