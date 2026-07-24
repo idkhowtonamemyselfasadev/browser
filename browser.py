@@ -1216,12 +1216,12 @@ class Browser(QMainWindow):
         fwd.clicked.connect(lambda: self.current().forward())
         reload_.clicked.connect(lambda: self.current().reload())
 
-        translate = QToolButton(text="\uf1ab")
+        translate = QToolButton(text="🌐")
         translate.setToolTip("Translate this page")
         translate.clicked.connect(self._translate_menu)
         self._translate_btn = translate
 
-        proxybtn = QToolButton(text="\uf0ac")
+        proxybtn = QToolButton(text="📡")
         proxybtn.setToolTip("Proxy")
         proxybtn.clicked.connect(self._proxy_menu)
         self._proxy_btn = proxybtn
@@ -1253,7 +1253,7 @@ class Browser(QMainWindow):
         self.sessions = [{"name": "Browser 1", "sid": "main"}]
         self.active_session = "main"
         self.session_profiles = {}
-        self._book = QToolButton(text="\uf02d", objectName="groupbtn")
+        self._book = QToolButton(text="📑", objectName="groupbtn")
         self._book.setToolTip("Tab groups")
         self._book.clicked.connect(self._group_menu)
         self.tabs.setCornerWidget(self._book, Qt.Corner.TopLeftCorner)
@@ -2687,8 +2687,8 @@ class Browser(QMainWindow):
                  "auto": "Auto"}.get(active, active)
         btn.setToolTip("Proxy: " + label)
         # a filled dot when a proxy is actually routing traffic
-        btn.setText("\uf0ac" if active not in ("system", "direct")
-                    else "\uf0ac")
+        btn.setText("📡" if active not in ("system", "direct")
+                    else "📡")
         btn.setStyleSheet(
             "QToolButton { color: %s; }" %
             ("#a6e3a1" if active not in ("system", "direct") else "#cdd6f4"))
