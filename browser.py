@@ -642,6 +642,11 @@ QToolButton#tabclose {
 QToolButton#tabclose:hover { background: rgba(243, 139, 168, 70); color: #f38ba8; }
 
 #toast { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 110); }
+#permcard { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 130); }
+#permcard QLabel { color: #cdd6f4; }
+#permcard QToolButton { padding: 6px 16px; border: 1px solid rgba(108, 112, 134, 90); }
+#permcard QToolButton#permallow { background: #a6e3a1; color: #000000; border: none; }
+#permcard QToolButton#permallow:hover { background: #c4f0c0; }
 #toast QLabel { color: #cdd6f4; }
 
 QMenu {
@@ -1509,6 +1514,7 @@ class Browser(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._place_toast()
+        self._place_perm()
 
     # ---- tabs ----
     def current(self):
@@ -1921,17 +1927,25 @@ class Browser(QMainWindow):
         if self._perm_widget is not None or not self._perm_queue:
             return
         permission, origin, label, key = self._perm_queue.pop(0)
-        bar = QWidget(self, objectName="toast")
-        bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        lay = QHBoxLayout(bar)
-        lay.setContentsMargins(14, 8, 8, 8)
-        lay.setSpacing(10)
-        lay.addWidget(QLabel("%s wants to %s" % (origin, label)))
-        allow = QToolButton(text="Allow")
+        # a small card in the bottom-right corner, clear of the tabs
+        card = QWidget(self, objectName="permcard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        card.setFixedWidth(300)
+        v = QVBoxLayout(card)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(12)
+        msg = QLabel("%s wants to %s." % (origin, label))
+        msg.setWordWrap(True)
+        v.addWidget(msg)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addStretch()
         deny = QToolButton(text="Deny")
-        lay.addWidget(allow)
-        lay.addWidget(deny)
-        self._perm_widget = bar
+        allow = QToolButton(text="Allow", objectName="permallow")
+        row.addWidget(deny)
+        row.addWidget(allow)
+        v.addLayout(row)
+        self._perm_widget = card
 
         def decide(granted):
             permission.grant() if granted else permission.deny()
@@ -1939,16 +1953,22 @@ class Browser(QMainWindow):
             if granted:  # only allows are remembered across restarts
                 self.config.setdefault("permissions", {})[key] = True
                 self.save_config()
-            bar.deleteLater()
+            card.deleteLater()
             self._perm_widget = None
             self._next_permission()
 
         allow.clicked.connect(lambda: decide(True))
         deny.clicked.connect(lambda: decide(False))
-        bar.adjustSize()
-        bar.move(max(0, (self.width() - bar.width()) // 2), 54)
-        bar.show()
-        bar.raise_()
+        self._place_perm()
+        card.show()
+        card.raise_()
+
+    def _place_perm(self):
+        card = getattr(self, "_perm_widget", None)
+        if card is not None:
+            card.adjustSize()
+            card.move(self.width() - card.width() - 18,
+                      self.height() - card.height() - 18)
 
     # ---- tab groups (Chrome-style inline headers) ----
     def _group_of(self, widget):
