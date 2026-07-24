@@ -15,6 +15,9 @@ CONFIG_FILE = Path.home() / ".local/share/browser/config.json"
 os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
     os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     + " --blink-settings=preferredColorScheme=0")
+# the embedded inspector (DevTools) only serves its frontend resources
+# when remote debugging is enabled; bound to localhost by Chromium
+os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "127.0.0.1:9222")
 
 from PyQt6.QtCore import (
     QSize, Qt, QElapsedTimer, QEvent, QObject, QProcess, QStringListModel,
@@ -26,16 +29,17 @@ from PyQt6.QtGui import (
     QShortcut, QGuiApplication,
 )
 from PyQt6.QtWidgets import (
-    QApplication, QCompleter, QInputDialog, QLabel, QMainWindow, QMenu,
-    QProgressBar, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit,
-    QTabWidget, QTabBar, QToolButton,
+    QApplication, QCompleter, QFileDialog, QInputDialog, QLabel, QMainWindow,
+    QMenu, QProgressBar, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLineEdit, QTabWidget, QTabBar, QToolButton, QWidgetAction,
 )
 from PyQt6.QtWebEngineCore import (
     QWebEnginePermission, QWebEngineProfile, QWebEnginePage, QWebEngineScript,
     QWebEngineSettings,
 )
 from PyQt6.QtNetwork import (
-    QLocalServer, QLocalSocket, QNetworkAccessManager, QNetworkRequest,
+    QLocalServer, QLocalSocket, QNetworkAccessManager, QNetworkProxy,
+    QNetworkProxyFactory, QNetworkRequest,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
@@ -45,12 +49,23 @@ APP_DIR = Path(__file__).resolve().parent
 START_PAGE = QUrl.fromLocalFile(str(APP_DIR / "start.html"))
 START_PAGE.setQuery("v=%d" % (APP_DIR / "start.html").stat().st_mtime)
 SEARCH_URL = "https://www.google.com/search?q={}"
+SEARCH_ENGINES = {
+    "google": ("Google", "https://www.google.com/search?q={}"),
+    "duckduckgo": ("DuckDuckGo", "https://duckduckgo.com/?q={}"),
+    "bing": ("Bing", "https://www.bing.com/search?q={}"),
+    "brave": ("Brave", "https://search.brave.com/search?q={}"),
+    "ecosia": ("Ecosia", "https://www.ecosia.org/search?q={}"),
+    "startpage": ("Startpage", "https://www.startpage.com/sp/search?query={}"),
+}
 SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
 DOWNLOAD_DIR = Path.home() / "Downloads"
 HOSTS_FILE = Path.home() / ".local/share/browser/hosts.json"
 HISTORY_FILE = Path.home() / ".local/share/browser/history.json"
 HISTORY_PAGE = QUrl.fromLocalFile(str(APP_DIR / "history.html"))
 HISTORY_PAGE.setQuery("v=%d" % (APP_DIR / "history.html").stat().st_mtime)
+SETTINGS_PAGE = QUrl.fromLocalFile(str(APP_DIR / "settings.html"))
+if (APP_DIR / "settings.html").exists():
+    SETTINGS_PAGE.setQuery("v=%d" % (APP_DIR / "settings.html").stat().st_mtime)
 HISTORY_MAX = 3000
 
 # sites that ship their own dark theme (served via preferredColorScheme):
@@ -61,16 +76,31 @@ NATIVE_DARK_SITES = {
     "modrinth.com", "duckduckgo.com",
 }
 
-# Google's native dark theme is gray (#202124); repaint it true black
-# so search pages match the rest of the UI
+# Google search stays LIGHT while the rest of the web is dark: the
+# engine asks every site for dark, so Google's dark gray is inverted
+# back to a light look (images and video are re-inverted to normal)
 GOOGLE_BLACK_JS = r"""
 (function () {
-  if (!/(^|\.)google\.[a-z.]+$/.test(location.hostname)) return;
+  if (!/^(www\.)?google\.[a-z.]+$/.test(location.hostname)) return;
   var s = document.createElement("style");
   s.textContent =
     "html, body { background: #000 !important; }" +
     ".sfbg, .minidiv, #searchform, #appbar, #sfcnt, #footcnt, #fbar," +
     " #footer, .appbar { background: #000 !important; }";
+  (document.head || document.documentElement).appendChild(s);
+})();
+"""
+
+GOOGLE_LIGHT_JS = r"""
+(function () {
+  if (!/^(www\.)?google\.[a-z.]+$/.test(location.hostname)) return;
+  var bg = getComputedStyle(document.body).backgroundColor;
+  var m = bg.match(/\d+/g);
+  if (m && (+m[0] + +m[1] + +m[2]) / 3 > 128) return;  // already light
+  var s = document.createElement("style");
+  s.textContent =
+    "html { filter: invert(1) hue-rotate(180deg); background: #fff !important; }" +
+    "img, video, iframe, svg, canvas { filter: invert(1) hue-rotate(180deg); }";
   (document.head || document.documentElement).appendChild(s);
 })();
 """
@@ -99,6 +129,442 @@ GROUP_COLORS = [
     ("Blue", "#89b4fa"), ("Pink", "#f38ba8"), ("Green", "#a6e3a1"),
     ("Yellow", "#f9e2af"), ("Purple", "#cba6f7"), ("Teal", "#94e2d5"),
     ("Orange", "#fab387"), ("Gray", "#6c7086"),
+]
+
+# UI translations for the browser's own pages (start, settings,
+# history). Languages not listed fall back to English — websites and
+# Google still follow the chosen language via Accept-Language.
+UI_STRINGS = {
+"en": {"settings":"Settings","search":"Search","searchEngine":"Search engine",
+"appearance":"Appearance","whiteGoogle":"White Google",
+"whiteGoogleHint":"Off = pitch-black Google",
+"autoDarken":"Auto-darken light websites","pageZoom":"Page zoom",
+"browsing":"Browsing","reopenTabs":"Reopen tabs from last time",
+"askDownload":"Ask where to save each download","translation":"Language",
+"translateInto":"Browser and translate language",
+"translateHint":"Changes this page, the start page, Google and the translate button.",
+"privacy":"Privacy","saveHistory":"Save history","viewHistory":"View history",
+"clearHistory":"Clear history","clearCookies":"Clear cookies",
+"cookiesHint":"Clear cookies logs this virtual browser out everywhere.",
+"updates":"Updates","checkUpdates":"Check for updates","setupT":"Setup",
+"runSetup":"Run setup again","setupHint":"Drag the search bar, pick a wallpaper",
+"filterPh":"Search\u2026","add":"Add","background":"Background",
+"allSettings":"All settings","searchSite":"Search {}",
+"wizWelcome":"Welcome! Let's set things up",
+"wizDrag":"Grab the search bar and drag it wherever you want it.",
+"center":"Center it again","nextBtn":"Next \u2192","wallpaper":"Wallpaper",
+"pickWallpaper":"Pick a wallpaper for your start page.","finish":"Finish",
+"history":"History","searchHistory":"Search history","clearAll":"Clear all",
+"noHistory":"No history.","today":"Today","yesterday":"Yesterday",
+"plugins":"Plugins",
+"pluginsHint":"Userscripts (.user.js) in this folder run on matching pages.",
+"reloadPlugins":"Reload plugins","noPlugins":"No plugins installed.","quickInstall":"Quick install","getMore":"Browse Greasy Fork","network":"Network (proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direct (no proxy)","proxyCustom":"Custom","proxyType":"Type","proxyHost":"Host","proxyPort":"Port","proxyHint":"Pick a profile here or from the toolbar proxy button.","inspectorHint":"Press F12 on any page to open the inspector (DevTools).","fromFile":"From file\u2026","install":"Install","installed":"Installed \u2713"},
+"de": {"settings":"Einstellungen","search":"Suche","searchEngine":"Suchmaschine",
+"appearance":"Aussehen","whiteGoogle":"Wei\u00dfes Google",
+"whiteGoogleHint":"Aus = pechschwarzes Google",
+"autoDarken":"Helle Seiten abdunkeln","pageZoom":"Seitenzoom",
+"browsing":"Surfen","reopenTabs":"Tabs vom letzten Mal \u00f6ffnen",
+"askDownload":"Bei Downloads nach Speicherort fragen","translation":"Sprache",
+"translateInto":"Browser- und \u00dcbersetzungssprache",
+"translateHint":"\u00c4ndert diese Seite, die Startseite, Google und den \u00dcbersetzen-Knopf.",
+"privacy":"Privatsph\u00e4re","saveHistory":"Verlauf speichern",
+"viewHistory":"Verlauf ansehen","clearHistory":"Verlauf l\u00f6schen",
+"clearCookies":"Cookies l\u00f6schen",
+"cookiesHint":"Cookies l\u00f6schen meldet diesen virtuellen Browser \u00fcberall ab.",
+"updates":"Updates","checkUpdates":"Nach Updates suchen","setupT":"Einrichtung",
+"runSetup":"Einrichtung neu starten","setupHint":"Suchleiste ziehen, Hintergrund w\u00e4hlen",
+"filterPh":"Suchen\u2026","add":"Hinzuf\u00fcgen","background":"Hintergrund",
+"allSettings":"Alle Einstellungen","searchSite":"{} durchsuchen",
+"wizWelcome":"Willkommen! Richten wir alles ein",
+"wizDrag":"Zieh die Suchleiste dorthin, wo du sie haben willst.",
+"center":"Wieder zentrieren","nextBtn":"Weiter \u2192","wallpaper":"Hintergrundbild",
+"pickWallpaper":"W\u00e4hle ein Hintergrundbild f\u00fcr deine Startseite.",
+"finish":"Fertig","history":"Verlauf","searchHistory":"Verlauf durchsuchen",
+"clearAll":"Alles l\u00f6schen","noHistory":"Kein Verlauf.","today":"Heute",
+"yesterday":"Gestern",
+"plugins":"Plugins",
+"pluginsHint":"Userscripts (.user.js) in diesem Ordner laufen auf passenden Seiten.",
+"reloadPlugins":"Plugins neu laden","noPlugins":"Keine Plugins installiert.","quickInstall":"Schnellinstallation","getMore":"Greasy Fork durchsuchen","network":"Netzwerk (Proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direkt (kein Proxy)","proxyCustom":"Benutzerdefiniert","proxyType":"Typ","proxyHost":"Host","proxyPort":"Port","proxyHint":"W\u00e4hle ein Profil hier oder \u00fcber den Proxy-Knopf in der Leiste.","inspectorHint":"F12 auf einer Seite \u00f6ffnet den Inspektor (DevTools).","fromFile":"Aus Datei\u2026","install":"Installieren","installed":"Installiert \u2713"},
+"fr": {"settings":"Param\u00e8tres","search":"Recherche","searchEngine":"Moteur de recherche",
+"appearance":"Apparence","whiteGoogle":"Google blanc",
+"whiteGoogleHint":"D\u00e9sactiv\u00e9 = Google noir",
+"autoDarken":"Assombrir les sites clairs","pageZoom":"Zoom de page",
+"browsing":"Navigation","reopenTabs":"Rouvrir les onglets pr\u00e9c\u00e9dents",
+"askDownload":"Demander o\u00f9 enregistrer chaque fichier","translation":"Langue",
+"translateInto":"Langue du navigateur et de traduction",
+"translateHint":"Change cette page, la page d'accueil, Google et le bouton de traduction.",
+"privacy":"Confidentialit\u00e9","saveHistory":"Enregistrer l'historique",
+"viewHistory":"Voir l'historique","clearHistory":"Effacer l'historique",
+"clearCookies":"Effacer les cookies",
+"cookiesHint":"Effacer les cookies d\u00e9connecte ce navigateur virtuel partout.",
+"updates":"Mises \u00e0 jour","checkUpdates":"Rechercher des mises \u00e0 jour",
+"setupT":"Configuration","runSetup":"Relancer la configuration",
+"setupHint":"D\u00e9placez la barre, choisissez un fond",
+"filterPh":"Rechercher\u2026","add":"Ajouter","background":"Fond d'\u00e9cran",
+"allSettings":"Tous les param\u00e8tres","searchSite":"Rechercher sur {}",
+"wizWelcome":"Bienvenue ! Configurons tout \u00e7a",
+"wizDrag":"Saisissez la barre de recherche et placez-la o\u00f9 vous voulez.",
+"center":"Recentrer","nextBtn":"Suivant \u2192","wallpaper":"Fond d'\u00e9cran",
+"pickWallpaper":"Choisissez un fond pour votre page d'accueil.","finish":"Terminer",
+"history":"Historique","searchHistory":"Rechercher dans l'historique",
+"clearAll":"Tout effacer","noHistory":"Aucun historique.","today":"Aujourd'hui",
+"yesterday":"Hier"},
+"es": {"settings":"Ajustes","search":"B\u00fasqueda","searchEngine":"Buscador",
+"appearance":"Apariencia","whiteGoogle":"Google blanco",
+"whiteGoogleHint":"Apagado = Google negro","autoDarken":"Oscurecer sitios claros",
+"pageZoom":"Zoom de p\u00e1gina","browsing":"Navegaci\u00f3n",
+"reopenTabs":"Reabrir pesta\u00f1as anteriores",
+"askDownload":"Preguntar d\u00f3nde guardar cada descarga","translation":"Idioma",
+"translateInto":"Idioma del navegador y de traducci\u00f3n",
+"translateHint":"Cambia esta p\u00e1gina, la p\u00e1gina de inicio, Google y el bot\u00f3n de traducir.",
+"privacy":"Privacidad","saveHistory":"Guardar historial",
+"viewHistory":"Ver historial","clearHistory":"Borrar historial",
+"clearCookies":"Borrar cookies",
+"cookiesHint":"Borrar cookies cierra la sesi\u00f3n de este navegador virtual en todas partes.",
+"updates":"Actualizaciones","checkUpdates":"Buscar actualizaciones",
+"setupT":"Configuraci\u00f3n","runSetup":"Repetir configuraci\u00f3n",
+"setupHint":"Arrastra la barra, elige un fondo","filterPh":"Buscar\u2026",
+"add":"A\u00f1adir","background":"Fondo","allSettings":"Todos los ajustes",
+"searchSite":"Buscar en {}","wizWelcome":"\u00a1Bienvenido! Vamos a configurarlo",
+"wizDrag":"Arrastra la barra de b\u00fasqueda a donde quieras.",
+"center":"Centrar de nuevo","nextBtn":"Siguiente \u2192","wallpaper":"Fondo",
+"pickWallpaper":"Elige un fondo para tu p\u00e1gina de inicio.","finish":"Listo",
+"history":"Historial","searchHistory":"Buscar en el historial",
+"clearAll":"Borrar todo","noHistory":"Sin historial.","today":"Hoy",
+"yesterday":"Ayer"},
+"it": {"settings":"Impostazioni","search":"Ricerca","searchEngine":"Motore di ricerca",
+"appearance":"Aspetto","whiteGoogle":"Google bianco",
+"whiteGoogleHint":"Spento = Google nero","autoDarken":"Scurisci i siti chiari",
+"pageZoom":"Zoom pagina","browsing":"Navigazione",
+"reopenTabs":"Riapri le schede precedenti",
+"askDownload":"Chiedi dove salvare ogni download","translation":"Lingua",
+"translateInto":"Lingua del browser e di traduzione",
+"translateHint":"Cambia questa pagina, la pagina iniziale, Google e il pulsante traduci.",
+"privacy":"Privacy","saveHistory":"Salva cronologia",
+"viewHistory":"Vedi cronologia","clearHistory":"Cancella cronologia",
+"clearCookies":"Cancella cookie",
+"cookiesHint":"Cancellare i cookie disconnette questo browser virtuale ovunque.",
+"updates":"Aggiornamenti","checkUpdates":"Cerca aggiornamenti",
+"setupT":"Configurazione","runSetup":"Ripeti configurazione",
+"setupHint":"Trascina la barra, scegli uno sfondo","filterPh":"Cerca\u2026",
+"add":"Aggiungi","background":"Sfondo","allSettings":"Tutte le impostazioni",
+"searchSite":"Cerca su {}","wizWelcome":"Benvenuto! Configuriamo tutto",
+"wizDrag":"Trascina la barra di ricerca dove preferisci.",
+"center":"Ricentra","nextBtn":"Avanti \u2192","wallpaper":"Sfondo",
+"pickWallpaper":"Scegli uno sfondo per la pagina iniziale.","finish":"Fine",
+"history":"Cronologia","searchHistory":"Cerca nella cronologia",
+"clearAll":"Cancella tutto","noHistory":"Nessuna cronologia.","today":"Oggi",
+"yesterday":"Ieri"},
+"pt": {"settings":"Configura\u00e7\u00f5es","search":"Pesquisa","searchEngine":"Motor de busca",
+"appearance":"Apar\u00eancia","whiteGoogle":"Google branco",
+"whiteGoogleHint":"Desligado = Google preto","autoDarken":"Escurecer sites claros",
+"pageZoom":"Zoom da p\u00e1gina","browsing":"Navega\u00e7\u00e3o",
+"reopenTabs":"Reabrir abas da \u00faltima vez",
+"askDownload":"Perguntar onde salvar cada download","translation":"Idioma",
+"translateInto":"Idioma do navegador e de tradu\u00e7\u00e3o",
+"translateHint":"Muda esta p\u00e1gina, a p\u00e1gina inicial, o Google e o bot\u00e3o de traduzir.",
+"privacy":"Privacidade","saveHistory":"Salvar hist\u00f3rico",
+"viewHistory":"Ver hist\u00f3rico","clearHistory":"Limpar hist\u00f3rico",
+"clearCookies":"Limpar cookies",
+"cookiesHint":"Limpar cookies desconecta este navegador virtual em todo lugar.",
+"updates":"Atualiza\u00e7\u00f5es","checkUpdates":"Procurar atualiza\u00e7\u00f5es",
+"setupT":"Configura\u00e7\u00e3o","runSetup":"Repetir configura\u00e7\u00e3o",
+"setupHint":"Arraste a barra, escolha um fundo","filterPh":"Pesquisar\u2026",
+"add":"Adicionar","background":"Plano de fundo","allSettings":"Todas as configura\u00e7\u00f5es",
+"searchSite":"Pesquisar no {}","wizWelcome":"Bem-vindo! Vamos configurar",
+"wizDrag":"Arraste a barra de pesquisa para onde quiser.",
+"center":"Centralizar","nextBtn":"Avan\u00e7ar \u2192","wallpaper":"Plano de fundo",
+"pickWallpaper":"Escolha um plano de fundo para sua p\u00e1gina inicial.","finish":"Concluir",
+"history":"Hist\u00f3rico","searchHistory":"Pesquisar no hist\u00f3rico",
+"clearAll":"Limpar tudo","noHistory":"Sem hist\u00f3rico.","today":"Hoje",
+"yesterday":"Ontem"},
+"nl": {"settings":"Instellingen","search":"Zoeken","searchEngine":"Zoekmachine",
+"appearance":"Uiterlijk","whiteGoogle":"Wit Google",
+"whiteGoogleHint":"Uit = pikzwart Google","autoDarken":"Lichte sites verdonkeren",
+"pageZoom":"Paginazoom","browsing":"Browsen",
+"reopenTabs":"Tabbladen van vorige keer heropenen",
+"askDownload":"Vragen waar elke download wordt opgeslagen","translation":"Taal",
+"translateInto":"Browser- en vertaaltaal",
+"translateHint":"Verandert deze pagina, de startpagina, Google en de vertaalknop.",
+"privacy":"Privacy","saveHistory":"Geschiedenis opslaan",
+"viewHistory":"Geschiedenis bekijken","clearHistory":"Geschiedenis wissen",
+"clearCookies":"Cookies wissen",
+"cookiesHint":"Cookies wissen logt deze virtuele browser overal uit.",
+"updates":"Updates","checkUpdates":"Zoeken naar updates","setupT":"Installatie",
+"runSetup":"Installatie opnieuw","setupHint":"Sleep de zoekbalk, kies een achtergrond",
+"filterPh":"Zoeken\u2026","add":"Toevoegen","background":"Achtergrond",
+"allSettings":"Alle instellingen","searchSite":"Zoeken op {}",
+"wizWelcome":"Welkom! Laten we alles instellen",
+"wizDrag":"Sleep de zoekbalk naar waar je hem wilt hebben.",
+"center":"Opnieuw centreren","nextBtn":"Volgende \u2192","wallpaper":"Achtergrond",
+"pickWallpaper":"Kies een achtergrond voor je startpagina.","finish":"Klaar",
+"history":"Geschiedenis","searchHistory":"Zoek in geschiedenis",
+"clearAll":"Alles wissen","noHistory":"Geen geschiedenis.","today":"Vandaag",
+"yesterday":"Gisteren"},
+"pl": {"settings":"Ustawienia","search":"Szukanie","searchEngine":"Wyszukiwarka",
+"appearance":"Wygl\u0105d","whiteGoogle":"Bia\u0142e Google",
+"whiteGoogleHint":"Wy\u0142\u0105czone = czarne Google",
+"autoDarken":"Przyciemniaj jasne strony","pageZoom":"Powi\u0119kszenie strony",
+"browsing":"Przegl\u0105danie","reopenTabs":"Przywr\u00f3\u0107 karty z ostatniego razu",
+"askDownload":"Pytaj, gdzie zapisa\u0107 ka\u017cdy plik","translation":"J\u0119zyk",
+"translateInto":"J\u0119zyk przegl\u0105darki i t\u0142umaczenia",
+"translateHint":"Zmienia t\u0119 stron\u0119, stron\u0119 startow\u0105, Google i przycisk t\u0142umaczenia.",
+"privacy":"Prywatno\u015b\u0107","saveHistory":"Zapisuj histori\u0119",
+"viewHistory":"Poka\u017c histori\u0119","clearHistory":"Wyczy\u015b\u0107 histori\u0119",
+"clearCookies":"Wyczy\u015b\u0107 cookies",
+"cookiesHint":"Wyczyszczenie cookies wylogowuje t\u0119 przegl\u0105dark\u0119 wsz\u0119dzie.",
+"updates":"Aktualizacje","checkUpdates":"Sprawd\u017a aktualizacje",
+"setupT":"Konfiguracja","runSetup":"Powt\u00f3rz konfiguracj\u0119",
+"setupHint":"Przeci\u0105gnij pasek, wybierz tapet\u0119","filterPh":"Szukaj\u2026",
+"add":"Dodaj","background":"T\u0142o","allSettings":"Wszystkie ustawienia",
+"searchSite":"Szukaj w {}","wizWelcome":"Witaj! Skonfigurujmy wszystko",
+"wizDrag":"Przeci\u0105gnij pasek wyszukiwania, gdzie chcesz.",
+"center":"Wy\u015brodkuj","nextBtn":"Dalej \u2192","wallpaper":"Tapeta",
+"pickWallpaper":"Wybierz tapet\u0119 strony startowej.","finish":"Gotowe",
+"history":"Historia","searchHistory":"Szukaj w historii",
+"clearAll":"Wyczy\u015b\u0107 wszystko","noHistory":"Brak historii.","today":"Dzisiaj",
+"yesterday":"Wczoraj"},
+"tr": {"settings":"Ayarlar","search":"Arama","searchEngine":"Arama motoru",
+"appearance":"G\u00f6r\u00fcn\u00fcm","whiteGoogle":"Beyaz Google",
+"whiteGoogleHint":"Kapal\u0131 = simsiyah Google",
+"autoDarken":"A\u00e7\u0131k siteleri karart","pageZoom":"Sayfa yak\u0131nla\u015ft\u0131rma",
+"browsing":"Gezinme","reopenTabs":"Son sekmeleri yeniden a\u00e7",
+"askDownload":"Her indirmede nereye kaydedilece\u011fini sor","translation":"Dil",
+"translateInto":"Taray\u0131c\u0131 ve \u00e7eviri dili",
+"translateHint":"Bu sayfay\u0131, ba\u015flang\u0131\u00e7 sayfas\u0131n\u0131, Google'\u0131 ve \u00e7eviri d\u00fc\u011fmesini de\u011fi\u015ftirir.",
+"privacy":"Gizlilik","saveHistory":"Ge\u00e7mi\u015fi kaydet",
+"viewHistory":"Ge\u00e7mi\u015fi g\u00f6r","clearHistory":"Ge\u00e7mi\u015fi sil",
+"clearCookies":"\u00c7erezleri sil",
+"cookiesHint":"\u00c7erezleri silmek bu sanal taray\u0131c\u0131y\u0131 her yerden \u00e7\u0131k\u0131\u015f yapt\u0131r\u0131r.",
+"updates":"G\u00fcncellemeler","checkUpdates":"G\u00fcncelleme ara","setupT":"Kurulum",
+"runSetup":"Kurulumu tekrar \u00e7al\u0131\u015ft\u0131r",
+"setupHint":"Arama \u00e7ubu\u011funu s\u00fcr\u00fckle, duvar ka\u011f\u0131d\u0131 se\u00e7",
+"filterPh":"Ara\u2026","add":"Ekle","background":"Arka plan",
+"allSettings":"T\u00fcm ayarlar","searchSite":"{} \u00fczerinde ara",
+"wizWelcome":"Ho\u015f geldin! Her \u015feyi kural\u0131m",
+"wizDrag":"Arama \u00e7ubu\u011funu istedi\u011fin yere s\u00fcr\u00fckle.",
+"center":"Yeniden ortala","nextBtn":"\u0130leri \u2192","wallpaper":"Duvar ka\u011f\u0131d\u0131",
+"pickWallpaper":"Ba\u015flang\u0131\u00e7 sayfan i\u00e7in duvar ka\u011f\u0131d\u0131 se\u00e7.",
+"finish":"Bitti","history":"Ge\u00e7mi\u015f","searchHistory":"Ge\u00e7mi\u015fte ara",
+"clearAll":"T\u00fcm\u00fcn\u00fc sil","noHistory":"Ge\u00e7mi\u015f yok.","today":"Bug\u00fcn",
+"yesterday":"D\u00fcn"},
+"ru": {"settings":"\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438","search":"\u041f\u043e\u0438\u0441\u043a",
+"searchEngine":"\u041f\u043e\u0438\u0441\u043a\u043e\u0432\u0430\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u0430",
+"appearance":"\u0412\u043d\u0435\u0448\u043d\u0438\u0439 \u0432\u0438\u0434",
+"whiteGoogle":"\u0411\u0435\u043b\u044b\u0439 Google",
+"whiteGoogleHint":"\u0412\u044b\u043a\u043b = \u0447\u0451\u0440\u043d\u044b\u0439 Google",
+"autoDarken":"\u0417\u0430\u0442\u0435\u043c\u043d\u044f\u0442\u044c \u0441\u0432\u0435\u0442\u043b\u044b\u0435 \u0441\u0430\u0439\u0442\u044b",
+"pageZoom":"\u041c\u0430\u0441\u0448\u0442\u0430\u0431 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u044b",
+"browsing":"\u041f\u0440\u043e\u0441\u043c\u043e\u0442\u0440",
+"reopenTabs":"\u041e\u0442\u043a\u0440\u044b\u0432\u0430\u0442\u044c \u043f\u0440\u043e\u0448\u043b\u044b\u0435 \u0432\u043a\u043b\u0430\u0434\u043a\u0438",
+"askDownload":"\u0421\u043f\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044c, \u043a\u0443\u0434\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u0442\u044c",
+"translation":"\u042f\u0437\u044b\u043a",
+"translateInto":"\u042f\u0437\u044b\u043a \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430 \u0438 \u043f\u0435\u0440\u0435\u0432\u043e\u0434\u0430",
+"translateHint":"\u041c\u0435\u043d\u044f\u0435\u0442 \u044d\u0442\u0443 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0443, \u0441\u0442\u0430\u0440\u0442\u043e\u0432\u0443\u044e, Google \u0438 \u043a\u043d\u043e\u043f\u043a\u0443 \u043f\u0435\u0440\u0435\u0432\u043e\u0434\u0430.",
+"privacy":"\u041a\u043e\u043d\u0444\u0438\u0434\u0435\u043d\u0446\u0438\u0430\u043b\u044c\u043d\u043e\u0441\u0442\u044c",
+"saveHistory":"\u0421\u043e\u0445\u0440\u0430\u043d\u044f\u0442\u044c \u0438\u0441\u0442\u043e\u0440\u0438\u044e",
+"viewHistory":"\u0418\u0441\u0442\u043e\u0440\u0438\u044f",
+"clearHistory":"\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u0438\u0441\u0442\u043e\u0440\u0438\u044e",
+"clearCookies":"\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c cookies",
+"cookiesHint":"\u041e\u0447\u0438\u0441\u0442\u043a\u0430 cookies \u0432\u044b\u0445\u043e\u0434\u0438\u0442 \u0438\u0437 \u0432\u0441\u0435\u0445 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u043e\u0432.",
+"updates":"\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f",
+"checkUpdates":"\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f",
+"setupT":"\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430",
+"runSetup":"\u041d\u0430\u0441\u0442\u0440\u043e\u0438\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e",
+"setupHint":"\u041f\u0435\u0440\u0435\u0442\u0430\u0449\u0438\u0442\u0435 \u0441\u0442\u0440\u043e\u043a\u0443, \u0432\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043e\u0431\u043e\u0438",
+"filterPh":"\u041f\u043e\u0438\u0441\u043a\u2026","add":"\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c",
+"background":"\u0424\u043e\u043d","allSettings":"\u0412\u0441\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
+"searchSite":"\u041f\u043e\u0438\u0441\u043a \u0432 {}",
+"wizWelcome":"\u0414\u043e\u0431\u0440\u043e \u043f\u043e\u0436\u0430\u043b\u043e\u0432\u0430\u0442\u044c!",
+"wizDrag":"\u041f\u0435\u0440\u0435\u0442\u0430\u0449\u0438\u0442\u0435 \u0441\u0442\u0440\u043e\u043a\u0443 \u043f\u043e\u0438\u0441\u043a\u0430 \u043a\u0443\u0434\u0430 \u0443\u0433\u043e\u0434\u043d\u043e.",
+"center":"\u041f\u043e \u0446\u0435\u043d\u0442\u0440\u0443","nextBtn":"\u0414\u0430\u043b\u0435\u0435 \u2192",
+"wallpaper":"\u041e\u0431\u043e\u0438",
+"pickWallpaper":"\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043e\u0431\u043e\u0438 \u0434\u043b\u044f \u0441\u0442\u0430\u0440\u0442\u043e\u0432\u043e\u0439.",
+"finish":"\u0413\u043e\u0442\u043e\u0432\u043e","history":"\u0418\u0441\u0442\u043e\u0440\u0438\u044f",
+"searchHistory":"\u041f\u043e\u0438\u0441\u043a \u0432 \u0438\u0441\u0442\u043e\u0440\u0438\u0438",
+"clearAll":"\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u0432\u0441\u0451",
+"noHistory":"\u0418\u0441\u0442\u043e\u0440\u0438\u0438 \u043d\u0435\u0442.",
+"today":"\u0421\u0435\u0433\u043e\u0434\u043d\u044f","yesterday":"\u0412\u0447\u0435\u0440\u0430"},
+"ja": {"settings":"\u8a2d\u5b9a","search":"\u691c\u7d22","searchEngine":"\u691c\u7d22\u30a8\u30f3\u30b8\u30f3",
+"appearance":"\u5916\u89b3","whiteGoogle":"\u767d\u3044Google",
+"whiteGoogleHint":"\u30aa\u30d5 = \u771f\u3063\u9ed2\u306aGoogle",
+"autoDarken":"\u660e\u308b\u3044\u30b5\u30a4\u30c8\u3092\u6697\u304f\u3059\u308b",
+"pageZoom":"\u30da\u30fc\u30b8\u30ba\u30fc\u30e0","browsing":"\u30d6\u30e9\u30a6\u30b8\u30f3\u30b0",
+"reopenTabs":"\u524d\u56de\u306e\u30bf\u30d6\u3092\u5fa9\u5143",
+"askDownload":"\u4fdd\u5b58\u5148\u3092\u6bce\u56de\u78ba\u8a8d","translation":"\u8a00\u8a9e",
+"translateInto":"\u30d6\u30e9\u30a6\u30b6\u3068\u7ffb\u8a33\u306e\u8a00\u8a9e",
+"translateHint":"\u3053\u306e\u30da\u30fc\u30b8\u3001\u30b9\u30bf\u30fc\u30c8\u30da\u30fc\u30b8\u3001Google\u3001\u7ffb\u8a33\u30dc\u30bf\u30f3\u304c\u5909\u308f\u308a\u307e\u3059\u3002",
+"privacy":"\u30d7\u30e9\u30a4\u30d0\u30b7\u30fc","saveHistory":"\u5c65\u6b74\u3092\u4fdd\u5b58",
+"viewHistory":"\u5c65\u6b74\u3092\u898b\u308b","clearHistory":"\u5c65\u6b74\u3092\u6d88\u53bb",
+"clearCookies":"Cookie\u3092\u6d88\u53bb",
+"cookiesHint":"Cookie\u6d88\u53bb\u3067\u3053\u306e\u4eee\u60f3\u30d6\u30e9\u30a6\u30b6\u306f\u5168\u3066\u30ed\u30b0\u30a2\u30a6\u30c8\u3055\u308c\u307e\u3059\u3002",
+"updates":"\u30a2\u30c3\u30d7\u30c7\u30fc\u30c8","checkUpdates":"\u66f4\u65b0\u3092\u78ba\u8a8d",
+"setupT":"\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7","runSetup":"\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7\u3092\u3084\u308a\u76f4\u3059",
+"setupHint":"\u691c\u7d22\u30d0\u30fc\u3092\u52d5\u304b\u3057\u3001\u58c1\u7d19\u3092\u9078\u3076",
+"filterPh":"\u691c\u7d22\u2026","add":"\u8ffd\u52a0","background":"\u80cc\u666f",
+"allSettings":"\u3059\u3079\u3066\u306e\u8a2d\u5b9a","searchSite":"{}\u3067\u691c\u7d22",
+"wizWelcome":"\u3088\u3046\u3053\u305d\uff01\u8a2d\u5b9a\u3057\u307e\u3057\u3087\u3046",
+"wizDrag":"\u691c\u7d22\u30d0\u30fc\u3092\u597d\u304d\u306a\u5834\u6240\u306b\u30c9\u30e9\u30c3\u30b0\u3002",
+"center":"\u4e2d\u592e\u306b\u623b\u3059","nextBtn":"\u6b21\u3078 \u2192","wallpaper":"\u58c1\u7d19",
+"pickWallpaper":"\u30b9\u30bf\u30fc\u30c8\u30da\u30fc\u30b8\u306e\u58c1\u7d19\u3092\u9078\u3093\u3067\u304f\u3060\u3055\u3044\u3002",
+"finish":"\u5b8c\u4e86","history":"\u5c65\u6b74","searchHistory":"\u5c65\u6b74\u3092\u691c\u7d22",
+"clearAll":"\u3059\u3079\u3066\u6d88\u53bb","noHistory":"\u5c65\u6b74\u306a\u3057\u3002",
+"today":"\u4eca\u65e5","yesterday":"\u6628\u65e5"},
+"zh": {"settings":"\u8bbe\u7f6e","search":"\u641c\u7d22","searchEngine":"\u641c\u7d22\u5f15\u64ce",
+"appearance":"\u5916\u89c2","whiteGoogle":"\u767d\u8272Google",
+"whiteGoogleHint":"\u5173\u95ed = \u7eaf\u9ed1Google",
+"autoDarken":"\u8c03\u6697\u6d45\u8272\u7f51\u7ad9","pageZoom":"\u9875\u9762\u7f29\u653e",
+"browsing":"\u6d4f\u89c8","reopenTabs":"\u6062\u590d\u4e0a\u6b21\u7684\u6807\u7b7e\u9875",
+"askDownload":"\u6bcf\u6b21\u4e0b\u8f7d\u65f6\u8be2\u95ee\u4fdd\u5b58\u4f4d\u7f6e",
+"translation":"\u8bed\u8a00","translateInto":"\u6d4f\u89c8\u5668\u548c\u7ffb\u8bd1\u8bed\u8a00",
+"translateHint":"\u66f4\u6539\u6b64\u9875\u3001\u8d77\u59cb\u9875\u3001Google\u548c\u7ffb\u8bd1\u6309\u94ae\u3002",
+"privacy":"\u9690\u79c1","saveHistory":"\u4fdd\u5b58\u5386\u53f2\u8bb0\u5f55",
+"viewHistory":"\u67e5\u770b\u5386\u53f2","clearHistory":"\u6e05\u9664\u5386\u53f2",
+"clearCookies":"\u6e05\u9664Cookie",
+"cookiesHint":"\u6e05\u9664Cookie\u5c06\u9000\u51fa\u6b64\u865a\u62df\u6d4f\u89c8\u5668\u7684\u6240\u6709\u767b\u5f55\u3002",
+"updates":"\u66f4\u65b0","checkUpdates":"\u68c0\u67e5\u66f4\u65b0","setupT":"\u8bbe\u7f6e\u5411\u5bfc",
+"runSetup":"\u91cd\u65b0\u8fd0\u884c\u8bbe\u7f6e","setupHint":"\u62d6\u52a8\u641c\u7d22\u680f\uff0c\u9009\u62e9\u58c1\u7eb8",
+"filterPh":"\u641c\u7d22\u2026","add":"\u6dfb\u52a0","background":"\u80cc\u666f",
+"allSettings":"\u6240\u6709\u8bbe\u7f6e","searchSite":"\u5728{}\u641c\u7d22",
+"wizWelcome":"\u6b22\u8fce\uff01\u6765\u8bbe\u7f6e\u4e00\u4e0b",
+"wizDrag":"\u628a\u641c\u7d22\u680f\u62d6\u5230\u4f60\u60f3\u8981\u7684\u4f4d\u7f6e\u3002",
+"center":"\u91cd\u65b0\u5c45\u4e2d","nextBtn":"\u4e0b\u4e00\u6b65 \u2192","wallpaper":"\u58c1\u7eb8",
+"pickWallpaper":"\u4e3a\u8d77\u59cb\u9875\u9009\u62e9\u58c1\u7eb8\u3002","finish":"\u5b8c\u6210",
+"history":"\u5386\u53f2","searchHistory":"\u641c\u7d22\u5386\u53f2",
+"clearAll":"\u6e05\u9664\u5168\u90e8","noHistory":"\u6ca1\u6709\u5386\u53f2\u8bb0\u5f55\u3002",
+"today":"\u4eca\u5929","yesterday":"\u6628\u5929"},
+}
+
+# built-in starter plugins (id -> (name, description, userscript source)).
+# kept simple and self-contained — no Tampermonkey GM_* APIs, which the
+# engine does not provide
+STARTER_PLUGINS = {
+    "yt-skip-ads": ("Skip YouTube ads",
+        "Auto-clicks the skip button and speeds through unskippable ads.",
+        """// ==UserScript==
+// @name Skip YouTube ads
+// @match *://*.youtube.com/*
+// ==/UserScript==
+setInterval(function () {
+  var b = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
+  if (b) b.click();
+  var ad = document.querySelector('.ad-showing');
+  var v = document.querySelector('video');
+  if (ad && v && v.duration) { v.currentTime = v.duration; v.muted = true; }
+}, 500);
+"""),
+    "yt-hide-shorts": ("Hide YouTube Shorts",
+        "Removes Shorts shelves and the sidebar entry.",
+        """// ==UserScript==
+// @name Hide YouTube Shorts
+// @match *://*.youtube.com/*
+// ==/UserScript==
+var css = document.createElement('style');
+css.textContent =
+  'ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts],' +
+  'ytd-guide-entry-renderer:has(a[title="Shorts"]),' +
+  'ytd-mini-guide-entry-renderer[aria-label="Shorts"] { display: none !important; }';
+document.documentElement.appendChild(css);
+"""),
+    "cookie-away": ("Dismiss cookie banners",
+        "Clicks away common cookie-consent popups automatically.",
+        """// ==UserScript==
+// @name Dismiss cookie banners
+// @match *://*/*
+// ==/UserScript==
+setInterval(function () {
+  var sels = ['#onetrust-accept-btn-handler','button[aria-label*="ccept"]',
+    'button[title*="ccept"]','.fc-cta-consent','[data-testid="accept-button"]'];
+  for (var i = 0; i < sels.length; i++) {
+    var b = document.querySelector(sels[i]);
+    if (b) { b.click(); break; }
+  }
+}, 1000);
+"""),
+    "text-select": ("Allow text selection",
+        "Re-enables copying and selecting on sites that block it.",
+        """// ==UserScript==
+// @name Allow text selection
+// @match *://*/*
+// ==/UserScript==
+var s = document.createElement('style');
+s.textContent = '* { user-select: text !important; -webkit-user-select: text !important; }';
+document.documentElement.appendChild(s);
+document.addEventListener('copy', function (e) { e.stopPropagation(); }, true);
+document.addEventListener('contextmenu', function (e) { e.stopPropagation(); }, true);
+"""),
+}
+
+# english search aliases for the language menu
+LANGUAGE_ALIASES = {
+    "af": "afrikaans", "sq": "albanian", "am": "amharic", "ar": "arabic",
+    "hy": "armenian", "az": "azerbaijani", "eu": "basque", "be": "belarusian",
+    "bn": "bengali", "bs": "bosnian", "bg": "bulgarian", "ca": "catalan",
+    "ceb": "cebuano", "zh-CN": "chinese simplified", "zh-TW": "chinese traditional",
+    "co": "corsican", "hr": "croatian", "cs": "czech", "da": "danish",
+    "nl": "dutch", "en": "english", "eo": "esperanto", "et": "estonian",
+    "fi": "finnish", "fr": "french", "fy": "frisian", "gl": "galician",
+    "ka": "georgian", "de": "german", "el": "greek", "gu": "gujarati",
+    "ht": "haitian creole", "ha": "hausa", "haw": "hawaiian", "he": "hebrew",
+    "hi": "hindi", "hmn": "hmong", "hu": "hungarian", "is": "icelandic",
+    "ig": "igbo", "id": "indonesian", "ga": "irish", "it": "italian",
+    "ja": "japanese", "jv": "javanese", "kn": "kannada", "kk": "kazakh",
+    "km": "khmer", "rw": "kinyarwanda", "ko": "korean", "ku": "kurdish",
+    "ky": "kyrgyz", "lo": "lao", "la": "latin", "lv": "latvian",
+    "lt": "lithuanian", "lb": "luxembourgish", "mk": "macedonian",
+    "mg": "malagasy", "ms": "malay", "ml": "malayalam", "mt": "maltese",
+    "mi": "maori", "mr": "marathi", "mn": "mongolian", "my": "burmese",
+    "ne": "nepali", "no": "norwegian", "ny": "chichewa", "or": "odia",
+    "ps": "pashto", "fa": "persian farsi", "pl": "polish", "pt": "portuguese",
+    "pa": "punjabi", "ro": "romanian", "ru": "russian", "sm": "samoan",
+    "gd": "scots gaelic", "sr": "serbian", "st": "sesotho", "sn": "shona",
+    "sd": "sindhi", "si": "sinhala", "sk": "slovak", "sl": "slovenian",
+    "so": "somali", "es": "spanish", "su": "sundanese", "sw": "swahili",
+    "sv": "swedish", "tl": "filipino tagalog", "tg": "tajik", "ta": "tamil",
+    "tt": "tatar", "te": "telugu", "th": "thai", "tr": "turkish",
+    "tk": "turkmen", "uk": "ukrainian", "ur": "urdu", "ug": "uyghur",
+    "uz": "uzbek", "vi": "vietnamese", "cy": "welsh", "xh": "xhosa",
+    "yi": "yiddish", "yo": "yoruba", "zu": "zulu",
+}
+
+# every language Google Translate speaks (code, native name)
+LANGUAGES = [
+    ("af", "Afrikaans"), ("sq", "Shqip"), ("am", "አማርኛ"), ("ar", "العربية"),
+    ("hy", "Հայերեն"), ("az", "Azərbaycan"), ("eu", "Euskara"),
+    ("be", "Беларуская"), ("bn", "বাংলা"), ("bs", "Bosanski"),
+    ("bg", "Български"), ("ca", "Català"), ("ceb", "Cebuano"),
+    ("zh-CN", "中文(简体)"), ("zh-TW", "中文(繁體)"), ("co", "Corsu"),
+    ("hr", "Hrvatski"), ("cs", "Čeština"), ("da", "Dansk"),
+    ("nl", "Nederlands"), ("en", "English"), ("eo", "Esperanto"),
+    ("et", "Eesti"), ("fi", "Suomi"), ("fr", "Français"), ("fy", "Frysk"),
+    ("gl", "Galego"), ("ka", "ქართული"), ("de", "Deutsch"),
+    ("el", "Ελληνικά"), ("gu", "ગુજરાતી"), ("ht", "Kreyòl"),
+    ("ha", "Hausa"), ("haw", "ʻŌlelo Hawaiʻi"), ("he", "עברית"),
+    ("hi", "हिन्दी"), ("hmn", "Hmong"), ("hu", "Magyar"),
+    ("is", "Íslenska"), ("ig", "Igbo"), ("id", "Indonesia"),
+    ("ga", "Gaeilge"), ("it", "Italiano"), ("ja", "日本語"),
+    ("jv", "Basa Jawa"), ("kn", "ಕನ್ನಡ"), ("kk", "Қазақ"),
+    ("km", "ខ្មែរ"), ("rw", "Kinyarwanda"), ("ko", "한국어"),
+    ("ku", "Kurdî"), ("ky", "Кыргызча"), ("lo", "ລາວ"),
+    ("la", "Latina"), ("lv", "Latviešu"), ("lt", "Lietuvių"),
+    ("lb", "Lëtzebuergesch"), ("mk", "Македонски"), ("mg", "Malagasy"),
+    ("ms", "Melayu"), ("ml", "മലയാളം"), ("mt", "Malti"),
+    ("mi", "Māori"), ("mr", "मराठी"), ("mn", "Монгол"),
+    ("my", "မြန်မာ"), ("ne", "नेपाली"), ("no", "Norsk"),
+    ("ny", "Chichewa"), ("or", "ଓଡ଼ିଆ"), ("ps", "پښتو"),
+    ("fa", "فارسی"), ("pl", "Polski"), ("pt", "Português"),
+    ("pa", "ਪੰਜਾਬੀ"), ("ro", "Română"), ("ru", "Русский"),
+    ("sm", "Sāmoa"), ("gd", "Gàidhlig"), ("sr", "Српски"),
+    ("st", "Sesotho"), ("sn", "Shona"), ("sd", "سنڌي"),
+    ("si", "සිංහල"), ("sk", "Slovenčina"), ("sl", "Slovenščina"),
+    ("so", "Soomaali"), ("es", "Español"), ("su", "Basa Sunda"),
+    ("sw", "Kiswahili"), ("sv", "Svenska"), ("tl", "Filipino"),
+    ("tg", "Тоҷикӣ"), ("ta", "தமிழ்"), ("tt", "Татар"),
+    ("te", "తెలుగు"), ("th", "ไทย"), ("tr", "Türkçe"),
+    ("tk", "Türkmen"), ("uk", "Українська"), ("ur", "اردو"),
+    ("ug", "ئۇيغۇرچە"), ("uz", "Oʻzbek"), ("vi", "Tiếng Việt"),
+    ("cy", "Cymraeg"), ("xh", "isiXhosa"), ("yi", "ייִדיש"),
+    ("yo", "Yorùbá"), ("zu", "isiZulu"),
 ]
 
 # domain guesses for the address bar ("wiki" -> wikipedia.org);
@@ -357,6 +823,141 @@ class Bridge(QObject):
         self.browser.save_config()
 
     @pyqtSlot(result=str)
+    def uiStrings(self):
+        lang = self.browser.config.get("translateLang", "de")
+        strings = dict(UI_STRINGS["en"])
+        override = UI_STRINGS.get(lang) or UI_STRINGS.get(lang.split("-")[0])
+        if override:
+            strings.update(override)
+        strings["lang"] = lang
+        return json.dumps(strings)
+
+    @pyqtSlot(result=str)
+    def getSettings(self):
+        c = self.browser.config
+        key = c.get("searchEngine", "google")
+        if key not in SEARCH_ENGINES:
+            key = "google"
+        name, template = SEARCH_ENGINES[key]
+        action, _, param = template.partition("?")
+        return json.dumps({
+            "searchEngine": key,
+            "engines": [[k, v[0]] for k, v in SEARCH_ENGINES.items()],
+            "searchName": name,
+            "searchAction": action,
+            "searchParam": param.split("=")[0] if param else "q",
+            "googleLight": c.get("googleLight", True),
+            "forceDark": c.get("forceDark", True),
+            "restoreTabs": c.get("restoreTabs", True),
+            "zoom": c.get("zoom", 1.0),
+            "askDownload": bool(c.get("askDownload", False)),
+            "history": c.get("history", True),
+            "translateLang": c.get("translateLang", "de"),
+            "languages": [[code, name, LANGUAGE_ALIASES.get(code, "")]
+                          for code, name in LANGUAGES],
+            "activeProxy": c.get("activeProxy", "system"),
+            "proxyProfiles": c.get("proxyProfiles", []),
+            "proxyAuto": c.get("proxyAuto") or {"rules": [], "default": "direct"},
+        })
+
+    @pyqtSlot(str)
+    def setProxyAuto(self, auto_json):
+        try:
+            auto = json.loads(auto_json)
+        except ValueError:
+            return
+        self.browser.config["proxyAuto"] = auto
+        self.browser.save_config()
+        self.browser.apply_proxy()
+
+    @pyqtSlot(str)
+    def setActiveProxy(self, name):
+        self.browser.set_active_proxy(name)
+
+    @pyqtSlot(str)
+    def saveProxyProfile(self, profile_json):
+        try:
+            prof = json.loads(profile_json)
+        except ValueError:
+            return
+        name = (prof.get("name") or "").strip()
+        if not name or name in ("system", "direct"):
+            return
+        prof["name"] = name
+        profs = [p for p in self.browser.config.get("proxyProfiles", [])
+                 if p.get("name") != name]
+        profs.append(prof)
+        self.browser.config["proxyProfiles"] = profs
+        self.browser.save_config()
+        self.browser.apply_proxy()
+
+    @pyqtSlot(str)
+    def deleteProxyProfile(self, name):
+        b = self.browser
+        b.config["proxyProfiles"] = [
+            p for p in b.config.get("proxyProfiles", [])
+            if p.get("name") != name]
+        if b.config.get("activeProxy") == name:
+            b.config["activeProxy"] = "system"
+        b.save_config()
+        b.apply_proxy()
+
+    @pyqtSlot(str, str)
+    def setSetting(self, key, value_json):
+        try:
+            value = json.loads(value_json)
+        except ValueError:
+            return
+        browser = self.browser
+        browser.config[key] = value
+        browser.save_config()
+        if key == "googleLight":
+            browser.refresh_google_scripts()
+        elif key == "translateLang":
+            browser.apply_language()
+        elif key == "proxy":
+            browser.apply_proxy()
+        elif key == "forceDark":
+            for profile in ([browser.profile]
+                            + list(browser.session_profiles.values())):
+                profile.settings().setAttribute(
+                    QWebEngineSettings.WebAttribute.ForceDarkMode, bool(value))
+        elif key == "zoom":
+            for i in range(browser.tabs.count()):
+                w = browser.tabs.widget(i)
+                if hasattr(w, "setZoomFactor"):
+                    w.setZoomFactor(float(value))
+
+    @pyqtSlot()
+    def clearCookies(self):
+        """Wipe cookies + cache of the CURRENT virtual browser only."""
+        view = self.browser.current()
+        profile = (view.page().profile() if view is not None
+                   else self.browser.profile)
+        profile.cookieStore().deleteAllCookies()
+        profile.clearHttpCache()
+
+    @pyqtSlot()
+    def requestSetup(self):
+        self.browser._setup_flag = True
+
+    @pyqtSlot(result=bool)
+    def popSetupFlag(self):
+        flag = getattr(self.browser, "_setup_flag", False)
+        self.browser._setup_flag = False
+        return flag
+
+    @pyqtSlot(result=bool)
+    def googleLight(self):
+        return self.browser.config.get("googleLight", True)
+
+    @pyqtSlot(bool)
+    def setGoogleLight(self, on):
+        self.browser.config["googleLight"] = bool(on)
+        self.browser.save_config()
+        self.browser.refresh_google_scripts()
+
+    @pyqtSlot(result=str)
     def getStartData(self):
         """Start-page setup shared across all cookie jars."""
         return json.dumps(self.browser.config.get("startPage", {}))
@@ -377,6 +978,36 @@ class Bridge(QObject):
     def clearHistory(self):
         self.browser.history = []
         self.browser.save_history()
+
+    @pyqtSlot(result=str)
+    def getPlugins(self):
+        b = self.browser
+        return json.dumps({
+            "plugins": [n[len("plugin-"):] for n in b.plugin_script_names],
+            "folder": str(b.plugins_dir),
+        })
+
+    @pyqtSlot(result=str)
+    def reloadPlugins(self):
+        self.browser.reload_plugins()
+        return self.getPlugins()
+
+    @pyqtSlot(result=str)
+    def starterPlugins(self):
+        return json.dumps([{"id": k, "name": v[0], "desc": v[1]}
+                           for k, v in STARTER_PLUGINS.items()])
+
+    @pyqtSlot(str, result=bool)
+    def installStarter(self, plugin_id):
+        return self.browser.install_starter(plugin_id)
+
+    @pyqtSlot()
+    def addPluginFromFile(self):
+        self.browser.add_plugin_from_file()
+
+    @pyqtSlot(str, str)
+    def savePlugin(self, filename, source):
+        self.browser.save_plugin(filename, source)
 
 
 class WebView(QWebEngineView):
@@ -533,6 +1164,12 @@ class Browser(QMainWindow):
             self.history = []
         self.bridge = Bridge(self)
 
+        # userscript plugins: *.user.js files next to the config
+        # (Greasemonkey-style; Qt WebEngine can't run real extensions)
+        self.plugins_dir = CONFIG_FILE.parent / "plugins"
+        self.plugin_scripts = self._load_plugins()
+        self.plugin_script_names = [s.name() for s in self.plugin_scripts]
+
         self.profile = self._make_profile("browser")
         self._perm_queue = []
         self._perm_widget = None
@@ -579,12 +1216,24 @@ class Browser(QMainWindow):
         fwd.clicked.connect(lambda: self.current().forward())
         reload_.clicked.connect(lambda: self.current().reload())
 
+        translate = QToolButton(text="\uf1ab")
+        translate.setToolTip("Translate this page")
+        translate.clicked.connect(self._translate_menu)
+        self._translate_btn = translate
+
+        proxybtn = QToolButton(text="\uf0ac")
+        proxybtn.setToolTip("Proxy")
+        proxybtn.clicked.connect(self._proxy_menu)
+        self._proxy_btn = proxybtn
+
         bar = QHBoxLayout()
         bar.setContentsMargins(10, 8, 10, 2)
         bar.setSpacing(6)
         for w in (back, fwd, reload_):
             bar.addWidget(w)
         bar.addWidget(self.urlbar, 1)
+        bar.addWidget(proxybtn)
+        bar.addWidget(translate)
 
         self.tabs = TabWidget(self)
         self.tabs.setDocumentMode(True)
@@ -656,8 +1305,12 @@ class Browser(QMainWindow):
             "Ctrl+Q": self.close,
             "Ctrl+Tab": lambda: self._cycle(1),
             "Ctrl+Shift+Tab": lambda: self._cycle(-1),
+            "Shift+Tab": lambda: self._cycle_session(1),
             "F11": lambda: self.set_fullscreen(not self.isFullScreen()),
             "Ctrl+H": lambda: self.new_tab(url=HISTORY_PAGE.toString()),
+            "F12": self.toggle_inspector,
+            "Ctrl+Shift+I": self.toggle_inspector,
+            "Ctrl+,": lambda: self.new_tab(url=SETTINGS_PAGE.toString()),
         }.items():
             QShortcut(QKeySequence(key), self).activated.connect(fn)
 
@@ -673,9 +1326,11 @@ class Browser(QMainWindow):
             self.sessions = saved_sessions
             if not any(e["sid"] == "main" for e in self.sessions):
                 self.sessions.insert(0, {"name": "Browser 1", "sid": "main"})
+        self.apply_proxy()
         self.active_session = self.sessions[0]["sid"]
-        self._restore_groups()
-        self._restore_session_tabs()
+        if self.config.get("restoreTabs", True):
+            self._restore_groups()
+            self._restore_session_tabs()
         self.new_tab(url=initial_url, group=None,
                      session=self.active_session)
         self.switch_session(self.active_session)
@@ -867,6 +1522,7 @@ class Browser(QMainWindow):
             session = (self.group_sessions.get(group)
                        if group is not None else self.active_session)
         view = WebView(self, self._profile_for(group, session))
+        view.setZoomFactor(float(self.config.get("zoom", 1.0)))
         view.group = group
         view.session = session or "main"
         view.urlChanged.connect(lambda u, v=view: self._url_changed(v, u))
@@ -1011,7 +1667,71 @@ class Browser(QMainWindow):
                 self.tabs.setCurrentIndex(i)
         self.tabs.tabBar().update()
 
+    # ---- translation ----
+    def _translate_menu(self):
+        menu = QMenu(self)
+        current = self.config.get("translateLang", "de")
+
+        search = QLineEdit(menu)
+        search.setPlaceholderText("Search language\u2026")
+        search.setStyleSheet(
+            "QLineEdit { background: #000000; color: #cdd6f4;"
+            " border: 1px solid rgba(108, 112, 134, 110);"
+            " border-radius: 0px; padding: 6px 10px; margin: 2px 4px; }")
+        box = QWidgetAction(menu)
+        box.setDefaultWidget(search)
+        menu.addAction(box)
+
+        entries = []
+        for code, name in LANGUAGES:
+            mark = "\u2713 " if code == current else "    "
+            action = menu.addAction(mark + name)
+            action.triggered.connect(
+                lambda _, c=code: self._translate_page(c))
+            haystack = " ".join((name.lower(), code.lower(),
+                                 LANGUAGE_ALIASES.get(code, "")))
+            entries.append((action, haystack))
+
+        def apply_filter(text):
+            needle = text.strip().lower()
+            for action, haystack in entries:
+                action.setVisible(needle in haystack)
+        search.textChanged.connect(apply_filter)
+        search.returnPressed.connect(lambda: next(
+            (a.trigger() or menu.close()
+             for a, _h in entries if a.isVisible()), None))
+        menu.aboutToShow.connect(search.setFocus)
+        self._tmenu = menu  # kept for tests
+        menu.exec(self._translate_btn.mapToGlobal(
+            self._translate_btn.rect().bottomLeft()))
+
+    def _translate_page(self, lang):
+        self.config["translateLang"] = lang
+        self.save_config()
+        self.apply_language()
+        view = self.current()
+        if view is None:
+            return
+        url = view.url()
+        if url.scheme() not in ("http", "https"):
+            return
+        target = QUrl("https://translate.google.com/translate")
+        q = QUrlQuery()
+        q.addQueryItem("sl", "auto")
+        q.addQueryItem("tl", lang)
+        q.addQueryItem("u", url.toString())
+        target.setQuery(q)
+        view.load(target)
+
     # ---- virtual browsers ----
+    def _cycle_session(self, step):
+        """Shift+Tab hops to the next virtual browser."""
+        if len(self.sessions) < 2:
+            return
+        sids = [e["sid"] for e in self.sessions]
+        i = sids.index(self.active_session) if self.active_session in sids else 0
+        self.switch_session(sids[(i + step) % len(sids)])
+
     def _update_session_bar(self):
         lay = self.sesslay
         while lay.count():
@@ -1518,7 +2238,9 @@ class Browser(QMainWindow):
         if not text:
             return
         if " " in text or ("." not in text and text != "localhost"):
-            url = SEARCH_URL.format(QUrl.toPercentEncoding(text).data().decode())
+            engine = SEARCH_ENGINES.get(self.config.get("searchEngine", "google"),
+                                        SEARCH_ENGINES["google"])
+            url = engine[1].format(QUrl.toPercentEncoding(text).data().decode())
         elif "://" in text:
             url = text
         else:
@@ -1581,11 +2303,16 @@ class Browser(QMainWindow):
 
     def _url_changed(self, view, url):
         self._remember_host(url)
+        if view is self.current() and self.config.get("activeProxy") == "auto":
+            self._apply_proxy_profile(self._auto_profile_for(url.host()))
+            self._update_proxy_btn()
         host = url.host().removeprefix("www.")
-        native_dark = any(host == d or host.endswith("." + d)
-                          for d in NATIVE_DARK_SITES)
+        native_dark = (any(host == d or host.endswith("." + d)
+                           for d in NATIVE_DARK_SITES)
+                       or bool(re.fullmatch(r"google\.[a-z.]+", host)))
         view.page().settings().setAttribute(
-            QWebEngineSettings.WebAttribute.ForceDarkMode, not native_dark)
+            QWebEngineSettings.WebAttribute.ForceDarkMode,
+            bool(self.config.get("forceDark", True)) and not native_dark)
         # never clobber the bar while the user is typing in it
         if view is self.current() and not self.urlbar.hasFocus():
             self.urlbar.setText("" if url == START_PAGE else url.toString())
@@ -1719,6 +2446,8 @@ class Browser(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _tab_changed(self, index):
+        if self.config.get("activeProxy") == "auto":
+            self.apply_proxy()
         w = self.tabs.widget(index)
         if w is not None and self._is_header(w):
             # selection landed on a header some indirect way: step off it
@@ -1782,19 +2511,336 @@ class Browser(QMainWindow):
         # let calls ring and voice chats start without a prior click
         s.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False)
         # auto-darken pages that have no dark theme of their own
-        s.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
+        s.setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode,
+                       bool(self.config.get("forceDark", True)))
         # some sites (Teams…) block calls on unknown browsers; the engine
         # IS Chromium, so drop the QtWebEngine token from the identity
         profile.setHttpUserAgent(
             re.sub(r"\s?QtWebEngine/[\d.]+", "", profile.httpUserAgent()))
+        lang = self.config.get("translateLang", "de")
+        profile.setHttpAcceptLanguage(
+            lang if lang.startswith("en") else lang + ",en")
+        profile.scripts().insert(self._google_script())
+        for script in self.plugin_scripts:
+            profile.scripts().insert(script)
+        return profile
+
+    def _google_script(self):
         script = QWebEngineScript()
-        script.setName("google-black")
+        script.setName("google-mode")
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
         script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
         script.setRunsOnSubFrames(False)
-        script.setSourceCode(GOOGLE_BLACK_JS)
-        profile.scripts().insert(script)
-        return profile
+        script.setSourceCode(
+            GOOGLE_LIGHT_JS if self.config.get("googleLight", True)
+            else GOOGLE_BLACK_JS)
+        return script
+
+    # ---- inspector (Chromium DevTools over remote debugging) ----
+    def toggle_inspector(self):
+        view = self.current()
+        if view is None or not hasattr(view, "page"):
+            return
+        existing = getattr(view, "_devtools", None)
+        if existing is not None:
+            existing.close()
+            view._devtools = None
+            return
+        # the embedded devtools:// frontend fails to load on some Qt
+        # builds; the remote-debugging server serves the same DevTools
+        # over http, which works everywhere
+        cur = view.url().toString()
+        reply = self._nam.get(QNetworkRequest(
+            QUrl("http://127.0.0.1:9222/json/list")))
+        reply.finished.connect(
+            lambda r=reply, v=view, u=cur: self._open_inspector(r, v, u))
+
+    def _open_inspector(self, reply, view, cur_url):
+        base = "http://127.0.0.1:9222"
+        frontend = base + "/"  # fallback: pick-a-page list
+        try:
+            targets = json.loads(bytes(reply.readAll()).decode())
+            match = next((t for t in targets if t.get("type") == "page"
+                          and t.get("url") == cur_url), None)
+            match = match or next((t for t in targets
+                                   if t.get("type") == "page"), None)
+            if match and match.get("devtoolsFrontendUrl"):
+                fe = match["devtoolsFrontendUrl"]
+                frontend = fe if fe.startswith("http") else base + fe
+        except Exception:
+            pass
+        reply.deleteLater()
+        dt = QWebEngineView()
+        dt.setWindowTitle("Inspector")
+        dt.resize(1000, 640)
+        dt.setWindowIcon(self.windowIcon())
+        dt.load(QUrl(frontend))
+        dt.destroyed.connect(lambda: setattr(view, "_devtools", None))
+        dt.show()
+        view._devtools = dt
+
+    # ---- proxy switcher (SwitchyOmega-style) ----
+    def _migrate_proxy(self):
+        # old single-proxy config -> a named profile + active selection
+        if "activeProxy" in self.config:
+            return
+        old = self.config.get("proxy")
+        if isinstance(old, dict) and old.get("mode") == "custom":
+            prof = {"name": "Proxy", "type": old.get("type", "http"),
+                    "host": old.get("host", ""), "port": old.get("port", 0)}
+            self.config["proxyProfiles"] = [prof]
+            self.config["activeProxy"] = "Proxy"
+        else:
+            self.config["activeProxy"] = (old or {}).get("mode", "system")
+
+    def _apply_proxy_profile(self, name):
+        if name == "system":
+            QNetworkProxyFactory.setUseSystemConfiguration(True)
+            return
+        QNetworkProxyFactory.setUseSystemConfiguration(False)
+        if name == "direct":
+            QNetworkProxy.setApplicationProxy(
+                QNetworkProxy(QNetworkProxy.ProxyType.NoProxy))
+            return
+        prof = next((p for p in self.config.get("proxyProfiles", [])
+                     if p.get("name") == name), None)
+        if prof is None:
+            QNetworkProxyFactory.setUseSystemConfiguration(True)
+            return
+        kind = (QNetworkProxy.ProxyType.Socks5Proxy
+                if prof.get("type") == "socks5"
+                else QNetworkProxy.ProxyType.HttpProxy)
+        proxy = QNetworkProxy(kind, prof.get("host", ""),
+                              int(prof.get("port") or 0))
+        if prof.get("user"):
+            proxy.setUser(prof["user"])
+            proxy.setPassword(prof.get("password", ""))
+        QNetworkProxy.setApplicationProxy(proxy)
+
+    def _host_matches(self, host, pattern):
+        pattern = (pattern or "").strip().lower()
+        host = (host or "").lower()
+        if not pattern:
+            return False
+        if pattern.startswith("*."):
+            base = pattern[2:]
+            return host == base or host.endswith("." + base)
+        if "*" in pattern:
+            rx = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
+            return re.match(rx, host) is not None
+        return host == pattern or host.endswith("." + pattern)
+
+    def _auto_profile_for(self, host):
+        auto = self.config.get("proxyAuto") or {}
+        for rule in auto.get("rules", []):
+            if self._host_matches(host, rule.get("pattern", "")):
+                return rule.get("profile", "direct")
+        return auto.get("default", "direct")
+
+    def apply_proxy(self):
+        self._migrate_proxy()
+        active = self.config.get("activeProxy", "system")
+        if active == "auto":
+            host = ""
+            v = self.current()
+            if v is not None and hasattr(v, "url"):
+                host = v.url().host()
+            self._apply_proxy_profile(self._auto_profile_for(host))
+        else:
+            self._apply_proxy_profile(active)
+        self._update_proxy_btn()
+
+    def _proxy_profiles(self):
+        base = [{"name": "system", "label": "System", "builtin": True},
+                {"name": "direct", "label": "Direct", "builtin": True}]
+        return base + [dict(p, label=p["name"], builtin=False)
+                       for p in self.config.get("proxyProfiles", [])]
+
+    def _proxy_menu(self):
+        menu = QMenu(self)
+        active = self.config.get("activeProxy", "system")
+        auto_mark = "\u2713 " if active == "auto" else "    "
+        menu.addAction(auto_mark + "Auto (by site rules)").triggered.connect(
+            lambda: self.set_active_proxy("auto"))
+        menu.addSeparator()
+        for p in self._proxy_profiles():
+            mark = "\u2713 " if p["name"] == active else "    "
+            menu.addAction(mark + p["label"]).triggered.connect(
+                lambda _, n=p["name"]: self.set_active_proxy(n))
+        menu.addSeparator()
+        menu.addAction("Manage profiles\u2026").triggered.connect(
+            lambda: self.new_tab(url=SETTINGS_PAGE.toString()))
+        b = self._proxy_btn
+        menu.exec(b.mapToGlobal(b.rect().bottomLeft()))
+
+    def set_active_proxy(self, name):
+        self.config["activeProxy"] = name
+        self.save_config()
+        self.apply_proxy()
+
+    def _update_proxy_btn(self):
+        btn = getattr(self, "_proxy_btn", None)
+        if btn is None:
+            return
+        active = self.config.get("activeProxy", "system")
+        label = {"system": "System", "direct": "Direct",
+                 "auto": "Auto"}.get(active, active)
+        btn.setToolTip("Proxy: " + label)
+        # a filled dot when a proxy is actually routing traffic
+        btn.setText("\uf0ac" if active not in ("system", "direct")
+                    else "\uf0ac")
+        btn.setStyleSheet(
+            "QToolButton { color: %s; }" %
+            ("#a6e3a1" if active not in ("system", "direct") else "#cdd6f4"))
+
+    def apply_language(self):
+        """The chosen language reaches websites (Accept-Language, so
+        Google speaks it too) and the browser's own pages."""
+        lang = self.config.get("translateLang", "de")
+        accept = lang if lang.startswith("en") else lang + ",en"
+        for profile in [self.profile] + list(self.session_profiles.values()):
+            profile.setHttpAcceptLanguage(accept)
+        for i in range(self.tabs.count()):
+            w = self.tabs.widget(i)
+            if hasattr(w, "url") and w.url().scheme() == "file":
+                w.reload()
+
+    def refresh_google_scripts(self):
+        """Swap the Google white/black script in every cookie jar."""
+        for profile in [self.profile] + list(self.session_profiles.values()):
+            scripts = profile.scripts()
+            for old in scripts.find("google-mode"):
+                scripts.remove(old)
+            scripts.insert(self._google_script())
+
+    @staticmethod
+    def _plugin_glob_to_regex(seg):
+        """Glob segment -> regex source: * -> .*, rest escaped
+        ( / escaped too, for the JS /.../ literal)."""
+        out = []
+        for ch in seg:
+            if ch == "*":
+                out.append(".*")
+            elif ch == "/":
+                out.append(r"\/")
+            else:
+                out.append(re.escape(ch))
+        return "".join(out)
+
+    def _plugin_pattern_to_regex(self, pattern):
+        """Chrome-style match pattern -> regex on the FULL url, matched
+        by component so `*.x.com` covers x.com and its subdomains and a
+        stray `.x.com/` in a path can't trigger it."""
+        m = re.match(r"^(\*|https?|file|ftp)://([^/]*)(/.*)?$", pattern)
+        if not m:  # not a scheme://host/path pattern: fall back to a glob
+            return "^%s$" % self._plugin_glob_to_regex(pattern)
+        scheme, host, path = m.group(1), m.group(2), m.group(3) or "/*"
+        scheme_re = r"https?" if scheme == "*" else re.escape(scheme)
+        if host == "*":
+            host_re = r"[^/]+"
+        elif host.startswith("*."):
+            host_re = r"(?:[^/]+\.)?" + re.escape(host[2:])
+        else:
+            host_re = self._plugin_glob_to_regex(host)
+        path_re = self._plugin_glob_to_regex(path)
+        return r"^%s:\/\/%s%s$" % (scheme_re, host_re, path_re)
+
+    def _plugin_wrap(self, source):
+        """Honor // @match and // @include lines: the script only runs
+        on matching URLs (any pattern may match). None = everywhere."""
+        patterns = re.findall(r"^\s*//\s*@(?:match|include)\s+(\S+)",
+                              source, re.MULTILINE)
+        if not patterns:
+            return source
+        regex = "|".join(self._plugin_pattern_to_regex(p) for p in patterns)
+        return "if (new RegExp(%s).test(location.href)) {\n%s\n}" % (
+            json.dumps(regex), source)
+
+    def _load_plugins(self):
+        """Every *.user.js in the plugins folder becomes an injectable
+        script; the folder is created on first start."""
+        try:
+            self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return []
+        scripts = []
+        for f in sorted(self.plugins_dir.glob("*.user.js")):
+            try:
+                source = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            script = QWebEngineScript()
+            # source first: setSourceCode parses ==UserScript== metadata
+            # and would overwrite the name / injection point set before
+            script.setSourceCode(self._plugin_wrap(source))
+            script.setName("plugin-" + f.name)
+            script.setInjectionPoint(
+                QWebEngineScript.InjectionPoint.DocumentReady)
+            script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+            script.setRunsOnSubFrames(False)
+            scripts.append(script)
+        return scripts
+
+    def _plugin_toast(self, name):
+        self.bridge.updateFinished.emit("Plugin installed: " + name)
+        self._show_toast()
+        if self._toast:
+            self._toast_label.setText("Plugin installed ✓")
+
+    def _plugin_downloaded(self, request):
+        if request.isFinished() and request.state() == \
+                request.DownloadState.DownloadCompleted:
+            self.reload_plugins()
+            self._plugin_toast(request.downloadFileName())
+
+    def _safe_plugin_name(self, filename):
+        base = re.sub(r"[^\w.-]", "_", Path(filename).name)
+        if not base.endswith(".user.js"):
+            base = base.removesuffix(".js") + ".user.js"
+        return base
+
+    def save_plugin(self, filename, source):
+        """Write a userscript into the plugins folder and activate it."""
+        try:
+            self.plugins_dir.mkdir(parents=True, exist_ok=True)
+            (self.plugins_dir / self._safe_plugin_name(filename)).write_text(
+                source, encoding="utf-8")
+        except OSError:
+            return False
+        self.reload_plugins()
+        self._plugin_toast(self._safe_plugin_name(filename))
+        return True
+
+    def install_starter(self, plugin_id):
+        entry = STARTER_PLUGINS.get(plugin_id)
+        if entry is None:
+            return False
+        return self.save_plugin(plugin_id + ".user.js", entry[2])
+
+    def add_plugin_from_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Add plugin", str(Path.home()),
+            "Userscripts (*.user.js *.js)")
+        if not path:
+            return
+        try:
+            source = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        self.save_plugin(Path(path).name, source)
+
+    def reload_plugins(self):
+        """Re-read the plugins folder into every cookie jar."""
+        old_names = self.plugin_script_names
+        self.plugin_scripts = self._load_plugins()
+        self.plugin_script_names = [s.name() for s in self.plugin_scripts]
+        for profile in [self.profile] + list(self.session_profiles.values()):
+            scripts = profile.scripts()
+            for name in old_names:
+                for stale in scripts.find(name):
+                    scripts.remove(stale)
+            for script in self.plugin_scripts:
+                scripts.insert(script)
 
     def _profile_for(self, group, session="main"):
         """Cookies are per virtual browser: every tab in it — grouped
@@ -1821,6 +2867,29 @@ class Browser(QMainWindow):
         view.load(target if target.toString() else START_PAGE)
 
     def _download(self, request):
+        # a .user.js is a plugin: install it straight into the folder
+        name = request.downloadFileName()
+        if name.endswith(".user.js"):
+            request.setDownloadDirectory(str(self.plugins_dir))
+            request.setDownloadFileName(name)
+            request.accept()
+            request.isFinishedChanged.connect(
+                lambda r=request: self._plugin_downloaded(r))
+            return
+        if self.config.get("askDownload"):
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save file",
+                str(DOWNLOAD_DIR / request.downloadFileName()))
+            if not path:
+                request.cancel()
+                return
+            request.setDownloadDirectory(str(Path(path).parent))
+            request.setDownloadFileName(Path(path).name)
+            request.accept()
+            widget = DownloadWidget(request, self._dismiss_download)
+            self.dllay.insertWidget(self.dllay.count() - 1, widget)
+            self.dlbar.show()
+            return
         request.setDownloadDirectory(str(DOWNLOAD_DIR))
         # don't overwrite existing files: name.pdf -> name (1).pdf
         name = request.downloadFileName()

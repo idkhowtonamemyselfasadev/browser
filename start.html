@@ -237,7 +237,7 @@
     width: 34px;
     height: 19px;
     border-radius: 10px;
-    background: #a6adc8;
+    background: #f38ba8;
     position: relative;
     transition: background .15s;
     flex-shrink: 0;
@@ -351,26 +351,19 @@
     <h3>Background</h3>
     <div class="thumbs" id="thumbs"></div>
     <input type="file" id="bgfile" accept="image/*" hidden>
-    <h3>&#128737;&#65039; Privacy</h3>
-    <div class="privacy">
-      <label class="switchrow">
-        <span>Save history</span>
-        <input type="checkbox" id="histtoggle" checked>
-        <span class="slider"></span>
-      </label>
-      <div class="privbtns">
-        <button type="button" id="viewhist">View history</button>
-        <button type="button" id="clearhist">Clear history</button>
-      </div>
-    </div>
-    <h3>Setup</h3>
     <div class="privbtns">
-      <button type="button" id="rerunsetup">Run setup again</button>
-      <button type="button" id="updatebtn">Check for updates</button>
+      <button type="button" id="allsettings">All settings</button>
     </div>
-    <div class="hint" id="updatemsg" hidden></div>
   </div>
 <script>
+  // UI strings; overridden from the bridge in the chosen language
+  let STR = {add: "Add", background: "Background", allSettings: "All settings",
+    searchSite: "Search {}", wizWelcome: "Welcome! Let's set things up",
+    wizDrag: "Grab the search bar and drag it wherever you want it.",
+    center: "Center it again", nextBtn: "Next \u2192", wallpaper: "Wallpaper",
+    pickWallpaper: "Pick a wallpaper for your start page.", finish: "Finish",
+    lang: undefined};
+
   const DEFAULTS = [
     { name: "GitHub", url: "https://github.com" },
     { name: "YouTube", url: "https://www.youtube.com" },
@@ -617,41 +610,28 @@
     };
     if (step === 1) {
       document.body.classList.add("dragging");
-      document.getElementById("wiztitle").textContent = "Welcome! Let's set things up";
-      document.getElementById("wiztext").textContent =
-        "Grab the search bar and drag it wherever you want it.";
+      document.getElementById("wiztitle").textContent = STR.wizWelcome;
+      document.getElementById("wiztext").textContent = STR.wizDrag;
       thumbs.hidden = true;
-      btn("Center it again", "", () => {
+      btn(STR.center, "", () => {
         localStorage.removeItem("searchpos");
         applySearchPos();
         syncStartData();
       });
-      btn("Next \u2192", "primary", () => wizStep(2));
+      btn(STR.nextBtn, "primary", () => wizStep(2));
     } else {
       document.body.classList.remove("dragging");
-      document.getElementById("wiztitle").textContent = "Wallpaper";
-      document.getElementById("wiztext").textContent =
-        "Pick a wallpaper for your start page.";
+      document.getElementById("wiztitle").textContent = STR.wallpaper;
+      document.getElementById("wiztext").textContent = STR.pickWallpaper;
       thumbs.hidden = false;
       renderThumbs("wizthumbs");
-      btn("Finish", "primary", () => {
+      btn(STR.finish, "primary", () => {
         localStorage.setItem("setupDone", "1");
         wiz.classList.remove("open");
         syncStartData();
       });
     }
   }
-  document.getElementById("updatebtn").onclick = (e) => {
-    if (!bridge) return;
-    e.target.disabled = true;
-    e.target.textContent = "Checking\u2026";
-    document.getElementById("updatemsg").hidden = true;
-    bridge.runUpdate();
-  };
-  document.getElementById("rerunsetup").onclick = () => {
-    document.getElementById("settings").classList.remove("open");
-    wizStep(1);
-  };
   let wizChecked = false;
   function maybeStartSetup() {
     if (wizChecked) return;
@@ -667,6 +647,26 @@
   if (typeof qt !== "undefined") {
     new QWebChannel(qt.webChannelTransport, (ch) => {
       bridge = ch.objects.bridge;
+      bridge.uiStrings((j) => {
+        try {
+          Object.assign(STR, JSON.parse(j));
+          document.querySelector("#addform button").textContent = STR.add;
+          document.querySelector("#settings h3").textContent = STR.background;
+          document.getElementById("allsettings").textContent = STR.allSettings;
+          tick();
+        } catch (e) {}
+      });
+      bridge.getSettings((j) => {
+        try {
+          const s = JSON.parse(j);
+          const form = document.querySelector("form.search");
+          form.action = s.searchAction;
+          form.querySelector("input").name = s.searchParam;
+          form.querySelector("input").placeholder =
+            STR.searchSite.replace("{}", s.searchName);
+        } catch (e) {}
+      });
+      bridge.popSetupFlag((v) => { if (v) wizStep(1); });
       bridge.getStartData((json) => {
         try {
           const data = JSON.parse(json || "{}");
@@ -683,47 +683,27 @@
         } catch (e) {}
         maybeStartSetup();
       });
-      bridge.updateFinished.connect((msg) => {
-        const el = document.getElementById("updatemsg");
-        el.hidden = false;
-        el.textContent = msg;
-        const b = document.getElementById("updatebtn");
-        b.disabled = false;
-        b.textContent = "Check for updates";
-      });
       syncSettings();
     });
   }
   function syncSettings() {
     if (!bridge) return;
-    bridge.historyEnabled((v) => {
-      document.getElementById("histtoggle").checked = v;
-    });
   }
   // tabs opened earlier would show stale switches; re-sync when shown
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) syncSettings();
   });
-  document.getElementById("histtoggle").onchange = (e) => {
-    if (bridge) bridge.setHistoryEnabled(e.target.checked);
-  };
-  document.getElementById("viewhist").onclick = () => {
-    // so Esc on the history page brings you back into this panel
-    sessionStorage.setItem("reopenSettings", "1");
-    location.href = "history.html";
-  };
-  document.getElementById("clearhist").onclick = (e) => {
-    if (bridge) bridge.clearHistory();
-    e.target.textContent = "Cleared ✓";
-    setTimeout(() => { e.target.textContent = "Clear history"; }, 1500);
+  document.getElementById("allsettings").onclick = () => {
+    location.href = "settings.html";
   };
 
   function tick() {
     const now = new Date();
+    const loc = STR.lang || [];
     document.getElementById("clock").textContent =
-      now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      now.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
     document.getElementById("date").textContent =
-      now.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+      now.toLocaleDateString(loc, { weekday: "long", day: "numeric", month: "long" });
   }
   tick();
   setInterval(tick, 1000);

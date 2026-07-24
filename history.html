@@ -80,7 +80,7 @@
 <body>
   <div class="wrap">
     <header>
-      <h1>History</h1>
+      <h1 id="t_history">History</h1>
       <input id="search" placeholder="Search history" autocomplete="off">
       <button id="clear">Clear all</button>
     </header>
@@ -90,13 +90,17 @@
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
   let bridge = null, entries = [];
+  let STR = {history: "History", searchHistory: "Search history",
+    clearAll: "Clear all", noHistory: "No history.",
+    today: "Today", yesterday: "Yesterday", lang: undefined};
 
   function dayLabel(t) {
     const d = new Date(t * 1000), now = new Date();
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    if (d >= midnight) return "Today";
-    if (d >= new Date(midnight - 86400000)) return "Yesterday";
-    return d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+    if (d >= midnight) return STR.today;
+    if (d >= new Date(midnight - 86400000)) return STR.yesterday;
+    return d.toLocaleDateString(STR.lang || [],
+      { weekday: "long", day: "numeric", month: "long" });
   }
 
   function render() {
@@ -152,7 +156,17 @@
   if (typeof qt !== "undefined") {
     new QWebChannel(qt.webChannelTransport, (ch) => {
       bridge = ch.objects.bridge;
-      bridge.getHistory((json) => { entries = JSON.parse(json); render(); });
+      bridge.uiStrings((j) => {
+        try {
+          Object.assign(STR, JSON.parse(j));
+          document.title = STR.history;
+          document.getElementById("t_history").textContent = STR.history;
+          document.getElementById("search").placeholder = STR.searchHistory;
+          document.getElementById("clear").textContent = STR.clearAll;
+          document.getElementById("empty").textContent = STR.noHistory;
+        } catch (e) {}
+        bridge.getHistory((json) => { entries = JSON.parse(json); render(); });
+      });
     });
   } else {
     render();

@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000000;
+    color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    padding: 40px 0 60px;
+  }
+  .wrap { max-width: 620px; margin: 0 auto; padding: 0 20px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 26px; }
+  section {
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  h2 {
+    font-size: 12px;
+    font-weight: normal;
+    color: #6c7086;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 0;
+    font-size: 13px;
+  }
+  .row > span:first-child { flex: 1; }
+  .hint { font-size: 11px; color: #6c7086; margin-top: -2px; padding-bottom: 6px; }
+
+  select, button {
+    background: #000000;
+    border: 1px solid rgba(108, 112, 134, 0.5);
+    border-radius: 0;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 12px;
+    cursor: pointer;
+    outline: none;
+  }
+  select:hover, button:hover { border-color: #a6adc8; color: #ffffff; }
+  #clearhist:hover, #clearcookies:hover { color: #f38ba8; border-color: #f38ba8; }
+
+  input[type=range] { width: 180px; accent-color: #cdd6f4; }
+  #zoomval { width: 48px; text-align: right; color: #6c7086; }
+
+  .switchrow { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .switchrow input { display: none; }
+  .slider {
+    width: 34px; height: 19px; border-radius: 10px;
+    background: #f38ba8; position: relative;
+    transition: background .15s; flex-shrink: 0;
+  }
+  .slider::after {
+    content: ""; position: absolute; top: 2.5px; left: 3px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #000000; transition: transform .15s;
+  }
+  .switchrow input:checked + .slider { background: #ffffff; }
+  .switchrow input:checked + .slider::after { transform: translateX(14px); }
+  #updmsg { color: #6c7086; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 id="t_settings">Settings</h1>
+
+    <section>
+      <h2 id="t_search">Search</h2>
+      <div class="row"><span id="t_searchEngine">Search engine</span>
+        <select id="engine"></select></div>
+    </section>
+
+    <section>
+      <h2 id="t_appearance">Appearance</h2>
+      <label class="row switchrow"><span id="t_whiteGoogle">White Google</span>
+        <input type="checkbox" id="googlelight"><span class="slider"></span></label>
+      <div class="hint" id="t_whiteGoogleHint">Off = pitch-black Google</div>
+      <label class="row switchrow"><span id="t_autoDarken">Auto-darken light websites</span>
+        <input type="checkbox" id="forcedark"><span class="slider"></span></label>
+      <div class="row"><span id="t_pageZoom">Page zoom</span>
+        <input type="range" id="zoom" min="50" max="200" step="10">
+        <span id="zoomval"></span></div>
+    </section>
+
+    <section>
+      <h2 id="t_browsing">Browsing</h2>
+      <label class="row switchrow"><span id="t_reopenTabs">Reopen tabs from last time</span>
+        <input type="checkbox" id="restoretabs"><span class="slider"></span></label>
+      <label class="row switchrow"><span id="t_askDownload">Ask where to save each download</span>
+        <input type="checkbox" id="askdownload"><span class="slider"></span></label>
+    </section>
+
+    <section>
+      <h2 id="t_translation">Translation</h2>
+      <div class="row"><span id="t_translateInto">Translate pages into</span>
+        <input type="text" id="langfilter" placeholder="Search…"
+               style="background:#000;border:1px solid rgba(108,112,134,.5);
+                      color:#cdd6f4;font:inherit;font-size:13px;
+                      padding:7px 10px;width:110px;outline:none;">
+        <select id="translatelang"></select></div>
+      <div class="hint" id="t_translateHint">Used by the translate button next to the address bar.</div>
+    </section>
+
+    <section>
+      <h2 id="t_privacy">Privacy</h2>
+      <label class="row switchrow"><span id="t_saveHistory">Save history</span>
+        <input type="checkbox" id="history"><span class="slider"></span></label>
+      <div class="row">
+        <span></span>
+        <button id="viewhist">View history</button>
+        <button id="clearhist">Clear history</button>
+        <button id="clearcookies">Clear cookies</button>
+      </div>
+      <div class="hint" id="t_cookiesHint">Clear cookies logs this virtual browser out everywhere.</div>
+    </section>
+
+    <section>
+      <h2 id="t_plugins">Plugins</h2>
+      <div id="pluginlist"></div>
+      <div class="row">
+        <span style="flex:1"></span>
+        <button id="reloadplugins">Reload plugins</button>
+      </div>
+      <div class="hint" id="t_pluginsHint">Userscripts (.user.js) in this folder run on matching pages.</div>
+      <div class="hint" id="pluginfolder"></div>
+
+      <h2 id="t_quickInstall" style="margin-top:16px">Quick install</h2>
+      <div id="starterlist"></div>
+      <div class="row" style="margin-top:8px">
+        <span style="flex:1"></span>
+        <button id="fromfile">From file…</button>
+        <button id="getmore">Browse Greasy Fork</button>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="t_network">Network (proxy)</h2>
+      <div id="proxyprofiles"></div>
+      <div class="hint" id="t_proxyHint">Pick a profile here or from the toolbar proxy button.</div>
+
+      <div id="autobox" style="margin-top:12px;border-top:1px solid rgba(108,112,134,.3);padding-top:10px">
+        <div style="color:#6c7086;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Auto rules</div>
+        <div id="autorules"></div>
+        <div class="row">
+          <input type="text" id="arpat" placeholder="*.reddit.com"
+                 style="background:#000;border:1px solid rgba(108,112,134,.5);color:#cdd6f4;font:inherit;font-size:13px;padding:6px 9px;width:150px;outline:none;">
+          <span>→</span>
+          <select id="arprof"></select>
+          <button id="araddbtn">Add rule</button>
+        </div>
+        <div class="row"><span>Everything else →</span>
+          <select id="ardefault"></select></div>
+        <div class="hint">Auto switches the browser proxy to match the site you're viewing.</div>
+      </div>
+
+      <h2 style="margin-top:14px" id="t_addProxy">Add proxy profile</h2>
+      <div class="row"><span id="t_proxyName">Name</span>
+        <input type="text" id="pname" placeholder="Tor / Work / VPN"
+               style="background:#000;border:1px solid rgba(108,112,134,.5);
+                      color:#cdd6f4;font:inherit;font-size:13px;padding:7px 10px;
+                      width:160px;outline:none;"></div>
+      <div class="row"><span id="t_proxyType">Type</span>
+        <select id="ptype"><option value="http">HTTP</option>
+          <option value="socks5">SOCKS5</option></select></div>
+      <div class="row"><span id="t_proxyHost">Host</span>
+        <input type="text" id="phost" placeholder="127.0.0.1"
+               style="background:#000;border:1px solid rgba(108,112,134,.5);
+                      color:#cdd6f4;font:inherit;font-size:13px;padding:7px 10px;
+                      width:160px;outline:none;"></div>
+      <div class="row"><span id="t_proxyPort">Port</span>
+        <input type="number" id="pport" placeholder="9050"
+               style="background:#000;border:1px solid rgba(108,112,134,.5);
+                      color:#cdd6f4;font:inherit;font-size:13px;padding:7px 10px;
+                      width:90px;outline:none;">
+        <button id="paddbtn">Save profile</button></div>
+      <div class="hint" id="t_inspectorHint">Press F12 on any page to open the inspector (DevTools).</div>
+    </section>
+
+    <section>
+      <h2 id="t_updates">Updates</h2>
+      <div class="row">
+        <span id="updmsg"></span>
+        <button id="updatebtn">Check for updates</button>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="t_setup">Setup</h2>
+      <div class="row"><span id="t_setupHint">Drag the search bar, pick a wallpaper</span>
+        <button id="rerunsetup">Run setup again</button></div>
+    </section>
+  </div>
+
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  let bridge = null;
+
+  function bindSwitch(id, key) {
+    document.getElementById(id).onchange = (e) => {
+      if (bridge) bridge.setSetting(key, JSON.stringify(e.target.checked));
+    };
+  }
+
+  let allLangs = [];
+  function fillLangs(filter) {
+    const sel = document.getElementById("translatelang");
+    const current = sel.value || window._tlang;
+    const needle = (filter || "").trim().toLowerCase();
+    sel.innerHTML = "";
+    for (const [code, native, english] of allLangs) {
+      if (needle && !(native.toLowerCase().includes(needle)
+                      || english.includes(needle)
+                      || code.toLowerCase().includes(needle))) continue;
+      const o = document.createElement("option");
+      o.value = code;
+      o.textContent = native;
+      o.selected = code === current;
+      sel.appendChild(o);
+    }
+  }
+
+  function load(s) {
+    const engine = document.getElementById("engine");
+    engine.innerHTML = "";
+    for (const [key, name] of s.engines) {
+      const o = document.createElement("option");
+      o.value = key; o.textContent = name;
+      o.selected = key === s.searchEngine;
+      engine.appendChild(o);
+    }
+    document.getElementById("googlelight").checked = s.googleLight;
+    document.getElementById("forcedark").checked = s.forceDark;
+    document.getElementById("restoretabs").checked = s.restoreTabs;
+    document.getElementById("askdownload").checked = s.askDownload;
+    document.getElementById("history").checked = s.history;
+    const zoom = document.getElementById("zoom");
+    zoom.value = Math.round(s.zoom * 100);
+    document.getElementById("zoomval").textContent = zoom.value + "%";
+    window._activeProxy = s.activeProxy || "system";
+    window._proxyProfiles = s.proxyProfiles || [];
+    window._proxyAuto = s.proxyAuto || {rules:[], default:"direct"};
+    renderProxies();
+    allLangs = s.languages;
+    window._tlang = s.translateLang;
+    fillLangs("");
+  }
+
+  function renderPlugins(j) {
+    try {
+      const p = JSON.parse(j);
+      window._plugins = j;
+      const list = document.getElementById("pluginlist");
+      list.innerHTML = "";
+      if (!p.plugins.length) {
+        const d = document.createElement("div");
+        d.className = "row"; d.id = "noplugins";
+        d.textContent = (window.STR && window.STR.noPlugins)
+                        || "No plugins installed.";
+        list.appendChild(d);
+      } else for (const name of p.plugins) {
+        const d = document.createElement("div");
+        d.className = "row"; d.textContent = name;
+        list.appendChild(d);
+      }
+      document.getElementById("pluginfolder").textContent = p.folder;
+      window._installed = p.plugins;
+    } catch (e) {}
+  }
+
+  function renderStarters(j) {
+    const box = document.getElementById("starterlist");
+    box.innerHTML = "";
+    const S = window.STR || {};
+    let arr = [];
+    try { arr = JSON.parse(j); } catch (e) { return; }
+    for (const s of arr) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const info = document.createElement("span");
+      info.style.flex = "1";
+      info.innerHTML = "<b>" + s.name + "</b><br><span style='color:#6c7086;font-size:11px'>"
+                       + s.desc + "</span>";
+      const btn = document.createElement("button");
+      const done = (window._installed || []).includes(s.id + ".user.js");
+      btn.textContent = done ? (S.installed || "Installed ✓") : (S.install || "Install");
+      btn.disabled = done;
+      btn.onclick = () => {
+        if (bridge) bridge.installStarter(s.id, (ok) => {
+          if (ok) { btn.textContent = S.installed || "Installed ✓"; btn.disabled = true;
+                    bridge.getPlugins(renderPlugins); }
+        });
+      };
+      row.append(info, btn);
+      box.appendChild(row);
+    }
+  }
+
+  if (typeof qt !== "undefined") {
+    new QWebChannel(qt.webChannelTransport, (ch) => {
+      bridge = ch.objects.bridge;
+      bridge.uiStrings((j) => {
+        try {
+          const S = JSON.parse(j);
+          window.STR = S;
+          document.title = S.settings;
+          const map = {t_settings:"settings", t_search:"search",
+            t_searchEngine:"searchEngine", t_appearance:"appearance",
+            t_whiteGoogle:"whiteGoogle", t_whiteGoogleHint:"whiteGoogleHint",
+            t_autoDarken:"autoDarken", t_pageZoom:"pageZoom",
+            t_browsing:"browsing", t_reopenTabs:"reopenTabs",
+            t_askDownload:"askDownload", t_translation:"translation",
+            t_translateInto:"translateInto", t_translateHint:"translateHint",
+            t_privacy:"privacy", t_saveHistory:"saveHistory",
+            t_cookiesHint:"cookiesHint", t_updates:"updates",
+            t_setup:"setupT", t_setupHint:"setupHint",
+            t_plugins:"plugins", t_pluginsHint:"pluginsHint",
+            t_quickInstall:"quickInstall", t_network:"network",
+            t_proxyMode:"proxyMode", t_proxyType:"proxyType",
+            t_proxyHost:"proxyHost", t_proxyPort:"proxyPort",
+            t_proxyHint:"proxyHint", t_inspectorHint:"inspectorHint",
+            t_addProxy:"addProxy", t_proxyName:"proxyName"};
+          for (const [id, key] of Object.entries(map)) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = S[key];
+          }
+          document.getElementById("viewhist").textContent = S.viewHistory;
+          document.getElementById("clearhist").textContent = S.clearHistory;
+          document.getElementById("clearcookies").textContent = S.clearCookies;
+          document.getElementById("updatebtn").textContent = S.checkUpdates;
+          document.getElementById("rerunsetup").textContent = S.runSetup;
+          document.getElementById("reloadplugins").textContent = S.reloadPlugins;
+          document.getElementById("fromfile").textContent = S.fromFile;
+          document.getElementById("getmore").textContent = S.getMore;
+          if (window._plugins) renderPlugins(window._plugins);
+          if (window._proxyProfiles !== undefined) renderProxies();
+          if (window._starters) renderStarters(window._starters);
+          document.getElementById("langfilter").placeholder = S.filterPh;
+        } catch (e) {}
+      });
+      bridge.getSettings((j) => { try { load(JSON.parse(j)); } catch (e) {} });
+      bridge.getPlugins(renderPlugins);
+      bridge.starterPlugins((j) => { window._starters = j; renderStarters(j); });
+      bridge.updateFinished.connect((msg) => {
+        document.getElementById("updmsg").textContent = msg;
+        const b = document.getElementById("updatebtn");
+        b.disabled = false;
+        b.textContent = "Check for updates";
+      });
+    });
+  }
+
+  bindSwitch("googlelight", "googleLight");
+  bindSwitch("forcedark", "forceDark");
+  bindSwitch("restoretabs", "restoreTabs");
+  bindSwitch("askdownload", "askDownload");
+  bindSwitch("history", "history");
+
+  document.getElementById("engine").onchange = (e) => {
+    if (bridge) bridge.setSetting("searchEngine", JSON.stringify(e.target.value));
+  };
+  document.getElementById("zoom").oninput = (e) => {
+    document.getElementById("zoomval").textContent = e.target.value + "%";
+    if (bridge) bridge.setSetting("zoom", JSON.stringify(e.target.value / 100));
+  };
+  document.getElementById("langfilter").oninput = (e) => fillLangs(e.target.value);
+  document.getElementById("translatelang").onchange = (e) => {
+    window._tlang = e.target.value;
+    if (bridge) bridge.setSetting("translateLang", JSON.stringify(e.target.value));
+  };
+  document.getElementById("viewhist").onclick = () => location.href = "history.html";
+  document.getElementById("clearhist").onclick = (e) => {
+    if (bridge) bridge.clearHistory();
+    e.target.textContent = "Cleared ✓";
+    setTimeout(() => { e.target.textContent = "Clear history"; }, 1500);
+  };
+  document.getElementById("clearcookies").onclick = (e) => {
+    if (bridge) bridge.clearCookies();
+    e.target.textContent = "Cleared ✓";
+    setTimeout(() => { e.target.textContent = "Clear cookies"; }, 1500);
+  };
+  document.getElementById("updatebtn").onclick = (e) => {
+    if (!bridge) return;
+    e.target.disabled = true;
+    e.target.textContent = "Checking…";
+    bridge.runUpdate();
+  };
+  document.getElementById("reloadplugins").onclick = () => {
+    if (bridge) bridge.reloadPlugins(renderPlugins);
+  };
+  document.getElementById("fromfile").onclick = () => {
+    if (bridge) bridge.addPluginFromFile();
+    setTimeout(() => { if (bridge) bridge.getPlugins(renderPlugins); }, 400);
+  };
+  document.getElementById("getmore").onclick = () => {
+    location.href = "https://greasyfork.org/";
+  };
+  function renderProxies() {
+    const box = document.getElementById("proxyprofiles");
+    if (!box) return;
+    box.innerHTML = "";
+    const active = window._activeProxy;
+    const S = window.STR || {};
+    const rows = [{name:"system", label:"System"},
+                  {name:"direct", label:"Direct"}]
+      .concat((window._proxyProfiles||[]).map(p =>
+        ({name:p.name, label:p.name + "  (" + p.type + " " + p.host + ":" + p.port + ")",
+          user:true})));
+    for (const r of rows) {
+      const row = document.createElement("label");
+      row.className = "row switchrow"; row.style.cursor = "pointer";
+      const dot = document.createElement("span");
+      dot.textContent = r.name === active ? "●" : "○";
+      dot.style.color = r.name === active ? "#a6e3a1" : "#6c7086";
+      const lbl = document.createElement("span");
+      lbl.style.flex = "1"; lbl.textContent = r.label;
+      row.append(dot, lbl);
+      if (r.user) {
+        const del = document.createElement("button");
+        del.textContent = "✕"; del.style.padding = "3px 9px";
+        del.onclick = (e) => { e.preventDefault();
+          if (bridge) bridge.deleteProxyProfile(r.name);
+          window._proxyProfiles = (window._proxyProfiles||[]).filter(p=>p.name!==r.name);
+          if (window._activeProxy === r.name) window._activeProxy = "system";
+          renderProxies(); };
+        row.append(del);
+      }
+      row.onclick = (e) => { if (e.target.tagName === "BUTTON") return;
+        window._activeProxy = r.name;
+        if (bridge) bridge.setActiveProxy(r.name);
+        renderProxies(); };
+      box.appendChild(row);
+    }
+    renderAuto();
+  }
+  function profOptions(sel, chosen) {
+    sel.innerHTML = "";
+    const opts = [["direct","Direct"],["system","System"]]
+      .concat((window._proxyProfiles||[]).map(p=>[p.name,p.name]));
+    for (const [v,l] of opts) {
+      const o = document.createElement("option");
+      o.value=v; o.textContent=l; o.selected=v===chosen; sel.appendChild(o);
+    }
+  }
+  function pushAuto() {
+    if (bridge) bridge.setProxyAuto(JSON.stringify(window._proxyAuto));
+  }
+  function renderAuto() {
+    const A = window._proxyAuto || {rules:[], default:"direct"};
+    const box = document.getElementById("autorules");
+    if (!box) return;
+    box.innerHTML = "";
+    A.rules.forEach((r, i) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const t = document.createElement("span"); t.style.flex="1";
+      t.textContent = r.pattern + "  →  " + r.profile;
+      const del = document.createElement("button");
+      del.textContent="✕"; del.style.padding="3px 9px";
+      del.onclick = () => { A.rules.splice(i,1); pushAuto(); renderAuto(); };
+      row.append(t, del); box.appendChild(row);
+    });
+    profOptions(document.getElementById("arprof"),
+                (A.rules[0]||{}).profile || "direct");
+    profOptions(document.getElementById("ardefault"), A.default || "direct");
+  }
+  document.getElementById("araddbtn").onclick = () => {
+    const pat = document.getElementById("arpat").value.trim();
+    const prof = document.getElementById("arprof").value;
+    if (!pat) return;
+    window._proxyAuto = window._proxyAuto || {rules:[], default:"direct"};
+    window._proxyAuto.rules.push({pattern:pat, profile:prof});
+    document.getElementById("arpat").value = "";
+    pushAuto(); renderAuto();
+  };
+  document.getElementById("ardefault").onchange = (e) => {
+    window._proxyAuto = window._proxyAuto || {rules:[], default:"direct"};
+    window._proxyAuto.default = e.target.value; pushAuto();
+  };
+  document.getElementById("paddbtn").onclick = () => {
+    const prof = {name: document.getElementById("pname").value.trim(),
+      type: document.getElementById("ptype").value,
+      host: document.getElementById("phost").value.trim(),
+      port: parseInt(document.getElementById("pport").value) || 0};
+    if (!prof.name || !prof.host) return;
+    if (bridge) bridge.saveProxyProfile(JSON.stringify(prof));
+    window._proxyProfiles = (window._proxyProfiles||[]).filter(p=>p.name!==prof.name).concat([prof]);
+    document.getElementById("pname").value = "";
+    document.getElementById("phost").value = "";
+    document.getElementById("pport").value = "";
+    renderProxies();
+  };
+  document.getElementById("rerunsetup").onclick = () => {
+    if (bridge) bridge.requestSetup();
+    location.href = "start.html";
+  };
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && history.length > 1) history.back();
+  });
+</script>
+</body>
+</html>
