@@ -2307,8 +2307,12 @@ class Browser(QMainWindow):
             self._apply_proxy_profile(self._auto_profile_for(url.host()))
             self._update_proxy_btn()
         host = url.host().removeprefix("www.")
-        native_dark = (any(host == d or host.endswith("." + d)
-                           for d in NATIVE_DARK_SITES)
+        # our own pages (start/settings/history) are already dark by
+        # design — force-dark would invert their white toggles to gray
+        own_page = url.scheme() == "file"
+        native_dark = (own_page
+                       or any(host == d or host.endswith("." + d)
+                              for d in NATIVE_DARK_SITES)
                        or bool(re.fullmatch(r"google\.[a-z.]+", host)))
         view.page().settings().setAttribute(
             QWebEngineSettings.WebAttribute.ForceDarkMode,
