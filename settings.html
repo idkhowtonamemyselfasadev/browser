@@ -157,7 +157,7 @@
       <div class="hint" id="t_proxyHint">Pick a profile here or from the toolbar proxy button.</div>
 
       <div id="autobox" style="margin-top:12px;border-top:1px solid rgba(108,112,134,.3);padding-top:10px">
-        <div style="color:#6c7086;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Auto rules</div>
+        <div id="t_rulesTitle" style="color:#6c7086;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Per-site rules</div>
         <div id="autorules"></div>
         <div class="row">
           <input type="text" id="arpat" placeholder="*.reddit.com"
@@ -166,9 +166,7 @@
           <select id="arprof"></select>
           <button id="araddbtn">Add rule</button>
         </div>
-        <div class="row"><span>Everything else →</span>
-          <select id="ardefault"></select></div>
-        <div class="hint" id="t_autoHint">Auto routes each site by these rules; changes apply after a restart.</div>
+        <div class="hint" id="t_autoHint">Rules override the mode above for matching sites; changes apply after a restart (system proxy is read at launch).</div>
       </div>
 
       <h2 class="sub" id="t_addProxy">Add proxy profile</h2>
@@ -342,7 +340,7 @@
             t_proxyHost:"proxyHost", t_proxyPort:"proxyPort",
             t_proxyHint:"proxyHint", t_inspectorHint:"inspectorHint",
             t_addProxy:"addProxy", t_proxyName:"proxyName",
-            t_autoHint:"autoHint"};
+            t_autoHint:"autoHint", t_rulesTitle:"rulesTitle"};
           for (const [id, key] of Object.entries(map)) {
             const el = document.getElementById(id);
             if (el) el.textContent = S[key];
@@ -464,7 +462,7 @@
   }
   function profOptions(sel, chosen) {
     sel.innerHTML = "";
-    const opts = [["direct","Direct"],["system","System"]]
+    const opts = [["direct","Direct"]]
       .concat((window._proxyProfiles||[]).map(p=>[p.name,p.name]));
     for (const [v,l] of opts) {
       const o = document.createElement("option");
@@ -491,20 +489,18 @@
     });
     profOptions(document.getElementById("arprof"),
                 (A.rules[0]||{}).profile || "direct");
-    profOptions(document.getElementById("ardefault"), A.default || "direct");
   }
   document.getElementById("araddbtn").onclick = () => {
-    const pat = document.getElementById("arpat").value.trim();
+    // a pasted URL becomes its hostname (mirrors the bridge side)
+    const pat = document.getElementById("arpat").value.trim().toLowerCase()
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split("/")[0].split("?")[0]
+      .replace(/^.*@/, "").replace(/:\d+$/, "");
     const prof = document.getElementById("arprof").value;
     if (!pat) return;
     window._proxyAuto = window._proxyAuto || {rules:[], default:"direct"};
     window._proxyAuto.rules.push({pattern:pat, profile:prof});
     document.getElementById("arpat").value = "";
     pushAuto(); renderAuto();
-  };
-  document.getElementById("ardefault").onchange = (e) => {
-    window._proxyAuto = window._proxyAuto || {rules:[], default:"direct"};
-    window._proxyAuto.default = e.target.value; pushAuto();
   };
   document.getElementById("paddbtn").onclick = () => {
     const prof = {name: document.getElementById("pname").value.trim(),

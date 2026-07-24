@@ -163,7 +163,7 @@ UI_STRINGS = {
 "noHistory":"No history.","today":"Today","yesterday":"Yesterday",
 "plugins":"Plugins",
 "pluginsHint":"Userscripts (.user.js) in this folder run on matching pages.",
-"reloadPlugins":"Reload plugins","noPlugins":"No plugins installed.","quickInstall":"Quick install","getMore":"Browse Greasy Fork","network":"Network (proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direct (no proxy)","proxyCustom":"Custom","proxyType":"Type","proxyHost":"Host","proxyPort":"Port","proxyHint":"Pick a profile here or from the toolbar proxy button.","autoHint":"Auto routes each site by these rules; changes apply after a restart.","inspectorHint":"Press F12 on any page to open the inspector (DevTools).","fromFile":"From file\u2026","install":"Install","installed":"Installed \u2713"},
+"reloadPlugins":"Reload plugins","noPlugins":"No plugins installed.","quickInstall":"Quick install","getMore":"Browse Greasy Fork","network":"Network (proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direct (no proxy)","proxyCustom":"Custom","proxyType":"Type","proxyHost":"Host","proxyPort":"Port","proxyHint":"Pick a profile here or from the toolbar proxy button.","autoHint":"Rules override the mode above for matching sites; changes apply after a restart (system proxy is read at launch).","rulesTitle":"Per-site rules","inspectorHint":"Press F12 on any page to open the inspector (DevTools).","fromFile":"From file\u2026","install":"Install","installed":"Installed \u2713"},
 "de": {"settings":"Einstellungen","search":"Suche","searchEngine":"Suchmaschine",
 "appearance":"Aussehen","whiteGoogle":"Wei\u00dfes Google",
 "whiteGoogleHint":"Aus = pechschwarzes Google",
@@ -190,7 +190,7 @@ UI_STRINGS = {
 "yesterday":"Gestern",
 "plugins":"Plugins",
 "pluginsHint":"Userscripts (.user.js) in diesem Ordner laufen auf passenden Seiten.",
-"reloadPlugins":"Plugins neu laden","noPlugins":"Keine Plugins installiert.","quickInstall":"Schnellinstallation","getMore":"Greasy Fork durchsuchen","network":"Netzwerk (Proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direkt (kein Proxy)","proxyCustom":"Benutzerdefiniert","proxyType":"Typ","proxyHost":"Host","proxyPort":"Port","proxyHint":"W\u00e4hle ein Profil hier oder \u00fcber den Proxy-Knopf in der Leiste.","autoHint":"Auto leitet jede Seite nach diesen Regeln; \u00c4nderungen gelten nach einem Neustart.","inspectorHint":"F12 auf einer Seite \u00f6ffnet den Inspektor (DevTools).","fromFile":"Aus Datei\u2026","install":"Installieren","installed":"Installiert \u2713"},
+"reloadPlugins":"Plugins neu laden","noPlugins":"Keine Plugins installiert.","quickInstall":"Schnellinstallation","getMore":"Greasy Fork durchsuchen","network":"Netzwerk (Proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direkt (kein Proxy)","proxyCustom":"Benutzerdefiniert","proxyType":"Typ","proxyHost":"Host","proxyPort":"Port","proxyHint":"W\u00e4hle ein Profil hier oder \u00fcber den Proxy-Knopf in der Leiste.","autoHint":"Regeln \u00fcberschreiben den Modus oben f\u00fcr passende Seiten; \u00c4nderungen gelten nach einem Neustart (System-Proxy wird beim Start gelesen).","rulesTitle":"Seitenregeln","inspectorHint":"F12 auf einer Seite \u00f6ffnet den Inspektor (DevTools).","fromFile":"Aus Datei\u2026","install":"Installieren","installed":"Installiert \u2713"},
 "fr": {"settings":"Param\u00e8tres","search":"Recherche","searchEngine":"Moteur de recherche",
 "appearance":"Apparence","whiteGoogle":"Google blanc",
 "whiteGoogleHint":"D\u00e9sactiv\u00e9 = Google noir",
@@ -878,6 +878,12 @@ class Bridge(QObject):
             auto = json.loads(auto_json)
         except ValueError:
             return
+        if not isinstance(auto, dict):
+            return
+        for rule in auto.get("rules", []):
+            if isinstance(rule, dict):
+                rule["pattern"] = _normalize_rule_pattern(
+                    rule.get("pattern", ""))
         self.browser.config["proxyAuto"] = auto
         self.browser.save_config()
         self.browser.apply_proxy()
@@ -2666,15 +2672,9 @@ class Browser(QMainWindow):
 
     def apply_proxy(self):
         self._migrate_proxy()
-        active = self.config.get("activeProxy", "system")
-        if active == "auto":
-            # Chromium routes per-site via the PAC baked in at launch;
-            # the QNAM can only take one proxy, so it follows the
-            # rules' default profile
-            auto = self.config.get("proxyAuto") or {}
-            self._apply_proxy_profile(auto.get("default", "direct"))
-        else:
-            self._apply_proxy_profile(active)
+        # rules route per-site inside Chromium (the PAC baked in at
+        # launch); QtNetwork follows the default mode
+        self._apply_proxy_profile(self.config.get("activeProxy", "system"))
         if self._proxy_restart_needed():
             self._show_restart_toast("Proxy change applies after a restart")
         self._update_proxy_btn()
@@ -2734,10 +2734,6 @@ class Browser(QMainWindow):
     def _proxy_menu(self):
         menu = QMenu(self)
         active = self.config.get("activeProxy", "system")
-        auto_mark = "\u2713 " if active == "auto" else "    "
-        menu.addAction(auto_mark + "Auto (by site rules)").triggered.connect(
-            lambda: self.set_active_proxy("auto"))
-        menu.addSeparator()
         for p in self._proxy_profiles():
             mark = "\u2713 " if p["name"] == active else "    "
             menu.addAction(mark + p["label"]).triggered.connect(
@@ -2758,15 +2754,20 @@ class Browser(QMainWindow):
         if btn is None:
             return
         active = self.config.get("activeProxy", "system")
-        label = {"system": "System", "direct": "Direct",
-                 "auto": "Auto"}.get(active, active)
-        btn.setToolTip("Proxy: " + label)
-        # a filled dot when a proxy is actually routing traffic
-        btn.setText("📡" if active not in ("system", "direct")
-                    else "📡")
+        label = {"system": "System", "direct": "Direct"}.get(active, active)
+        rules = self._has_proxy_rules()
+        btn.setToolTip("Proxy: " + label
+                       + (" + site rules" if rules else ""))
+        # tinted whenever a proxy can actually route traffic
         btn.setStyleSheet(
             "QToolButton { color: %s; }" %
-            ("#a6e3a1" if active not in ("system", "direct") else "#cdd6f4"))
+            ("#a6e3a1" if rules or active not in ("system", "direct")
+             else "#cdd6f4"))
+
+    def _has_proxy_rules(self):
+        return any((r.get("pattern") or "").strip()
+                   for r in (self.config.get("proxyAuto") or {})
+                   .get("rules", []))
 
     def apply_language(self):
         """The chosen language reaches websites (Accept-Language, so
@@ -3010,17 +3011,59 @@ _PROXY_FLAGS_AT_LAUNCH = None  # what Chromium was started with
 
 def _migrate_proxy_config(config):
     # old single-proxy config -> a named profile + active selection
-    if "activeProxy" in config:
-        return config
-    old = config.get("proxy")
-    if isinstance(old, dict) and old.get("mode") == "custom":
-        config["proxyProfiles"] = [
-            {"name": "Proxy", "type": old.get("type", "http"),
-             "host": old.get("host", ""), "port": old.get("port", 0)}]
-        config["activeProxy"] = "Proxy"
-    else:
-        config["activeProxy"] = (old or {}).get("mode", "system")
+    if "activeProxy" not in config:
+        old = config.get("proxy")
+        if isinstance(old, dict) and old.get("mode") == "custom":
+            config["proxyProfiles"] = [
+                {"name": "Proxy", "type": old.get("type", "http"),
+                 "host": old.get("host", ""), "port": old.get("port", 0)}]
+            config["activeProxy"] = "Proxy"
+        else:
+            config["activeProxy"] = (old or {}).get("mode", "system")
+    if config.get("activeProxy") == "auto":
+        # rules now apply in every mode; the old Auto mode collapses
+        # to the default route its rules fell back to
+        config["activeProxy"] = (config.get("proxyAuto") or {}).get(
+            "default", "direct")
     return config
+
+
+def _normalize_rule_pattern(pattern):
+    """A pasted URL becomes its hostname: scheme, path, query,
+    credentials and port are stripped so "https://www.youtube.com/"
+    just works as a rule pattern."""
+    pat = (pattern or "").strip().lower()
+    pat = re.sub(r"^[a-z][a-z0-9+.-]*://", "", pat)
+    pat = pat.split("/", 1)[0].split("?", 1)[0]
+    if "@" in pat:
+        pat = pat.rsplit("@", 1)[1]
+    return re.sub(r":\d+$", "", pat)
+
+
+def _system_proxy_pac():
+    """The system proxy as a PAC default branch: (directive, bypass
+    hosts). Resolved once at launch from the proxy environment
+    variables — Chromium cannot combine a PAC with live OS settings.
+    Nothing configured means DIRECT."""
+    val = scheme = ""
+    for var in ("https_proxy", "http_proxy", "all_proxy"):
+        val = os.environ.get(var, "") or os.environ.get(var.upper(), "")
+        if val:
+            break
+    val = val.strip().rstrip("/")
+    if "://" in val:
+        scheme, _, val = val.partition("://")
+    if "@" in val:
+        val = val.rsplit("@", 1)[1]
+    host, _, port = val.rpartition(":")
+    host = re.sub(r"[^A-Za-z0-9.-]", "", host)
+    if not host or not port.isdigit():
+        return "DIRECT", []
+    kind = "SOCKS5" if scheme.lower().startswith("socks") else "PROXY"
+    bypass = [re.sub(r":\d+$", "", e.strip().lstrip("*."))
+              for e in re.split(r"[\s,]+", os.environ.get("no_proxy", "")
+                                or os.environ.get("NO_PROXY", ""))]
+    return "%s %s:%d" % (kind, host, int(port)), [b for b in bypass if b]
 
 
 def _proxy_hostport(prof):
@@ -3040,20 +3083,13 @@ def _proxy_launch_flags(config):
     proxy settings only once, at startup: a Qt application proxy set
     later is ignored, and one set earlier overrides these flags and
     then freezes. So the flags are the single source of truth and any
-    change means a restart. Per-site rules become a PAC script — the
-    only per-host routing Chromium offers."""
+    change means a restart. Per-site rules apply in every mode: they
+    become a PAC script — the only per-host routing Chromium offers —
+    whose default branch encodes the selected mode."""
     active = config.get("activeProxy", "system")
+    if active == "auto":  # pre-rules-everywhere config, unmigrated
+        active = (config.get("proxyAuto") or {}).get("default", "direct")
     profiles = {p.get("name"): p for p in config.get("proxyProfiles", [])}
-    if active == "direct":
-        return "--no-proxy-server"
-    if active != "auto":
-        hp = _proxy_hostport(profiles.get(active))
-        if hp is None:  # "system" or a broken/deleted profile
-            return ""
-        scheme = ("socks5://" if profiles[active].get("type") == "socks5"
-                  else "")
-        return "--proxy-server=%s%s:%d" % (scheme, hp[0], hp[1])
-    auto = config.get("proxyAuto") or {}
 
     def directive(name):
         # a single PROXY entry, no "; DIRECT" tail: a dead proxy must
@@ -3067,7 +3103,8 @@ def _proxy_launch_flags(config):
 
     def condition(pattern):
         # mirrors the old _host_matches semantics in PAC-JavaScript
-        pat = re.sub(r"[^a-z0-9.*-]", "", (pattern or "").strip().lower())
+        pat = re.sub(r"[^a-z0-9.*-]", "",
+                     _normalize_rule_pattern(pattern))
         if not pat:
             return None
         if pat.startswith("*."):
@@ -3076,15 +3113,39 @@ def _proxy_launch_flags(config):
             return 'shExpMatch(host, "%s")' % pat
         return 'host == "%s" || dnsDomainIs(host, ".%s")' % (pat, pat)
 
+    rules = []
+    for rule in (config.get("proxyAuto") or {}).get("rules", []):
+        cond = condition(rule.get("pattern", ""))
+        if cond is not None:
+            rules.append((cond, directive(rule.get("profile", "direct"))))
+
+    if not rules:  # plain single-route modes need no PAC
+        if active == "direct":
+            return "--no-proxy-server"
+        hp = _proxy_hostport(profiles.get(active))
+        if hp is None:  # "system" or a broken/deleted profile
+            return ""
+        scheme = ("socks5://" if profiles[active].get("type") == "socks5"
+                  else "")
+        return "--proxy-server=%s%s:%d" % (scheme, hp[0], hp[1])
+
+    # the selected mode routes every host the rules don't match
+    bypass = []
+    if active == "direct":
+        default = "DIRECT"
+    elif active in profiles:
+        default = directive(active)  # dead default blocks, no leak
+    else:  # system — re-resolved only at launch
+        default, bypass = _system_proxy_pac()
     lines = ["function FindProxyForURL(url, host) {",
              "  host = host.toLowerCase();"]
-    for rule in auto.get("rules", []):
-        cond = condition(rule.get("pattern", ""))
-        if cond is None:
-            continue
-        lines.append('  if (%s) return "%s";'
-                     % (cond, directive(rule.get("profile", "direct"))))
-    lines.append('  return "%s";' % directive(auto.get("default", "direct")))
+    for cond, target in rules:
+        lines.append('  if (%s) return "%s";' % (cond, target))
+    for hostpat in bypass:  # the system proxy's no_proxy list
+        cond = condition(hostpat)
+        if cond is not None:
+            lines.append('  if (%s) return "DIRECT";' % cond)
+    lines.append('  return "%s";' % default)
     lines.append("}")
     pac = base64.b64encode("\n".join(lines).encode()).decode()
     return ("--proxy-pac-url=data:application/x-ns-proxy-autoconfig;base64,"
