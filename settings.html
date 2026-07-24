@@ -9,50 +9,51 @@
     background: #000000;
     color: #cdd6f4;
     font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
-    padding: 40px 0 60px;
+    padding: 36px 0 60px;
   }
-  .wrap { max-width: 620px; margin: 0 auto; padding: 0 20px; }
-  h1 { font-size: 22px; font-weight: 600; margin-bottom: 26px; }
-  section {
-    background: rgba(0, 0, 0, 0.85);
-    border: 1px solid rgba(108, 112, 134, 0.4);
-    padding: 16px 18px;
-    margin-bottom: 14px;
+  h1 { font-size: 24px; font-weight: 600; margin: 0 auto 24px; max-width: 900px; padding: 0 24px; }
+  .layout { display: flex; gap: 26px; max-width: 900px; margin: 0 auto; padding: 0 24px; }
+  .sidebar {
+    width: 190px; flex-shrink: 0; position: sticky; top: 36px;
+    align-self: flex-start; display: flex; flex-direction: column; gap: 3px;
   }
+  .sidebar button {
+    text-align: left; background: transparent; border: none;
+    color: #a6adc8; font: inherit; font-size: 14px; padding: 10px 14px;
+    cursor: pointer; border-left: 2px solid transparent; border-radius: 0;
+  }
+  .sidebar button:hover { color: #ffffff; background: rgba(255,255,255,.05); }
+  .sidebar button.active {
+    color: #ffffff; border-left-color: #89b4fa; background: rgba(137,180,250,.10);
+  }
+  .content { flex: 1; min-width: 0; }
+
+  section { display: none; }
+  section.active { display: block; }
   h2 {
-    font-size: 12px;
-    font-weight: normal;
-    color: #6c7086;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    margin-bottom: 12px;
+    font-size: 16px; font-weight: 600; color: #cdd6f4;
+    letter-spacing: 0; text-transform: none; margin-bottom: 16px;
+  }
+  h2.sub {
+    font-size: 13px; color: #a6adc8; margin-top: 18px; margin-bottom: 10px;
   }
   .row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 7px 0;
-    font-size: 13px;
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 0; font-size: 14px;
   }
   .row > span:first-child { flex: 1; }
-  .hint { font-size: 11px; color: #6c7086; margin-top: -2px; padding-bottom: 6px; }
+  .hint { font-size: 12px; color: #7c8194; margin-top: -2px; padding-bottom: 6px; }
 
   select, button {
-    background: #000000;
-    border: 1px solid rgba(108, 112, 134, 0.5);
-    border-radius: 0;
-    color: #cdd6f4;
-    font: inherit;
-    font-size: 13px;
-    padding: 7px 12px;
-    cursor: pointer;
-    outline: none;
+    background: #0d0d12; border: 1px solid rgba(108, 112, 134, 0.5);
+    border-radius: 0; color: #cdd6f4; font: inherit; font-size: 13px;
+    padding: 7px 12px; cursor: pointer; outline: none;
   }
   select:hover, button:hover { border-color: #a6adc8; color: #ffffff; }
   #clearhist:hover, #clearcookies:hover { color: #f38ba8; border-color: #f38ba8; }
 
   input[type=range] { width: 180px; accent-color: #cdd6f4; }
-  #zoomval { width: 48px; text-align: right; color: #6c7086; }
+  #zoomval, #minfontval { width: 48px; text-align: right; color: #a6adc8; }
 
   .switchrow { display: flex; align-items: center; gap: 10px; cursor: pointer; }
   .switchrow input { display: none; }
@@ -68,12 +69,14 @@
   }
   .switchrow input:checked + .slider { background: #ffffff; }
   .switchrow input:checked + .slider::after { transform: translateX(14px); }
-  #updmsg { color: #6c7086; font-size: 12px; }
+  #updmsg { color: #a6adc8; font-size: 12px; }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1 id="t_settings">Settings</h1>
+  <h1 id="t_settings">Settings</h1>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <div class="content">
 
     <section>
       <h2 id="t_search">Search</h2>
@@ -139,7 +142,7 @@
       <div class="hint" id="t_pluginsHint">Userscripts (.user.js) in this folder run on matching pages.</div>
       <div class="hint" id="pluginfolder"></div>
 
-      <h2 id="t_quickInstall" style="margin-top:16px">Quick install</h2>
+      <h2 class="sub" id="t_quickInstall">Quick install</h2>
       <div id="starterlist"></div>
       <div class="row" style="margin-top:8px">
         <span style="flex:1"></span>
@@ -168,7 +171,7 @@
         <div class="hint">Auto switches the browser proxy to match the site you're viewing.</div>
       </div>
 
-      <h2 style="margin-top:14px" id="t_addProxy">Add proxy profile</h2>
+      <h2 class="sub" id="t_addProxy">Add proxy profile</h2>
       <div class="row"><span id="t_proxyName">Name</span>
         <input type="text" id="pname" placeholder="Tor / Work / VPN"
                style="background:#000;border:1px solid rgba(108,112,134,.5);
@@ -204,6 +207,7 @@
       <div class="row"><span id="t_setupHint">Drag the search bar, pick a wallpaper</span>
         <button id="rerunsetup">Run setup again</button></div>
     </section>
+    </div>
   </div>
 
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
@@ -354,6 +358,7 @@
           if (window._proxyProfiles !== undefined) renderProxies();
           if (window._starters) renderStarters(window._starters);
           document.getElementById("langfilter").placeholder = S.filterPh;
+          buildNav();
         } catch (e) {}
       });
       bridge.getSettings((j) => { try { load(JSON.parse(j)); } catch (e) {} });
@@ -517,6 +522,28 @@
     if (bridge) bridge.requestSetup();
     location.href = "start.html";
   };
+
+  function showCat(i) {
+    window._cat = i;
+    const secs = document.querySelectorAll(".content > section");
+    const btns = document.querySelectorAll("#sidebar button");
+    secs.forEach((s, k) => s.classList.toggle("active", k === i));
+    btns.forEach((b, k) => b.classList.toggle("active", k === i));
+  }
+  function buildNav() {
+    const bar = document.getElementById("sidebar");
+    const secs = document.querySelectorAll(".content > section");
+    bar.innerHTML = "";
+    secs.forEach((sec, i) => {
+      const head = sec.querySelector("h2");
+      const btn = document.createElement("button");
+      btn.textContent = head ? head.textContent : ("Section " + (i + 1));
+      btn.onclick = () => showCat(i);
+      bar.appendChild(btn);
+    });
+    showCat(window._cat || 0);
+  }
+  buildNav();
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && history.length > 1) history.back();
   });
