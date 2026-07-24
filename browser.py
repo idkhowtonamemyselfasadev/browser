@@ -139,6 +139,7 @@ UI_STRINGS = {
 "appearance":"Appearance","whiteGoogle":"White Google",
 "whiteGoogleHint":"Off = pitch-black Google",
 "autoDarken":"Auto-darken light websites","pageZoom":"Page zoom",
+"minFont":"Minimum text size","minFontHint":"Forces tiny website text to be at least this big.",
 "browsing":"Browsing","reopenTabs":"Reopen tabs from last time",
 "askDownload":"Ask where to save each download","translation":"Language",
 "translateInto":"Browser and translate language",
@@ -163,6 +164,7 @@ UI_STRINGS = {
 "appearance":"Aussehen","whiteGoogle":"Wei\u00dfes Google",
 "whiteGoogleHint":"Aus = pechschwarzes Google",
 "autoDarken":"Helle Seiten abdunkeln","pageZoom":"Seitenzoom",
+"minFont":"Minimale Textgr\u00f6\u00dfe","minFontHint":"Erzwingt, dass winziger Text mindestens so gro\u00df ist.",
 "browsing":"Surfen","reopenTabs":"Tabs vom letzten Mal \u00f6ffnen",
 "askDownload":"Bei Downloads nach Speicherort fragen","translation":"Sprache",
 "translateInto":"Browser- und \u00dcbersetzungssprache",
@@ -855,6 +857,7 @@ class Bridge(QObject):
             "forceDark": c.get("forceDark", True),
             "restoreTabs": c.get("restoreTabs", True),
             "zoom": c.get("zoom", 1.0),
+            "minFont": c.get("minFont", 0),
             "askDownload": bool(c.get("askDownload", False)),
             "history": c.get("history", True),
             "translateLang": c.get("translateLang", "de"),
@@ -932,6 +935,12 @@ class Bridge(QObject):
                 w = browser.tabs.widget(i)
                 if hasattr(w, "setZoomFactor"):
                     w.setZoomFactor(float(value))
+        elif key == "minFont":
+            browser.apply_font_size()
+            for i in range(browser.tabs.count()):
+                w = browser.tabs.widget(i)
+                if hasattr(w, "reload") and w.url().scheme() in ("http", "https"):
+                    w.reload()
 
     @pyqtSlot()
     def clearCookies(self):
@@ -1315,7 +1324,7 @@ class Browser(QMainWindow):
             "Ctrl+H": lambda: self.new_tab(url=HISTORY_PAGE.toString()),
             "F12": self.toggle_inspector,
             "Ctrl+Shift+I": self.toggle_inspector,
-            "Ctrl+,": lambda: self.new_tab(url=SETTINGS_PAGE.toString()),
+            "Ctrl+,": self.open_settings,
         }.items():
             QShortcut(QKeySequence(key), self).activated.connect(fn)
 
@@ -2544,6 +2553,9 @@ class Browser(QMainWindow):
         lang = self.config.get("translateLang", "de")
         profile.setHttpAcceptLanguage(
             lang if lang.startswith("en") else lang + ",en")
+        profile.settings().setFontSize(
+            QWebEngineSettings.FontSize.MinimumFontSize,
+            int(self.config.get("minFont", 0) or 0))
         profile.scripts().insert(self._google_script())
         for script in self.plugin_scripts:
             profile.scripts().insert(script)
@@ -2559,6 +2571,29 @@ class Browser(QMainWindow):
             GOOGLE_LIGHT_JS if self.config.get("googleLight", True)
             else GOOGLE_BLACK_JS)
         return script
+
+    def open_settings(self):
+        """Open settings in the current tab (or an existing Settings tab),
+        never spawning a pile of new tabs."""
+        target = SETTINGS_PAGE.toString()
+        for i in range(self.tabs.count()):
+            w = self.tabs.widget(i)
+            if (not self._is_header(w) and hasattr(w, "url")
+                    and w.url().toString().split("?")[0]
+                    == SETTINGS_PAGE.toString().split("?")[0]):
+                self.tabs.setCurrentIndex(i)
+                return
+        cur = self.current()
+        if cur is not None and not self._is_header(cur):
+            cur.load(QUrl(target))
+        else:
+            self.new_tab(url=target)
+
+    def apply_font_size(self):
+        px = int(self.config.get("minFont", 0) or 0)
+        for profile in [self.profile] + list(self.session_profiles.values()):
+            profile.settings().setFontSize(
+                QWebEngineSettings.FontSize.MinimumFontSize, px)
 
     # ---- inspector (Chromium DevTools over remote debugging) ----
     def toggle_inspector(self):
@@ -2693,7 +2728,7 @@ class Browser(QMainWindow):
                 lambda _, n=p["name"]: self.set_active_proxy(n))
         menu.addSeparator()
         menu.addAction("Manage profiles\u2026").triggered.connect(
-            lambda: self.new_tab(url=SETTINGS_PAGE.toString()))
+            self.open_settings)
         b = self._proxy_btn
         menu.exec(b.mapToGlobal(b.rect().bottomLeft()))
 

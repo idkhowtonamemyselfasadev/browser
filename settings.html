@@ -91,6 +91,10 @@
       <div class="row"><span id="t_pageZoom">Page zoom</span>
         <input type="range" id="zoom" min="50" max="200" step="10">
         <span id="zoomval"></span></div>
+      <div class="row"><span id="t_minFont">Minimum text size</span>
+        <input type="range" id="minfont" min="0" max="28" step="2">
+        <span id="minfontval"></span></div>
+      <div class="hint" id="t_minFontHint">Forces tiny website text to be at least this big.</div>
     </section>
 
     <section>
@@ -247,6 +251,10 @@
     const zoom = document.getElementById("zoom");
     zoom.value = Math.round(s.zoom * 100);
     document.getElementById("zoomval").textContent = zoom.value + "%";
+    const mf = document.getElementById("minfont");
+    mf.value = s.minFont || 0;
+    document.getElementById("minfontval").textContent =
+      (s.minFont ? s.minFont + "px" : "Off");
     window._activeProxy = s.activeProxy || "system";
     window._proxyProfiles = s.proxyProfiles || [];
     window._proxyAuto = s.proxyAuto || {rules:[], default:"direct"};
@@ -317,7 +325,7 @@
           const map = {t_settings:"settings", t_search:"search",
             t_searchEngine:"searchEngine", t_appearance:"appearance",
             t_whiteGoogle:"whiteGoogle", t_whiteGoogleHint:"whiteGoogleHint",
-            t_autoDarken:"autoDarken", t_pageZoom:"pageZoom",
+            t_autoDarken:"autoDarken", t_pageZoom:"pageZoom", t_minFont:"minFont", t_minFontHint:"minFontHint",
             t_browsing:"browsing", t_reopenTabs:"reopenTabs",
             t_askDownload:"askDownload", t_translation:"translation",
             t_translateInto:"translateInto", t_translateHint:"translateHint",
@@ -372,6 +380,11 @@
   document.getElementById("zoom").oninput = (e) => {
     document.getElementById("zoomval").textContent = e.target.value + "%";
     if (bridge) bridge.setSetting("zoom", JSON.stringify(e.target.value / 100));
+  };
+  document.getElementById("minfont").oninput = (e) => {
+    const v = parseInt(e.target.value) || 0;
+    document.getElementById("minfontval").textContent = v ? v + "px" : "Off";
+    if (bridge) bridge.setSetting("minFont", JSON.stringify(v));
   };
   document.getElementById("langfilter").oninput = (e) => fillLangs(e.target.value);
   document.getElementById("translatelang").onchange = (e) => {
