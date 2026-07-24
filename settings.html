@@ -168,7 +168,7 @@
         </div>
         <div class="row"><span>Everything else →</span>
           <select id="ardefault"></select></div>
-        <div class="hint">Auto switches the browser proxy to match the site you're viewing.</div>
+        <div class="hint" id="t_autoHint">Auto routes each site by these rules; changes apply after a restart.</div>
       </div>
 
       <h2 class="sub" id="t_addProxy">Add proxy profile</h2>
@@ -341,7 +341,8 @@
             t_proxyMode:"proxyMode", t_proxyType:"proxyType",
             t_proxyHost:"proxyHost", t_proxyPort:"proxyPort",
             t_proxyHint:"proxyHint", t_inspectorHint:"inspectorHint",
-            t_addProxy:"addProxy", t_proxyName:"proxyName"};
+            t_addProxy:"addProxy", t_proxyName:"proxyName",
+            t_autoHint:"autoHint"};
           for (const [id, key] of Object.entries(map)) {
             const el = document.getElementById(id);
             if (el) el.textContent = S[key];

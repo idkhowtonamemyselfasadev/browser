@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """A minimal, island-styled web browser. Tabs, search bar, start page."""
+import base64
 import json
 import os
 import re
@@ -12,9 +13,12 @@ CONFIG_FILE = Path.home() / ".local/share/browser/config.json"
 
 # sites see prefers-color-scheme: dark and serve their native dark theme
 # (0 = dark); must be set before Qt WebEngine starts
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-    os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
-    + " --blink-settings=preferredColorScheme=0")
+# (idempotent: a restarted child inherits the parent's flags)
+if ("--blink-settings=preferredColorScheme=0"
+        not in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")):
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+        + " --blink-settings=preferredColorScheme=0")
 # the embedded inspector (DevTools) only serves its frontend resources
 # when remote debugging is enabled; bound to localhost by Chromium
 os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "127.0.0.1:9222")
@@ -39,7 +43,7 @@ from PyQt6.QtWebEngineCore import (
 )
 from PyQt6.QtNetwork import (
     QLocalServer, QLocalSocket, QNetworkAccessManager, QNetworkProxy,
-    QNetworkProxyFactory, QNetworkRequest,
+    QNetworkRequest,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
@@ -159,7 +163,7 @@ UI_STRINGS = {
 "noHistory":"No history.","today":"Today","yesterday":"Yesterday",
 "plugins":"Plugins",
 "pluginsHint":"Userscripts (.user.js) in this folder run on matching pages.",
-"reloadPlugins":"Reload plugins","noPlugins":"No plugins installed.","quickInstall":"Quick install","getMore":"Browse Greasy Fork","network":"Network (proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direct (no proxy)","proxyCustom":"Custom","proxyType":"Type","proxyHost":"Host","proxyPort":"Port","proxyHint":"Pick a profile here or from the toolbar proxy button.","inspectorHint":"Press F12 on any page to open the inspector (DevTools).","fromFile":"From file\u2026","install":"Install","installed":"Installed \u2713"},
+"reloadPlugins":"Reload plugins","noPlugins":"No plugins installed.","quickInstall":"Quick install","getMore":"Browse Greasy Fork","network":"Network (proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direct (no proxy)","proxyCustom":"Custom","proxyType":"Type","proxyHost":"Host","proxyPort":"Port","proxyHint":"Pick a profile here or from the toolbar proxy button.","autoHint":"Auto routes each site by these rules; changes apply after a restart.","inspectorHint":"Press F12 on any page to open the inspector (DevTools).","fromFile":"From file\u2026","install":"Install","installed":"Installed \u2713"},
 "de": {"settings":"Einstellungen","search":"Suche","searchEngine":"Suchmaschine",
 "appearance":"Aussehen","whiteGoogle":"Wei\u00dfes Google",
 "whiteGoogleHint":"Aus = pechschwarzes Google",
@@ -186,7 +190,7 @@ UI_STRINGS = {
 "yesterday":"Gestern",
 "plugins":"Plugins",
 "pluginsHint":"Userscripts (.user.js) in diesem Ordner laufen auf passenden Seiten.",
-"reloadPlugins":"Plugins neu laden","noPlugins":"Keine Plugins installiert.","quickInstall":"Schnellinstallation","getMore":"Greasy Fork durchsuchen","network":"Netzwerk (Proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direkt (kein Proxy)","proxyCustom":"Benutzerdefiniert","proxyType":"Typ","proxyHost":"Host","proxyPort":"Port","proxyHint":"W\u00e4hle ein Profil hier oder \u00fcber den Proxy-Knopf in der Leiste.","inspectorHint":"F12 auf einer Seite \u00f6ffnet den Inspektor (DevTools).","fromFile":"Aus Datei\u2026","install":"Installieren","installed":"Installiert \u2713"},
+"reloadPlugins":"Plugins neu laden","noPlugins":"Keine Plugins installiert.","quickInstall":"Schnellinstallation","getMore":"Greasy Fork durchsuchen","network":"Netzwerk (Proxy)","proxyMode":"Proxy","proxySystem":"System","proxyDirect":"Direkt (kein Proxy)","proxyCustom":"Benutzerdefiniert","proxyType":"Typ","proxyHost":"Host","proxyPort":"Port","proxyHint":"W\u00e4hle ein Profil hier oder \u00fcber den Proxy-Knopf in der Leiste.","autoHint":"Auto leitet jede Seite nach diesen Regeln; \u00c4nderungen gelten nach einem Neustart.","inspectorHint":"F12 auf einer Seite \u00f6ffnet den Inspektor (DevTools).","fromFile":"Aus Datei\u2026","install":"Installieren","installed":"Installiert \u2713"},
 "fr": {"settings":"Param\u00e8tres","search":"Recherche","searchEngine":"Moteur de recherche",
 "appearance":"Apparence","whiteGoogle":"Google blanc",
 "whiteGoogleHint":"D\u00e9sactiv\u00e9 = Google noir",
@@ -1038,6 +1042,7 @@ class WebView(QWebEngineView):
         page.setWebChannel(channel)
         page.fullScreenRequested.connect(self._fullscreen)
         page.permissionRequested.connect(self.browser._permission_requested)
+        page.proxyAuthenticationRequired.connect(self.browser._proxy_auth)
         self.setPage(page)
         if old is not None and old is not page:
             try:
@@ -2332,9 +2337,6 @@ class Browser(QMainWindow):
 
     def _url_changed(self, view, url):
         self._remember_host(url)
-        if view is self.current() and self.config.get("activeProxy") == "auto":
-            self._apply_proxy_profile(self._auto_profile_for(url.host()))
-            self._update_proxy_btn()
         host = url.host().removeprefix("www.")
         # our own pages (start/settings/history) are already dark by
         # design — force-dark would invert their white toggles to gray
@@ -2479,8 +2481,6 @@ class Browser(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _tab_changed(self, index):
-        if self.config.get("activeProxy") == "auto":
-            self.apply_proxy()
         w = self.tabs.widget(index)
         if w is not None and self._is_header(w):
             # selection landed on a header some indirect way: step off it
@@ -2640,31 +2640,19 @@ class Browser(QMainWindow):
 
     # ---- proxy switcher (SwitchyOmega-style) ----
     def _migrate_proxy(self):
-        # old single-proxy config -> a named profile + active selection
-        if "activeProxy" in self.config:
-            return
-        old = self.config.get("proxy")
-        if isinstance(old, dict) and old.get("mode") == "custom":
-            prof = {"name": "Proxy", "type": old.get("type", "http"),
-                    "host": old.get("host", ""), "port": old.get("port", 0)}
-            self.config["proxyProfiles"] = [prof]
-            self.config["activeProxy"] = "Proxy"
-        else:
-            self.config["activeProxy"] = (old or {}).get("mode", "system")
+        _migrate_proxy_config(self.config)
 
     def _apply_proxy_profile(self, name):
-        if name == "system":
-            QNetworkProxyFactory.setUseSystemConfiguration(True)
-            return
-        QNetworkProxyFactory.setUseSystemConfiguration(False)
-        if name == "direct":
-            QNetworkProxy.setApplicationProxy(
-                QNetworkProxy(QNetworkProxy.ProxyType.NoProxy))
-            return
+        """QtNetwork side (search suggestions, inspector fetch). Never
+        app-wide: an application proxy would override the launch flags
+        inside the web engine and freeze there, so it lives on the
+        QNAM alone."""
         prof = next((p for p in self.config.get("proxyProfiles", [])
                      if p.get("name") == name), None)
-        if prof is None:
-            QNetworkProxyFactory.setUseSystemConfiguration(True)
+        if prof is None:  # "system", "direct" or a deleted profile
+            kind = (QNetworkProxy.ProxyType.NoProxy if name == "direct"
+                    else QNetworkProxy.ProxyType.DefaultProxy)
+            self._nam.setProxy(QNetworkProxy(kind))
             return
         kind = (QNetworkProxy.ProxyType.Socks5Proxy
                 if prof.get("type") == "socks5"
@@ -2674,40 +2662,68 @@ class Browser(QMainWindow):
         if prof.get("user"):
             proxy.setUser(prof["user"])
             proxy.setPassword(prof.get("password", ""))
-        QNetworkProxy.setApplicationProxy(proxy)
-
-    def _host_matches(self, host, pattern):
-        pattern = (pattern or "").strip().lower()
-        host = (host or "").lower()
-        if not pattern:
-            return False
-        if pattern.startswith("*."):
-            base = pattern[2:]
-            return host == base or host.endswith("." + base)
-        if "*" in pattern:
-            rx = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
-            return re.match(rx, host) is not None
-        return host == pattern or host.endswith("." + pattern)
-
-    def _auto_profile_for(self, host):
-        auto = self.config.get("proxyAuto") or {}
-        for rule in auto.get("rules", []):
-            if self._host_matches(host, rule.get("pattern", "")):
-                return rule.get("profile", "direct")
-        return auto.get("default", "direct")
+        self._nam.setProxy(proxy)
 
     def apply_proxy(self):
         self._migrate_proxy()
         active = self.config.get("activeProxy", "system")
         if active == "auto":
-            host = ""
-            v = self.current()
-            if v is not None and hasattr(v, "url"):
-                host = v.url().host()
-            self._apply_proxy_profile(self._auto_profile_for(host))
+            # Chromium routes per-site via the PAC baked in at launch;
+            # the QNAM can only take one proxy, so it follows the
+            # rules' default profile
+            auto = self.config.get("proxyAuto") or {}
+            self._apply_proxy_profile(auto.get("default", "direct"))
         else:
             self._apply_proxy_profile(active)
+        if self._proxy_restart_needed():
+            self._show_restart_toast("Proxy change applies after a restart")
         self._update_proxy_btn()
+
+    def _proxy_restart_needed(self):
+        """The web engine reads its proxy flags only at startup:
+        true when the config drifted from what this process was
+        launched with."""
+        return (_PROXY_FLAGS_AT_LAUNCH is not None
+                and _proxy_launch_flags(self.config)
+                != _PROXY_FLAGS_AT_LAUNCH)
+
+    def _proxy_auth(self, url, authenticator, proxy_host):
+        # Chromium asks for proxy credentials itself; answer from the
+        # matching profile (QNetworkProxy user/password never reach it)
+        host = proxy_host.rsplit(":", 1)[0]
+        for p in self.config.get("proxyProfiles", []):
+            if p.get("user") and p.get("host") in (proxy_host, host):
+                authenticator.setUser(p["user"])
+                authenticator.setPassword(p.get("password", ""))
+                return
+
+    def _show_restart_toast(self, message):
+        """Update-toast styling, but for settings Chromium only reads
+        at launch; stays until dismissed or acted on."""
+        if self._toast:
+            return
+        toast = QWidget(self, objectName="toast")
+        toast.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        lay = QHBoxLayout(toast)
+        lay.setContentsMargins(14, 8, 8, 8)
+        lay.setSpacing(10)
+        self._toast_label = QLabel(message)
+        restart = QToolButton(text="Restart now")
+        close = QToolButton(text="\u2715", objectName="tabclose")
+        lay.addWidget(self._toast_label)
+        lay.addWidget(restart)
+        lay.addWidget(close)
+
+        self._toast = toast
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.timeout.connect(self._hide_toast)
+        close.clicked.connect(self._hide_toast)
+        restart.clicked.connect(self.restart)
+
+        self._place_toast()
+        toast.show()
+        toast.raise_()
 
     def _proxy_profiles(self):
         base = [{"name": "system", "label": "System", "builtin": True},
@@ -2989,6 +3005,114 @@ class Browser(QMainWindow):
             self.dlbar.hide()
 
 
+_PROXY_FLAGS_AT_LAUNCH = None  # what Chromium was started with
+
+
+def _migrate_proxy_config(config):
+    # old single-proxy config -> a named profile + active selection
+    if "activeProxy" in config:
+        return config
+    old = config.get("proxy")
+    if isinstance(old, dict) and old.get("mode") == "custom":
+        config["proxyProfiles"] = [
+            {"name": "Proxy", "type": old.get("type", "http"),
+             "host": old.get("host", ""), "port": old.get("port", 0)}]
+        config["activeProxy"] = "Proxy"
+    else:
+        config["activeProxy"] = (old or {}).get("mode", "system")
+    return config
+
+
+def _proxy_hostport(prof):
+    """Sanitized (host, port) of a profile, or None if unusable."""
+    if not prof:
+        return None
+    host = re.sub(r"[^A-Za-z0-9.-]", "", str(prof.get("host", "")))
+    try:
+        port = int(prof.get("port") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    return (host, port) if host and port else None
+
+
+def _proxy_launch_flags(config):
+    """Chromium flags for the configured proxy. The web engine reads
+    proxy settings only once, at startup: a Qt application proxy set
+    later is ignored, and one set earlier overrides these flags and
+    then freezes. So the flags are the single source of truth and any
+    change means a restart. Per-site rules become a PAC script — the
+    only per-host routing Chromium offers."""
+    active = config.get("activeProxy", "system")
+    profiles = {p.get("name"): p for p in config.get("proxyProfiles", [])}
+    if active == "direct":
+        return "--no-proxy-server"
+    if active != "auto":
+        hp = _proxy_hostport(profiles.get(active))
+        if hp is None:  # "system" or a broken/deleted profile
+            return ""
+        scheme = ("socks5://" if profiles[active].get("type") == "socks5"
+                  else "")
+        return "--proxy-server=%s%s:%d" % (scheme, hp[0], hp[1])
+    auto = config.get("proxyAuto") or {}
+
+    def directive(name):
+        # a single PROXY entry, no "; DIRECT" tail: a dead proxy must
+        # block the site, not silently leak traffic directly
+        hp = _proxy_hostport(profiles.get(name))
+        if hp is None:  # "direct", "system" or a deleted profile
+            return "DIRECT"
+        kind = ("SOCKS5" if profiles[name].get("type") == "socks5"
+                else "PROXY")
+        return "%s %s:%d" % (kind, hp[0], hp[1])
+
+    def condition(pattern):
+        # mirrors the old _host_matches semantics in PAC-JavaScript
+        pat = re.sub(r"[^a-z0-9.*-]", "", (pattern or "").strip().lower())
+        if not pat:
+            return None
+        if pat.startswith("*."):
+            pat = pat[2:]
+        if "*" in pat:
+            return 'shExpMatch(host, "%s")' % pat
+        return 'host == "%s" || dnsDomainIs(host, ".%s")' % (pat, pat)
+
+    lines = ["function FindProxyForURL(url, host) {",
+             "  host = host.toLowerCase();"]
+    for rule in auto.get("rules", []):
+        cond = condition(rule.get("pattern", ""))
+        if cond is None:
+            continue
+        lines.append('  if (%s) return "%s";'
+                     % (cond, directive(rule.get("profile", "direct"))))
+    lines.append('  return "%s";' % directive(auto.get("default", "direct")))
+    lines.append("}")
+    pac = base64.b64encode("\n".join(lines).encode()).decode()
+    return ("--proxy-pac-url=data:application/x-ns-proxy-autoconfig;base64,"
+            + pac)
+
+
+def _install_proxy_flags():
+    """Bake the proxy rules into Chromium's command line; must run
+    before the QApplication (and thus the web engine) exists. Any
+    proxy flags already in the environment are stripped first: an
+    in-app restart hands the child the parent's flags, and a stale
+    --no-proxy-server/--proxy-server/--proxy-pac-url would silently
+    win over the current config."""
+    global _PROXY_FLAGS_AT_LAUNCH
+    try:
+        config = json.loads(CONFIG_FILE.read_text())
+    except (OSError, ValueError):
+        config = {}
+    flags = _proxy_launch_flags(_migrate_proxy_config(config))
+    env = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    env = re.sub(r"\s*--(?:proxy-server|proxy-pac-url)=\S+", "", env)
+    env = re.sub(r"\s*--no-proxy-server\b", "", env)
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        env + " " + flags if flags else env)
+    _PROXY_FLAGS_AT_LAUNCH = flags
+    return flags
+
+
 SINGLE_INSTANCE_SOCKET = "browser-single-instance"
 
 
@@ -3035,6 +3159,7 @@ def main():
         return
 
     QGuiApplication.setDesktopFileName("browser")
+    _install_proxy_flags()
     app = QApplication(sys.argv)
     app.setApplicationName("browser")
     app.setWindowIcon(QIcon(str(APP_DIR / "icon.svg")))
