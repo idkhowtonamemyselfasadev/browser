@@ -1,0 +1,2251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New tab</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #000000;
+    color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+  }
+  #clock {
+    font-size: 64px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: #cdd6f4;
+  }
+  #date {
+    color: #6c7086;
+    font-size: 15px;
+    margin-top: -18px;
+  }
+  form.search {
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid rgba(108, 112, 134, 0.45);
+    border-radius: 0;
+    padding: 4px 6px;
+    width: min(520px, 86vw);
+    display: flex;
+    transition: border-color .15s;
+  }
+  form.search:focus-within { border-color: #a6adc8; }
+  form.search input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 15px;
+    padding: 10px 14px;
+  }
+  input::placeholder { color: #6c7086; }
+
+  .links {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 86vw;
+  }
+  .links a {
+    position: relative;
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(137, 180, 250, 0.15);
+    border-radius: 12px;
+    color: #a6adc8;
+    text-decoration: none;
+    padding: 9px 18px;
+    font-size: 13px;
+    transition: all .15s;
+  }
+  .links a:hover {
+    color: #89b4fa;
+    border-color: rgba(137, 180, 250, 0.4);
+    transform: translateY(-2px);
+  }
+  .links a .rm {
+    position: absolute;
+    top: -7px;
+    right: -7px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #f38ba8;
+    color: #000000;
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
+    display: none;
+    cursor: pointer;
+  }
+  .links a:hover .rm { display: block; }
+
+  #addbtn {
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 50%;
+    width: 38px;
+    height: 38px;
+    color: #89b4fa;
+    font-size: 19px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  #addbtn:hover {
+    border-color: #89b4fa;
+    background: #16161d;
+    transform: translateY(-2px);
+  }
+
+  #addform {
+    display: none;
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 14px;
+    padding: 10px;
+    gap: 8px;
+  }
+  #addform.open { display: flex; }
+  #addform input {
+    background: #000000;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    border-radius: 9px;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 11px;
+    outline: none;
+    width: 150px;
+  }
+  #addform input:focus { border-color: #89b4fa; }
+  #addform button {
+    background: #89b4fa;
+    border: none;
+    border-radius: 9px;
+    color: #000000;
+    font: inherit;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 7px 15px;
+    cursor: pointer;
+  }
+  #addform button:hover { background: #b4d0fb; }
+
+  /* background image mode */
+  body.hasbg {
+    background-size: cover;
+    background-position: center;
+  }
+  body.hasbg::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: #000000;
+    opacity: .5;
+    z-index: 0;
+  }
+  body > * { z-index: 1; }
+  body.hasbg #clock, body.hasbg #date {
+    text-shadow: 0 1px 3px #000000, 0 2px 14px #000000;
+  }
+  body.hasbg #date { color: #bac2de; }
+
+  /* gear + settings panel */
+  #gear {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    color: #6c7086;
+    font-size: 18px;
+    cursor: pointer;
+    transition: all .25s;
+    z-index: 2;
+  }
+  #gear:hover {
+    color: #89b4fa;
+    border-color: #89b4fa;
+    transform: rotate(45deg);
+  }
+  #settings {
+    position: fixed;
+    right: 22px;
+    bottom: 74px;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 14px;
+    padding: 14px;
+    z-index: 2;
+  }
+  #settings.open { display: flex; }
+  #settings h3 {
+    font-size: 12px;
+    font-weight: normal;
+    color: #6c7086;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .thumbs {
+    display: grid;
+    grid-template-columns: repeat(3, 92px);
+    gap: 8px;
+  }
+  .thumb {
+    height: 52px;
+    border-radius: 9px;
+    background-color: #000000;
+    background-size: cover;
+    background-position: center;
+    border: 2px solid transparent;
+    cursor: pointer;
+    color: #6c7086;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color .15s;
+  }
+  .thumb:hover { border-color: rgba(137, 180, 250, 0.5); }
+  .thumb.sel { border-color: #89b4fa; }
+
+  /* privacy section */
+  .privacy { display: flex; flex-direction: column; gap: 10px; }
+  .switchrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #cdd6f4;
+    cursor: pointer;
+  }
+  .switchrow span:first-child { flex: 1; }
+  .switchrow input { display: none; }
+  .slider {
+    width: 34px;
+    height: 19px;
+    border-radius: 10px;
+    background: #f38ba8;
+    position: relative;
+    transition: background .15s;
+    flex-shrink: 0;
+  }
+  .slider::after {
+    content: "";
+    position: absolute;
+    top: 2.5px;
+    left: 3px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 0 3px rgba(0,0,0,.45);
+    transition: transform .15s;
+  }
+  .switchrow input:checked + .slider { background: #ffffff; }
+  .switchrow input:checked + .slider::after { transform: translateX(14px); }
+  .privbtns { display: flex; gap: 8px; }
+  .privbtns button {
+    flex: 1;
+    background: #000000;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    border-radius: 9px;
+    color: #a6adc8;
+    font: inherit;
+    font-size: 12px;
+    padding: 7px 0;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .privbtns button:hover { color: #89b4fa; border-color: #89b4fa; }
+  #clearhist:hover { color: #f38ba8; border-color: #f38ba8; }
+  .hint { font-size: 11px; color: #6c7086; }
+
+
+  form.search.custompos { position: fixed; margin: 0; }
+
+  /* ---------- first-run setup wizard: a full-screen, one-decision-
+     per-page walk-through. Pitch black, square, no blue. ---------- */
+  #wizard {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: none;
+    background: #000000;
+    color: #cdd6f4;
+    grid-template-columns: 268px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  #wizard.open { display: grid; }
+  body.wizopen { overflow: hidden; }
+  body.wizopen #gear, body.wizopen #settings { display: none; }
+
+  /* the hairline that fills up as the pages go by */
+  #wizprog {
+    position: absolute;
+    top: 0; left: 0;
+    height: 2px;
+    width: 0;
+    background: #cdd6f4;
+    transition: width .35s ease;
+    z-index: 2;
+  }
+
+  /* ---- left rail: every step, and where we are in them ---- */
+  #wizrail {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    min-height: 0;
+    overflow-y: auto;
+    border-right: 1px solid rgba(108, 112, 134, 0.35);
+    padding: 36px 0 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  #wizbrand {
+    padding: 0 24px 26px;
+    font-size: 11px;
+    letter-spacing: 3.5px;
+    text-transform: uppercase;
+    color: #6c7086;
+  }
+  .railitem {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 11px 24px;
+    font-size: 13px;
+    color: #313244;
+    border-left: 3px solid transparent;
+    cursor: default;
+    transition: color .15s, border-color .15s;
+  }
+  .railitem .num {
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    border: 1px solid currentColor;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+  .railitem.done { color: #6c7086; cursor: pointer; }
+  .railitem.done:hover { color: #cdd6f4; }
+  .railitem.cur { color: #ffffff; border-left-color: #ffffff; }
+  .railitem.cur .num {
+    background: #cdd6f4;
+    border-color: #cdd6f4;
+    color: #000000;
+    font-weight: bold;
+  }
+  #wizrailfoot {
+    margin-top: auto;
+    padding: 24px 24px 0;
+    font-size: 11px;
+    line-height: 1.7;
+    color: #313244;
+  }
+
+  /* ---- content ---- */
+  #wizmain {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: safe center;
+    padding: clamp(26px, 4vh, 46px) clamp(24px, 5vw, 60px);
+  }
+  #wizmain .inner { width: 100%; max-width: 780px; }
+  #wizstepno {
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #6c7086;
+  }
+  #wiztitle {
+    font-size: clamp(24px, 3.4vw, 34px);
+    font-weight: 600;
+    color: #ffffff;
+    margin: 12px 0 10px;
+  }
+  #wiztext { font-size: 14px; color: #6c7086; line-height: 1.7; max-width: 64ch; }
+  #wizbody { margin-top: 30px; display: flex; flex-direction: column; gap: 18px; }
+
+  /* ---- footer ---- */
+  #wizfoot {
+    grid-column: 2;
+    grid-row: 2;
+    border-top: 1px solid rgba(108, 112, 134, 0.35);
+    padding: 18px clamp(24px, 5vw, 60px);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* ---- shared bits ---- */
+  .wbtn {
+    background: #000000;
+    border: 1px solid rgba(108, 112, 134, 0.5);
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 10px 22px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .wbtn:hover { border-color: #cdd6f4; color: #ffffff; }
+  .wbtn.primary {
+    background: #cdd6f4;
+    border-color: #cdd6f4;
+    color: #000000;
+    font-weight: bold;
+  }
+  .wbtn.primary:hover { background: #ffffff; border-color: #ffffff; }
+  .wbtn.ghost { border-color: transparent; color: #6c7086; padding-left: 0; }
+  .wbtn.ghost:hover { color: #cdd6f4; border-color: transparent; }
+  .wbtn:disabled { opacity: .3; cursor: default; }
+  .wbtn:disabled:hover { border-color: rgba(108, 112, 134, 0.5); color: #cdd6f4; }
+  #wizskip { margin-right: auto; }
+  .wsec {
+    font-size: 11px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: #6c7086;
+    margin-bottom: -8px;
+  }
+  .whint { font-size: 12px; color: #6c7086; line-height: 1.6; }
+  .wbtnrow { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .pgcols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px 30px;
+    align-items: start;
+  }
+  .pgcol { display: flex; flex-direction: column; gap: 16px; }
+
+  /* pickable option cards */
+  .cards { display: grid; gap: 10px; }
+  .cards.c3 { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+  .card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    background: #000000;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .card:hover { border-color: #a6adc8; }
+  .card.sel { border-color: #cdd6f4; background: #101018; }
+  .card .cname { font-size: 14px; color: #cdd6f4; }
+  .card .csub { font-size: 11px; color: #6c7086; margin-top: 4px; }
+  .card .tick { margin-left: auto; color: #cdd6f4; opacity: 0; font-size: 13px; }
+  .card.sel .tick { opacity: 1; }
+
+  /* theme cards: the same swatch the settings page draws, so the
+     dozen offered here read as a slice of the catalogue there */
+  .tgrid {
+    display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(186px, 1fr));
+  }
+  .tcard {
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    border: 1px solid rgba(108, 112, 134, .4);
+    background: #000000; padding: 8px 10px; transition: all .12s;
+  }
+  .tcard:hover { border-color: #a6adc8; }
+  .tcard.sel { border-color: #cdd6f4; background: #101018; }
+  .tsw {
+    width: 44px; height: 30px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(108, 112, 134, .35);
+  }
+  .tswi {
+    width: 32px; height: 16px; display: flex; align-items: center;
+    gap: 4px; padding: 0 4px;
+  }
+  .tswt { height: 3px; flex: 1; }
+  .tswd { width: 6px; height: 6px; flex: none; border-radius: 50%; }
+  .tname { font-size: 12px; color: #cdd6f4; line-height: 1.35; }
+  .tnote { font-size: 10px; color: #a6adc8; margin-top: 2px; }
+  .tcard .tick {
+    margin-left: auto; color: #cdd6f4; opacity: 0; font-size: 12px;
+  }
+  .tcard.sel .tick { opacity: 1; }
+
+  /* one question, one block: its parts sit closer to each other than
+     to the next question down the page */
+  .wgroup { display: flex; flex-direction: column; gap: 10px; }
+  .wgroup .wsec { margin-bottom: 0; }
+
+  /* what the browser made of a typed address */
+  .urlmsg { display: none; font-size: 12px; color: #a6adc8; }
+  .urlmsg.on { display: block; }
+  .urlmsg.bad { color: #f38ba8; }
+
+  /* switch rows */
+  .wrow {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    border: 1px solid rgba(108, 112, 134, 0.3);
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .wrow:hover { border-color: rgba(108, 112, 134, 0.65); }
+  .wrow .wlabel { flex: 1; }
+  .wrow .wname { font-size: 14px; color: #cdd6f4; }
+  .wrow .wsub { font-size: 11px; color: #6c7086; margin-top: 5px; line-height: 1.5; }
+  .wsw {
+    flex: 0 0 42px;
+    width: 42px;
+    height: 20px;
+    margin-top: 2px;
+    border: 1px solid #45475a;
+    background: #000000;
+    position: relative;
+    transition: all .15s;
+  }
+  .wsw::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 12px;
+    height: 12px;
+    background: #45475a;
+    transition: all .15s;
+  }
+  .wrow.on .wsw { border-color: #cdd6f4; background: #cdd6f4; }
+  .wrow.on .wsw::after { transform: translateX(20px); background: #000000; }
+  /* The master password, under the switch that reveals it. The warning
+     is the loudest thing on the page on purpose: it is the only choice
+     in this wizard that cannot be undone afterwards. */
+  .wmwarn {
+    border: 1px solid rgba(249, 226, 175, 0.4);
+    border-top: none;
+    padding: 13px 16px;
+    background: rgba(249, 226, 175, 0.05);
+  }
+  /* Off, the warning is not hanging under a switched-on row, so it
+     needs its own top edge and a little air above it. */
+  .wmwarnoff { border-top: 1px solid rgba(249, 226, 175, 0.4);
+               margin-top: 14px; }
+  .wmwarnt { font-size: 13px; color: #f9e2af; font-weight: 600; }
+  .wmwarnb {
+    font-size: 12px;
+    color: #cdd6f4;
+    margin-top: 6px;
+    line-height: 1.6;
+  }
+  .wmfields { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .wmpass {
+    flex: 1 1 200px;
+    min-width: 0;
+    background: #000000;
+    border: 1px solid #45475a;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 9px 11px;
+  }
+  .wmpass:focus { outline: none; border-color: #cdd6f4; }
+  .wmnote { font-size: 12px; color: #f38ba8; margin-top: 8px; line-height: 1.5; }
+  .wmnote.ok { color: #a6e3a1; }
+
+  /* wallpaper picker */
+  /* three thumbs to a row rather than two: the start-page page grew a
+     question above this one, and the wallpapers are what it can spare */
+  .wgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+  .wthumb {
+    height: 84px;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    background-color: #000000;
+    background-size: cover;
+    background-position: center;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: #6c7086;
+    transition: border-color .15s;
+  }
+  .wthumb:hover { border-color: #a6adc8; }
+  .wthumb.sel { border-color: #ffffff; box-shadow: inset 0 0 0 2px #ffffff; }
+
+  /* live start-page preview with the draggable search bar */
+  .wizprev {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    background-color: #000000;
+    background-size: cover;
+    background-position: center;
+    overflow: hidden;
+    user-select: none;
+  }
+  .wizprev .shade { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); }
+  .wizprev .pclock {
+    position: absolute;
+    top: 15%;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 20px;
+    font-weight: 600;
+    color: #cdd6f4;
+  }
+  .wizprev .pbar {
+    position: absolute;
+    width: 48%;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    border: 1px solid rgba(205, 214, 244, 0.65);
+    background: rgba(0, 0, 0, 0.8);
+    color: #6c7086;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
+  }
+  .wizprev .pbar:active { cursor: grabbing; }
+
+  /* language picker */
+  .wfilter, .qadd input {
+    background: #000000;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 10px 12px;
+    outline: none;
+  }
+  .wfilter { width: 100%; max-width: 320px; }
+  .wfilter:focus, .qadd input:focus { border-color: #cdd6f4; }
+  .langgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1px;
+    max-height: min(300px, 32vh);
+    overflow-y: auto;
+    border: 1px solid rgba(108, 112, 134, 0.3);
+    padding: 6px;
+  }
+  .langitem {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: #a6adc8;
+    cursor: pointer;
+  }
+  .langitem:hover { background: #101018; color: #ffffff; }
+  .langitem.sel { background: #cdd6f4; color: #000000; }
+  .langitem .code { font-size: 10px; opacity: .55; margin-left: auto; }
+
+  /* quick links editor */
+  .qlist { display: flex; flex-wrap: wrap; gap: 8px; }
+  .qchip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #cdd6f4;
+  }
+  .qchip .x { color: #6c7086; cursor: pointer; font-size: 11px; }
+  .qchip .x:hover { color: #f38ba8; }
+  .qsug {
+    background: #000000;
+    border: 1px solid rgba(108, 112, 134, 0.3);
+    color: #6c7086;
+    font: inherit;
+    font-size: 12px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .qsug:hover { color: #cdd6f4; border-color: #a6adc8; }
+  .qsug.added { color: #585b70; border-style: dashed; }
+  .qadd { display: flex; gap: 8px; flex-wrap: wrap; }
+  .qadd input.wide { flex: 1; min-width: 220px; }
+
+  /* zoom slider */
+  .wslider { display: flex; align-items: center; gap: 16px; max-width: 460px; }
+  .wslider input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 2px;
+    background: #45475a;
+    outline: none;
+  }
+  .wslider input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 20px;
+    background: #cdd6f4;
+    cursor: pointer;
+  }
+  .wslider .val { font-size: 13px; color: #cdd6f4; width: 52px; text-align: right; }
+
+  /* the closing summary */
+  .sumlist {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1px;
+    padding: 1px;
+  }
+  .sumrow {
+    background: #000000;
+    box-shadow: 0 0 0 1px rgba(108, 112, 134, 0.3);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 13px 16px;
+  }
+  .sumrow .k {
+    font-size: 10px;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: #6c7086;
+  }
+  .sumrow .v { font-size: 14px; color: #cdd6f4; word-break: break-word; }
+
+  /* Esc: ask before dropping out halfway */
+  #wizconfirm {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    background: rgba(0, 0, 0, 0.88);
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  #wizconfirm.open { display: flex; }
+  #wizconfirm .box {
+    border: 1px solid rgba(108, 112, 134, 0.5);
+    background: #000000;
+    padding: 26px 28px;
+    max-width: 440px;
+  }
+  #wizconfirm h3 { font-size: 16px; font-weight: 600; color: #ffffff; }
+  #wizconfirm p { font-size: 13px; color: #6c7086; line-height: 1.65; margin: 10px 0 22px; }
+  #wizconfirm .btns { display: flex; gap: 10px; justify-content: flex-end; }
+
+  @media (max-width: 940px) {
+    #wizard.open { grid-template-columns: minmax(0, 1fr); }
+    #wizrail { display: none; }
+    #wizmain, #wizfoot { grid-column: 1; }
+  }
+
+  /* A selection and a keyboard focus come out of the palette like
+     everything else. Left alone they are the engine's own idea of a
+     highlight — a blue that belongs to no theme in here, and on a
+     couple of them a ring that cannot be seen at all. */
+  ::selection { background: #cdd6f4; color: #000000; }
+  :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <div id="clock">--:--</div>
+  <div id="date"></div>
+  <form class="search" action="https://www.google.com/search">
+    <input name="q" placeholder="Search Google" autofocus autocomplete="off">
+  </form>
+  <div class="links" id="links"></div>
+  <form id="addform" autocomplete="off">
+    <input id="addurl" placeholder="wikipedia.org" list="sites">
+    <input id="addname" placeholder="Name (e.g. Wikipedia)" maxlength="20">
+    <button type="submit">Add</button>
+  </form>
+  <datalist id="sites">
+    <option value="wikipedia.org"><option value="youtube.com">
+    <option value="github.com"><option value="google.com">
+    <option value="reddit.com"><option value="amazon.de">
+    <option value="ebay.de"><option value="netflix.com">
+    <option value="spotify.com"><option value="twitch.tv">
+    <option value="instagram.com"><option value="tiktok.com">
+    <option value="discord.com"><option value="translate.google.com">
+    <option value="maps.google.com"><option value="web.de">
+    <option value="gmx.net"><option value="modrinth.com">
+  </datalist>
+
+  <div id="wizard">
+    <div id="wizprog"></div>
+    <nav id="wizrail">
+      <div id="wizbrand">Setup</div>
+      <div id="wizsteps"></div>
+      <div id="wizrailfoot"></div>
+    </nav>
+    <main id="wizmain">
+      <div class="inner">
+        <div id="wizstepno"></div>
+        <h2 id="wiztitle"></h2>
+        <p id="wiztext"></p>
+        <div id="wizbody"></div>
+      </div>
+    </main>
+    <footer id="wizfoot">
+      <button type="button" class="wbtn ghost" id="wizskip"></button>
+      <button type="button" class="wbtn" id="wizback"></button>
+      <button type="button" class="wbtn primary" id="wiznext"></button>
+    </footer>
+    <div id="wizconfirm">
+      <div class="box">
+        <h3 id="wizcfT"></h3>
+        <p id="wizcfP"></p>
+        <div class="btns">
+          <button type="button" class="wbtn" id="wizcfLeave"></button>
+          <button type="button" class="wbtn primary" id="wizcfStay"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button id="gear" title="Customize">⚙</button>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <div id="settings">
+    <h3>Background</h3>
+    <div class="thumbs" id="thumbs"></div>
+    <input type="file" id="bgfile" accept="image/*" hidden>
+    <div class="privbtns">
+      <button type="button" id="allsettings">All settings</button>
+      <button type="button" id="dlpage">Downloads</button>
+    </div>
+  </div>
+<script>
+  // UI strings; overridden from the bridge in the chosen language
+  let STR = {add: "Add", background: "Background", allSettings: "All settings",
+    downloads: "Downloads", filterPh: "Search\u2026", privacy: "Privacy",
+    searchSite: "Search {}", searchEngine: "Search engine",
+    translation: "Language", saveHistory: "Save history",
+    reopenTabs: "Reopen tabs from last time",
+    askDownload: "Ask where to save each download",
+    autoDarken: "Auto-darken light websites", whiteGoogle: "White Google",
+    whiteGoogleHint: "Off = pitch-black Google", pageZoom: "Page zoom",
+    center: "Center it again", nextBtn: "Next \u2192", wallpaper: "Wallpaper",
+    finish: "Finish",
+    wizBrand: "Setup", wizStepOf: "Step {a} of {b}",
+    wizNavWelcome: "Welcome", wizNavTheme: "Colours",
+    wizNavSearch: "Search", wizNavLook: "Start page",
+    wizNavWeb: "Websites", wizNavPrivacy: "Privacy", wizNavLinks: "Quick links",
+    wizNavDone: "Finish", wizWelcomeT: "Welcome",
+    wizWelcomeP: "Let's set your browser up. Eight quick steps \u2014 and you " +
+      "can change every one of them later under Settings.",
+    wizLangLabel: "Language",
+    wizLangHint: "Changes the browser's own pages, the language websites are " +
+      "asked for, and the translate button.",
+    wizSearchT: "Choose your search engine",
+    wizSearchP: "The start page and the address bar send your searches here.",
+    wizLookT: "Make the start page yours",
+    wizLookP: "Whether the browser opens on it, what it looks like, and " +
+      "where the search bar sits.",
+    wizPosLabel: "Search bar position",
+    wizPosHint: "Drag the bar in the preview \u2014 the real start page follows.",
+    wizOwnImage: "Use your own image\u2026",
+    wizWebT: "How websites look",
+    wizWebP: "These apply to every site you visit.",
+    wizDarkHint: "Bright pages get darkened so they don't blind you at night.",
+    wizZoomHint: "Makes everything on a website bigger or smaller.",
+    wizPrivP: "None of this leaves your computer. Choose what the browser remembers.",
+    wizHistHint: "Pages you visit are listed on the history page.",
+    wizVaultT: "Vault Password",
+    wizVaultHint: "A password manager built into the browser: it " +
+      "remembers your logins, fills them back in, and keeps secure " +
+      "notes, cards and two-factor codes. Leave it off and the browser " +
+      "never looks at a login form at all. You can switch it on later " +
+      "under Settings → Plugins.",
+    wizPwOffer: "Offer to save passwords",
+    wizPwHint: "When you log in somewhere, the browser asks whether it should " +
+      "remember it.",
+    wizTabsHint: "Start again where you left off.",
+    wizDlHint: "Off = everything lands in your Downloads folder.",
+    wizLinksT: "Quick links",
+    wizLinksP: "Shortcuts under the search bar on every new tab.",
+    wizLinksYours: "On your start page", wizLinksSug: "Suggestions",
+    wizNamePh: "Name", wizDoneT: "You're all set",
+    wizDoneP: "Here is what you picked. Anything can be changed later under " +
+      "Settings \u2014 Setup.",
+    wizSumBar: "Search bar", wizNone: "None", wizCentered: "Centered",
+    wizCustom: "Where you put it", wizYourImage: "Your image",
+    wizOn: "On", wizOff: "Off", wizBack: "\u2190 Back",
+    wizSkip: "Skip to the summary",
+    wizLeaveT: "Leave setup?",
+    wizLeaveP: "Everything you already picked is kept; only a quick link " +
+      "typed but not added is dropped. Setup opens again on your next new " +
+      "tab, or from Settings.",
+    wizLeaveBtn: "Leave", wizStay: "Keep setting up",
+    wizRailFoot: "Settings \u2014 Setup re-runs this any time.",
+    wizNature: "Nature",
+    theme: "Theme", themeDark: "Dark", themeLight: "Light",
+    themeCharacter: "With character",
+    wizThemeT: "Pick your colours",
+    wizThemeP: "A theme paints the browser and its own pages. Websites " +
+      "keep the colours their makers gave them.",
+    wizThemeMore: "Twelve of a hundred and fourteen \u2014 the rest are " +
+      "under Settings \u2014 Theme, with a search box.",
+    startUrl: "When the browser starts",
+    startUrlHint: "The first tab at launch. Tabs reopened from last time " +
+      "come back instead of it.",
+    startUrlStart: "The start page",
+    startUrlStartSub: "Clock, search bar and your quick links.",
+    startUrlCustom: "A page you choose",
+    startUrlCustomSub: "Type an address below.",
+    startUrlPh: "example.com",
+    startUrlAsk: "Type an address, then press Save \u2014 until you do, the " +
+      "browser starts on the start page.",
+    startUrlBad: "That is not an address the browser can open \u2014 the " +
+      "browser still starts on {a}.",
+    startUrlOk: "The browser starts on {a}",
+    theStartPage: "the start page", pwSaveBtn: "Save",
+    lang: undefined};
+
+  const DEFAULTS = [
+    { name: "GitHub", url: "https://github.com" },
+    { name: "YouTube", url: "https://www.youtube.com" },
+  ];
+  let links = JSON.parse(localStorage.getItem("quicklinks") || "null") || DEFAULTS;
+
+  function save() {
+    localStorage.setItem("quicklinks", JSON.stringify(links));
+    syncStartData();
+  }
+
+  // the wizard flag, wallpaper, search position and quick links are
+  // shared across all virtual browsers via the browser's config
+  const SHARED_KEYS = ["setupDone", "quicklinks", "bg", "custombg", "searchpos"];
+  function syncStartData() {
+    if (!bridge) return;
+    const data = {};
+    for (const k of SHARED_KEYS) {
+      const v = localStorage.getItem(k);
+      if (v !== null) data[k] = v;
+    }
+    bridge.setStartData(JSON.stringify(data));
+  }
+
+  function render() {
+    const box = document.getElementById("links");
+    box.innerHTML = "";
+    links.forEach((l, i) => {
+      const a = document.createElement("a");
+      a.href = l.url;
+      a.textContent = l.name;
+      const rm = document.createElement("span");
+      rm.className = "rm";
+      rm.textContent = "✕";
+      rm.title = "Remove";
+      rm.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        links.splice(i, 1);
+        save();
+        render();
+      };
+      a.appendChild(rm);
+      box.appendChild(a);
+    });
+    const plus = document.createElement("button");
+    plus.id = "addbtn";
+    plus.textContent = "+";
+    plus.title = "Add a link";
+    plus.onclick = () => {
+      document.getElementById("addform").classList.toggle("open");
+      document.getElementById("addname").focus();
+    };
+    box.appendChild(plus);
+  }
+
+  // auto-fill the name from the address: "wikipedia.org" -> "Wikipedia"
+  document.getElementById("addurl").addEventListener("input", () => {
+    const nameBox = document.getElementById("addname");
+    if (nameBox.dataset.touched === "1") return;
+    let host = document.getElementById("addurl").value.trim()
+      .replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+    const base = host.split(".")[0];
+    nameBox.value = base ? base.charAt(0).toUpperCase() + base.slice(1) : "";
+  });
+  document.getElementById("addname").addEventListener("input", (e) => {
+    e.target.dataset.touched = e.target.value ? "1" : "";
+  });
+
+  document.getElementById("addform").onsubmit = (e) => {
+    e.preventDefault();
+    const name = document.getElementById("addname").value.trim();
+    let url = document.getElementById("addurl").value.trim();
+    if (!name || !url) return;
+    if (!url.includes("://")) url = "https://" + url;
+    links.push({ name, url });
+    save();
+    document.getElementById("addname").value = "";
+    document.getElementById("addname").dataset.touched = "";
+    document.getElementById("addurl").value = "";
+    document.getElementById("addform").classList.remove("open");
+    render();
+  };
+
+  render();
+
+  // ---- background customization ----
+  const BGS = [
+    "backgrounds/nature-1015.jpg",
+    "backgrounds/nature-1016.jpg",
+    "backgrounds/nature-1018.jpg",
+    "backgrounds/nature-1039.jpg",
+  ];
+
+  function applyBg() {
+    const bg = localStorage.getItem("bg") || "";
+    if (bg) {
+      document.body.style.backgroundImage = `url("${bg}")`;
+      document.body.classList.add("hasbg");
+    } else {
+      document.body.style.backgroundImage = "";
+      document.body.classList.remove("hasbg");
+    }
+  }
+
+  function renderThumbs(boxId = "thumbs") {
+    const box = document.getElementById(boxId);
+    box.innerHTML = "";
+    const current = localStorage.getItem("bg") || "";
+    const mk = (label, value, image) => {
+      const t = document.createElement("div");
+      t.className = "thumb" + (current === value ? " sel" : "");
+      if (image) t.style.backgroundImage = `url("${image}")`;
+      else t.textContent = label;
+      t.title = label;
+      t.onclick = () => {
+        localStorage.setItem("bg", value);
+        applyBg();
+        renderThumbs(boxId);
+        syncStartData();
+      };
+      return t;
+    };
+    box.appendChild(mk("None", "", null));
+    BGS.forEach((b) => box.appendChild(mk("Nature", b, b)));
+    const custom = localStorage.getItem("custombg");
+    if (custom) box.appendChild(mk("Your image", custom, custom));
+    const up = document.createElement("div");
+    up.className = "thumb";
+    up.textContent = "+ Add";
+    up.title = "Use your own image";
+    up.onclick = () => document.getElementById("bgfile").click();
+    box.appendChild(up);
+  }
+
+  document.getElementById("bgfile").onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+      // downscale so it fits in local storage
+      const scale = Math.min(1, 1920 / img.width);
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      const data = c.toDataURL("image/jpeg", 0.82);
+      try {
+        localStorage.setItem("custombg", data);
+        localStorage.setItem("bg", data);
+      } catch (err) {
+        alert("That image is too large, sorry — try a smaller one.");
+        return;
+      }
+      applyBg();
+      renderThumbs();
+      syncStartData();
+      if (wizOpen) renderWiz();
+    };
+    img.src = URL.createObjectURL(file);
+  };
+
+  document.getElementById("gear").onclick = () => {
+    document.getElementById("settings").classList.toggle("open");
+    renderThumbs();
+  };
+
+  // Esc closes the settings panel — or asks about leaving setup
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (wizOpen) {
+      const cf = document.getElementById("wizconfirm");
+      if (cf.classList.contains("open")) leaveWiz();
+      else cf.classList.add("open");
+      e.preventDefault();
+      return;
+    }
+    document.getElementById("settings").classList.remove("open");
+  });
+
+  // coming back from the history page: reopen the panel
+  if (sessionStorage.getItem("reopenSettings")) {
+    sessionStorage.removeItem("reopenSettings");
+    document.getElementById("settings").classList.add("open");
+    renderThumbs();
+  }
+
+  applyBg();
+
+
+  // ---- movable search bar (placed in the setup wizard's preview) ----
+  const searchForm = document.querySelector("form.search");
+  function applySearchPos() {
+    const pos = JSON.parse(localStorage.getItem("searchpos") || "null");
+    if (!pos) {
+      searchForm.classList.remove("custompos");
+      searchForm.style.left = searchForm.style.top = "";
+      return;
+    }
+    searchForm.classList.add("custompos");
+    const w = searchForm.offsetWidth, h = searchForm.offsetHeight;
+    searchForm.style.left = Math.round(pos.xp * Math.max(0, innerWidth - w)) + "px";
+    searchForm.style.top = Math.round(pos.yp * Math.max(0, innerHeight - h)) + "px";
+  }
+  window.addEventListener("resize", applySearchPos);
+  applySearchPos();
+
+  // ---- first-run setup wizard ----------------------------------------
+  // A full-screen walk-through: one decision per page, a rail that shows
+  // how far along we are, Back/Next, and a way out that never lies about
+  // being finished. "setupDone" is written by Finish and by nothing else,
+  // so closing the tab halfway simply means setup runs again.
+  const WIZ_KEY = "wizProgress";   // survives a reload, dies with the tab
+  // "Leave" was used in THIS tab. Applying a language reloads the
+  // browser's own pages, and that reload must not drag the wizard back
+  // in; a new tab still gets it, because setupDone is the only thing
+  // that ends setup for good.
+  const WIZ_LEFT = "wizLeft";
+  const ENGINE_HOSTS = {
+    google: "google.com", duckduckgo: "duckduckgo.com", bing: "bing.com",
+    brave: "search.brave.com", ecosia: "ecosia.org",
+    startpage: "startpage.com",
+  };
+  const SUGGESTED = [
+    { name: "GitHub", url: "https://github.com" },
+    { name: "YouTube", url: "https://www.youtube.com" },
+    { name: "Wikipedia", url: "https://www.wikipedia.org" },
+    { name: "Reddit", url: "https://www.reddit.com" },
+    { name: "GMX", url: "https://www.gmx.net" },
+    { name: "Modrinth", url: "https://modrinth.com" },
+    { name: "Amazon", url: "https://www.amazon.de" },
+    { name: "Twitch", url: "https://www.twitch.tv" },
+    { name: "Maps", url: "https://maps.google.com" },
+  ];
+
+  let SET = null;            // newest bridge.getSettings() payload
+  let wizOpen = false, wizPage = 0, wizSeen = 0;
+  let wizLang = null;        // language picked but not applied yet
+  let wizReplace = null;     // reposition hook of the live preview
+  // Half-typed input lives OUT of the DOM. renderWiz() rebuilds the page
+  // from scratch, and three callers reach it while he is still typing --
+  // a tab switch (visibilitychange), fresh UI strings, and the language
+  // commit's re-translate -- so the builders read their fields back from
+  // here instead of losing them.
+  let wizDraft = {};
+
+  function el(tag, cls, txt) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (txt !== undefined && txt !== null) n.textContent = txt;
+    return n;
+  }
+  // a browser setting: read what is really configured, write it straight
+  // through to the config so a half-finished wizard still leaves it set
+  function setVal(key, dflt) {
+    return SET && SET[key] !== undefined && SET[key] !== null ? SET[key] : dflt;
+  }
+  function putVal(key, value) {
+    if (SET) SET[key] = value;
+    if (bridge) bridge.setSetting(key, JSON.stringify(value));
+  }
+
+  // `after` runs once the answer is stored, for a switch that changes
+  // which other switches belong on the page. renderWiz() rebuilds the
+  // page from scratch and wizDraft is what carries the answers across,
+  // so re-rendering from here is safe.
+  function switchRow(key, name, sub, dflt, after) {
+    const row = el("div", "wrow" + (setVal(key, dflt) ? " on" : ""));
+    const lab = el("div", "wlabel");
+    lab.appendChild(el("div", "wname", name));
+    if (sub) lab.appendChild(el("div", "wsub", sub));
+    row.appendChild(lab);
+    row.appendChild(el("div", "wsw"));
+    row.onclick = () => {
+      const on = !row.classList.contains("on");
+      row.classList.toggle("on", on);
+      putVal(key, on);
+      if (after) after(on);
+    };
+    return row;
+  }
+
+  // ---- page 1: welcome + language ----
+  function pgWelcome(box) {
+    const langs = (SET && SET.languages) ||
+      [["en", "English", "english"], ["de", "Deutsch", "german"]];
+    if (wizLang === null) wizLang = setVal("translateLang", "en");
+    box.appendChild(el("div", "wsec", STR.wizLangLabel));
+    const filter = el("input", "wfilter");
+    filter.id = "wizfilter";
+    filter.type = "text";
+    filter.placeholder = STR.filterPh;
+    filter.value = wizDraft.langFilter || "";
+    box.appendChild(filter);
+    const grid = el("div", "langgrid");
+    box.appendChild(grid);
+    box.appendChild(el("div", "whint", STR.wizLangHint));
+    let firstDraw = true, lastQ = null;
+    const draw = () => {
+      const q = filter.value.trim().toLowerCase();
+      const keep = grid.scrollTop, sameQ = q === lastQ;
+      lastQ = q;
+      grid.innerHTML = "";
+      let sel = null;
+      langs.forEach((L) => {
+        const code = L[0], name = L[1], alias = L[2] || "";
+        if (q && name.toLowerCase().indexOf(q) < 0 &&
+            alias.indexOf(q) < 0 && code.toLowerCase().indexOf(q) < 0) return;
+        const it = el("div", "langitem" + (code === wizLang ? " sel" : ""));
+        it.appendChild(el("span", "lname", name));
+        it.appendChild(el("span", "code", code));
+        it.onclick = () => { wizLang = code; draw(); };
+        grid.appendChild(it);
+        if (code === wizLang) sel = it;
+      });
+      if (firstDraw && wizDraft.langScroll != null) {
+        grid.scrollTop = wizDraft.langScroll;   // back from a re-render
+      } else if (firstDraw && sel) {
+        grid.scrollTop = Math.max(0, sel.offsetTop - grid.offsetTop
+          - grid.clientHeight / 2 + sel.offsetHeight / 2);
+      } else if (sameQ) {
+        grid.scrollTop = keep;      // picking a language stays put
+      }
+      firstDraw = false;
+    };
+    grid.onscroll = () => { wizDraft.langScroll = grid.scrollTop; };
+    filter.oninput = () => { wizDraft.langFilter = filter.value; draw(); };
+    draw();
+  }
+
+  // ---- page 2: the browser's colours ----
+  // A hundred and fourteen themes is a catalogue, and a catalogue is
+  // not a setup question. The browser hands over twelve of them, four
+  // to a shelf so all three shelves are seen at all, and the line
+  // underneath says where the other hundred live. The pick lands at
+  // once and this page is one of the browser's own, so the wizard
+  // repaints under his hand as he clicks -- which is the whole answer
+  // to "what will it look like".
+  function themeSwatch(t) {
+    const box = el("span", "tsw");
+    box.style.background = t.swatch[0];
+    const isl = el("span", "tswi");
+    isl.style.background = t.swatch[1];
+    const bar = el("span", "tswt");
+    bar.style.background = t.swatch[2];
+    const dot = el("span", "tswd");
+    dot.style.background = t.swatch[3];
+    isl.appendChild(bar);
+    isl.appendChild(dot);
+    box.appendChild(isl);
+    return box;
+  }
+
+  function pgTheme(box) {
+    const picks = (SET && SET.themePicks) || [];
+    const cur = setVal("theme", "mocha");
+    const shelf = { dark: STR.themeDark, light: STR.themeLight,
+                    character: STR.themeCharacter };
+    ["dark", "light", "character"].forEach((g) => {
+      const mine = picks.filter((t) => t.group === g);
+      if (!mine.length) return;
+      box.appendChild(el("div", "wsec", shelf[g] || g));
+      const grid = el("div", "tgrid");
+      mine.forEach((t) => {
+        const c = el("div", "tcard" + (t.key === cur ? " sel" : ""));
+        c.dataset.theme = t.key;
+        c.appendChild(themeSwatch(t));
+        const txt = el("div", "ttext");
+        txt.appendChild(el("div", "tname", t.name));
+        if (t.note) txt.appendChild(el("div", "tnote", t.note));
+        c.appendChild(txt);
+        c.appendChild(el("div", "tick", "\u2713"));
+        c.onclick = () => pickWizTheme(t);
+        grid.appendChild(c);
+      });
+      box.appendChild(grid);
+    });
+    box.appendChild(el("div", "whint", STR.wizThemeMore));
+  }
+
+  // The tick moves before the browser answers -- SET is corrected on
+  // the spot and confirmed by the refresh -- so a click never looks
+  // like it missed.
+  function pickWizTheme(t) {
+    if (SET) { SET.theme = t.key; SET.themeName = t.name; }
+    if (bridge) bridge.setTheme(t.key);
+    renderWiz();
+    refreshSettings();
+  }
+
+  // the name to show for whatever is in force, whether or not it is
+  // one of the twelve on offer here
+  function wizThemeName() {
+    const key = setVal("theme", "mocha");
+    const hit = ((SET && SET.themePicks) || []).find((t) => t.key === key);
+    return hit ? hit.name : ((SET && SET.themeName) || key);
+  }
+
+  // ---- page 3: search engine ----
+  function pgSearch(box) {
+    const engines = (SET && SET.engines) || [["google", "Google"]];
+    const cur = setVal("searchEngine", "google");
+    const grid = el("div", "cards c3");
+    engines.forEach((E) => {
+      const key = E[0], name = E[1];
+      const c = el("div", "card" + (key === cur ? " sel" : ""));
+      const t = el("div", "ctext");
+      t.appendChild(el("div", "cname", name));
+      t.appendChild(el("div", "csub", ENGINE_HOSTS[key] || key));
+      c.appendChild(t);
+      c.appendChild(el("div", "tick", "✓"));
+      c.dataset.engine = key;
+      c.onclick = () => { putVal("searchEngine", key); refreshSettings(); renderWiz(); };
+      grid.appendChild(c);
+    });
+    box.appendChild(grid);
+  }
+
+  // Which card is ticked, which is not always what is saved: an
+  // address typed but not saved yet has to leave "A page you choose"
+  // standing, exactly as it does in Settings.
+  function startMode() {
+    if (wizDraft.startMode) return wizDraft.startMode;
+    return setVal("startUrl", "") ? "custom" : "start";
+  }
+
+  // The browser gets the last word on what an address turns into, so a
+  // typo is told about instead of quietly becoming the start page.
+  // "then" is told whether the address took. The browser answers on
+  // its own time, so anything that has to happen after the answer --
+  // leaving the page, above all -- has to wait to be told rather than
+  // carry on and hope.
+  function saveStartUrl(text, then) {
+    const done = then || function () {};
+    const before = setVal("startUrl", "") || STR.theStartPage;
+    delete wizDraft.startMsg;
+    delete wizDraft.startBad;
+    if (!text) {
+      if (SET) SET.startUrl = "";
+      wizDraft.startMode = "start";
+      if (bridge) bridge.setPageUrl("startUrl", "", () => {});
+      done(true);
+      return;
+    }
+    wizDraft.startMode = "custom";
+    if (!bridge) {
+      if (SET) SET.startUrl = text;
+      wizDraft.startMsg = ["Ok", text];
+      done(true);
+      return;
+    }
+    bridge.setPageUrl("startUrl", text, (resolved) => {
+      if (!resolved) {
+        // refused: it stays in the box, because the line underneath
+        // is about it and a complaint over somebody else's address
+        // reads as the browser having lost track
+        wizDraft.startBad = text;
+        wizDraft.startMsg = ["Bad", before];
+      } else {
+        if (SET) SET.startUrl = text;
+        wizDraft.startMsg = ["Ok", resolved];
+      }
+      renderWiz();
+      done(!!resolved);
+    });
+  }
+
+  // Save and Enter write at once; commitWiz writes on the way out of
+  // the page, the same promise commitZoom makes for the slider.
+  function commitStartUrl(force, then) {
+    const done = then || function () {};
+    if (wizDraft.startUrl === undefined) return done(true);
+    const v = String(wizDraft.startUrl).trim();
+    const was = setVal("startUrl", "") || "";
+    delete wizDraft.startUrl;
+    if (!force && v === was) return done(true);
+    saveStartUrl(v, done);
+  }
+
+  // ---- what the browser opens on ----
+  function pgStart(outer) {
+    const box = el("div", "wgroup");
+    outer.appendChild(box);
+    box.appendChild(el("div", "wsec", STR.startUrl));
+    box.appendChild(el("div", "whint", STR.startUrlHint));
+    const mode = startMode();
+    const grid = el("div", "cards c3");
+    grid.id = "wizstartcards";
+    const mk = (value, name, sub) => {
+      const c = el("div", "card" + (value === mode ? " sel" : ""));
+      const t = el("div", "ctext");
+      t.appendChild(el("div", "cname", name));
+      t.appendChild(el("div", "csub", sub));
+      c.appendChild(t);
+      c.appendChild(el("div", "tick", "\u2713"));
+      c.dataset.start = value;
+      c.onclick = () => {
+        delete wizDraft.startUrl;
+        if (value === "start") saveStartUrl("");
+        else {
+          wizDraft.startMode = "custom";
+          if (!setVal("startUrl", "")) wizDraft.startMsg = ["Ask", ""];
+        }
+        renderWiz();
+      };
+      return c;
+    };
+    grid.appendChild(mk("start", STR.startUrlStart, STR.startUrlStartSub));
+    grid.appendChild(mk("custom", STR.startUrlCustom, STR.startUrlCustomSub));
+    box.appendChild(grid);
+    if (mode !== "custom") return;
+    const row = el("div", "qadd");
+    const inp = document.createElement("input");
+    inp.id = "wizstarturl";
+    inp.className = "wide";
+    inp.type = "text";
+    inp.placeholder = STR.startUrlPh;
+    inp.autocomplete = "off";
+    inp.value = wizDraft.startUrl !== undefined ? wizDraft.startUrl
+      : (wizDraft.startBad !== undefined ? wizDraft.startBad
+         : setVal("startUrl", ""));
+    inp.oninput = () => { wizDraft.startUrl = inp.value; };
+    inp.onkeydown = (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      commitStartUrl(true);
+      renderWiz();
+    };
+    const b = el("button", "wbtn", STR.pwSaveBtn);
+    b.type = "button";
+    b.id = "wizstartsave";
+    b.onclick = () => { commitStartUrl(true); renderWiz(); };
+    row.appendChild(inp);
+    row.appendChild(b);
+    box.appendChild(row);
+    const msg = el("div", "urlmsg");
+    msg.id = "wizstartmsg";
+    const m = wizDraft.startMsg;
+    if (m) {
+      msg.textContent = String(STR["startUrl" + m[0]] || "")
+        .replace("{a}", m[1] || "");
+      msg.className = "urlmsg on" + (m[0] === "Bad" ? " bad" : "");
+    }
+    box.appendChild(msg);
+  }
+
+  // ---- page 4: what the browser opens on, wallpaper, search bar ----
+  function pgLook(box) {
+    pgStart(box);
+    const cols = el("div", "pgcols");
+    const left = el("div", "pgcol");
+    const right = el("div", "pgcol");
+    cols.appendChild(left);
+    cols.appendChild(right);
+    box.appendChild(cols);
+    left.appendChild(el("div", "wsec", STR.wallpaper));
+    const grid = el("div", "wgrid");
+    const cur = localStorage.getItem("bg") || "";
+    const mk = (label, value, image) => {
+      const t = el("div", "wthumb" + (cur === value ? " sel" : ""));
+      if (image) t.style.backgroundImage = 'url("' + image + '")';
+      else t.textContent = label;
+      t.title = label;
+      t.dataset.bg = value ? "1" : "0";
+      t.onclick = () => {
+        localStorage.setItem("bg", value);
+        applyBg();
+        syncStartData();
+        renderWiz();
+      };
+      return t;
+    };
+    grid.appendChild(mk(STR.wizNone, "", null));
+    BGS.forEach((b) => grid.appendChild(mk(STR.wizNature, b, b)));
+    const custom = localStorage.getItem("custombg");
+    if (custom) grid.appendChild(mk(STR.wizYourImage, custom, custom));
+    left.appendChild(grid);
+    const own = el("button", "wbtn", STR.wizOwnImage);
+    own.type = "button";
+    own.onclick = () => document.getElementById("bgfile").click();
+    const r1 = el("div", "wbtnrow");
+    r1.appendChild(own);
+    left.appendChild(r1);
+
+    right.appendChild(el("div", "wsec", STR.wizPosLabel));
+    right.appendChild(buildPreview());
+    const ctr = el("button", "wbtn", STR.center);
+    ctr.type = "button";
+    ctr.id = "wizcenter";
+    ctr.onclick = () => {
+      localStorage.removeItem("searchpos");
+      applySearchPos();
+      syncStartData();
+      renderWiz();
+    };
+    right.appendChild(el("div", "whint", STR.wizPosHint));
+    const r2 = el("div", "wbtnrow");
+    r2.appendChild(ctr);
+    right.appendChild(r2);
+  }
+
+  // a miniature of the real start page: the bar moved here is the bar
+  // moved there, because both store the same 0..1 fractions
+  function buildPreview() {
+    const p = el("div", "wizprev");
+    p.id = "wizprev";
+    const bg = localStorage.getItem("bg") || "";
+    if (bg) {
+      p.style.backgroundImage = 'url("' + bg + '")';
+      p.appendChild(el("div", "shade"));
+    }
+    p.appendChild(el("div", "pclock",
+      document.getElementById("clock").textContent));
+    const bar = el("div", "pbar",
+      document.querySelector("form.search input").placeholder || "");
+    bar.id = "wizpbar";
+    p.appendChild(bar);
+
+    const place = () => {
+      const W = p.clientWidth, H = p.clientHeight;
+      if (!W || !H) return;
+      const bw = bar.offsetWidth, bh = bar.offsetHeight;
+      let pos = null;
+      try { pos = JSON.parse(localStorage.getItem("searchpos") || "null"); } catch (e) {}
+      const x = pos ? pos.xp * (W - bw) : (W - bw) / 2;
+      const y = pos ? pos.yp * (H - bh) : (H - bh) / 2 + H * 0.07;
+      bar.style.left = Math.round(Math.min(Math.max(0, x), W - bw)) + "px";
+      bar.style.top = Math.round(Math.min(Math.max(0, y), H - bh)) + "px";
+    };
+    const store = (x, y) => {
+      const W = p.clientWidth, H = p.clientHeight;
+      const bw = bar.offsetWidth, bh = bar.offsetHeight;
+      x = Math.min(Math.max(0, x), W - bw);
+      y = Math.min(Math.max(0, y), H - bh);
+      bar.style.left = Math.round(x) + "px";
+      bar.style.top = Math.round(y) + "px";
+      localStorage.setItem("searchpos", JSON.stringify({
+        xp: x / Math.max(1, W - bw), yp: y / Math.max(1, H - bh) }));
+      applySearchPos();
+      syncStartData();
+    };
+
+    let grab = null;
+    bar.addEventListener("pointerdown", (e) => {
+      const r = bar.getBoundingClientRect();
+      grab = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (!grab) return;
+      const pr = p.getBoundingClientRect();
+      store(e.clientX - pr.left - grab.dx, e.clientY - pr.top - grab.dy);
+    });
+    const drop = () => { grab = null; };
+    bar.addEventListener("pointerup", drop);
+    bar.addEventListener("pointercancel", drop);
+    // clicking the empty preview drops the bar there
+    p.addEventListener("click", (e) => {
+      if (e.target === bar || bar.contains(e.target)) return;
+      const pr = p.getBoundingClientRect();
+      store(e.clientX - pr.left - bar.offsetWidth / 2,
+            e.clientY - pr.top - bar.offsetHeight / 2);
+    });
+
+    wizReplace = place;
+    requestAnimationFrame(place);
+    return p;
+  }
+
+  // ---- page 4: how websites look ----
+  function pgWeb(box) {
+    box.appendChild(switchRow("forceDark", STR.autoDarken, STR.wizDarkHint, true));
+    box.appendChild(switchRow("googleLight", STR.whiteGoogle,
+                              STR.whiteGoogleHint, true));
+    box.appendChild(el("div", "wsec", STR.pageZoom));
+    const wrap = el("div", "wslider");
+    const r = document.createElement("input");
+    r.type = "range";
+    r.id = "wizzoom";
+    r.min = "80"; r.max = "150"; r.step = "5";
+    r.value = wizDraft.zoom || String(Math.round(setVal("zoom", 1) * 100));
+    const val = el("div", "val", r.value + "%");
+    r.oninput = () => { wizDraft.zoom = r.value; val.textContent = r.value + "%"; };
+    r.onchange = () => { commitZoom(); };
+    wrap.appendChild(r);
+    wrap.appendChild(val);
+    box.appendChild(wrap);
+    box.appendChild(el("div", "whint", STR.wizZoomHint));
+  }
+
+  // ---- page 5: privacy ----
+  function pgPrivacy(box) {
+    box.appendChild(switchRow("history", STR.saveHistory, STR.wizHistHint, true));
+    // Vault Password is off until he says otherwise, and "offer to
+    // save passwords" only means anything once it is on — so that
+    // switch appears underneath it rather than standing on its own.
+    box.appendChild(switchRow("vaultPassword", STR.wizVaultT,
+                              STR.wizVaultHint, false, renderWiz));
+    // The master password used to be a row here. It is a page of its
+    // own now (pgMaster): every other question in this wizard can be
+    // taken back afterwards and that one cannot, so it does not belong
+    // as one switch among five on a page somebody is clicking through.
+    if (setVal("vaultPassword", false))
+      box.appendChild(switchRow("savePasswords", STR.wizPwOffer,
+                                STR.wizPwHint, true));
+    box.appendChild(switchRow("restoreTabs", STR.reopenTabs, STR.wizTabsHint, true));
+    box.appendChild(switchRow("askDownload", STR.askDownload, STR.wizDlHint, false));
+  }
+
+  // ---- the master password, offered but never demanded ----
+  //
+  // It lives under Vault Password because it only means anything when
+  // that is on, and nesting it says so without a sentence. It is OFF
+  // to begin with on purpose: a wizard that demands a passphrase
+  // before the browser will work is a wizard people abandon.
+  //
+  // What he types lives in wizDraft and nowhere else. wizDraft is not
+  // written to sessionStorage (see saveWizState, which stores the page
+  // number and nothing more), so the passphrase never leaves this
+  // page's memory -- and it survives a re-render, which is what
+  // pressing Esc and staying does.
+  const MASTER_MIN = () => (SET && SET.masterMin) || 8;
+
+  function masterOk() {
+    const a = wizDraft.masterA || "";
+    return a.length >= MASTER_MIN() && a === (wizDraft.masterB || "");
+  }
+
+  function masterProblem() {
+    const a = wizDraft.masterA || "", b = wizDraft.masterB || "";
+    if (!a && !b) return STR.wizMasterTyping || "";
+    if (a.length < MASTER_MIN()) return STR.masterShort || "";
+    if (a !== b) return STR.masterMismatch || "";
+    return "";
+  }
+
+  // ---- page 7: the master password, a page of its own ----
+  //
+  // It earns one. Every other question in this wizard is reversible --
+  // the wrong search engine is a click to change -- and this one is
+  // not: forget the passphrase and the passwords are gone. A choice
+  // that cannot be taken back should make the person stop, and the
+  // warning needs room to be read rather than skimmed.
+  function pgMaster(box) {
+    // Vault Password is answered on the page before this one, and with
+    // it off there is nothing here to lock. The page says so and Next
+    // still works -- a step that can neither be answered nor passed is
+    // the one outcome worth avoiding.
+    if (!setVal("vaultPassword", false)) {
+      box.appendChild(el("div", "wsec", STR.wizMasterNoVault));
+      box.appendChild(el("div", "whint", STR.wizMasterNoVaultHint));
+      return;
+    }
+    // An install that already has one is not offered a second: setting
+    // a new passphrase over an existing vault needs the old one, which
+    // is a different question and belongs in Settings.
+    if (SET && SET.masterOn) {
+      const row = el("div", "wrow");
+      const lab = el("div", "wlabel");
+      lab.appendChild(el("div", "wname", STR.wizMasterT));
+      lab.appendChild(el("div", "wsub", STR.wizMasterHave));
+      row.appendChild(lab);
+      box.appendChild(row);
+      return;
+    }
+    const on = !!wizDraft.masterOn;
+    const row = el("div", "wrow" + (on ? " on" : ""));
+    const lab = el("div", "wlabel");
+    lab.appendChild(el("div", "wname", STR.wizMasterT));
+    lab.appendChild(el("div", "wsub", STR.wizMasterHint));
+    row.appendChild(lab);
+    row.appendChild(el("div", "wsw"));
+    row.onclick = () => {
+      wizDraft.masterOn = !wizDraft.masterOn;
+      if (!wizDraft.masterOn) {
+        delete wizDraft.masterA;
+        delete wizDraft.masterB;
+      }
+      renderWiz();
+    };
+    box.appendChild(row);
+    if (!on) {
+      // Off, the page is still about the one thing it is for: what he
+      // would be agreeing to, in full, before he agrees to it.
+      const pre = el("div", "wmwarn wmwarnoff");
+      pre.appendChild(el("div", "wmwarnt", STR.masterWarnT));
+      pre.appendChild(el("div", "wmwarnb",
+                         STR.wizMasterWarnB || STR.masterWarnB));
+      box.appendChild(pre);
+      box.appendChild(el("div", "whint", STR.wizMasterLater));
+      return;
+    }
+
+    // Switched on, the warning is the substance of the page rather
+    // than a line above two boxes -- which is the whole reason this is
+    // a page at all. The headline is the Settings dialog's, word for
+    // word.
+    const warn = el("div", "wmwarn");
+    warn.appendChild(el("div", "wmwarnt", STR.masterWarnT));
+    // The headline is word for word the one the Settings dialog
+    // uses. The body is not, deliberately: that one ends by telling
+    // him to export his passwords first, and there is no export
+    // here because a fresh install has nothing in it to export.
+    // Telling someone to do something he cannot do is worse than
+    // saying the same thing in one sentence fewer.
+    warn.appendChild(el("div", "wmwarnb",
+                        STR.wizMasterWarnB || STR.masterWarnB));
+    box.appendChild(warn);
+
+    const pair = el("div", "wmfields");
+    const mk = (which, ph) => {
+      const i = document.createElement("input");
+      i.type = "password";
+      i.className = "wmpass";
+      i.id = "wizmaster" + which;
+      i.placeholder = ph;
+      i.autocomplete = "new-password";
+      i.value = wizDraft["master" + which] || "";
+      i.oninput = () => {
+        wizDraft["master" + which] = i.value;
+        const note = document.getElementById("wizmasternote");
+        if (note) {
+          note.textContent = masterOk() ? (STR.wizMasterSet || "")
+                                        : masterProblem();
+          note.className = "wmnote" + (masterOk() ? " ok" : "");
+        }
+      };
+      return i;
+    };
+    pair.appendChild(mk("A", STR.masterNewPh));
+    pair.appendChild(mk("B", STR.masterAgainPh));
+    box.appendChild(pair);
+    const note = el("div", "wmnote" + (masterOk() ? " ok" : ""),
+                    masterOk() ? (STR.wizMasterSet || "") : masterProblem());
+    note.id = "wizmasternote";
+    box.appendChild(note);
+    box.appendChild(el("div", "whint", STR.masterMinHint));
+    box.appendChild(el("div", "whint", STR.wizMasterAuto));
+  }
+
+  // Applied once, on the way out -- from Done or from Leave, the only
+  // two ways out there are. Not on every Next: that would set a
+  // passphrase from a half-typed box and then have to re-key it, and
+  // re-keying needs the old one. One apply, with the final answer.
+  function applyMaster(then) {
+    const done = then || (() => {});
+    if (!bridge || !bridge.setupMaster || (SET && SET.masterOn))
+      return done();
+    if (!setVal("vaultPassword", false) || !wizDraft.masterOn || !masterOk())
+      return done();
+    bridge.setupMaster(wizDraft.masterA, (j) => {
+      try {
+        const d = JSON.parse(j);
+        if (SET) SET.masterOn = !!d.on;
+      } catch (e) {}
+      delete wizDraft.masterA;
+      delete wizDraft.masterB;
+      done();
+    });
+  }
+
+  // ---- page 6: quick links ----
+  function pgLinks(box) {
+    box.appendChild(el("div", "wsec", STR.wizLinksYours));
+    const list = el("div", "qlist");
+    list.id = "wizlinks";
+    if (!links.length) list.appendChild(el("span", "whint", STR.wizNone));
+    links.forEach((l, i) => {
+      const c = el("div", "qchip");
+      c.appendChild(el("span", "qn", l.name));
+      const x = el("span", "x", "✕");
+      x.title = l.url;
+      x.onclick = () => { links.splice(i, 1); save(); render(); renderWiz(); };
+      c.appendChild(x);
+      list.appendChild(c);
+    });
+    box.appendChild(list);
+
+    const form = el("form", "qadd");
+    const urlI = document.createElement("input");
+    urlI.id = "wizurl";
+    urlI.placeholder = "wikipedia.org";
+    urlI.setAttribute("list", "sites");
+    urlI.autocomplete = "off";
+    urlI.value = wizDraft.linkUrl || "";
+    const nameI = document.createElement("input");
+    nameI.id = "wizname";
+    nameI.placeholder = STR.wizNamePh;
+    nameI.maxLength = 20;
+    nameI.autocomplete = "off";
+    nameI.value = wizDraft.linkName || "";
+    nameI.dataset.touched = wizDraft.linkTouched || "";
+    urlI.oninput = () => {
+      wizDraft.linkUrl = urlI.value;
+      if (nameI.dataset.touched === "1") return;
+      const host = urlI.value.trim().replace(/^https?:\/\//, "")
+        .replace(/^www\./, "").split("/")[0].split(".")[0];
+      nameI.value = host ? host.charAt(0).toUpperCase() + host.slice(1) : "";
+      wizDraft.linkName = nameI.value;
+    };
+    nameI.oninput = () => {
+      nameI.dataset.touched = nameI.value ? "1" : "";
+      wizDraft.linkName = nameI.value;
+      wizDraft.linkTouched = nameI.dataset.touched;
+    };
+    const addB = el("button", "wbtn", STR.add);
+    addB.type = "submit";
+    form.appendChild(urlI);
+    form.appendChild(nameI);
+    form.appendChild(addB);
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      let url = urlI.value.trim();
+      const name = nameI.value.trim();
+      if (!url || !name) return;
+      if (url.indexOf("://") < 0) url = "https://" + url;
+      links.push({ name: name, url: url });
+      delete wizDraft.linkUrl;      // added: the form starts over
+      delete wizDraft.linkName;
+      delete wizDraft.linkTouched;
+      save();
+      render();
+      renderWiz();
+    };
+    box.appendChild(form);
+
+    box.appendChild(el("div", "wsec", STR.wizLinksSug));
+    const sug = el("div", "qlist");
+    SUGGESTED.forEach((s) => {
+      const has = links.some((l) => l.url === s.url || l.name === s.name);
+      const b = el("button", "qsug" + (has ? " added" : ""),
+                   (has ? "✓ " : "+ ") + s.name);
+      b.type = "button";
+      b.dataset.sug = s.name;
+      b.onclick = () => {
+        if (has) links = links.filter((l) => !(l.url === s.url || l.name === s.name));
+        else links.push({ name: s.name, url: s.url });
+        save();
+        render();
+        renderWiz();
+      };
+      sug.appendChild(b);
+    });
+    box.appendChild(sug);
+  }
+
+  // ---- page 7: what was chosen ----
+  function pgDone(box) {
+    const langs = (SET && SET.languages) || [];
+    const code = wizLang || setVal("translateLang", "en");
+    let lname = code;
+    langs.forEach((L) => { if (L[0] === code) lname = L[1]; });
+    const engines = (SET && SET.engines) || [];
+    const ekey = setVal("searchEngine", "google");
+    let ename = ekey;
+    engines.forEach((E) => { if (E[0] === ekey) ename = E[1]; });
+    const bg = localStorage.getItem("bg") || "";
+    const wall = !bg ? STR.wizNone
+      : (bg === localStorage.getItem("custombg") ? STR.wizYourImage : STR.wizNature);
+    const yn = (v) => (v ? STR.wizOn : STR.wizOff);
+    const list = el("div", "sumlist");
+    list.id = "wizsummary";
+    const row = (k, v) => {
+      const r = el("div", "sumrow");
+      r.appendChild(el("div", "k", k));
+      r.appendChild(el("div", "v", v));
+      list.appendChild(r);
+    };
+    row(STR.translation, lname);
+    row(STR.theme, wizThemeName());
+    row(STR.searchEngine, ename);
+    row(STR.startUrl, setVal("startUrl", "") || STR.startUrlStart);
+    row(STR.wallpaper, wall);
+    row(STR.wizSumBar,
+        localStorage.getItem("searchpos") ? STR.wizCustom : STR.wizCentered);
+    row(STR.pageZoom, Math.round(setVal("zoom", 1) * 100) + "%");
+    row(STR.autoDarken, yn(setVal("forceDark", true)));
+    row(STR.saveHistory, yn(setVal("history", true)));
+    row(STR.wizVaultT, yn(setVal("vaultPassword", false)));
+    if (setVal("vaultPassword", false)) {
+      row(STR.wizPwOffer, yn(setVal("savePasswords", true)));
+      // "on" here means it will really be on when he leaves, so a
+      // switch flicked with nothing typed into it says so rather than
+      // promising something the browser is not going to do
+      row(STR.wizMasterSum,
+          (SET && SET.masterOn) || (wizDraft.masterOn && masterOk())
+            ? STR.wizMasterSumSet
+            : (wizDraft.masterOn ? STR.wizMasterSumUnset : STR.wizOff));
+    }
+    row(STR.reopenTabs, yn(setVal("restoreTabs", true)));
+    row(STR.wizLinksT,
+        links.length ? links.map((l) => l.name).join(", ") : STR.wizNone);
+    box.appendChild(list);
+  }
+
+  function wizPages() {
+    return [
+      { nav: STR.wizNavWelcome, title: STR.wizWelcomeT, text: STR.wizWelcomeP,
+        build: pgWelcome },
+      { nav: STR.wizNavTheme, title: STR.wizThemeT, text: STR.wizThemeP,
+        build: pgTheme },
+      { nav: STR.wizNavSearch, title: STR.wizSearchT, text: STR.wizSearchP,
+        build: pgSearch },
+      { nav: STR.wizNavLook, title: STR.wizLookT, text: STR.wizLookP,
+        build: pgLook },
+      { nav: STR.wizNavWeb, title: STR.wizWebT, text: STR.wizWebP,
+        build: pgWeb },
+      { nav: STR.wizNavPrivacy, title: STR.privacy, text: STR.wizPrivP,
+        build: pgPrivacy },
+      { nav: STR.wizNavMaster, title: STR.wizMasterT, text: STR.wizMasterP,
+        build: pgMaster },
+      { nav: STR.wizNavLinks, title: STR.wizLinksT, text: STR.wizLinksP,
+        build: pgLinks },
+      { nav: STR.wizNavDone, title: STR.wizDoneT, text: STR.wizDoneP,
+        build: pgDone },
+    ];
+  }
+
+  function renderWiz() {
+    if (!wizOpen) return;
+    const pages = wizPages();
+    const total = pages.length;
+    if (wizPage > total - 1) wizPage = total - 1;
+    const page = pages[wizPage];
+    document.getElementById("wizbrand").textContent = STR.wizBrand;
+    document.getElementById("wizrailfoot").textContent = STR.wizRailFoot;
+    const steps = document.getElementById("wizsteps");
+    steps.innerHTML = "";
+    pages.forEach((pg, i) => {
+      const cls = i === wizPage ? " cur" : (i <= wizSeen ? " done" : "");
+      const it = el("div", "railitem" + cls);
+      it.appendChild(el("div", "num", i < wizPage ? "✓" : String(i + 1)));
+      it.appendChild(el("span", "rname", pg.nav));
+      if (i <= wizSeen && i !== wizPage) it.onclick = () => gotoWiz(i);
+      steps.appendChild(it);
+    });
+    document.getElementById("wizprog").style.width =
+      Math.round(((wizPage + 1) / total) * 100) + "%";
+    document.getElementById("wizstepno").textContent = String(STR.wizStepOf)
+      .replace("{a}", String(wizPage + 1)).replace("{b}", String(total));
+    document.getElementById("wiztitle").textContent = page.title;
+    document.getElementById("wiztext").textContent = page.text;
+    wizReplace = null;
+    const body = document.getElementById("wizbody");
+    // the values come back from wizDraft; the caret and the focus don't,
+    // so they are carried over the rebuild by hand
+    const act = document.activeElement;
+    const focusId = act && act.id && body.contains(act) ? act.id : null;
+    let caret = null;
+    if (focusId) {
+      try { caret = [act.selectionStart, act.selectionEnd]; } catch (e) {}
+    }
+    body.innerHTML = "";
+    page.build(body);
+    if (focusId) {
+      const again = document.getElementById(focusId);
+      if (again) {
+        try {
+          again.focus({ preventScroll: true });
+          if (caret && caret[0] !== null && caret[0] !== undefined)
+            again.setSelectionRange(caret[0], caret[1]);
+        } catch (e) {}
+      }
+    }
+    const back = document.getElementById("wizback");
+    back.textContent = STR.wizBack;
+    back.disabled = wizPage === 0;
+    document.getElementById("wiznext").textContent =
+      wizPage === total - 1 ? STR.finish : STR.nextBtn;
+    const skip = document.getElementById("wizskip");
+    skip.textContent = STR.wizSkip;
+    skip.style.visibility = wizPage === total - 1 ? "hidden" : "visible";
+    document.getElementById("wizcfT").textContent = STR.wizLeaveT;
+    document.getElementById("wizcfP").textContent = STR.wizLeaveP;
+    document.getElementById("wizcfLeave").textContent = STR.wizLeaveBtn;
+    document.getElementById("wizcfStay").textContent = STR.wizStay;
+  }
+
+  function saveWizState() {
+    try {
+      sessionStorage.setItem(WIZ_KEY,
+        JSON.stringify({ p: wizPage, s: wizSeen }));
+    } catch (e) {}
+  }
+
+  function openWiz(page) {
+    wizOpen = true;
+    wizPage = page || 0;
+    wizSeen = Math.max(wizSeen, wizPage);
+    wizLang = null;
+    wizDraft = {};
+    try { sessionStorage.removeItem(WIZ_LEFT); } catch (e) {}
+    document.body.classList.add("wizopen");
+    document.getElementById("wizard").classList.add("open");
+    document.getElementById("wizconfirm").classList.remove("open");
+    saveWizState();
+    renderWiz();
+  }
+
+  // Applying it reloads the browser's own pages, so it waits until the
+  // welcome page is actually being left. The step is saved first, so the
+  // wizard comes back exactly where it was going.
+  function commitLang() {
+    if (wizPage !== 0 || !wizLang) return;
+    if (wizLang === setVal("translateLang", "en")) return;
+    const lang = wizLang;
+    if (SET) SET.translateLang = lang;
+    if (!bridge) return;
+    bridge.setSetting("translateLang", JSON.stringify(lang));
+    setTimeout(refreshStrings, 700);      // no reload? still re-translate
+  }
+
+  // the slider writes when it is released; a page left mid-drag counts too
+  function commitZoom() {
+    if (wizDraft.zoom === undefined) return;
+    const pct = parseInt(wizDraft.zoom, 10);
+    delete wizDraft.zoom;
+    if (!pct) return;
+    if (pct / 100 !== setVal("zoom", 1)) putVal("zoom", pct / 100);
+  }
+
+  // Every way out of a page runs this: Next, Back, a rail jump, Skip,
+  // Finish, and Esc/Leave. Whatever a page holds back instead of writing
+  // on the spot is flushed here, so no exit can drop a choice silently.
+  // "then" is called once everything is written, and is told whether
+  // it all took. Nothing but the start-up address can be refused, and
+  // nothing but the start-up address makes anyone wait: with no
+  // address pending this answers on the spot.
+  function commitWiz(then) {
+    commitLang();
+    commitZoom();
+    commitStartUrl(false, then);
+  }
+
+  // Next, Back, Skip and a rail jump all come through here, and all of
+  // them write the page they are leaving first. An address the browser
+  // refuses is the one thing that write can fail at, and the complaint
+  // it produces is a line under the box he typed in: shown on the next
+  // page it belongs to nothing, so the step is not left. He is told
+  // where he can see it, and pressing Next again goes -- there is
+  // nothing left pending by then, so he is held once, not trapped.
+  function gotoWiz(i) {
+    const total = wizPages().length;
+    const target = Math.min(Math.max(0, i), total - 1);
+    commitWiz((ok) => {
+      if (!ok || !wizOpen) return;
+      wizPage = target;
+      wizSeen = Math.max(wizSeen, wizPage);
+      saveWizState();
+      renderWiz();
+      document.getElementById("wizmain").scrollTop = 0;
+    });
+  }
+
+  function nextWiz() {
+    const total = wizPages().length;
+    if (wizPage >= total - 1) finishWiz();
+    else gotoWiz(wizPage + 1);
+  }
+
+  function closeWiz() {
+    wizOpen = false;
+    wizReplace = null;
+    document.getElementById("wizard").classList.remove("open");
+    document.getElementById("wizconfirm").classList.remove("open");
+    document.body.classList.remove("wizopen");
+  }
+
+  function finishWiz() {
+    commitWiz();
+    applyMaster(() => {
+      localStorage.setItem("setupDone", "1");
+      try { sessionStorage.removeItem(WIZ_KEY); } catch (e) {}
+      closeWiz();
+      syncStartData();
+    });
+  }
+
+  // Esc / "Leave": setupDone is deliberately NOT written, so the wizard
+  // greets him again on the next new tab -- but what he already chose is
+  // written first, exactly as Next would have written it.
+  function leaveWiz() {
+    commitWiz();
+    // What he already chose is written on the way out, and a master
+    // password he finished typing is one of those things.
+    applyMaster(() => {
+      try {
+        sessionStorage.removeItem(WIZ_KEY);
+        sessionStorage.setItem(WIZ_LEFT, "1");
+      } catch (e) {}
+      closeWiz();
+    });
+  }
+
+  document.getElementById("wiznext").onclick = nextWiz;
+  document.getElementById("wizback").onclick = () => gotoWiz(wizPage - 1);
+  document.getElementById("wizskip").onclick = () => gotoWiz(wizPages().length - 1);
+  document.getElementById("wizcfStay").onclick = () =>
+    document.getElementById("wizconfirm").classList.remove("open");
+  document.getElementById("wizcfLeave").onclick = leaveWiz;
+  window.addEventListener("resize", () => { if (wizReplace) wizReplace(); });
+
+  let wizChecked = false;
+  function maybeStartSetup() {
+    if (wizChecked) return;
+    wizChecked = true;
+    let st = null;
+    try { st = JSON.parse(sessionStorage.getItem(WIZ_KEY) || "null"); } catch (e) {}
+    if (st) {                       // a reload mid-setup: pick it back up
+      wizSeen = st.s || 0;
+      openWiz(st.p || 0);
+      return;
+    }
+    let left = null;
+    try { left = sessionStorage.getItem(WIZ_LEFT); } catch (e) {}
+    if (left) return;
+    if (!localStorage.getItem("setupDone")) openWiz(0);
+  }
+  if (typeof qt === "undefined") maybeStartSetup();
+  // with a bridge, the check happens after pulling the shared setup
+  setTimeout(maybeStartSetup, 600);  // fallback if the bridge is slow
+
+  // ---- privacy / history (talks to the browser via QWebChannel) ----
+  let bridge = null;
+  if (typeof qt !== "undefined") {
+    new QWebChannel(qt.webChannelTransport, (ch) => {
+      bridge = ch.objects.bridge;
+      refreshStrings();
+      refreshSettings();
+      bridge.popSetupFlag((v) => {
+        if (!v) return;                 // "Run setup again" from settings
+        wizChecked = true;
+        wizSeen = 0;
+        try { sessionStorage.removeItem(WIZ_KEY); } catch (e) {}
+        openWiz(0);
+      });
+      bridge.getStartData((json) => {
+        try {
+          const data = JSON.parse(json || "{}");
+          if (!localStorage.getItem("setupDone") && data.setupDone) {
+            for (const k of SHARED_KEYS)
+              if (data[k] !== undefined) localStorage.setItem(k, data[k]);
+            links = JSON.parse(localStorage.getItem("quicklinks") || "null") || DEFAULTS;
+            render();
+            applyBg();
+            applySearchPos();
+          } else if (localStorage.getItem("setupDone") && !data.setupDone) {
+            syncStartData();  // seed the shared store from this jar
+          }
+        } catch (e) {}
+        maybeStartSetup();
+      });
+      syncSettings();
+    });
+  }
+  function syncSettings() {
+    if (!bridge) return;
+    refreshSettings();
+  }
+  function applyStrings() {
+    try {
+      document.querySelector("#addform button").textContent = STR.add;
+      document.querySelector("#settings h3").textContent = STR.background;
+      document.getElementById("allsettings").textContent = STR.allSettings;
+      document.getElementById("dlpage").textContent = STR.downloads;
+    } catch (e) {}
+    tick();
+    renderWiz();
+  }
+  function refreshStrings() {
+    if (!bridge) return;
+    bridge.uiStrings((j) => {
+      try { Object.assign(STR, JSON.parse(j)); } catch (e) {}
+      applyStrings();
+    });
+  }
+  function refreshSettings() {
+    if (!bridge) return;
+    bridge.getSettings((j) => {
+      try {
+        SET = JSON.parse(j);
+        const form = document.querySelector("form.search");
+        form.action = SET.searchAction;
+        form.querySelector("input").name = SET.searchParam;
+        form.querySelector("input").placeholder =
+          STR.searchSite.replace("{}", SET.searchName);
+      } catch (e) {}
+      renderWiz();
+    });
+  }
+  // tabs opened earlier would show stale switches; re-sync when shown
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) syncSettings();
+  });
+  document.getElementById("allsettings").onclick = () => {
+    // a pane over the tab, not a page this tab travels to: the little
+    // gear panel folds away behind it
+    document.getElementById("settings").classList.remove("open");
+    if (bridge) bridge.openSettings();
+    else location.href = "settings.html";
+  };
+  document.getElementById("dlpage").onclick = () => {
+    // the browser opens it: the page only works with the key it adds
+    if (bridge) bridge.openDownloadsPage();
+    else location.href = "downloads.html";
+  };
+
+  function tick() {
+    const now = new Date();
+    const loc = STR.lang || [];
+    document.getElementById("clock").textContent =
+      now.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
+    document.getElementById("date").textContent =
+      now.toLocaleDateString(loc, { weekday: "long", day: "numeric", month: "long" });
+  }
+  tick();
+  setInterval(tick, 1000);
+</script>
+</body>
+</html>

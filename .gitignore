@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+
+# Nothing personal belongs in here — user data lives in
+# ~/.local/share/browser/ (%LOCALAPPDATA%\browser\ on Windows), well
+# outside the repository. These are a safety net in case a config, a
+# vault or a service-account token is ever copied in by hand.
+config.json
+history.json
+downloads.json
+bookmarks.json
+passwords.json
+passwords.key
+*.token
+*token.txt
+.env
+.env.*
+
+# agent worktrees and session files - never part of the browser
+.claude/
+CLAUDE.md

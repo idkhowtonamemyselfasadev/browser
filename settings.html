@@ -1,0 +1,2495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<style>
+  /* Settings speaks the setup wizard's language: pitch black, square
+     corners, a left rail with a marker on where you are, one generous
+     content column with a big title, and a hairline footer.
+
+     What it takes from Chrome's settings is the shape of the
+     information rather than the look of it. Settings that belong
+     together sit in one raised card with a title of its own; the
+     hairlines run between the rows instead of drawing a box round each
+     one; the label and its plain-language line are on the left and the
+     control is hard right, down a common axis the eye can follow; and
+     the search box is at the top of the content where you are looking,
+     not tucked into the rail. What it does not take is Chrome's blue,
+     its typeface, its rounded corners or its metrics — this is his
+     browser laid out well, not Chrome wearing a Catppuccin skin.
+
+     There are four sizes of type here and each does one job: the
+     section title at the top of the page, the title of a card, the
+     label of a row, and the line of description under it.
+
+     Every colour in here is a token of the palette and nothing
+     else: test_contrast.py measures what each pair comes out at in
+     all of the themes, not only in this one. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #000000;
+    color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    display: grid;
+    grid-template-columns: 272px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #000000; }
+  ::-webkit-scrollbar-thumb { background: rgba(108, 112, 134, .45); }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(166, 173, 200, .7); }
+
+  /* ---- left rail: every section, and which one you are in ---- */
+  #rail {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    min-height: 0;
+    overflow-y: auto;
+    border-right: 1px solid rgba(108, 112, 134, .35);
+    padding: 30px 0 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  #brand {
+    padding: 0 22px 22px;
+    font-size: 11px;
+    letter-spacing: 3.5px;
+    text-transform: uppercase;
+    color: #a6adc8;
+  }
+  .navlabel {
+    font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase;
+    color: #a6adc8; font-weight: 600; padding: 20px 22px 8px;
+  }
+  #sidebar button {
+    display: flex; align-items: center; gap: 13px;
+    width: 100%; text-align: left; background: transparent;
+    border: none; border-left: 3px solid transparent; border-radius: 0;
+    color: #a6adc8; font: inherit; font-size: 13px; padding: 11px 22px;
+    cursor: pointer; position: relative;
+    transition: color .15s ease, border-color .15s ease,
+                background .15s ease;
+  }
+  /* the wizard marks a step with a numbered square; settings is not a
+     sequence, so the square is a marker only: a small block for the
+     sections you can go to, a filled chip for the one you are in */
+  #sidebar button .mark {
+    flex: 0 0 22px; width: 22px; height: 22px;
+    border: 1px solid transparent;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  #sidebar button .mark::after {
+    content: ""; width: 6px; height: 6px; background: currentColor;
+    opacity: .5; transition: opacity .15s ease, transform .15s ease;
+  }
+  #sidebar button:hover .mark::after { opacity: 1; transform: scale(1.3); }
+  #sidebar button:hover { color: #ffffff; background: rgba(205, 214, 244, .06); }
+  #sidebar button:focus-visible {
+    outline: 1px solid #cdd6f4; outline-offset: -3px;
+    color: #ffffff; background: rgba(205, 214, 244, .1);
+  }
+  #sidebar button.active {
+    color: #ffffff; border-left-color: #ffffff; font-weight: 600;
+    background: rgba(205, 214, 244, .05);
+  }
+  #sidebar button.active .mark { border-color: #cdd6f4; background: #cdd6f4; }
+  #sidebar button.active .mark::after {
+    background: #000000; transform: none;
+  }
+  /* how many settings in that section answer to what was typed. An
+     attribute and a pseudo-element, never a text node: a rail button's
+     text is the name of its section and it is read that way. */
+  #sidebar button[data-hits]::after {
+    content: attr(data-hits);
+    margin-left: auto; font-size: 11px; font-weight: 600;
+    color: #000000; background: #cdd6f4;
+    min-width: 18px; height: 16px; padding: 0 5px;
+    display: flex; align-items: center; justify-content: center;
+    animation: fadeIn .15s ease-out both;
+  }
+  #railfoot {
+    margin-top: auto; padding: 24px 22px 0;
+    font-size: 11px; line-height: 1.7; color: #a6adc8;
+  }
+
+  /* ---- the search bar, across the top of the content ---- */
+  /* It sits outside #content on purpose. #content is what a search
+     with no matches at all steps aside — and a search box that
+     disappears the moment nothing matches is a box you cannot correct
+     a typo in. */
+  #topbar {
+    grid-column: 2; grid-row: 1;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 15px clamp(24px, 5vw, 60px);
+    border-bottom: 1px solid rgba(108, 112, 134, .25);
+  }
+  #navfilter {
+    flex: 1 1 240px; max-width: 400px;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  #navfilter:focus { background: #0a0a0d; }
+  /* while something is typed in there: what the keyboard can do with
+     the results, in one line that is not there the rest of the time */
+  #searchtips {
+    display: none; font-size: 11px; line-height: 1.6; color: #a6adc8;
+  }
+  #searchtips.on { display: block; }
+  #showall {
+    display: none; padding: 7px 12px;
+    background: transparent; border: 1px solid rgba(108, 112, 134, 0.45);
+    color: #a6adc8; font-size: 12px; text-align: left; cursor: pointer;
+  }
+  #showall:hover { color: #cdd6f4; border-color: rgba(205, 214, 244, 0.5); }
+  #showall.on { display: block; }
+  #nomatch {
+    display: none; font-size: 12px; line-height: 1.5; color: #a6adc8;
+  }
+  #nomatch.on { display: block; animation: fadeIn .18s ease-out both; }
+  /* nothing matched the filter: no stale section is left standing */
+  #content.blank { display: none; }
+  /* something in the page did not draw. Said out loud, over everything
+     else, because the alternative is a pane with nothing in it that
+     looks like a broken window. */
+  #drawfail {
+    display: none; position: fixed; inset: 0 0 auto 0; z-index: 9;
+    padding: 10px 16px; font-size: 12px; line-height: 1.5;
+    background: #000000; color: #f38ba8;
+    border-bottom: 1px solid rgba(243, 139, 168, .5);
+  }
+  #drawfail.on { display: block; }
+  .urlmsg { display: none; font-size: 12px; color: #a6adc8;
+            padding: 0 22px 16px; }
+  .urlmsg.on { display: block; }
+  .urlmsg.bad { color: #f38ba8; }
+
+  /* ---- the content column ---- */
+  .content {
+    grid-column: 2; grid-row: 2;
+    min-height: 0; overflow-y: auto;
+    padding: clamp(26px, 4.5vh, 48px) clamp(24px, 5vw, 60px) 48px;
+  }
+  .inner { width: 100%; max-width: 880px; }
+  /* title block, then a hairline, then the settings: the page says
+     where you are once, at the top, and never again further down */
+  #pagehead {
+    padding-bottom: 24px;
+    border-bottom: 1px solid rgba(108, 112, 134, .25);
+  }
+  #curgroup {
+    font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
+    color: #a6adc8; min-height: 14px;
+  }
+  #curcat {
+    font-size: clamp(25px, 3.3vw, 33px); font-weight: 600;
+    color: #ffffff; margin: 10px 0; letter-spacing: -.2px;
+  }
+  #curdesc { font-size: 14px; color: #a6adc8; line-height: 1.7; max-width: 64ch; }
+
+  /* a section arrives instead of blinking: a few pixels of travel that
+     are over in a fifth of a second — and nothing at all if the system
+     asks for less motion, see the end of this stylesheet */
+  @keyframes secIn {
+    from { opacity: 0; transform: translateY(7px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  #pagehead.in { animation: secIn .2s ease-out both; }
+
+  section { display: none; margin-top: 28px; }
+  section.active {
+    display: flex; flex-direction: column; gap: 20px;
+    animation: secIn .22s ease-out both;
+  }
+  /* beats .active: a section whose feature is not installed stays
+     down even if it was the one showing when it was switched off */
+  section[hidden] { display: none !important; }
+  section > h2:first-child { display: none; }  /* it is the page title */
+
+  /* ---- the card ---- */
+  /* Chrome's one good idea, in his colours: settings that belong
+     together are one raised island with a title, and the hairlines run
+     between the rows rather than round each of them. */
+  .panel {
+    background: #0d0d12;
+    border: 1px solid rgba(108, 112, 134, .3);
+    display: flex; flex-direction: column;
+  }
+  h2.sub {
+    font-size: 15px; font-weight: 600; color: #cdd6f4;
+    letter-spacing: 0; text-transform: none;
+    margin: 0; padding: 17px 22px 15px;
+  }
+  /* a row inside a card carries the hairline above it; the first one
+     takes the card's title as its lid instead, and a card that opens
+     straight onto a row has no line at all above it */
+  .panel .wrow, .panel .row {
+    border: none; border-top: 1px solid rgba(108, 112, 134, .22);
+    padding: 16px 22px;
+  }
+  /* the overlapping-hairline trick the loose rows use would pull each
+     row a pixel over the one above it, and inside a card there is no
+     border of its own left to overlap */
+  .panel .group > .wrow + .wrow, .panel .row + .row,
+  .panel .wrow, .panel .row { margin-top: 0; }
+  .panel > .wrow:first-child, .panel > .row:first-child,
+  .panel > *:first-child > .wrow:first-child,
+  .panel > *:first-child > .row:first-child { border-top: none; }
+  .panel > .cards { padding: 4px 22px 20px; }
+  .panel > h2.sub + .cards { padding-top: 0; }
+  .panel > .hint { padding: 0 22px 18px; max-width: none; }
+  /* the line under a card's title is a sentence, not a subtitle: it gets
+     room to breathe rather than being tucked up against the heading */
+  .panel > .wsub { padding: 2px 22px 18px; max-width: none; }
+  /* a note under the rows rather than under the title: it gets a line
+     of its own to sit below */
+  .panel > .group + .hint, .panel > .wrow + .hint, .panel > .row + .hint,
+  .panel > .cards + .hint {
+    border-top: 1px solid rgba(108, 112, 134, .22);
+    padding-top: 15px;
+  }
+
+  /* ---- footer: the wizard's hairline, minus the Next button ---- */
+  #foot {
+    grid-column: 2; grid-row: 3;
+    border-top: 1px solid rgba(108, 112, 134, .35);
+    padding: 16px clamp(24px, 5vw, 60px);
+    display: flex; align-items: center; gap: 12px;
+  }
+  #savednote { font-size: 12px; color: #a6adc8; margin-right: auto; }
+
+  /* ---- shared bits, lifted from the wizard ---- */
+  /* settings that belong together share their hairlines instead of
+     each drawing its own box: one block, not a stack of cards */
+  .group { display: flex; flex-direction: column; gap: 0; }
+  .group > .wrow + .wrow { margin-top: -1px; }
+  .wrow {
+    display: flex; align-items: center; gap: 20px;
+    border: 1px solid rgba(108, 112, 134, .3);
+    padding: 15px 18px; position: relative;
+    transition: border-color .15s ease, background .15s ease,
+                opacity .15s ease, box-shadow .15s ease;
+    flex-wrap: wrap;
+  }
+  label.wrow { cursor: pointer; }
+  .wrow:hover {
+    border-color: rgba(108, 112, 134, .65); z-index: 1;
+    background: rgba(205, 214, 244, .03);
+  }
+  /* inside a card the box is the card's, so the mouse gets a wash
+     rather than a brighter outline */
+  .panel .wrow:hover, .panel .row:hover {
+    border-color: rgba(108, 112, 134, .22);
+    background: rgba(205, 214, 244, .04);
+  }
+  .wlabel { flex: 1; min-width: 200px; }
+  .wname { display: block; font-size: 14px; color: #cdd6f4; }
+  .wsub {
+    display: block; font-size: 12px; color: #a6adc8;
+    margin-top: 6px; line-height: 1.6; max-width: 62ch;
+  }
+  .wnote { display: block; font-size: 11px; color: #a6adc8; margin-top: 6px; }
+
+  /* square switches, exactly the wizard's. The box itself is never
+     drawn — the square beside it is the switch — but it stays in the
+     page rather than being display:none, so Tab reaches it and Space
+     flips it, and so Enter in the search box has something to land
+     on when it finds a switch. */
+  .wrow input[type=checkbox] {
+    position: absolute; opacity: 0; pointer-events: none;
+    width: 0; height: 0; margin: 0;
+  }
+  .wsw {
+    flex: 0 0 42px; width: 42px; height: 20px;
+    border: 1px solid #6c7086; background: #000000;
+    position: relative;
+    transition: background .2s ease, border-color .2s ease;
+  }
+  .wsw::after {
+    content: ""; position: absolute; top: 3px; left: 3px;
+    width: 12px; height: 12px; background: #6c7086;
+    transition: transform .22s cubic-bezier(.2, .8, .25, 1),
+                width .15s ease, background .2s ease;
+  }
+  .wrow:hover .wsw { border-color: #a6adc8; }
+  label.wrow:active .wsw::after { width: 16px; }
+
+  /* Reordering sits at the LEADING edge of a toolbar row, the full
+     width of the row away from the switch at the trailing edge.
+     It used to sit right beside the switch, and <button> is a
+     labelable element: a <label> with no for= binds to the first
+     labelable thing inside it, so the row's control was the up
+     arrow and not the checkbox. Every click on the row - dead
+     centre of the switch included - moved the button along the bar
+     instead of switching it off. The switch is named explicitly
+     now, and nothing aimed at it can land on an arrow. */
+  .warr { display: flex; gap: 4px; flex: 0 0 auto; }
+  .warr button { padding: 6px 9px; font-size: 12px; line-height: 1.2; }
+  .warr button:disabled { opacity: .4; }
+
+  /* A row that cannot be switched off says so before it is clicked:
+     the switch is on and visibly not his to move. Clicking one
+     answers rather than sitting there, which is what a dead row
+     used to do. */
+  .wrow.fixed { cursor: default; }
+  .wrow.fixed .wsw { opacity: .4; }
+  .wrow.fixed.say { border-color: rgba(205, 214, 244, .6); z-index: 1; }
+  .wrow.fixed.say .wsub { color: #cdd6f4; }
+  /* inside a card there is no box round the row left to brighten -
+     only the hairline above it - so the answer is a wash instead */
+  .panel .wrow.fixed.say { background: rgba(205, 214, 244, .07); }
+  .wrow input[type=checkbox]:focus-visible + .wsw {
+    border-color: #ffffff; outline: 1px solid #cdd6f4; outline-offset: 2px;
+  }
+  .wrow input[type=checkbox]:checked + .wsw {
+    border-color: #cdd6f4; background: #cdd6f4;
+  }
+  .wrow input[type=checkbox]:checked + .wsw::after {
+    transform: translateX(20px); background: #000000;
+  }
+
+  /* pickable option cards */
+  .cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .card {
+    display: flex; align-items: center; gap: 12px;
+    border: 1px solid rgba(108, 112, 134, .4);
+    background: #000000; padding: 14px 16px; cursor: pointer;
+    transition: all .12s;
+  }
+  .card:hover { border-color: #a6adc8; background: #0a0a0d; }
+  .card.sel { border-color: #cdd6f4; background: #101018; }
+  .card .cname { font-size: 14px; color: #cdd6f4; }
+  .card .csub { font-size: 11px; color: #a6adc8; margin-top: 4px; }
+  .card .tick {
+    margin-left: auto; color: #cdd6f4; opacity: 0; font-size: 13px;
+    transform: scale(.6); transition: opacity .15s ease, transform .15s ease;
+  }
+  .card.sel .tick { opacity: 1; transform: none; }
+
+  /* generated list rows (passwords, plugins, proxies, rules) */
+  .row {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    border: 1px solid rgba(108, 112, 134, .3);
+    padding: 12px 16px; font-size: 14px; position: relative;
+    transition: border-color .15s ease, background .15s ease,
+                opacity .15s ease, box-shadow .15s ease;
+  }
+  .row + .row { margin-top: -1px; }
+  .row:hover { border-color: rgba(108, 112, 134, .55); z-index: 1; }
+  .row > span:first-child { flex: 1; min-width: 120px; }
+  .switchrow { cursor: pointer; }
+  /* a line of explanation. The room for the search's mark is kept on
+     the left whether or not it is showing, so finding one never
+     shunts the sentence sideways. */
+  .hint {
+    font-size: 13px; color: #a6adc8; line-height: 1.6; max-width: 64ch;
+    padding: 2px 0 2px 14px; margin-left: -14px; position: relative;
+    transition: opacity .15s ease, box-shadow .15s ease;
+  }
+
+  /* what the search found, inside the section: the settings that
+     answer to it keep their colour and get a mark down the left, the
+     ones that do not step back rather than disappear */
+  .hit { box-shadow: inset 3px 0 0 #cdd6f4; z-index: 2; }
+  .dim { opacity: .3; }
+  .dim:hover { opacity: .65; }
+
+  select, button {
+    background: #000000; border: 1px solid rgba(108, 112, 134, .5);
+    border-radius: 0; color: #cdd6f4; font: inherit; font-size: 13px;
+    padding: 9px 14px; cursor: pointer; outline: none;
+    transition: all .15s;
+  }
+  select:hover, button:hover { border-color: #cdd6f4; color: #ffffff; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  select:focus-visible, button:focus-visible, .card:focus-visible {
+    outline: 1px solid #cdd6f4; outline-offset: 2px;
+  }
+  button:disabled { color: #a6adc8; border-color: rgba(108, 112, 134, .3); cursor: default; }
+  button.primary {
+    background: #cdd6f4; border-color: #cdd6f4; color: #000000; font-weight: bold;
+  }
+  button.primary:hover { background: #ffffff; border-color: #ffffff; color: #000000; }
+  #clearhist:hover, #clearcookies:hover { color: #f38ba8; border-color: #f38ba8; }
+  input[type=text], input[type=password], input[type=number] {
+    background: #000000; border: 1px solid rgba(108, 112, 134, .4);
+    border-radius: 0; color: #cdd6f4; font: inherit; font-size: 13px;
+    padding: 9px 12px; outline: none;
+  }
+  input[type=text]:focus, input[type=password]:focus,
+  input[type=number]:focus { border-color: #cdd6f4; }
+  input::placeholder { color: #a6adc8; }
+
+  /* ---- sliders: a square block on a hairline track ---- */
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    flex: 0 1 280px; min-width: 130px; height: 22px;
+    background: transparent; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    box-sizing: border-box; height: 2px;
+    background: linear-gradient(to right,
+                #cdd6f4 0 var(--fill, 0%), #45475a var(--fill, 0%) 100%);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 12px; height: 20px; margin-top: -9px; border-radius: 0;
+    background: #cdd6f4;
+  }
+  input[type=range]:hover::-webkit-slider-thumb,
+  input[type=range]:focus::-webkit-slider-thumb { background: #ffffff; }
+  #zoomval, #minfontval {
+    min-width: 58px; text-align: right; color: #cdd6f4; font-size: 13px;
+  }
+  #dlpath {
+    font-size: 12px; color: #cdd6f4; word-break: break-all;
+    border-top: 1px solid rgba(108, 112, 134, .22); padding: 14px 22px;
+  }
+  #updmsg { color: #a6adc8; font-size: 12px; flex: 1; min-width: 120px; }
+
+  @media (max-width: 900px) {
+    body { grid-template-columns: 190px minmax(0, 1fr); }
+    #brand, .navlabel, #sidebar button, #railfoot { padding-left: 14px; padding-right: 14px; }
+    #sidebar button .mark { display: none; }
+    h2.sub, .panel .wrow, .panel .row, .panel > .hint,
+    .panel > .wsub, .panel > .cards, .urlmsg, #dlpath { padding-left: 14px; padding-right: 14px; }
+  }
+  /* the theme picker: one card per palette, each showing its own
+     colours — a window, an island on it, a line of text, an accent.
+     A gallery, not a list of settings, so it is not put in a card:
+     114 palettes painting themselves want a plain backdrop. */
+  #themelist { display: flex; flex-direction: column; gap: 20px; }
+  .tglabel {
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: #6c7086; margin-bottom: 10px;
+  }
+  .tgrid {
+    display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  }
+  .tcard {
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    border: 1px solid rgba(108, 112, 134, .4);
+    background: #000000; padding: 9px 11px; transition: all .12s;
+  }
+  .tcard:hover { border-color: #a6adc8; }
+  .tcard.sel { border-color: #cdd6f4; background: #101018; }
+  .tsw {
+    width: 48px; height: 32px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(108, 112, 134, .35);
+  }
+  .tswi {
+    width: 36px; height: 18px; display: flex; align-items: center;
+    gap: 4px; padding: 0 4px;
+  }
+  .tswt { height: 3px; flex: 1; }
+  .tswd { width: 6px; height: 6px; flex: none; border-radius: 50%; }
+  .tname { font-size: 13px; color: #cdd6f4; }
+  .tnote { font-size: 10px; color: #a6adc8; margin-top: 2px; }
+  .tcard .tick {
+    margin-left: auto; color: #cdd6f4; opacity: 0; font-size: 12px;
+  }
+  .tcard.sel .tick { opacity: 1; }
+  #themerestart {
+    display: none; align-items: center; gap: 12px; flex-wrap: wrap;
+    border: 1px solid rgba(249, 226, 175, .45);
+    padding: 13px 18px;
+  }
+  #themerestart.on { display: flex; }
+  #themerestartmsg {
+    font-size: 12px; color: #f9e2af; flex: 1; min-width: 180px;
+    line-height: 1.5;
+  }
+  #themenomatch { display: none; font-size: 13px; color: #a6adc8; }
+  #themenomatch.on { display: block; }
+
+  /* everything above is decoration; a system that asks for less motion
+     gets the page with none of it, not a slower version of it */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+  /* A selection and a keyboard focus come out of the palette like
+     everything else. Left alone they are the engine's own idea of a
+     highlight — a blue that belongs to no theme in here, and on a
+     couple of them a ring that cannot be seen at all. */
+  ::selection { background: #cdd6f4; color: #000000; }
+  :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <nav id="rail">
+    <div id="brand" data-str="settings">Settings</div>
+    <div id="sidebar"></div>
+    <div id="railfoot" data-str="setRailFoot">Nothing here is sent anywhere &mdash; it all lives in one file on this computer.</div>
+  </nav>
+
+  <!-- The search box sits over the content, where the eye already is.
+       Outside #content, though, and deliberately: a search that matches
+       nothing takes #content away, and a search box that vanishes the
+       moment you mistype is a box you cannot correct a typo in. -->
+  <div id="topbar">
+    <input type="text" id="navfilter" placeholder="Search settings&hellip;">
+    <button id="showall" data-str="setAll">All settings</button>
+    <div id="searchtips" data-str="setSearchTips">&uarr; &darr; move &middot; Enter opens &middot; Esc clears</div>
+    <div id="nomatch">Nothing here matches that.</div>
+  </div>
+
+  <main class="content" id="content">
+    <div class="inner">
+      <div id="pagehead">
+        <div id="curgroup"></div>
+        <h1 id="curcat">Settings</h1>
+        <p id="curdesc"></p>
+      </div>
+
+    <section data-group="gen" data-desc="descSearch">
+      <h2 id="t_search">Search</h2>
+      <div class="panel">
+        <h2 class="sub" id="t_searchEngine">Search engine</h2>
+        <div class="cards" id="enginecards"></div>
+      </div>
+      <div class="panel">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_searchSuggest">Search suggestions while typing</span>
+            <span class="wsub" id="t_searchSuggestHint">Off = nothing you type in the address bar is sent to the search engine.</span>
+          </span>
+          <input type="checkbox" id="suggestions"><span class="wsw"></span>
+        </label>
+      </div>
+    </section>
+
+    <section data-group="gen" data-desc="descAppearance">
+      <h2 id="t_appearance">Appearance</h2>
+      <div class="panel">
+        <h2 class="sub" data-str="cardRendering">How pages are drawn</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_whiteGoogle">White Google</span>
+            <span class="wsub" id="t_whiteGoogleHint">Off = pitch-black Google</span>
+          </span>
+          <input type="checkbox" id="googlelight"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_autoDarken">Auto-darken light websites</span>
+            <span class="wsub" id="t_darkHint">Bright pages get darkened so they don't blind you at night.</span>
+          </span>
+          <input type="checkbox" id="forcedark"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_smoothScroll">Smooth scrolling</span>
+            <span class="wsub" id="t_smoothScrollHint">Scrolling glides instead of jumping line by line.</span>
+            <span class="wnote" id="t_smoothNote">Applies to pages you open from now on.</span>
+          </span>
+          <input type="checkbox" id="smoothscroll"><span class="wsw"></span>
+        </label>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="sub" data-str="cardSize">Size</h2>
+        <div class="group">
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pageZoom">Page zoom</span>
+            <span class="wsub" id="t_zoomHint">Makes everything on a website bigger or smaller. Ctrl + and Ctrl − zoom one tab; Ctrl 0 puts it back to this.</span>
+          </span>
+          <input type="range" id="zoom" min="50" max="200" step="10">
+          <span id="zoomval"></span>
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_minFont">Minimum text size</span>
+            <span class="wsub" id="t_minFontHint">Forces tiny website text to be at least this big.</span>
+          </span>
+          <input type="range" id="minfont" min="0" max="28" step="2">
+          <span id="minfontval"></span>
+        </div>
+        </div>
+      </div>
+    </section>
+
+    <section data-group="gen" data-desc="descToolbar">
+      <h2 data-str="toolbar">Toolbar</h2>
+      <p class="hint" data-str="tbHint">A right-click on the toolbar itself opens the same list.</p>
+
+      <div class="panel">
+        <h2 class="sub" data-str="tbShown">On the toolbar</h2>
+        <div class="group" id="tbbar"></div>
+      </div>
+
+      <div class="panel" id="tbhidpanel">
+        <h2 class="sub" id="tbhidhead" data-str="tbHidden">Not shown</h2>
+        <div class="group" id="tbhid"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" data-str="tbElsewhere">Elsewhere in the chrome</h2>
+        <div class="wsub" data-str="tbElsewhereHint">These sit where they sit &mdash; you can take one away, but not move it.</div>
+        <div class="group" id="tbelse"></div>
+      </div>
+
+      <p class="hint" data-str="tbShortcutHint">Taking a button away never touches its keyboard shortcut &mdash; Ctrl+P still prints.</p>
+      <div class="panel">
+        <div class="wrow">
+          <span class="wlabel"><span class="wsub" data-str="tbFixedHint">Back, forward, reload and the address bar stay. A browser with no way back is a broken browser.</span></span>
+          <button id="tbreset" data-str="tbReset">Back to the usual set</button>
+        </div>
+      </div>
+    </section>
+
+    <section data-group="gen" data-desc="descTheme">
+      <h2 id="t_theme">Theme</h2>
+      <p class="hint" id="t_themeHint">A theme paints the browser and its own pages. Websites keep the colours their makers gave them.</p>
+      <div class="panel">
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="themecurname">Catppuccin Mocha</span>
+            <span class="wsub" id="themecurnote"></span>
+          </span>
+          <input type="text" id="themefilter" placeholder="Search themes&hellip;" style="width:180px">
+        </div>
+      </div>
+      <div id="themerestart">
+        <span id="themerestartmsg"></span>
+        <button id="themerestartbtn" class="primary">Restart now</button>
+      </div>
+      <div id="themenomatch">No theme by that name.</div>
+      <div id="themelist"></div>
+    </section>
+
+    <section data-group="gen" data-desc="descBrowsing">
+      <h2 id="t_browsing">Browsing</h2>
+      <div class="panel">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_reopenTabs">Reopen tabs from last time</span>
+            <span class="wsub" id="t_tabsHint">Start again where you left off.</span>
+          </span>
+          <input type="checkbox" id="restoretabs"><span class="wsw"></span>
+        </label>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_startUrl">When the browser starts</h2>
+        <div class="wsub" id="t_startUrlHint">The first tab at launch. Tabs reopened from last time come back instead of it.</div>
+        <div class="cards" id="startpage"></div>
+        <div class="wrow" id="starturlrow">
+          <input type="text" id="starturl" placeholder="example.com" style="flex:1;min-width:200px">
+          <button id="starturlsave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="starturlmsg" class="urlmsg"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_newTabPage">What a new tab shows</h2>
+        <div class="cards" id="newtabpage"></div>
+        <div class="wrow" id="newtaburlrow">
+          <input type="text" id="newtaburl" placeholder="example.com" style="flex:1;min-width:200px">
+          <button id="newtaburlsave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="newtaburlmsg" class="urlmsg"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_newTabPos">Where a new tab opens</h2>
+        <div class="cards" id="newtabpos"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_media">Media</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_blockAutoplay">Block videos from playing on their own</span>
+            <span class="wsub" id="t_blockAutoplayHint">A page has to be clicked before it may play sound or video.</span>
+            <span class="wnote" id="t_autoNote">Applies to pages you open from now on.</span>
+          </span>
+          <input type="checkbox" id="blockautoplay"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pdfViewer">Open PDFs in the browser</span>
+            <span class="wsub" id="t_pdfViewerHint">Off = a PDF is downloaded instead of shown.</span>
+            <span class="wnote" id="t_pdfNote">Applies to pages you open from now on.</span>
+          </span>
+          <input type="checkbox" id="pdfviewer"><span class="wsw"></span>
+        </label>
+        </div>
+      </div>
+    </section>
+
+    <section data-group="gen" data-desc="descDownloads">
+      <h2 id="t_downloads">Downloads</h2>
+      <div class="panel">
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_askDownload">Ask where to save each download</span>
+          <span class="wsub" id="t_dlHint">Off = everything lands in your download folder.</span>
+        </span>
+        <input type="checkbox" id="askdownload"><span class="wsw"></span>
+      </label>
+      <div class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_downloadFolder">Download folder</span>
+          <span class="wsub" id="t_downloadFolderHint">Where files land when you are not asked.</span>
+        </span>
+        <button id="dlpick">Choose&hellip;</button>
+        <button id="dldefault">Use ~/Downloads</button>
+      </div>
+      <div id="dlpath"></div>
+      </div>
+    </section>
+
+    <section data-group="gen" data-desc="descLanguage">
+      <h2 id="t_translation">Language</h2>
+      <div class="panel">
+      <div class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_translateInto">Browser and translate language</span>
+          <span class="wsub" id="t_translateHint">Used by the translate button next to the address bar.</span>
+        </span>
+        <input type="text" id="langfilter" placeholder="Search&hellip;" style="width:140px">
+        <select id="translatelang"></select>
+      </div>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_spellCheck">Check spelling as I type</span>
+          <span class="wsub" id="t_spellHint">Needs the matching dictionary installed on this computer.</span>
+        </span>
+        <input type="checkbox" id="spellcheck"><span class="wsw"></span>
+      </label>
+      <div class="wrow">
+        <span class="wlabel"><span class="wname" id="t_spellLang">Spell-check language</span></span>
+        <select id="spelllang"></select>
+      </div>
+      </div>
+    </section>
+
+    <section data-group="priv" data-desc="descPrivacy">
+      <h2 id="t_privacy">Privacy</h2>
+      <div class="panel">
+        <h2 class="sub" data-str="cardKept">What is kept</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_saveHistory">Save history</span>
+            <span class="wsub" id="t_histHint">Pages you visit are listed on the history page.</span>
+          </span>
+          <input type="checkbox" id="history"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_clearHistExit">Clear history when the browser closes</span>
+          </span>
+          <input type="checkbox" id="clearhistexit"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_clearCookiesExit">Clear cookies when the browser closes</span>
+            <span class="wsub" id="t_clearExitHint">Cookies go for every virtual browser, so you start each session logged out. A site that keeps your login in its own storage rather than in a cookie can still recognise you.</span>
+            <span class="wnote" id="t_clearExitCrash">Kept up even when the browser is killed: a wipe the last run did not get to do is done at the next start.</span>
+          </span>
+          <input type="checkbox" id="clearcookiesexit"><span class="wsw"></span>
+        </label>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="wrow">
+          <span class="wlabel"><span class="wsub" id="t_cookiesHint">Clear cookies logs this virtual browser out everywhere.</span></span>
+          <button id="viewhist">View history</button>
+          <button id="clearhist">Clear history</button>
+          <button id="clearcookies">Clear cookies</button>
+        </div>
+      </div>
+    </section>
+
+    <section data-group="priv" data-desc="descPasswords">
+      <h2 id="t_passwords">Passwords</h2>
+      <div class="panel">
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_savePasswords">Offer to save passwords</span>
+          <span class="wsub" id="t_savePwHint">When you log in somewhere, the browser asks whether it should remember it.</span>
+        </span>
+        <input type="checkbox" id="savepasswords"><span class="wsw"></span>
+      </label>
+      <div class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="pwsummary">&mdash;</span>
+          <span class="wsub" id="t_pwManageHint">Logins, secure notes, cards and identities &mdash; with a generator, two-factor codes and a health check.</span>
+        </span>
+        <button id="pwopen">Open the password manager</button>
+      </div>
+      <div class="hint" id="t_pwHint">Stored scrambled on this computer &mdash; anyone who can use this user account can read them.</div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_masterPw">Master password</h2>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_masterPwName">Lock the vault with a master password</span>
+            <span class="wsub" id="t_masterPwHint"></span>
+          </span>
+          <input type="checkbox" id="masterpw"><span class="wsw"></span>
+        </label>
+        <!-- The warning is here as well as in the box that switches it
+             on. It is the whole bargain of the feature, and a person
+             reading Settings to decide should not have to open a dialog
+             to find out what he would be agreeing to. -->
+        <div class="hint danger" id="masterwarn"></div>
+        <div class="wrow" id="masterauto_row" hidden>
+          <span class="wlabel">
+            <span class="wname" id="t_masterAuto">Lock again after</span>
+            <span class="wsub" id="t_masterAutoHint"></span>
+          </span>
+          <select id="masterauto"></select>
+        </div>
+        <div class="wrow" id="masterbtn_row" hidden>
+          <span class="wlabel"><span class="wname" id="masterstate">&mdash;</span></span>
+          <button id="masterchange">Change master password&hellip;</button>
+          <button id="masterlock">Lock now</button>
+        </div>
+      </div>
+    </section>
+
+    <section data-group="adv" data-desc="descPlugins">
+      <h2 id="t_plugins">Plugins</h2>
+      <div class="panel">
+        <h2 class="sub" data-str="cardInstalled">Installed</h2>
+        <div id="pluginlist"></div>
+        <div class="wrow">
+          <span class="wlabel"><span class="wsub" id="t_pluginsHint">Userscripts (.user.js) in this folder run on matching pages.</span>
+            <span class="wnote" id="pluginfolder"></span></span>
+          <button id="reloadplugins">Reload plugins</button>
+        </div>
+      </div>
+
+      <div class="panel">
+      <h2 class="sub" id="t_builtIn">Built-in features</h2>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_vaultPw">Vault Password</span>
+          <span class="wsub" id="t_vaultPwHint">The built-in password manager: saves your logins and fills them back in, with secure notes, payment cards, two-factor codes and a generator. It ships with the browser and does nothing at all until you switch it on.</span>
+          <span class="wnote" id="t_vaultKept"></span>
+        </span>
+        <input type="checkbox" id="vaultpw"><span class="wsw"></span>
+      </label>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_quickInstall">Quick install</h2>
+        <div id="starterlist"></div>
+        <div class="wrow">
+          <span class="wlabel"></span>
+          <button id="fromfile">From file&hellip;</button>
+          <button id="getmore">Browse Greasy Fork</button>
+        </div>
+      </div>
+    </section>
+
+    <section data-group="adv" data-desc="descNetwork">
+      <h2 id="t_network">Network (proxy)</h2>
+      <div class="panel">
+        <div id="proxyprofiles"></div>
+        <div class="hint" id="t_proxyHint">Pick a profile here or from the toolbar proxy button.</div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_rulesTitle">Per-site rules</h2>
+        <div id="autorules"></div>
+        <div class="wrow">
+          <input type="text" id="arpat" placeholder="*.reddit.com" style="width:190px">
+          <span style="flex:0">&rarr;</span>
+          <select id="arprof"></select>
+          <button id="araddbtn">Add rule</button>
+        </div>
+        <div class="hint" id="t_autoHint">Rules override the mode above for matching sites; changes apply after a restart (system proxy is read at launch).</div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_addProxy">Add proxy profile</h2>
+        <div class="group">
+        <div class="wrow"><span class="wlabel"><span class="wname" id="t_proxyName">Name</span></span>
+          <input type="text" id="pname" placeholder="Tor / Work / VPN" style="width:200px"></div>
+        <div class="wrow"><span class="wlabel"><span class="wname" id="t_proxyType">Type</span></span>
+          <select id="ptype"><option value="http">HTTP</option>
+            <option value="socks5">SOCKS5</option></select></div>
+        <div class="wrow"><span class="wlabel"><span class="wname" id="t_proxyHost">Host</span></span>
+          <input type="text" id="phost" placeholder="127.0.0.1" style="width:200px"></div>
+        <div class="wrow"><span class="wlabel"><span class="wname" id="t_proxyPort">Port</span></span>
+          <input type="number" id="pport" placeholder="9050" style="width:110px">
+          <button id="paddbtn">Save profile</button></div>
+        </div>
+      </div>
+      <div class="hint" id="t_inspectorHint">Press F12 on any page to open the inspector (DevTools).</div>
+    </section>
+
+    <section data-group="sys" data-desc="descUpdates">
+      <h2 id="t_updates">Updates</h2>
+      <div class="panel">
+        <div class="wrow">
+          <span id="updmsg"></span>
+          <button id="updatebtn">Check for updates</button>
+        </div>
+      </div>
+    </section>
+
+    <section data-group="sys" data-desc="descSetup">
+      <h2 id="t_setup">Setup</h2>
+      <div class="panel">
+        <div class="wrow">
+          <span class="wlabel"><span class="wsub" id="t_setupHint">Language, search, wallpaper, privacy and quick links</span></span>
+          <button id="rerunsetup" class="primary">Run setup again</button>
+        </div>
+      </div>
+    </section>
+
+    </div>
+  </main>
+  <div id="drawfail"></div>
+
+  <footer id="foot">
+    <span id="savednote">Every change is saved the moment you make it.</span>
+    <button id="donebtn" class="primary">Done</button>
+  </footer>
+
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  let bridge = null;
+
+  // the page's own stopwatch, read back by BROWSER_TIMING=1. The marks
+  // are taken either way (performance.now() costs nothing) and only
+  // ever leave the page when the browser is listening.
+  const MARKS = [];
+  function mark(label) {
+    const ms = performance.now();
+    if (!bridge) MARKS.push([label, ms]);      // nowhere to send it yet
+    else if (bridge.timing) bridge.pageTiming(label, ms);
+  }
+  mark("script");
+
+  // Every setting is written through here. window._settings is the
+  // snapshot the page was drawn from, and the uiStrings callback draws
+  // the page again from it - so a snapshot left holding the old value
+  // puts the old value back on screen, and the next Save re-commits it.
+  function saveSetting(key, value) {
+    if (bridge) bridge.setSetting(key, JSON.stringify(value));
+    if (window._settings) window._settings[key] = value;
+  }
+
+  // the one line on this page that is a warning rather than a note
+  function paintWarn() {
+    const w = document.getElementById("masterwarn");
+    if (w) w.style.color = "var(--yellow, #f9e2af)";
+  }
+
+  function bindSwitch(id, key) {
+    document.getElementById(id).onchange = (e) => {
+      saveSetting(key, e.target.checked);
+    };
+  }
+
+  // Vault Password decides whether the Passwords section is in
+  // Settings at all. Hidden, never removed: renderPwSummary writes
+  // into #pwsummary without checking it is there, and the summary can
+  // arrive from the bridge at any moment.
+  function applyVaultPassword(on) {
+    const sec = document.querySelector('section[data-desc="descPasswords"]');
+    if (sec) sec.hidden = !on;
+    const kept = document.getElementById("t_vaultKept");
+    const S = window.STR || {};
+    if (kept) {
+      kept.textContent = (!on && window._settings && window._settings.vaultKept)
+                         ? (S.vaultKept || "") : "";
+    }
+    buildNav();
+  }
+
+  function paintRange(el) {
+    // the filled part of the track is a gradient stop, and only the
+    // script knows where the value sits between min and max
+    const min = parseFloat(el.min) || 0, max = parseFloat(el.max) || 100;
+    const v = parseFloat(el.value);
+    const pct = max > min ? ((v - min) / (max - min)) * 100 : 0;
+    el.style.setProperty("--fill", pct + "%");
+  }
+
+  // one card per choice, the wizard's treatment: name, one line under
+  // it, a tick on the one in force
+  function renderCards(boxId, options, chosen, pick) {
+    const box = document.getElementById(boxId);
+    if (!box) return;
+    box.innerHTML = "";
+    for (const o of options) {
+      const card = document.createElement("div");
+      card.className = "card" + (o.value === chosen ? " sel" : "");
+      card.dataset.value = o.value;
+      const txt = document.createElement("div");
+      const n = document.createElement("div");
+      n.className = "cname"; n.textContent = o.name;
+      txt.appendChild(n);
+      if (o.sub) {
+        const s = document.createElement("div");
+        s.className = "csub"; s.textContent = o.sub;
+        txt.appendChild(s);
+      }
+      const tick = document.createElement("span");
+      tick.className = "tick"; tick.textContent = "✓";
+      card.append(txt, tick);
+      card.onclick = () => {
+        for (const c of box.children) c.classList.remove("sel");
+        card.classList.add("sel");
+        pick(o.value);
+      };
+      box.appendChild(card);
+    }
+  }
+
+  let allLangs = [];
+  function fillLangs(filter) {
+    const sel = document.getElementById("translatelang");
+    const current = sel.value || window._tlang;
+    const needle = (filter || "").trim().toLowerCase();
+    sel.innerHTML = "";
+    for (const [code, native, english] of allLangs) {
+      if (needle && !(native.toLowerCase().includes(needle)
+                      || english.includes(needle)
+                      || code.toLowerCase().includes(needle))) continue;
+      const o = document.createElement("option");
+      o.value = code;
+      o.textContent = native;
+      o.selected = code === current;
+      sel.appendChild(o);
+    }
+    refreshHay();   // the rail matches on what a section says
+  }
+
+  const ENGINE_SITES = {google: "google.com", duckduckgo: "duckduckgo.com",
+    bing: "bing.com", brave: "search.brave.com", ecosia: "ecosia.org",
+    startpage: "startpage.com"};
+
+  // Two settings, one field: the page the browser opens on and the
+  // page a new tab shows. Same cards, same box, same rules - they are
+  // told apart only by the key they save under, and neither one ever
+  // writes the other.
+  const PAGE_FIELDS = [
+    {key: "startUrl", cards: "startpage", box: "starturl", str: "startUrl"},
+    {key: "newTabUrl", cards: "newtabpage", box: "newtaburl",
+     str: "newTabPage"},
+  ];
+  const PAGE_EN = {
+    startUrlAsk: "Type an address, then press Save.",
+    startUrlBad: "That is not an address the browser can open.",
+    startUrlOk: "The browser starts on {a}",
+    newTabUrlAsk: "Type an address, then press Save.",
+    newTabUrlBad: "That is not an address the browser can open.",
+    newTabUrlOk: "New tabs open {a}"};
+  window._pageMode = {};
+  window._pageUrl = {};
+
+  function pageField(key) {
+    return PAGE_FIELDS.find((f) => f.key === key);
+  }
+
+  // the card that is in force, which is not always what is saved: an
+  // address typed but not saved yet leaves "A page you choose" picked
+  // and says out loud that the start page is still what opens
+  function pageMode(key) {
+    if (window._pageMode[key]) return window._pageMode[key];
+    return (window._pageUrl[key] || "") ? "custom" : "start";
+  }
+
+  // what the address box would fall back to if a new one is refused
+  function pageInForce(key) {
+    const S = window.STR || {};
+    return window._pageUrl[key] || S.theStartPage || "the start page";
+  }
+
+  function pageMsg(key, which, arg) {
+    const S = window.STR || {};
+    const el = document.getElementById(pageField(key).box + "msg");
+    if (!which) { el.className = "urlmsg"; el.textContent = ""; return; }
+    const name = key + which;
+    const t = S[name] || PAGE_EN[name] || "";
+    el.textContent = t.replace("{a}", arg || "");
+    el.className = "urlmsg on" + (which === "Bad" ? " bad" : "");
+  }
+
+  function renderPage(key) {
+    const S = window.STR || {}, f = pageField(key);
+    const mode = pageMode(key);
+    renderCards(f.cards, [
+      {value: "start", name: S[f.str + "Start"] || "The start page",
+       sub: S[f.str + "StartSub"] || ""},
+      {value: "custom", name: S[f.str + "Custom"] || "A page you choose",
+       sub: S[f.str + "CustomSub"] || ""}],
+      mode, (v) => {
+        window._pageMode[key] = v;
+        if (v === "start") {
+          window._pageUrl[key] = "";
+          document.getElementById(f.box).value = "";
+          pageMsg(key, null);
+          saveSetting(key, "");
+        } else {
+          document.getElementById(f.box).focus();
+          if (!window._pageUrl[key]) pageMsg(key, "Ask");
+        }
+        showPageUrl(key, v === "custom");
+      });
+    showPageUrl(key, mode === "custom");
+    if (mode === "custom" && !window._pageUrl[key]) pageMsg(key, "Ask");
+    else if (mode !== "custom") pageMsg(key, null);
+    refreshHay();   // the rail matches on what a section says
+  }
+
+  function renderNewTab() {
+    for (const f of PAGE_FIELDS) renderPage(f.key);
+  }
+
+  function showPageUrl(key, on) {
+    document.getElementById(pageField(key).box + "row").style.display =
+      on ? "" : "none";
+  }
+
+  // The browser gets the last word on what an address turns into, so a
+  // typo is told about instead of quietly becoming the start page.
+  //
+  // force is the Save button and Enter, which always answer. Leaving
+  // the box commits too - the page promises every change is saved the
+  // moment you make it, and this was the one control that broke that
+  // promise - but only when there is something new to commit.
+  function savePageUrl(key, force) {
+    const f = pageField(key);
+    const v = document.getElementById(f.box).value.trim();
+    if (!force && v === (window._pageUrl[key] || "")) return;
+    if (!v) {
+      // an empty box means the start page, and the cards have to say
+      // so: leaving "A page you choose" ticked over an empty box was
+      // the setting claiming it had not taken when it had
+      window._pageUrl[key] = "";
+      window._pageMode[key] = "start";
+      saveSetting(key, "");    // an empty box is not an address to check
+      renderPage(key);
+      return;
+    }
+    window._pageMode[key] = "custom";
+    if (!bridge) { window._pageUrl[key] = v; pageMsg(key, "Ok", v); return; }
+    const before = pageInForce(key);
+    bridge.setPageUrl(key, v, (resolved) => {
+      if (!resolved) { pageMsg(key, "Bad", before); return; }
+      window._pageUrl[key] = v;
+      if (window._settings) window._settings[key] = v;
+      pageMsg(key, "Ok", resolved);
+    });
+  }
+
+  function load(s) {
+    const S = window.STR || {};
+    renderCards("enginecards",
+      s.engines.map(([key, name]) => ({value: key, name: name,
+                                       sub: ENGINE_SITES[key] || ""})),
+      s.searchEngine,
+      (v) => saveSetting("searchEngine", v));
+    window._theme = s.theme;
+    window._launchDark = s.themeLaunchDark;
+    // named in its own right: reported as part of "settings" it would
+    // send whoever reads the message looking in the wrong place
+    guard("themes", renderThemes);
+    document.getElementById("googlelight").checked = s.googleLight;
+    document.getElementById("forcedark").checked = s.forceDark;
+    document.getElementById("smoothscroll").checked = s.smoothScroll;
+    document.getElementById("restoretabs").checked = s.restoreTabs;
+    document.getElementById("askdownload").checked = s.askDownload;
+    document.getElementById("history").checked = s.history;
+    document.getElementById("suggestions").checked = s.searchSuggestions;
+    document.getElementById("blockautoplay").checked = s.blockAutoplay;
+    document.getElementById("pdfviewer").checked = s.pdfViewer;
+    document.getElementById("clearhistexit").checked = s.clearHistoryExit;
+    document.getElementById("clearcookiesexit").checked = s.clearCookiesExit;
+    document.getElementById("savepasswords").checked = s.savePasswords;
+    document.getElementById("vaultpw").checked = s.vaultPassword;
+    applyVaultPassword(s.vaultPassword);
+    document.getElementById("spellcheck").checked = s.spellCheck;
+    document.getElementById("dlpath").textContent = s.downloadDir;
+    window._dlDefault = s.downloadDirDefault;
+    const sp = document.getElementById("spelllang");
+    sp.innerHTML = "";
+    for (const [code, name] of (s.spellLanguages || [])) {
+      const o = document.createElement("option");
+      o.value = code; o.textContent = name;
+      o.selected = code === s.spellCheckLang;
+      sp.appendChild(o);
+    }
+    renderCards("newtabpos", [
+      {value: "end", name: S.newTabPosEnd || "At the end of the strip",
+       sub: S.newTabPosEndSub || ""},
+      {value: "after", name: S.newTabPosAfter || "Right after this tab",
+       sub: S.newTabPosAfterSub || ""}],
+      s.newTabPos || "end",
+      (v) => saveSetting("newTabPos", v));
+    for (const f of PAGE_FIELDS) {
+      window._pageUrl[f.key] = s[f.key] || "";
+      if (!window._pageMode[f.key])
+        window._pageMode[f.key] = window._pageUrl[f.key] ? "custom" : "start";
+      document.getElementById(f.box).value = window._pageUrl[f.key];
+      renderPage(f.key);
+    }
+    const zoom = document.getElementById("zoom");
+    zoom.value = Math.round(s.zoom * 100);
+    document.getElementById("zoomval").textContent = zoom.value + "%";
+    paintRange(zoom);
+    const mf = document.getElementById("minfont");
+    mf.value = s.minFont || 0;
+    document.getElementById("minfontval").textContent =
+      (s.minFont ? s.minFont + "px" : (window.STR && window.STR.off) || "Off");
+    paintRange(mf);
+    tbTake(s.toolbarItems, s.toolbarButtons);
+    window._activeProxy = s.activeProxy || "system";
+    window._proxyProfiles = s.proxyProfiles || [];
+    window._proxyAuto = s.proxyAuto || {rules:[], default:"direct"};
+    renderProxies();
+    allLangs = s.languages;
+    window._tlang = s.translateLang;
+    fillLangs("");
+    refreshHay();   // the rail matches on what a section says
+  }
+
+  // ---- which buttons sit at the top ----
+  // window._tbItems is every button the browser has to offer,
+  // window._tbShown the ordered list of the ones that are up there.
+  // The names are looked up in window.STR here, so a language change
+  // redraws this list without asking for the settings again.
+  //
+  // Both lists at once, from wherever they came - the settings the page
+  // loaded with, or the browser saying the toolbar has moved. Never one
+  // without the other: which buttons are on offer and which are up
+  // there are two halves of the same answer, and Vault Password moves
+  // both of them at the same moment.
+  function tbTake(items, shown) {
+    window._tbItems = items || [];
+    window._tbShown = (shown || []).slice();
+    if (window._settings) {
+      window._settings.toolbarItems = window._tbItems;
+      window._settings.toolbarButtons = window._tbShown;
+    }
+    renderToolbar();
+  }
+
+  // Ask the browser what the toolbar is now. The right-click menu on
+  // the bar works while this page is up, so the list this page loaded
+  // with can be out of date by the time he flips a switch on it -- and
+  // posting that list back would undo whatever the menu did.
+  function tbReread() {
+    if (!bridge || !bridge.toolbarState) return;
+    bridge.toolbarState((j) => {
+      guard("toolbar", () => {
+        let st;
+        try { st = JSON.parse(j); } catch (e) { return; }
+        tbTake(st.items, st.shown);
+      });
+    });
+  }
+
+  function tbSave() {
+    saveSetting("toolbarButtons", window._tbShown);
+    renderToolbar();
+  }
+
+  function tbRank(name) {
+    return (window._tbItems || []).findIndex((x) => x.name === name);
+  }
+
+  // one step along the bar, stepping over anything that is not on it -
+  // the star and the tab groups button have no place in the order
+  function tbMove(name, delta) {
+    const L = window._tbShown, byName = {};
+    for (const it of window._tbItems || []) byName[it.name] = it;
+    const i = L.indexOf(name);
+    if (i < 0) return;
+    let j = i + delta;
+    while (j >= 0 && j < L.length
+           && (byName[L[j]] || {}).place !== "bar") j += delta;
+    if (j < 0 || j >= L.length) return;
+    L.splice(j, 0, L.splice(i, 1)[0]);
+    tbSave();
+  }
+
+  // switched on, a button goes back where the browser would have put
+  // it: ahead of the first button the registry ranks after it
+  function tbShow(name, on) {
+    const L = window._tbShown, at = L.indexOf(name);
+    if (on && at < 0) {
+      const rank = tbRank(name);
+      let put = L.length;
+      for (let k = 0; k < L.length; k++) {
+        if (tbRank(L[k]) > rank) { put = k; break; }
+      }
+      L.splice(put, 0, name);
+    } else if (!on && at >= 0) {
+      L.splice(at, 1);
+    }
+    // The browser is told which button and which way, not what the
+    // whole row should be afterwards. It has the row; this page's copy
+    // of it is one right-click away from being out of date, and posted
+    // back it would undo whatever that right-click did. The list above
+    // is only so the row redraws at once - toolbarChanged confirms it.
+    if (bridge && bridge.setToolbarButton) {
+      bridge.setToolbarButton(name, !!on);
+      renderToolbar();
+    } else {
+      tbSave();
+    }
+  }
+
+  function tbRow(it, on, onBar) {
+    const S = window.STR || {};
+    // a switch he can flip is a label so the whole row is clickable;
+    // one he cannot is a plain div, so it does not offer to
+    const row = document.createElement(it.fixed ? "div" : "label");
+    row.className = "wrow" + (it.fixed ? " fixed" : "");
+    row.dataset.tb = it.name;
+    // the arrows go in FIRST, at the leading edge, so the trailing
+    // edge of the row is the switch and nothing else - see .warr
+    if (it.place === "bar" && on) {
+      const at = onBar.indexOf(it.name);
+      const arr = document.createElement("span");
+      arr.className = "warr";
+      for (const [d, key, glyph] of [[-1, "tbMoveUp", "\u2191"],
+                                     [1, "tbMoveDown", "\u2193"]]) {
+        const b = document.createElement("button");
+        // without this a button inside a <label> is a submit button
+        b.type = "button";
+        b.textContent = glyph;
+        b.title = S[key] || S[d < 0 ? "bmUp" : "bmDown"] || "";
+        b.disabled = d < 0 ? at <= 0 : at >= onBar.length - 1;
+        // the row it sits in may be a label, and a click on a button
+        // inside one flips that label's switch as well unless it is
+        // told not to. A disabled button never fires click at all, so
+        // this never runs for one - which is the other half of why
+        // the switch below is named rather than left to be guessed.
+        b.onclick = (e) => {
+          e.preventDefault(); e.stopPropagation(); tbMove(it.name, d);
+        };
+        arr.appendChild(b);
+      }
+      row.appendChild(arr);
+    }
+    const lab = document.createElement("span");
+    lab.className = "wlabel";
+    const nm = document.createElement("span");
+    nm.className = "wname";
+    nm.textContent = (it.glyph ? it.glyph + "   " : "")
+                     + (S[it.str] || it.name);
+    lab.appendChild(nm);
+    const sub = document.createElement("span");
+    sub.className = "wsub";
+    sub.textContent = it.fixed ? (S.tbFixed || "Always there") : (it.key || "");
+    if (sub.textContent) lab.appendChild(sub);
+    if (it.fixed && it.key) {
+      const note = document.createElement("span");
+      note.className = "wnote";
+      note.textContent = it.key;
+      lab.appendChild(note);
+    }
+    row.appendChild(lab);
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    // Named, not guessed. A bare <label> takes the first labelable
+    // element inside it, and the arrows above are labelable; saying
+    // which one the row switches keeps that true whatever else the
+    // row grows later.
+    box.id = "tbsw-" + it.name;
+    box.checked = on;
+    if (it.fixed) {
+      box.disabled = true;
+      // not switchable is not the same as not answering: say what
+      // this row will and will not do, then go quiet again
+      row.onclick = () => {
+        row.classList.add("say");
+        sub.textContent = S.tbFixedWhy || sub.textContent;
+        clearTimeout(row._sayT);
+        row._sayT = setTimeout(() => {
+          row.classList.remove("say");
+          sub.textContent = S.tbFixed || "Always there";
+        }, 2200);
+      };
+    } else {
+      row.htmlFor = box.id;
+      box.onchange = () => tbShow(it.name, box.checked);
+    }
+    const sw = document.createElement("span");
+    sw.className = "wsw";
+    row.append(box, sw);
+    return row;
+  }
+
+  function renderToolbar() {
+    const items = window._tbItems || [];
+    const shown = window._tbShown || [];
+    const bar = document.getElementById("tbbar");
+    if (!bar) return;
+    const hid = document.getElementById("tbhid");
+    const other = document.getElementById("tbelse");
+    bar.innerHTML = ""; hid.innerHTML = ""; other.innerHTML = "";
+    const byName = {};
+    for (const it of items) byName[it.name] = it;
+    const onBar = shown.filter((n) => (byName[n] || {}).place === "bar");
+    for (const name of onBar) bar.appendChild(tbRow(byName[name], true, onBar));
+    for (const it of items) {
+      const on = shown.indexOf(it.name) >= 0;
+      if (it.place === "bar") {
+        if (!on) hid.appendChild(tbRow(it, false, onBar));
+      } else {
+        other.appendChild(tbRow(it, on, onBar));
+      }
+    }
+    // no heading over an empty list - and no empty card round it
+    // either, now that the heading lives inside one
+    const hidHead = document.getElementById("tbhidhead");
+    (hidHead.closest(".panel") || hidHead).style.display =
+      hid.children.length ? "" : "none";
+    refreshHay();   // the rail matches on what a section says
+  }
+
+  function renderPlugins(j) {
+    try {
+      const p = JSON.parse(j);
+      window._plugins = j;
+      const list = document.getElementById("pluginlist");
+      list.innerHTML = "";
+      if (!p.plugins.length) {
+        const d = document.createElement("div");
+        d.className = "row"; d.id = "noplugins";
+        d.textContent = (window.STR && window.STR.noPlugins)
+                        || "No plugins installed.";
+        list.appendChild(d);
+      } else for (const name of p.plugins) {
+        const d = document.createElement("div");
+        d.className = "row"; d.textContent = name;
+        list.appendChild(d);
+      }
+      document.getElementById("pluginfolder").textContent = p.folder;
+      window._installed = p.plugins;
+    } catch (e) {}
+    refreshHay();   // the rail matches on what a section says
+  }
+
+  function renderStarters(j) {
+    const box = document.getElementById("starterlist");
+    box.innerHTML = "";
+    const S = window.STR || {};
+    let arr = [];
+    try { arr = JSON.parse(j); } catch (e) { return; }
+    for (const s of arr) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const info = document.createElement("span");
+      info.style.flex = "1";
+      const b = document.createElement("b");
+      b.textContent = s.name;
+      const d = document.createElement("span");
+      d.className = "wsub"; d.textContent = s.desc;
+      info.append(b, d);
+      const btn = document.createElement("button");
+      const done = (window._installed || []).includes(s.id + ".user.js");
+      btn.textContent = done ? (S.installed || "Installed ✓") : (S.install || "Install");
+      btn.disabled = done;
+      btn.onclick = () => {
+        if (bridge) bridge.installStarter(s.id, (ok) => {
+          if (ok) { btn.textContent = S.installed || "Installed ✓"; btn.disabled = true;
+                    bridge.getPlugins(renderPlugins); }
+        });
+      };
+      row.append(info, btn);
+      box.appendChild(row);
+    }
+    refreshHay();   // the rail matches on what a section says
+  }
+
+  // One line about the vault, and a button to the page that is the
+  // password manager. Everything that used to be here — the list, the
+  // reveal and copy and edit and delete on every row, the add-login
+  // form, the never-saved list — lives on passwords.html now, behind
+  // this run's page key and a confirmation per secret. The slots this
+  // section used to call are gone from browser.py; markup for them
+  // would be buttons that quietly do nothing.
+  // ---- master password ----
+  // Everything here is three booleans and a number; the passphrase
+  // itself is never in this page, never comes back from a slot, and
+  // is only ever typed into a window of the browser's own.
+  const MASTER_CHOICES = [1, 5, 15, 30, 60, 0];
+  function renderMaster(j) {
+    let m; try { m = JSON.parse(j); } catch (e) { return; }
+    window._master = m;
+    const S = window.STR || {};
+    const box = document.getElementById("masterpw");
+    if (!box) return;
+    box.checked = !!m.on;
+    document.getElementById("masterauto_row").hidden = !m.on;
+    document.getElementById("masterbtn_row").hidden = !m.on;
+    // The warning belongs above the decision, so it is here while it
+    // is still a decision. Once it is on he has already agreed to it,
+    // and an empty .hint would otherwise leave a blank band of padding
+    // between the switch and the rest.
+    const warn = document.getElementById("masterwarn");
+    warn.textContent = m.on ? "" : (S.masterWarnT || "");
+    warn.hidden = !!m.on;
+    paintWarn();
+    document.getElementById("masterstate").textContent =
+      m.on ? (m.locked ? (S.masterShut || "") : (S.masterOn || ""))
+           : (S.masterOffState || "");
+    const lock = document.getElementById("masterlock");
+    lock.textContent = S.masterLockNow || "Lock now";
+    lock.disabled = !m.on || !!m.locked;
+    document.getElementById("masterchange").textContent =
+      S.masterChangeBtn || "Change master password\u2026";
+    const sel = document.getElementById("masterauto");
+    sel.innerHTML = "";
+    for (const n of MASTER_CHOICES) {
+      const o = document.createElement("option");
+      o.value = String(n);
+      o.textContent = n === 0 ? (S.masterAutoNever || "Never")
+        : n === 60 ? (S.masterHour || "1 hour")
+        : (S.masterMinutes || "{} minutes").replace("{}", n);
+      sel.appendChild(o);
+    }
+    sel.value = String(m.minutes);
+    // The line under the manager describes how the FILE vault keeps
+    // things, and a master password changes what that sentence is --
+    // in both directions, so switching it off says the old thing again
+    // rather than leaving a claim about encryption that is no longer
+    // true sitting on the page until the next reload.
+    const hint = document.getElementById("t_pwHint");
+    if (hint && S.masterEncHint && S.pwHint) {
+      hint.textContent = m.on ? S.masterEncHint : S.pwHint;
+    }
+    refreshHay();
+  }
+
+  function askMaster(fn, arg) {
+    if (!bridge || !bridge[fn]) return;
+    if (arg === undefined) bridge[fn](renderMaster);
+    else bridge[fn](arg, renderMaster);
+  }
+
+  function renderPwSummary(j) {
+    let d; try { d = JSON.parse(j); } catch (e) { return; }
+    window._pwsummary = j;
+    const S = window.STR || {};
+    // Two reasons this line must not say "No saved passwords.", and
+    // the serious one goes first. A vault a newer build wrote cannot
+    // be read at all, and reporting it as empty invites exactly the
+    // wrong reaction; a locked vault is simply not ours to list yet.
+    if (d.reason === "vault-newer") {
+      const box = document.getElementById("pwsummary");
+      box.textContent = S.pwVaultNewer || "";
+      box.style.color = "var(--yellow, #f9e2af)";
+      refreshHay();
+      return;
+    }
+    if (d.locked) {
+      const box = document.getElementById("pwsummary");
+      box.textContent = S.masterLockedLine || "";
+      box.style.color = "";
+      refreshHay();
+      return;
+    }
+    const bits = [];
+    const names = {login: S.pwLogins, note: S.pwNotes, card: S.pwCards,
+                   identity: S.pwIdentities};
+    for (const [kind, n] of Object.entries(d.counts || {}))
+      bits.push(n + " " + (names[kind] || kind));
+    if (!bits.length) bits.push(S.noPasswords || "No saved passwords.");
+    const flags = [];
+    for (const [name, n] of Object.entries(d.health || {}))
+      if (n) flags.push(n + " " + ({reused: S.pwReused, weak: S.pwWeak,
+                                    old: S.pwOld}[name] || name));
+    let line = bits.join(" \u00b7 ")
+      + (flags.length ? "  \u2014  " + flags.join(", ") : "");
+    // No flags because the check could not run is not the same news as
+    // no flags because nothing is wrong. The passwords page says so;
+    // this line is all the settings page says about the vault, and
+    // without the caveat it reads as a clean bill of health.
+    if (d.healthNA && S.pwHealthNA) line += "  \u2014  " + S.pwHealthNA;
+    if (d.store) line = d.store + "  \u2014  " + line;
+    const box = document.getElementById("pwsummary");
+    box.textContent = line;
+    box.style.color = ((d.storeOk === false && !d.checking) || d.fellBack)
+      ? "var(--yellow, #f9e2af)" : "";
+    // this line describes how the FILE vault keeps things, so it is
+    // shown when that is the store and not when it is 1Password, which
+    // keeps nothing on this computer at all
+    document.getElementById("t_pwHint").style.display =
+      d.eager === false ? "none" : "";
+    refreshHay();   // the rail matches on what a section says
+  }
+
+  // The theme picker. Every palette the browser knows, on three
+  // shelves, each card painted in its own colours so the list is the
+  // preview. Clicking one applies it there and then - the window, this
+  // page and every other page of ours are repainted without a reload.
+  function themeSwatch(t) {
+    const box = document.createElement("span");
+    box.className = "tsw";
+    box.style.background = t.swatch[0];
+    const isl = document.createElement("span");
+    isl.className = "tswi";
+    isl.style.background = t.swatch[1];
+    const bar = document.createElement("span");
+    bar.className = "tswt";
+    bar.style.background = t.swatch[2];
+    const dot = document.createElement("span");
+    dot.className = "tswd";
+    dot.style.background = t.swatch[3];
+    isl.append(bar, dot);
+    box.appendChild(isl);
+    return box;
+  }
+
+  function themeRestartNote() {
+    const S = window.STR || {};
+    const box = document.getElementById("themerestart");
+    if (!box) return;
+    const cur = (window._themes && window._themes.themes || [])
+                  .find((t) => t.key === window._theme);
+    // the one part of a theme that is decided before the engine
+    // starts: what websites are told about dark mode
+    const off = cur && window._launchDark !== undefined
+                && cur.dark !== window._launchDark;
+    box.classList.toggle("on", !!off);
+    if (!off) return;
+    document.getElementById("themerestartmsg").textContent =
+      window._launchDark
+        ? (S.themeRestart || "Websites are still being asked for their dark "
+                           + "version. Restart the browser and they follow "
+                           + "this theme too.")
+        : (S.themeRestartLight || "Websites are still being asked for their "
+                                + "light version. Restart the browser and "
+                                + "they follow this theme too.");
+    document.getElementById("themerestartbtn").textContent =
+      S.themeRestartBtn || "Restart now";
+  }
+
+  function renderThemes() {
+    const box = document.getElementById("themelist");
+    if (!box || !window._themes) return;
+    const S = window.STR || {};
+    const names = {dark: S.themeDark || "Dark",
+                   light: S.themeLight || "Light",
+                   character: S.themeCharacter || "With character"};
+    box.innerHTML = "";
+    for (const group of window._themes.groups) {
+      const items = window._themes.themes.filter((t) => t.group === group);
+      if (!items.length) continue;
+      const shelf = document.createElement("div");
+      const lab = document.createElement("div");
+      lab.className = "tglabel";
+      lab.textContent = names[group] || group;
+      const grid = document.createElement("div");
+      grid.className = "tgrid";
+      for (const t of items) {
+        const card = document.createElement("div");
+        card.className = "tcard" + (t.key === window._theme ? " sel" : "");
+        card.dataset.key = t.key;
+        card.dataset.hay = (t.name + " " + t.note + " " + names[group])
+                             .toLowerCase();
+        const txt = document.createElement("div");
+        const nm = document.createElement("div");
+        nm.className = "tname"; nm.textContent = t.name;
+        txt.appendChild(nm);
+        if (t.note) {
+          const nt = document.createElement("div");
+          nt.className = "tnote"; nt.textContent = t.note;
+          txt.appendChild(nt);
+        }
+        const tick = document.createElement("span");
+        tick.className = "tick"; tick.textContent = "✓";
+        card.append(themeSwatch(t), txt, tick);
+        card.onclick = () => pickTheme(t);
+        grid.appendChild(card);
+      }
+      shelf.append(lab, grid);
+      shelf.className = "tgroup";
+      box.appendChild(shelf);
+    }
+    showTheme();
+    filterThemes(document.getElementById("themefilter").value);
+  }
+
+  function showTheme() {
+    const cur = (window._themes && window._themes.themes || [])
+                  .find((t) => t.key === window._theme);
+    for (const c of document.querySelectorAll(".tcard"))
+      c.classList.toggle("sel", c.dataset.key === window._theme);
+    if (cur) {
+      document.getElementById("themecurname").textContent = cur.name;
+      document.getElementById("themecurnote").textContent = cur.note || "";
+    }
+    themeRestartNote();
+  }
+
+  function pickTheme(t) {
+    window._theme = t.key;
+    // through the same door every other setting goes through: a theme
+    // written past saveSetting leaves the snapshot holding the old one,
+    // and the next redraw puts the old one back on screen
+    saveSetting("theme", t.key);
+    showTheme();
+  }
+
+  // 114 palettes is more than a list you scroll: the box above them
+  // narrows it, and the rail's own search finds the section because
+  // every name is in it
+  function filterThemes(text) {
+    const needle = (text || "").trim().toLowerCase();
+    let shown = 0;
+    for (const c of document.querySelectorAll(".tcard")) {
+      const on = !needle || (c.dataset.hay || "").includes(needle);
+      c.style.display = on ? "" : "none";
+      if (on) shown++;
+    }
+    for (const g of document.querySelectorAll(".tgroup")) {
+      const any = [...g.querySelectorAll(".tcard")]
+                    .some((c) => c.style.display !== "none");
+      g.style.display = any ? "" : "none";
+    }
+    const S = window.STR || {};
+    const miss = document.getElementById("themenomatch");
+    miss.textContent = S.themeNoMatch || "No theme by that name.";
+    miss.classList.toggle("on", shown === 0);
+  }
+
+  document.getElementById("themefilter").oninput =
+    (e) => filterThemes(e.target.value);
+  // the theme can also change from outside this page (the browser's
+  // own menu, another window); the injected painter says so
+  document.addEventListener("themepainted", (e) => {
+    window._theme = e.detail;
+    showTheme();
+  });
+  document.getElementById("themerestartbtn").onclick = () => {
+    if (bridge && bridge.restartBrowser) bridge.restartBrowser();
+  };
+
+  if (typeof qt !== "undefined") {
+    new QWebChannel(qt.webChannelTransport, (ch) => {
+      guard("channel", () => {
+        bridge = ch.objects.bridge;
+        if (bridge.timing)
+          for (const [l, ms] of MARKS) bridge.pageTiming(l, ms);
+      });
+      mark("channel");
+      // One stage failing must not take the rest of the page down with
+      // it. All of this used to sit inside a single catch that said
+      // nothing, so anything that threw left Settings with an empty
+      // rail and no section showing - a blank pane over the tab.
+      // The guard goes around the CALL and not only around the
+      // callback: a slot that cannot be reached throws right here, and
+      // a throw here is outside every guard there was - the theme
+      // picker, the plugin list, the password summary and the update
+      // banner all silently absent, and not even a red line to say so.
+      guard("text", () => bridge.uiStrings((j) => {
+        guard("text", () => {
+          const S = JSON.parse(j);
+          window.STR = S;
+          document.title = S.settings;
+          const map = {t_settings:"settings", t_search:"search",
+            t_searchEngine:"searchEngine", t_appearance:"appearance",
+            t_theme:"theme", t_themeHint:"themeHint",
+            t_whiteGoogle:"whiteGoogle", t_whiteGoogleHint:"whiteGoogleHint",
+            t_autoDarken:"autoDarken", t_darkHint:"wizDarkHint",
+            t_pageZoom:"pageZoom", t_zoomHint:"zoomHint",
+            t_minFont:"minFont", t_minFontHint:"minFontHint",
+            t_browsing:"browsing", t_reopenTabs:"reopenTabs",
+            t_tabsHint:"wizTabsHint",
+            t_askDownload:"askDownload", t_dlHint:"wizDlHint",
+            t_translation:"translation",
+            t_translateInto:"translateInto", t_translateHint:"translateHint",
+            t_privacy:"privacy", t_saveHistory:"saveHistory",
+            t_histHint:"wizHistHint",
+            t_cookiesHint:"cookiesHint", t_updates:"updates",
+            t_setup:"setupT", t_setupHint:"setupHint",
+            t_plugins:"plugins", t_pluginsHint:"pluginsHint",
+            t_quickInstall:"quickInstall", t_network:"network",
+            t_proxyMode:"proxyMode", t_proxyType:"proxyType",
+            t_proxyHost:"proxyHost", t_proxyPort:"proxyPort",
+            t_proxyHint:"proxyHint", t_inspectorHint:"inspectorHint",
+            t_addProxy:"addProxy", t_proxyName:"proxyName",
+            t_autoHint:"autoHint", t_rulesTitle:"rulesTitle",
+            t_passwords:"passwords", t_pwHint:"pwHint",
+            t_pwManageHint:"pwManageHint", t_masterPw:"masterPw",
+            t_masterPwName:"masterPwName", t_masterPwHint:"masterPwHint",
+            t_masterAuto:"masterAuto", t_masterAutoHint:"masterAutoHint",
+            t_builtIn:"builtIn", t_vaultPw:"vaultPw",
+            t_vaultPwHint:"vaultPwHint",
+            t_searchSuggest:"searchSuggest",
+            t_searchSuggestHint:"searchSuggestHint",
+            t_smoothScroll:"smoothScroll",
+            t_smoothScrollHint:"smoothScrollHint",
+            t_smoothNote:"restartLater", t_autoNote:"restartLater",
+            t_pdfNote:"restartLater",
+            t_blockAutoplay:"blockAutoplay",
+            t_blockAutoplayHint:"blockAutoplayHint",
+            t_pdfViewer:"pdfViewer", t_pdfViewerHint:"pdfViewerHint",
+            t_downloads:"downloads", t_downloadFolder:"downloadFolder",
+            t_downloadFolderHint:"downloadFolderHint",
+            t_clearHistExit:"clearHistExit",
+            t_clearCookiesExit:"clearCookiesExit",
+            t_clearExitHint:"clearExitHint",
+            t_clearExitCrash:"clearExitCrash",
+            t_savePasswords:"wizPwOffer", t_savePwHint:"wizPwHint",
+            t_spellCheck:"spellCheck", t_spellHint:"spellHint",
+            t_spellLang:"spellLang", t_media:"media",
+            t_newTabPos:"newTabPos", t_newTabPage:"newTabPage",
+            t_startUrl:"startUrl", t_startUrlHint:"startUrlHint"};
+          for (const [id, key] of Object.entries(map)) {
+            const el = document.getElementById(id);
+            if (el && S[key]) el.textContent = S[key];
+          }
+          for (const el of document.querySelectorAll("[data-str]")) {
+            const v = S[el.dataset.str];
+            if (v) el.textContent = v;
+          }
+          document.getElementById("viewhist").textContent = S.viewHistory;
+          document.getElementById("clearhist").textContent = S.clearHistory;
+          document.getElementById("clearcookies").textContent = S.clearCookies;
+          document.getElementById("updatebtn").textContent = S.checkUpdates;
+          document.getElementById("rerunsetup").textContent = S.runSetup;
+          document.getElementById("reloadplugins").textContent = S.reloadPlugins;
+          document.getElementById("fromfile").textContent = S.fromFile;
+          document.getElementById("getmore").textContent = S.getMore;
+          document.getElementById("pwopen").textContent = S.pwOpenManager;
+          document.getElementById("dlpick").textContent = S.chooseFolder;
+          document.getElementById("dldefault").textContent = S.useDefault;
+          document.getElementById("donebtn").textContent = S.setDone;
+          document.getElementById("savednote").textContent = S.setSaved;
+          document.getElementById("nomatch").textContent = S.setNoMatch;
+          document.getElementById("navfilter").placeholder = S.setFilterPh;
+          document.getElementById("newtaburl").placeholder = S.newTabUrlPh;
+          document.getElementById("starturl").placeholder =
+            S.startUrlPh || S.newTabUrlPh;
+          document.getElementById("themefilter").placeholder =
+            S.themeFilterPh || "Search themes\u2026";
+          document.getElementById("langfilter").placeholder = S.filterPh;
+        });
+        guard("pages", renderNewTab);
+        guard("plugins", () => {
+          if (window._plugins) renderPlugins(window._plugins); });
+        guard("proxies", () => {
+          if (window._proxyProfiles !== undefined) renderProxies(); });
+        guard("toolbar", () => {
+          if (window._tbItems !== undefined) renderToolbar(); });
+        guard("plugin list", () => {
+          if (window._starters) renderStarters(window._starters); });
+        guard("passwords", () => {
+          if (window._pwsummary) renderPwSummary(window._pwsummary);
+          if (window._master) renderMaster(JSON.stringify(window._master)); });
+        guard("settings", () => {
+          if (window._settings) load(window._settings); });
+        guard("themes", renderThemes);
+        guard("rail", buildNav);
+        settle();
+        mark("strings drawn");
+      }));
+      guard("settings", () => bridge.getSettings((j) => {
+        guard("settings", () => {
+          window._settings = JSON.parse(j);
+          load(window._settings);
+        });
+        settle();
+        mark("settings drawn");
+      }));
+      guard("plugins", () => bridge.getPlugins(renderPlugins));
+      guard("plugin list", () => bridge.starterPlugins((j) => {
+        window._starters = j; renderStarters(j); }));
+      guard("passwords", () => bridge.passwordSummary(renderPwSummary));
+      guard("master", () => { if (bridge.masterState) askMaster("masterState"); });
+      // Locking, unlocking and switching it on all happen in windows of
+      // the browser's own, so this page has to be told rather than
+      // notice: vaultChanged is what the manager listens to as well.
+      if (bridge.vaultChanged) bridge.vaultChanged.connect(() => {
+        guard("master", () => { if (bridge.masterState) askMaster("masterState"); });
+        guard("passwords", () => bridge.passwordSummary(renderPwSummary));
+      });
+      guard("themes", () => bridge.themes((j) => {
+        try { window._themes = JSON.parse(j); } catch (e) { return; }
+        guard("themes", renderThemes);
+      }));
+      // the toolbar moved somewhere else - the right-click menu on the
+      // bar, or Vault Password taking the key button with it
+      guard("toolbarpush", () => {
+        if (bridge.toolbarChanged)
+          bridge.toolbarChanged.connect(() => tbReread());
+      });
+      guard("updates", () => bridge.updateFinished.connect((msg) => {
+        document.getElementById("updmsg").textContent = msg;
+        const b = document.getElementById("updatebtn");
+        b.disabled = false;
+        b.textContent = (window.STR && window.STR.checkUpdates)
+                        || "Check for updates";
+      }));
+      // whatever of that got through, the page ends up drawn
+      settle();
+    });
+  }
+
+  document.getElementById("tbreset").onclick = () => {
+    if (!bridge) return;
+    // the browser owns what "the usual set" means, so it says
+    bridge.resetToolbar(() => tbReread());
+  };
+  bindSwitch("googlelight", "googleLight");
+  bindSwitch("forcedark", "forceDark");
+  bindSwitch("smoothscroll", "smoothScroll");
+  bindSwitch("restoretabs", "restoreTabs");
+  bindSwitch("askdownload", "askDownload");
+  bindSwitch("history", "history");
+  bindSwitch("suggestions", "searchSuggestions");
+  bindSwitch("blockautoplay", "blockAutoplay");
+  bindSwitch("pdfviewer", "pdfViewer");
+  bindSwitch("clearhistexit", "clearHistoryExit");
+  bindSwitch("clearcookiesexit", "clearCookiesExit");
+  bindSwitch("savepasswords", "savePasswords");
+  // not bindSwitch: this one also puts a whole section in or out
+  document.getElementById("vaultpw").onchange = (e) => {
+    const on = e.target.checked;
+    saveSetting("vaultPassword", on);
+    applyVaultPassword(on);   // this one also puts a section in or out
+  };
+  bindSwitch("spellcheck", "spellCheck");
+
+  document.getElementById("spelllang").onchange = (e) => {
+    saveSetting("spellCheckLang", e.target.value);
+  };
+  for (const f of PAGE_FIELDS) {
+    document.getElementById(f.box + "save").onclick =
+      () => savePageUrl(f.key, true);
+    document.getElementById(f.box).onkeydown = (e) => {
+      if (e.key === "Enter") savePageUrl(f.key, true);
+    };
+    document.getElementById(f.box).onblur = () => savePageUrl(f.key, false);
+  }
+  document.getElementById("dlpick").onclick = () => {
+    if (bridge) bridge.pickDownloadDir((p) => {
+      document.getElementById("dlpath").textContent = p;
+      if (window._settings) window._settings.downloadDir = p;
+    });
+  };
+  document.getElementById("dldefault").onclick = () => {
+    if (!bridge) return;
+    saveSetting("downloadDir", "");
+    // the snapshot holds the folder in force, not the empty value that
+    // asks for the default one, so it is patched with what is shown
+    const shown = window._dlDefault || "";
+    document.getElementById("dlpath").textContent = shown;
+    if (window._settings) window._settings.downloadDir = shown;
+  };
+  document.getElementById("zoom").oninput = (e) => {
+    document.getElementById("zoomval").textContent = e.target.value + "%";
+    paintRange(e.target);
+    saveSetting("zoom", e.target.value / 100);
+  };
+  document.getElementById("minfont").oninput = (e) => {
+    const v = parseInt(e.target.value) || 0;
+    document.getElementById("minfontval").textContent =
+      v ? v + "px" : ((window.STR && window.STR.off) || "Off");
+    paintRange(e.target);
+    saveSetting("minFont", v);
+  };
+  paintRange(document.getElementById("zoom"));
+  paintRange(document.getElementById("minfont"));
+  document.getElementById("langfilter").oninput = (e) => fillLangs(e.target.value);
+  document.getElementById("translatelang").onchange = (e) => {
+    window._tlang = e.target.value;
+    saveSetting("translateLang", e.target.value);
+  };
+  // history is a pane of its own now, not a page this one travels to:
+  // navigating there would have thrown settings out of its pane and
+  // spent a tab on the way. Outside the browser, where no bridge ever
+  // arrives, the plain link is still the only thing that can work.
+  document.getElementById("viewhist").onclick = () => {
+    if (bridge && bridge.openHistoryPage) bridge.openHistoryPage();
+    else location.href = "history.html";
+  };
+  document.getElementById("clearhist").onclick = (e) => {
+    if (bridge) bridge.clearHistory();
+    const S = window.STR || {};
+    e.target.textContent = (S.clearAll ? "✓ " : "") + "Cleared ✓";
+    setTimeout(() => { e.target.textContent = S.clearHistory || "Clear history"; }, 1500);
+  };
+  document.getElementById("clearcookies").onclick = (e) => {
+    if (bridge) bridge.clearCookies();
+    const S = window.STR || {};
+    e.target.textContent = "Cleared ✓";
+    setTimeout(() => { e.target.textContent = S.clearCookies || "Clear cookies"; }, 1500);
+  };
+  document.getElementById("updatebtn").onclick = (e) => {
+    if (!bridge) return;
+    e.target.disabled = true;
+    e.target.textContent = "Checking…";
+    bridge.runUpdate();
+  };
+  document.getElementById("reloadplugins").onclick = () => {
+    if (bridge) bridge.reloadPlugins(renderPlugins);
+  };
+  document.getElementById("fromfile").onclick = () => {
+    if (bridge) bridge.addPluginFromFile();
+    setTimeout(() => { if (bridge) bridge.getPlugins(renderPlugins); }, 400);
+  };
+  document.getElementById("getmore").onclick = () => {
+    location.href = "https://greasyfork.org/";
+  };
+  document.getElementById("donebtn").onclick = () => {
+    if (bridge && bridge.closePane) bridge.closePane();
+  };
+  document.getElementById("pwopen").onclick = () => {
+    if (bridge) bridge.openPasswordsPage();
+  };
+  // The switch does not decide anything by itself. It asks the browser,
+  // the browser puts a window in front of him, and the answer that comes
+  // back is what the switch is set to -- so cancelling the box leaves the
+  // switch where it was rather than where he flicked it.
+  document.getElementById("masterpw").onchange = (e) => {
+    askMaster("setMasterPassword", !!e.target.checked);
+  };
+  document.getElementById("masterchange").onclick = () => {
+    askMaster("changeMasterPassword");
+  };
+  document.getElementById("masterlock").onclick = () => {
+    askMaster("lockVault");
+  };
+  document.getElementById("masterauto").onchange = (e) => {
+    askMaster("setMasterMinutes", parseInt(e.target.value, 10) || 0);
+  };
+  function renderProxies() {
+    const box = document.getElementById("proxyprofiles");
+    if (!box) return;
+    box.innerHTML = "";
+    const active = window._activeProxy;
+    const S = window.STR || {};
+    const rows = [{name:"system", label:"System"},
+                  {name:"direct", label:"Direct"}]
+      .concat((window._proxyProfiles||[]).map(p =>
+        ({name:p.name, label:p.name + "  (" + p.type + " " + p.host + ":" + p.port + ")",
+          user:true})));
+    for (const r of rows) {
+      const row = document.createElement("label");
+      row.className = "row switchrow"; row.style.cursor = "pointer";
+      const dot = document.createElement("span");
+      dot.style.flex = "0 0 auto";
+      dot.style.minWidth = "0";
+      dot.textContent = r.name === active ? "●" : "○";
+      dot.style.color = r.name === active
+        ? "var(--green, #a6e3a1)" : "var(--subtext, #a6adc8)";
+      const lbl = document.createElement("span");
+      lbl.style.flex = "1"; lbl.textContent = r.label;
+      row.append(dot, lbl);
+      if (r.user) {
+        const del = document.createElement("button");
+        del.textContent = "✕"; del.style.padding = "6px 10px";
+        del.onclick = (e) => { e.preventDefault();
+          if (bridge) bridge.deleteProxyProfile(r.name);
+          window._proxyProfiles = (window._proxyProfiles||[]).filter(p=>p.name!==r.name);
+          if (window._activeProxy === r.name) window._activeProxy = "system";
+          renderProxies(); };
+        row.append(del);
+      }
+      row.onclick = (e) => { if (e.target.tagName === "BUTTON") return;
+        window._activeProxy = r.name;
+        if (bridge) bridge.setActiveProxy(r.name);
+        renderProxies(); };
+      box.appendChild(row);
+    }
+    renderAuto();
+    refreshHay();   // the rail matches on what a section says
+  }
+  function profOptions(sel, chosen) {
+    sel.innerHTML = "";
+    const opts = [["direct","Direct"]]
+      .concat((window._proxyProfiles||[]).map(p=>[p.name,p.name]));
+    for (const [v,l] of opts) {
+      const o = document.createElement("option");
+      o.value=v; o.textContent=l; o.selected=v===chosen; sel.appendChild(o);
+    }
+  }
+  function pushAuto() {
+    if (bridge) bridge.setProxyAuto(JSON.stringify(window._proxyAuto));
+  }
+  function renderAuto() {
+    const A = window._proxyAuto || {rules:[], default:"direct"};
+    const box = document.getElementById("autorules");
+    if (!box) return;
+    box.innerHTML = "";
+    A.rules.forEach((r, i) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const t = document.createElement("span"); t.style.flex="1";
+      t.textContent = r.pattern + "  →  " + r.profile;
+      const del = document.createElement("button");
+      del.textContent="✕"; del.style.padding="6px 10px";
+      del.onclick = () => { A.rules.splice(i,1); pushAuto(); renderAuto(); };
+      row.append(t, del); box.appendChild(row);
+    });
+    profOptions(document.getElementById("arprof"),
+                (A.rules[0]||{}).profile || "direct");
+  }
+  document.getElementById("araddbtn").onclick = () => {
+    // a pasted URL becomes its hostname (mirrors the bridge side)
+    const pat = document.getElementById("arpat").value.trim().toLowerCase()
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split("/")[0].split("?")[0]
+      .replace(/^.*@/, "").replace(/:\d+$/, "");
+    const prof = document.getElementById("arprof").value;
+    if (!pat) return;
+    window._proxyAuto = window._proxyAuto || {rules:[], default:"direct"};
+    window._proxyAuto.rules.push({pattern:pat, profile:prof});
+    document.getElementById("arpat").value = "";
+    pushAuto(); renderAuto();
+  };
+  document.getElementById("paddbtn").onclick = () => {
+    const prof = {name: document.getElementById("pname").value.trim(),
+      type: document.getElementById("ptype").value,
+      host: document.getElementById("phost").value.trim(),
+      port: parseInt(document.getElementById("pport").value) || 0};
+    if (!prof.name || !prof.host) return;
+    if (bridge) bridge.saveProxyProfile(JSON.stringify(prof));
+    window._proxyProfiles = (window._proxyProfiles||[]).filter(p=>p.name!==prof.name).concat([prof]);
+    document.getElementById("pname").value = "";
+    document.getElementById("phost").value = "";
+    document.getElementById("pport").value = "";
+    renderProxies();
+  };
+  document.getElementById("rerunsetup").onclick = () => {
+    if (bridge) bridge.requestSetup();
+    location.href = "start.html";
+  };
+
+  // the order the groups appear in the rail, and the string that names
+  // each one; a section carries its group in data-group
+  const CATS = [["gen", "catGeneral", "General"],
+                ["priv", "catPrivacy", "Privacy"],
+                ["adv", "catAdvanced", "Advanced"],
+                ["sys", "catSystem", "Browser"]];
+
+  // Whatever did not draw says which part it was. Settings coming up
+  // empty and silent is worse than any one section being wrong.
+  function guard(part, fn) {
+    try { fn(); } catch (e) { drawFailed(part, e); }
+  }
+
+  function drawFailed(part, err) {
+    const S = window.STR || {};
+    const box = document.getElementById("drawfail");
+    box.textContent = (S.setDrawFailed
+        || "Part of this page could not be drawn ({}). "
+           + "The rest of it is still here.").replace("{}", part)
+      + "  " + String((err && err.message) || err);
+    box.classList.add("on");
+  }
+
+  // However the drawing went, the page ends up usable: a rail with a
+  // way into every section, one section showing, and a content area
+  // that is not hidden.
+  function settle() {
+    const content = document.getElementById("content");
+    // an empty filter box can never justify a hidden content area, and
+    // that pair is exactly what a blank Settings looked like
+    if (!document.getElementById("navfilter").value.trim())
+      content.classList.remove("blank");
+    if (!document.getElementById("sidebar").querySelector("button")) {
+      try { buildNav(); } catch (e) { drawFailed("rail", e); }
+    }
+    const secs = visibleSections();
+    if (secs.length && !secs.some((s) => s.classList.contains("active")))
+      showCat(0);
+  }
+
+  // The sections that exist right now. A section can be hidden — Vault
+  // Password not installed takes Passwords out — and showCat indexes
+  // into this list while buildNav numbers its buttons from it, so the
+  // two must be looking at exactly the same thing or the rail sends
+  // you to the wrong page.
+  function visibleSections() {
+    return [...document.querySelectorAll(".content section")]
+      .filter((s) => !s.hidden);
+  }
+
+  function showCat(i) {
+    // an index that points at nothing - a section hidden after the
+    // rail was built with it in the list - would leave every section
+    // down and the page empty. It falls back to the first one.
+    const secs = visibleSections();
+    if (!secs.length) return;
+    if (!(i >= 0 && i < secs.length)) i = 0;
+    window._cat = i;
+    const btns = document.querySelectorAll("#sidebar button");
+    secs.forEach((s, k) => s.classList.toggle("active", k === i));
+    let group = "";
+    btns.forEach((b) => {
+      const on = Number(b.dataset.index) === i;
+      b.classList.toggle("active", on);
+      if (on) group = b.dataset.group || "";
+    });
+    const sec = secs[i];
+    const head = sec && sec.querySelector("h2");
+    const title = head ? head.textContent : "";
+    document.getElementById("curcat").textContent = title;
+    // Privacy sitting in the Privacy group would say it twice
+    document.getElementById("curgroup").textContent =
+      group === title ? "" : group;
+    const S = window.STR || {};
+    const key = sec ? sec.dataset.desc : "";
+    document.getElementById("curdesc").textContent = (key && S[key]) || "";
+    // the title block arrives with the section under it
+    const ph = document.getElementById("pagehead");
+    if (ph) {
+      ph.classList.remove("in");
+      void ph.offsetWidth;              // start the animation over
+      ph.classList.add("in");
+    }
+    const content = document.getElementById("content");
+    if (content) content.scrollTop = 0;   // a section always starts at its top
+    revealHit();   // ...unless a search sent you here for one setting
+  }
+
+  function buildNav() {
+    const bar = document.getElementById("sidebar");
+    const secs = visibleSections();
+    const S = window.STR || {};
+    bar.innerHTML = "";
+    const seen = new Set();
+    const addBtn = (sec, i, group) => {
+      seen.add(i);
+      const head = sec.querySelector("h2");
+      const btn = document.createElement("button");
+      const mark = document.createElement("span");
+      mark.className = "mark";
+      const name = document.createElement("span");
+      name.textContent = head ? head.textContent : ("Section " + (i + 1));
+      btn.append(mark, name);
+      btn.dataset.index = i;
+      btn.dataset.group = group;
+      btn._sec = sec;
+      btn.dataset.hay = hayFor(sec, group);
+      btn.onclick = () => showCat(i);
+      bar.appendChild(btn);
+    };
+    for (const [key, str, fallback] of CATS) {
+      const items = secs.map((sec, i) => [sec, i])
+                        .filter(([sec]) => sec.dataset.group === key);
+      if (!items.length) continue;
+      const name = S[str] || fallback;
+      const lab = document.createElement("div");
+      lab.className = "navlabel";
+      lab.textContent = name;
+      lab.dataset.group = name;
+      bar.appendChild(lab);
+      for (const [sec, i] of items) addBtn(sec, i, name);
+    }
+    // a section with an unknown group still gets a way in
+    secs.forEach((sec, i) => { if (!seen.has(i)) addBtn(sec, i, ""); });
+    refreshHay();
+    showCat(window._cat || 0);
+  }
+
+  // What a rail button matches on. Read off the section itself, so
+  // everything the bridge painted into it - engine names, spell-check
+  // languages, saved logins, proxy profiles, the new-tab cards -
+  // counts, not just the words that shipped in the file.
+  function hayFor(sec, group) {
+    const head = sec.querySelector("h2");
+    return ((head ? head.textContent : "") + " " + (group || "") + " "
+            + sec.textContent).toLowerCase();
+  }
+
+  // Re-read every section and apply the filter again. Cheap, and it
+  // has to run after anything redraws a card, a list or a dropdown.
+  function refreshHay() {
+    const bar = document.getElementById("sidebar");
+    for (const btn of bar.querySelectorAll("button")) {
+      if (btn._sec) btn.dataset.hay = hayFor(btn._sec, btn.dataset.group);
+    }
+    filterNav(document.getElementById("navfilter").value);
+  }
+
+  // ...and "anything" includes renders this file does not know about
+  // yet, so the content is watched rather than every render patched.
+  let hayTimer = null;
+  window._hayWatch = new MutationObserver(() => {
+    clearTimeout(hayTimer);
+    hayTimer = setTimeout(refreshHay, 50);
+  });
+  window._hayWatch.observe(document.getElementById("content"),
+                           {childList: true, subtree: true,
+                            characterData: true});
+
+  // What one setting looks like: the rows a section is built out of.
+  // Everything the search can point at, and nothing that contains
+  // another one of them.
+  const HITSEL = ".wrow, .row, .card, .hint";
+
+  // Mark the settings that answer to what was typed, section by
+  // section, and count them. A section nothing matched inside is left
+  // alone: it is in the rail because its name matched, and dimming
+  // every row in it would say the opposite.
+  function markHits(needle) {
+    const counts = new Map();
+    for (const sec of document.querySelectorAll(".content section")) {
+      const rows = [...sec.querySelectorAll(HITSEL)];
+      const hits = needle
+        ? rows.filter((r) => r.textContent.toLowerCase().includes(needle))
+        : [];
+      counts.set(sec, hits.length);
+      for (const r of rows) {
+        r.classList.toggle("hit", hits.length > 0 && hits.includes(r));
+        r.classList.toggle("dim", hits.length > 0 && !hits.includes(r));
+      }
+    }
+    return counts;
+  }
+
+  const stillMotion = () => window.matchMedia
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // bring the first matching setting of the section on screen; without
+  // a search running there is nothing marked and nothing to do
+  function revealHit(smooth) {
+    const sec = visibleSections()[window._cat];
+    const hit = sec && sec.querySelector(".hit");
+    if (!hit) return;
+    // "nearest": scroll it into view and no further, so the title of
+    // the section you landed in stays where you can read it
+    hit.scrollIntoView({block: "nearest",
+                        behavior: (smooth && !stillMotion())
+                                  ? "smooth" : "auto"});
+  }
+
+  // Enter, from the search box: hand the keyboard to the setting that
+  // was found, so it can be switched or typed into straight away
+  function focusHit() {
+    const sec = visibleSections()[window._cat];
+    const hit = sec && sec.querySelector(".hit");
+    if (!hit) return;
+    revealHit(true);
+    const ctl = [...hit.querySelectorAll("input, select, button")]
+                  .find((el) => el.offsetParent !== null);
+    if (ctl) ctl.focus();
+    else { hit.setAttribute("tabindex", "-1"); hit.focus(); }
+  }
+
+  // up and down the sections the search left standing, without ever
+  // leaving the search box
+  function moveRail(step) {
+    const vis = [...document.querySelectorAll("#sidebar button")]
+                  .filter((b) => b.style.display !== "none");
+    if (!vis.length) return;
+    const at = vis.findIndex((b) => Number(b.dataset.index) === window._cat);
+    let to = (at < 0 ? 0 : at + step) % vis.length;
+    if (to < 0) to = vis.length - 1;
+    showCat(Number(vis[to].dataset.index));
+  }
+
+  // the rail stays usable as the list of settings grows: type and only
+  // the sections that carry that word anywhere in them stay listed
+  function filterNav(text) {
+    const needle = (text || "").trim().toLowerCase();
+    const bar = document.getElementById("sidebar");
+    if (!bar.querySelector("button")) return;   // not built yet
+    let shown = 0;
+    for (const btn of bar.querySelectorAll("button")) {
+      const on = !needle || (btn.dataset.hay || "").includes(needle);
+      btn.style.display = on ? "" : "none";
+      if (on) shown++;
+    }
+    // a group label with nothing under it goes too
+    for (const lab of bar.querySelectorAll(".navlabel")) {
+      let any = false;
+      for (let el = lab.nextElementSibling;
+           el && !el.classList.contains("navlabel");
+           el = el.nextElementSibling) {
+        if (el.tagName === "BUTTON" && el.style.display !== "none") any = true;
+      }
+      lab.style.display = any ? "" : "none";
+    }
+    document.getElementById("nomatch").classList.toggle("on", shown === 0);
+    document.getElementById("showall").classList.toggle("on", !!needle);
+    document.getElementById("searchtips").classList.toggle(
+      "on", !!needle && shown > 0);
+    // which settings matched, and how many of them per section
+    const counts = markHits(needle);
+    for (const btn of bar.querySelectorAll("button")) {
+      const hits = btn._sec ? (counts.get(btn._sec) || 0) : 0;
+      if (hits) btn.dataset.hits = hits;
+      else delete btn.dataset.hits;
+    }
+    // the pane never shows a section the rail has just filtered away:
+    // with no match at all it steps aside, and a filtered-out section
+    // hands over to the first one that did match
+    const content = document.getElementById("content");
+    content.classList.toggle("blank", shown === 0);
+    if (shown === 0) return;
+    const vis = [...bar.querySelectorAll("button")]
+                  .filter((b) => b.style.display !== "none");
+    if (!vis.some((b) => Number(b.dataset.index) === window._cat))
+      showCat(Number(vis[0].dataset.index));
+    else revealHit();
+  }
+  document.getElementById("navfilter").oninput = (e) => filterNav(e.target.value);
+  // the search box takes the keyboard with it: up and down walk the
+  // sections that matched, Enter drops into the first setting one of
+  // them found, and Esc empties the box rather than closing the page
+  document.getElementById("navfilter").onkeydown = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); moveRail(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveRail(-1); }
+    else if (e.key === "Enter") { e.preventDefault(); focusHit(); }
+    else if (e.key === "Escape" && e.target.value) {
+      e.preventDefault();
+      e.stopPropagation();          // Esc here does not close settings
+      e.target.value = "";
+      filterNav("");
+    }
+  };
+  document.getElementById("showall").onclick = () => {
+    const box = document.getElementById("navfilter");
+    box.value = "";
+    filterNav("");
+    box.focus();
+  };
+
+  buildNav();
+  // Esc, asked for by the pane before it closes: a search with
+  // something in it takes it and empties the box instead.
+  window.__paneEsc = () => {
+    const box = document.getElementById("navfilter");
+    if (box && box.value) {
+      box.value = "";
+      filterNav("");
+      box.focus();
+      return true;
+    }
+    return false;
+  };
+
+  // Esc, once: close the pane this page lives in. Going back through
+  // the page's own history was what Esc did when settings was a tab —
+  // it stays as the fallback for a settings.html opened outside the
+  // browser, where no bridge ever arrives.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (bridge && bridge.closePane) bridge.closePane();
+    else if (typeof qt === "undefined" && history.length > 1) history.back();
+  });
+</script>
+</body>
+</html>
