@@ -1,0 +1,33 @@
+# Dependabot watches two things for us, for free, and faster than the
+# monthly check can: the pinned PyQt6 WebEngine (a new one is usually a
+# newer Chromium, which is the update that actually matters) and the
+# actions the workflows use. It opens a pull request; nothing changes
+# until that is merged.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /.github          # .github/requirements.txt
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /                 # .github/workflows/*.yml
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: actions
+
+  # the composite action lives in its own folder, so it needs its own entry
+  - package-ecosystem: github-actions
+    directory: /.github/actions/webengine
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: actions

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bookmarks</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000000;
+    color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    padding: 40px 0 60px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px; }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin-right: auto; }
+  input[type=text], input[type=search] {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(108, 112, 134, 0.35);
+    border-radius: 0;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+  input:focus { outline: none; border-color: #a6adc8; }
+  #filter { width: 220px; }
+  .btn {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(108, 112, 134, 0.45);
+    border-radius: 0;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 13px;
+    cursor: pointer;
+  }
+  .btn:hover { border-color: #a6adc8; background: #16161d; }
+  .barbox {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #a6adc8;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .barbox input { accent-color: #a6adc8; }
+  .group {
+    color: #6c7086;
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin: 24px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .group .gname { flex: 1; }
+  /* a folder inside a folder is stepped in, so the page reads the way
+     the drop-down does: what is in what */
+  .group.sub .gname::before { content: "\2937\00a0"; color: #45475a; }
+  .group button {
+    background: transparent;
+    border: 1px solid rgba(108, 112, 134, 0.35);
+    border-radius: 0;
+    color: #6c7086;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+    padding: 3px 8px;
+    cursor: pointer;
+  }
+  .group button:hover { color: #cdd6f4; border-color: #a6adc8; }
+  .group button.danger:hover { color: #f38ba8; border-color: rgba(243, 139, 168, 0.6); }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(13, 13, 18, 0.6);
+    border: 1px solid transparent;
+    padding: 9px 12px;
+    margin-bottom: 4px;
+  }
+  .row:hover { border-color: rgba(108, 112, 134, 0.55); background: rgba(13, 13, 18, 0.95); }
+  .row img.fav, .row span.fav {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    display: inline-block;
+    text-align: center;
+    line-height: 16px;
+    font-size: 12px;
+    color: #6c7086;
+  }
+  .row .text { flex: 1; min-width: 0; }
+  .row .title {
+    font-size: 13px;
+    color: #cdd6f4;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row .title:hover { text-decoration: underline; }
+  .row .url {
+    font-size: 11px;
+    color: #6c7086;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+  .row .acts { display: flex; gap: 5px; flex-shrink: 0; }
+  .row button, .row select {
+    background: transparent;
+    border: 1px solid rgba(108, 112, 134, 0.4);
+    border-radius: 0;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 9px;
+    cursor: pointer;
+  }
+  .row select { background: #0d0d12; max-width: 190px; }
+  .row button:hover { border-color: #a6adc8; background: #16161d; }
+  .row button.danger { color: #f38ba8; border-color: rgba(243, 139, 168, 0.4); }
+  .row button.danger:hover { background: rgba(243, 139, 168, 0.12); }
+  .row button:disabled { color: #45475a; border-color: rgba(108, 112, 134, 0.18); cursor: default; }
+  .row button:disabled:hover { background: transparent; }
+  .edit { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+  .edit input { width: 100%; }
+  #empty { color: #6c7086; margin-top: 40px; text-align: center; }
+  .hint { color: #45475a; font-size: 12px; margin: 6px 0 0 2px; }
+  /* A selection and a keyboard focus come out of the palette like
+     everything else. Left alone they are the engine's own idea of a
+     highlight — a blue that belongs to no theme in here, and on a
+     couple of them a ring that cannot be seen at all. */
+  ::selection { background: #cdd6f4; color: #000000; }
+  :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 id="t_title">Bookmarks</h1>
+      <input type="search" id="filter" placeholder="Search bookmarks">
+      <button class="btn" id="newfolder">New folder</button>
+      <label class="barbox"><input type="checkbox" id="showbar">
+        <span id="t_showbar">Show bookmarks bar</span></label>
+    </header>
+    <div id="list"></div>
+    <div id="empty" hidden>No bookmarks.</div>
+  </div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  // the browser puts this run's key in our URL; without it every
+  // bookmark slot stays shut (a website never learns it)
+  const KEY = new URLSearchParams(location.search).get("k") || "";
+  let bridge = null, items = [], editing = 0;
+  let STR = {bookmarks: "Bookmarks", bmNoBookmarks: "No bookmarks.",
+    bmSearch: "Search bookmarks", bmNewFolder: "New folder",
+    bmShowBar: "Show bookmarks bar", bmNoFolder: "Bookmarks bar",
+    bmRename: "Rename", bmDelete: "Delete", bmUp: "Up", bmDown: "Down",
+    bmSave: "Save", bmCancel: "Cancel", bmEmptyFolder: "Empty",
+    bmFolderName: "Folder name", bmName: "Name", bmUrl: "Address",
+    bmSure: "Sure?"};
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function btn(label, cls, onclick, disabled) {
+    const b = el("button", cls, label);
+    b.disabled = !!disabled;
+    if (!disabled) b.onclick = onclick;
+    return b;
+  }
+
+  const childrenOf = (id) => items.filter(e => e.parent === id);
+
+  // every folder, in reading order, each with how deep it sits. The
+  // browser hands over a tree - it unties a hand-edited knot before it
+  // ever gets here - but this keeps its own note of where it has been
+  // anyway, because a page that hangs is worse than a page that is
+  // missing a row.
+  function folderList(parent, depth, out, seen) {
+    parent = parent || 0; depth = depth || 0;
+    out = out || []; seen = seen || new Set();
+    for (const f of items) {
+      if (f.type !== "folder" || f.parent !== parent || seen.has(f.id)) continue;
+      seen.add(f.id);
+      out.push({folder: f, depth: depth});
+      if (depth < 20) folderList(f.id, depth + 1, out, seen);
+    }
+    return out;
+  }
+
+  // a folder and everything under it: what it may not be moved into
+  function subtree(id) {
+    const found = new Set([id]);
+    let edge = new Set([id]);
+    while (edge.size) {
+      const step = new Set();
+      for (const e of items) {
+        if (edge.has(e.parent) && !found.has(e.id)) {
+          found.add(e.id);
+          if (e.type === "folder") step.add(e.id);
+        }
+      }
+      edge = step;
+    }
+    return found;
+  }
+
+  function favicon(entry) {
+    if (entry.icon) {
+      const img = el("img", "fav");
+      img.src = entry.icon;
+      return img;
+    }
+    return el("span", "fav", entry.type === "folder" ? "▸" : "○");
+  }
+
+  function open_(entry, newTab) {
+    if (bridge) bridge.openBookmarkById(KEY, entry.id, !!newTab);
+  }
+
+  function beginEdit(id) { editing = id; render(); }
+
+  function editRow(entry) {
+    const row = el("div", "row");
+    row.appendChild(favicon(entry));
+    const box = el("div", "edit");
+    const name = document.createElement("input");
+    name.type = "text";
+    name.value = entry.title;
+    name.placeholder = entry.type === "folder" ? STR.bmFolderName : STR.bmName;
+    box.appendChild(name);
+    let addr = null;
+    if (entry.type !== "folder") {
+      addr = document.createElement("input");
+      addr.type = "text";
+      addr.value = entry.url;
+      addr.placeholder = STR.bmUrl;
+      box.appendChild(addr);
+    }
+    const save = () => {
+      if (bridge)
+        bridge.updateBookmark(KEY, entry.id, name.value,
+                              addr ? addr.value : "");
+      editing = 0;
+    };
+    const keys = (ev) => {
+      if (ev.key === "Enter") save();
+      else if (ev.key === "Escape") { ev.stopPropagation(); editing = 0; render(); }
+    };
+    name.onkeydown = keys;
+    if (addr) addr.onkeydown = keys;
+    const acts = el("div", "acts");
+    acts.appendChild(btn(STR.bmSave, "", save));
+    acts.appendChild(btn(STR.bmCancel, "", () => { editing = 0; render(); }));
+    row.append(box, acts);
+    setTimeout(() => { name.focus(); name.select(); }, 0);
+    return row;
+  }
+
+  function linkRow(entry, index, count, flat) {
+    if (entry.id === editing) return editRow(entry);
+    const row = el("div", "row");
+    row.appendChild(favicon(entry));
+    const text = el("div", "text");
+    const title = el("div", "title", entry.title || entry.url);
+    title.title = entry.url || entry.title;
+    title.onclick = (ev) => open_(entry, ev.ctrlKey || ev.shiftKey);
+    title.onauxclick = (ev) => { if (ev.button === 1) open_(entry, true); };
+    text.appendChild(title);
+    if (entry.url) text.appendChild(el("div", "url", entry.url));
+    row.appendChild(text);
+
+    const acts = el("div", "acts");
+    if (!flat) {
+      const up = btn("↑", "", () => move(entry, index - 1), index <= 0);
+      up.title = STR.bmUp;
+      const down = btn("↓", "", () => move(entry, index + 1),
+                       index >= count - 1);
+      down.title = STR.bmDown;
+      acts.append(up, down);
+      // a folder can be moved into another folder now, so it gets the
+      // box too - minus itself and everything under it, which is the
+      // one move that would tie the collection in a knot
+      const barred = entry.type === "folder" ? subtree(entry.id) : new Set();
+      const choices = folderList().filter(f => !barred.has(f.folder.id));
+      if (choices.length) {
+        const sel = document.createElement("select");
+        const root = el("option", "", STR.bmNoFolder);
+        root.value = "0";
+        sel.appendChild(root);
+        for (const f of choices) {
+          const o = el("option", "",
+                       "\u00a0\u00a0".repeat(f.depth) + (f.folder.title || "—"));
+          o.value = String(f.folder.id);
+          sel.appendChild(o);
+        }
+        sel.value = String(entry.parent);
+        sel.onchange = () => {
+          if (bridge)
+            bridge.moveBookmark(KEY, entry.id, parseInt(sel.value, 10), 9999);
+        };
+        acts.appendChild(sel);
+      }
+    }
+    acts.appendChild(btn(STR.bmRename, "", () => beginEdit(entry.id)));
+    acts.appendChild(deleteBtn(entry));
+    row.appendChild(acts);
+    return row;
+  }
+
+  // a folder goes down with everything in it, so that one asks twice:
+  // the button turns into "Sure?" and forgets again after a moment
+  function deleteBtn(entry) {
+    const kids = entry.type === "folder" ? childrenOf(entry.id).length : 0;
+    const b = btn(STR.bmDelete, "danger", () => {
+      if (!kids || b.dataset.armed) {
+        if (bridge) bridge.removeBookmark(KEY, entry.id);
+        return;
+      }
+      b.dataset.armed = "1";
+      b.textContent = STR.bmSure;
+      setTimeout(() => {
+        if (b.isConnected) { delete b.dataset.armed; b.textContent = STR.bmDelete; }
+      }, 3000);
+    });
+    return b;
+  }
+
+  function move(entry, index) {
+    if (bridge) bridge.moveBookmark(KEY, entry.id, entry.parent, index);
+  }
+
+  function render() {
+    const list = document.getElementById("list");
+    const query = document.getElementById("filter").value.trim().toLowerCase();
+    list.innerHTML = "";
+    document.getElementById("empty").hidden = items.length > 0;
+
+    if (query) {
+      const hits = items.filter(e => e.type !== "folder"
+        && ((e.title || "") + " " + (e.url || "")).toLowerCase().includes(query));
+      for (const e of hits) list.appendChild(linkRow(e, 0, 0, true));
+      if (!hits.length) list.appendChild(el("div", "hint", STR.bmNoBookmarks));
+      return;
+    }
+
+    if (!items.length) return;
+    const sections = [{id: 0, title: STR.bmNoFolder, folder: null, depth: 0}];
+    for (const f of folderList())
+      sections.push({id: f.folder.id, title: f.folder.title,
+                     folder: f.folder, depth: f.depth + 1});
+
+    for (const sec of sections) {
+      const head = el("div", "group" + (sec.depth ? " sub" : ""));
+      head.style.marginLeft = (sec.depth * 18) + "px";
+      head.appendChild(el("span", "gname", sec.title || "—"));
+      // a folder inside this one, made where you are looking at it
+      const mk = el("button", "", STR.bmNewFolder);
+      mk.onclick = () => newFolder(sec.id);
+      head.appendChild(mk);
+      list.appendChild(head);
+      if (sec.folder && sec.folder.id === editing) {
+        list.appendChild(editRow(sec.folder));
+        continue;
+      }
+      const kids = childrenOf(sec.id);
+      const step = (node) => {
+        node.style.marginLeft = (sec.depth * 18) + "px";
+        return node;
+      };
+      if (!kids.length) {
+        list.appendChild(step(el("div", "hint", STR.bmEmptyFolder)));
+        continue;
+      }
+      kids.forEach((e, i) =>
+        list.appendChild(step(linkRow(e, i, kids.length, false))));
+    }
+  }
+
+  function refresh() {
+    if (!bridge) return;
+    bridge.getBookmarks(KEY, (j) => {
+      try { items = JSON.parse(j); } catch (e) { items = []; }
+      render();
+    });
+    bridge.bookmarksBarVisible(KEY, (on) => {
+      document.getElementById("showbar").checked = !!on;
+    });
+  }
+
+  // a new folder arrives already open for a name: an unnamed "New
+  // folder" you then have to work out how to rename is the thing this
+  // whole page is meant to spare him
+  function newFolder(parent) {
+    if (!bridge) return;
+    bridge.addBookmarkFolder(KEY, STR.bmNewFolder, parent || 0, (id) => {
+      if (id) beginEdit(id);
+    });
+  }
+
+  document.getElementById("filter").oninput = render;
+  document.getElementById("newfolder").onclick = () => newFolder(0);
+  document.getElementById("showbar").onchange = (ev) => {
+    if (bridge) bridge.setBookmarksBarVisible(KEY, ev.target.checked);
+  };
+
+  // Esc, asked for by the pane before it closes: a rename in progress
+  // takes it and is dropped, the pane stays.
+  window.__paneEsc = () => {
+    if (editing) { editing = 0; render(); return true; }
+    return false;
+  };
+
+  // Esc: the way out, exactly like the downloads page. The browser
+  // decides what that means for this tab, because only it knows what
+  // else is open; a bookmarks.html opened outside the browser (no
+  // bridge) falls back to its own history.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (editing) { editing = 0; render(); return; }
+    if (bridge && bridge.closeBookmarks) bridge.closeBookmarks(KEY);
+    else if (typeof qt === "undefined" && history.length > 1) history.back();
+  });
+
+  if (typeof qt !== "undefined") {
+    new QWebChannel(qt.webChannelTransport, (ch) => {
+      bridge = ch.objects.bridge;
+      bridge.uiStrings((j) => {
+        try {
+          Object.assign(STR, JSON.parse(j));
+          document.title = STR.bookmarks;
+          document.getElementById("t_title").textContent = STR.bookmarks;
+          document.getElementById("filter").placeholder = STR.bmSearch;
+          document.getElementById("newfolder").textContent = STR.bmNewFolder;
+          document.getElementById("t_showbar").textContent = STR.bmShowBar;
+          document.getElementById("empty").textContent = STR.bmNoBookmarks;
+        } catch (e) {}
+        refresh();
+      });
+      bridge.bookmarksChanged.connect(refresh);
+    });
+  } else {
+    render();
+  }
+</script>
+</body>
+</html>

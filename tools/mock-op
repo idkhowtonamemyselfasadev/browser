@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""A stand-in for 1Password's `op` CLI, for testing without the real
+binary and without a real tenant.
+
+It speaks the same subset the browser uses:
+
+    op whoami
+    op item list --format json [--vault V]
+    op item get <id> --format json [--vault V]
+    op item get <id> --otp
+    op item create - --format json          (JSON template on stdin)
+    op item create --format json --category C --title T [field=value ...]
+    op item edit <id> --format json         (whole item JSON on stdin)
+    op item edit <id> --format json [field=value ...]
+    op item delete <id>
+
+The stdin forms are the ones the browser uses for anything with a
+secret in it, so that no password is ever visible in `ps`.
+
+The "server" is a JSON file at $MOCK_OP_STORE. Everything the real
+thing does that we do not use is simply not here — this exists to prove
+the browser's side of the conversation, not to reimplement 1Password.
+
+Failure modes can be forced, because those are the interesting ones:
+  MOCK_OP_FAIL=auth     every call fails the way a revoked token does
+  MOCK_OP_FAIL=hang     every call sleeps forever
+  MOCK_OP_FAIL=garbage  every call prints something that is not JSON
+"""
+import base64
+import hashlib
+import hmac
+import json
+import os
+import struct
+import sys
+import time
+import uuid
+
+STORE = os.environ.get("MOCK_OP_STORE", "/tmp/mock-op-store.json")
+FAIL = os.environ.get("MOCK_OP_FAIL", "")
+
+
+def die(message, code=1):
+    sys.stderr.write("[ERROR] " + message + "\n")
+    sys.exit(code)
+
+
+def load():
+    try:
+        with open(STORE) as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {"items": []}
+
+
+def save(data):
+    with open(STORE, "w") as handle:
+        json.dump(data, handle)
+
+
+def token():
+    return os.environ.get("OP_SERVICE_ACCOUNT_TOKEN", "")
+
+
+def totp(secret):
+    raw = secret.replace(" ", "").upper()
+    raw += "=" * (-len(raw) % 8)
+    key = base64.b32decode(raw)
+    counter = int(time.time() // 30)
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0f
+    code = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7fffffff
+    return str(code % 1000000).zfill(6)
+
+
+def field_map(item):
+    return {f.get("id"): f.get("value", "") for f in item.get("fields", [])}
+
+
+def summarise(item):
+    """`op item list` shows no secrets — same as the real thing."""
+    fields = field_map(item)
+    extra = ""
+    if item["category"] == "LOGIN":
+        extra = fields.get("username", "")
+    elif item["category"] == "CREDIT_CARD":
+        extra = fields.get("ccnum", "")[-4:]
+    return {"id": item["id"], "title": item["title"],
+            "category": item["category"], "vault": item.get("vault", {}),
+            "urls": item.get("urls", []), "tags": item.get("tags", []),
+            "favorite": item.get("favorite", False),
+            "additional_information": extra,
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at")}
+
+
+def read_stdin():
+    """Whatever was piped in, or "". The browser always gives `op` a
+    pipe — empty when there is nothing to send — so this never waits
+    on a terminal that will not answer."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return ""
+    try:
+        return sys.stdin.read()
+    except (OSError, ValueError):
+        return ""
+
+
+def piped_json(text):
+    if not (text or "").strip():
+        return None
+    try:
+        value = json.loads(text)
+    except ValueError:
+        die("unable to parse JSON from standard input")
+    if not isinstance(value, dict):
+        die("standard input is not an item")
+    return value
+
+
+def main(argv):
+    if FAIL == "hang":
+        time.sleep(3600)
+    if FAIL == "garbage":
+        print("not json at all")
+        return 0
+    if not token():
+        die("no service account token found")
+    if FAIL == "auth" or token() == "revoked":
+        die("authentication: the service account token is not valid", 1)
+
+    if not argv:
+        die("usage")
+    if argv[0] == "whoami":
+        print(json.dumps({"user_type": "SERVICE_ACCOUNT",
+                          "account_uuid": "MOCKACCOUNT"}))
+        return 0
+    if argv[0] != "item":
+        die("unknown command " + argv[0])
+
+    action, rest = argv[1], argv[2:]
+    flags, positional, assignments = {}, [], []
+    i = 0
+    while i < len(rest):
+        piece = rest[i]
+        if piece.startswith("--"):
+            name = piece[2:]
+            if "=" in name:
+                key, value = name.split("=", 1)
+                flags[key] = value
+            elif i + 1 < len(rest) and not rest[i + 1].startswith("--"):
+                flags[name] = rest[i + 1]
+                i += 1
+            else:
+                flags[name] = True
+        elif "=" in piece:
+            assignments.append(piece.split("=", 1))
+        else:
+            positional.append(piece)
+        i += 1
+
+    data = load()
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    vault = flags.get("vault")
+    piped = piped_json(read_stdin())
+
+    def in_vault(item):
+        return not vault or item.get("vault", {}).get("name") == vault
+
+    if action == "list":
+        print(json.dumps([summarise(i) for i in data["items"]
+                          if in_vault(i)]))
+        return 0
+
+    if action in ("get", "edit", "delete"):
+        if not positional:
+            die("no item given")
+        wanted = positional[0]
+        found = None
+        for item in data["items"]:
+            if not in_vault(item):
+                continue
+            if item["id"] == wanted or item["title"] == wanted:
+                found = item
+                break
+        if found is None:
+            die('"%s" isn\'t an item. Specify the item with its UUID, name '
+                'or domain.' % wanted)
+        if action == "get":
+            if flags.get("otp"):
+                secret = field_map(found).get("totp", "")
+                if not secret:
+                    die("this item doesn't have a one-time password")
+                print(totp(secret))
+                return 0
+            print(json.dumps(found))
+            return 0
+        if action == "delete":
+            data["items"] = [i for i in data["items"] if i is not found]
+            save(data)
+            return 0
+        if piped is not None:
+            # the piped form of `op item edit`: the whole item, as it
+            # came out of `op item get` and was then changed
+            for key in ("title", "tags", "urls", "fields"):
+                if key in piped:
+                    found[key] = piped[key]
+        for key, value in assignments:
+            for field in found["fields"]:
+                if field["id"] == key:
+                    field["value"] = value
+                    break
+            else:
+                found["fields"].append({"id": key, "type": "STRING",
+                                        "value": value})
+        if "title" in flags:
+            found["title"] = flags["title"]
+        found["updated_at"] = now
+        save(data)
+        print(json.dumps(found))
+        return 0
+
+    if action == "create":
+        # `op item create -` takes the whole item as JSON on stdin;
+        # assignments, if any, are applied on top
+        template = piped if "-" in positional and piped is not None else {}
+        fields = [dict(f) for f in (template.get("fields") or [])
+                  if isinstance(f, dict)]
+        fields += [{"id": key, "type": "STRING", "value": value}
+                   for key, value in assignments]
+        tags = template.get("tags") or []
+        if isinstance(flags.get("tags"), str):
+            tags = tags + [flags["tags"]]
+        item = {"id": uuid.uuid4().hex[:26].upper(),
+                "title": flags.get("title", template.get("title", "")),
+                "category": str(flags.get("category")
+                                or template.get("category")
+                                or "LOGIN").upper(),
+                "vault": {"id": "MOCKVAULT", "name": vault or "Private"},
+                "fields": fields,
+                "tags": [t for t in tags if t],
+                "created_at": now, "updated_at": now}
+        urls = [u for u in (template.get("urls") or []) if isinstance(u, dict)]
+        if flags.get("url"):
+            urls = [{"href": flags["url"], "primary": True}]
+        if urls:
+            item["urls"] = urls
+        data["items"].append(item)
+        save(data)
+        print(json.dumps(item))
+        return 0
+
+    die("unknown action " + action)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
