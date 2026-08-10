@@ -769,6 +769,10 @@ def a_bare_scheme_is_not_an_address():
           B._launch_url("http://") is None)
     check("nothing stays nothing",
           B._launch_url(None) is None and B._launch_url("") is None)
+    # a launcher that does not substitute Exec field codes hands the
+    # literal "%u" over — the placeholder for a URL is not a URL
+    check("an unsubstituted field code maps to no address",
+          all(B._launch_url(c) is None for c in ("%u", "%U", "%f", "%F")))
     check("a real address passes untouched",
           B._launch_url("https://example.com/a?b=c")
           == "https://example.com/a?b=c")

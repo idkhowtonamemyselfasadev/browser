@@ -15895,6 +15895,11 @@ def _launch_url(text):
     every caller already treats as "no address given"."""
     if not text:
         return None
+    if re.fullmatch(r"%[a-zA-Z]", text):
+        # the desktop entry says "Exec=... %u", and a launcher that
+        # does not substitute field codes hands the %u over as it
+        # stands. It marks where a URL would go; it never is one.
+        return None
     url = QUrl(text)
     if url.scheme() in ("http", "https") and not url.host():
         return None
