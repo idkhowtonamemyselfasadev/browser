@@ -185,6 +185,25 @@ BOOKMARKS_MAX = 2000
 # still there, still in the manager, and the menu says so.
 BOOKMARKS_DEPTH = 20
 
+# The libraries underneath. PyQt6 and QtWebEngine are the parts that
+# actually render the web, and an old QtWebEngine is an old Chromium --
+# which is a security problem long before it is a rendering one. So the
+# browser looks after its own foundations, on the same terms as
+# everything else in here: the looking is quiet and automatic, the
+# changing never happens without being asked for.
+LIB_UPDATE_DAYS = 2
+# A session left open for a fortnight would otherwise never look again,
+# so the gate is read on a slow tick as well as at startup.
+LIB_TICK_MS = 6 * 3600 * 1000
+# far enough past startup that the first window is painted and the
+# tabs restored before a subprocess is spawned behind them
+LIB_FIRST_MS = 20000
+# What the engine actually comes out of on this system: RPMs on Fedora,
+# wheels on Windows. dnf expands the glob itself -- nothing here is a
+# shell, so nothing here has to be quoted against one.
+LIB_RPMS = ["python3-pyqt6*", "qt6-qtwebengine"]
+LIB_PIP = ["PyQt6", "PyQt6-WebEngine"]
+
 # sites that ship their own dark theme (served via preferredColorScheme):
 # force-dark would only slow them down repainting an already-dark page
 NATIVE_DARK_SITES = {
@@ -854,6 +873,13 @@ UI_STRINGS = {
 "clearHistory":"Clear history","clearCookies":"Clear cookies",
 "cookiesHint":"Clear cookies logs this virtual browser out everywhere.",
 "updates":"Updates","checkUpdates":"Check for updates","setupT":"Setup",
+"libUpdates":"Keep the libraries up to date",
+"libUpdatesHint":"How often to look for a newer web engine (PyQt6 and QtWebEngine). Nothing is ever installed without asking.",
+"libAvailable":"Library updates are available","libUpdateBtn":"Update",
+"libUpdating":"Updating libraries\u2026",
+"libUpdated":"Libraries updated \u2014 restart to load them",
+"libFailed":"Library update failed",
+"restartNow":"Restart now","day":"day","days":"days",
 "runSetup":"Run setup again","setupHint":"Language, search, wallpaper, privacy and quick links",
 "filterPh":"Search\u2026","add":"Add","background":"Background",
 "allSettings":"All settings","searchSite":"Search {}",
@@ -972,6 +998,14 @@ UI_STRINGS = {
 "clearCookies":"Cookies l\u00f6schen",
 "cookiesHint":"Cookies l\u00f6schen meldet diesen virtuellen Browser \u00fcberall ab.",
 "updates":"Updates","checkUpdates":"Nach Updates suchen","setupT":"Einrichtung",
+"libUpdates":"Bibliotheken aktuell halten",
+"libUpdatesHint":"Wie oft nach einer neueren Web-Engine (PyQt6 und QtWebEngine) gesucht wird. Installiert wird nie ohne Nachfrage.",
+"libAvailable":"Updates f\u00fcr die Bibliotheken verf\u00fcgbar",
+"libUpdateBtn":"Aktualisieren",
+"libUpdating":"Bibliotheken werden aktualisiert\u2026",
+"libUpdated":"Bibliotheken aktualisiert \u2014 Neustart erforderlich",
+"libFailed":"Aktualisierung fehlgeschlagen",
+"restartNow":"Jetzt neu starten","day":"Tag","days":"Tage",
 "runSetup":"Einrichtung neu starten","setupHint":"Sprache, Suche, Hintergrund, Privatsph\u00e4re und Links",
 "filterPh":"Suchen\u2026","add":"Hinzuf\u00fcgen","background":"Hintergrund",
 "allSettings":"Alle Einstellungen","searchSite":"{} durchsuchen",
@@ -5708,6 +5742,8 @@ class Bridge(QObject):
             "restoreTabs": c.get("restoreTabs", True),
             "zoom": c.get("zoom", 1.0),
             "minFont": c.get("minFont", 0),
+            "libUpdateEvery": int(c.get("libUpdateEvery",
+                                        LIB_UPDATE_DAYS) or 0),
             "askDownload": bool(c.get("askDownload", False)),
             "downloadDir": str(self.browser.download_dir(create=False)),
             "downloadDirDefault": str(DOWNLOAD_DIR),
@@ -9996,6 +10032,15 @@ class Browser(QMainWindow):
         self.bridge.updateFinished.connect(self._toast_result)
         QTimer.singleShot(3000, self._check_updates)
         self._toast = None
+        # ...and the libraries under the browser, on a longer rope and
+        # a slower tick. See _check_lib_updates.
+        self._lib_checking = False
+        self._lib_button = None
+        QTimer.singleShot(LIB_FIRST_MS, self._check_lib_updates)
+        self._lib_timer = QTimer(self)
+        self._lib_timer.setInterval(LIB_TICK_MS)
+        self._lib_timer.timeout.connect(self._check_lib_updates)
+        self._lib_timer.start()
         self._pw_pending = None
         # half-finished logins: (profile, host) -> the account whose
         # password step is still to come. See _pw_step_remember.
@@ -10256,6 +10301,240 @@ class Browser(QMainWindow):
             self._toast_timer.setInterval(8000)
             self._toast_timer.start()
         self._place_toast()
+
+    # ---- the libraries underneath ----
+    #
+    # The browser updates itself from git a few lines above. This does the
+    # same for what it is standing on. The split that matters is between
+    # looking and changing: `dnf check-update` needs no root and can run
+    # on its own, while the upgrade needs it and therefore may not. A root
+    # password box nobody asked for is the wrong way to meet somebody, so
+    # pkexec is reached from exactly one place in here -- the button in
+    # the toast, pressed by hand.
+
+    def _lib_due(self):
+        """Whether the every-N-days gate has come round.
+
+        Zero days is off, and off is off: no check, no toast, and the
+        stamp is left where it stands, so switching it back on later
+        does not produce a prompt about a check that never ran."""
+        try:
+            days = int(self.config.get("libUpdateEvery", LIB_UPDATE_DAYS) or 0)
+        except (TypeError, ValueError):
+            days = LIB_UPDATE_DAYS
+        if days <= 0:
+            return False
+        try:
+            last = float(self.config.get("libUpdateLast", 0) or 0)
+        except (TypeError, ValueError):
+            last = 0.0
+        return time.time() - last >= days * 86400
+
+    def _lib_stamp(self):
+        """This round is over, however it ended.
+
+        Written down for every ending that was an answer -- nothing to
+        update, updated, or "not now" -- and deliberately not for a check
+        that could not be made at all. A laptop offline for a week is
+        asked again tomorrow rather than told it is up to date."""
+        self.config["libUpdateLast"] = int(time.time())
+        self.save_config()
+
+    def _lib_check_cmd(self):
+        """"Is there anything newer?", as a command.
+
+        Fedora ships the engine as RPMs, and check-update is the one part
+        of dnf that runs as a normal user: 100 when something is waiting,
+        0 when nothing is. The Windows edition has no dnf -- there the
+        same libraries came out of pip, which answers in its output
+        instead of its exit code."""
+        if sys.platform == "win32":
+            return sys.executable, ["-m", "pip", "list", "--outdated"]
+        return "dnf", ["check-update"] + LIB_RPMS
+
+    def _lib_upgrade_cmd(self):
+        """The upgrade, which only ever runs because he pressed Update.
+
+        Root on Linux, hence pkexec and hence the polkit dialog; on
+        Windows the wheels go into his own environment and no such
+        elevation exists or is wanted."""
+        if sys.platform == "win32":
+            return sys.executable, ["-m", "pip", "install", "--upgrade"] + LIB_PIP
+        return "pkexec", ["dnf", "-y", "upgrade"] + LIB_RPMS
+
+    def _lib_run(self, program, args, done):
+        """One command, asynchronously, answered as (exit code, output).
+
+        The only place this feature starts a process, which is what makes
+        it testable at all: a test replaces this one method and no dnf and
+        certainly no pkexec is ever reached. A command that cannot even
+        start reports itself the way anything else that failed does --
+        code -1 -- so the caller has one shape to read and the UI thread
+        is never held up waiting for either."""
+        proc = QProcess(self)
+        answered = []
+
+        def answer(code, out):
+            # errorOccurred and finished can both arrive for one crash;
+            # the first one to speak is the answer
+            if answered:
+                return
+            answered.append(True)
+            done(code, out)
+
+        def finished(*_):
+            try:
+                out = bytes(proc.readAllStandardOutput()).decode(
+                    "utf-8", "replace")
+                code = proc.exitCode()
+                normal = proc.exitStatus() == QProcess.ExitStatus.NormalExit
+                proc.deleteLater()
+            except RuntimeError:
+                return   # quitting while the command was in flight
+            answer(code if normal else -1, out)
+
+        def failed(*_):
+            try:
+                proc.deleteLater()
+            except RuntimeError:
+                pass
+            answer(-1, "")
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(failed)
+        proc.start(program, args)
+        return proc
+
+    def _lib_found_updates(self, code, out):
+        """True, False, or None for "the question could not be asked".
+
+        The third answer is the important one. No dnf, no network, or the
+        package lock held by something else are all not "you are up to
+        date", and treating them as one would stamp the config and go
+        quiet for two days over a check that never happened."""
+        if sys.platform == "win32":
+            if code != 0:
+                return None
+            wanted = {name.lower() for name in LIB_PIP}
+            for line in out.splitlines():
+                first = line.split()
+                if first and first[0].lower() in wanted:
+                    return True
+            return False
+        if code == 100:
+            return True
+        if code == 0:
+            return False
+        return None
+
+    def _check_lib_updates(self):
+        """The quiet look, from startup and from the six-hourly tick."""
+        if self._lib_checking or not self._lib_due():
+            return
+        self._lib_checking = True
+        program, args = self._lib_check_cmd()
+        try:
+            self._lib_run(program, args, self._lib_check_done)
+        except Exception:
+            # nothing about keeping libraries fresh is worth a traceback
+            # in front of somebody who was reading a web page
+            self._lib_checking = False
+
+    def _lib_check_done(self, code, out):
+        self._lib_checking = False
+        found = self._lib_found_updates(code, out)
+        if found is None:
+            return          # ask again next tick; say nothing now
+        if not found:
+            self._lib_stamp()
+            return          # the common case, and it is silent on purpose
+        self._show_lib_toast()
+
+    def _show_lib_toast(self):
+        """The offer. Same toast as the browser's own update, because it
+        is the same kind of news, and one at a time like all of them: if
+        something else is already asking, this waits for the next tick
+        rather than pushing in front of it -- and the stamp waits with
+        it, so nothing is lost by waiting."""
+        if self._toast:
+            return
+        toast = QWidget(self, objectName="toast")
+        toast.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        lay = QHBoxLayout(toast)
+        lay.setContentsMargins(14, 8, 8, 8)
+        lay.setSpacing(10)
+        self._toast_label = QLabel(self._ui_str("libAvailable"))
+        update = QToolButton(text=self._ui_str("libUpdateBtn"))
+        close = QToolButton(text="\u2715", objectName="tabclose")
+        lay.addWidget(self._toast_label)
+        lay.addWidget(update)
+        lay.addWidget(close)
+
+        self._toast = toast
+        self._lib_button = update
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        # long, because it is asking for a decision rather than reporting
+        # one -- but not forever, because a toast that never goes away
+        # holds the one slot every other prompt in here needs. Running
+        # out is dismissal, and dismissal is an answer.
+        self._toast_timer.setInterval(30000)
+        self._toast_timer.timeout.connect(self._lib_dismiss)
+        close.clicked.connect(self._lib_dismiss)
+        update.clicked.connect(self._lib_update_now)
+
+        self._place_toast()
+        toast.show()
+        toast.raise_()
+        self._toast_timer.start()
+
+    def _lib_dismiss(self):
+        """Not now. Answered is answered, so the stamp goes down and the
+        same offer is not made again tomorrow."""
+        self._lib_stamp()
+        self._hide_toast()
+
+    def _lib_update_now(self):
+        """He pressed Update: the one path in here that runs pkexec."""
+        self._toast_timer.stop()
+        if self._lib_button is not None:
+            self._lib_button.hide()
+        self._toast_label.setText(self._ui_str("libUpdating"))
+        self._place_toast()
+        program, args = self._lib_upgrade_cmd()
+        try:
+            self._lib_run(program, args, self._lib_upgrade_done)
+        except Exception:
+            self._lib_upgrade_done(-1, "")
+
+    def _lib_upgrade_done(self, code, _out):
+        """How it went. A cancelled polkit box exits non-zero, so a zero
+        here really is "the libraries were replaced" and not "he was
+        offered the chance"."""
+        ok = code == 0
+        # Either way this round is over: he was asked, he answered, and
+        # a polkit box he closed must not come back in six hours. The
+        # stamp goes down for a failure exactly as for a success -- the
+        # thing that is not written down is a check that never happened.
+        self._lib_stamp()
+        if self._toast is None:
+            return   # dismissed while it ran; the work still counted
+        try:
+            self._toast_label.setText(
+                self._ui_str("libUpdated" if ok else "libFailed"))
+            if ok:
+                # the new libraries are on disk; this process is still
+                # running the old ones and will be until it is restarted
+                restart = QToolButton(text=self._ui_str("restartNow"))
+                restart.clicked.connect(self.restart)
+                self._toast.layout().insertWidget(1, restart)
+                self._toast_timer.stop()   # stays until acted on
+            else:
+                self._toast_timer.setInterval(8000)
+                self._toast_timer.start()
+            self._place_toast()
+        except RuntimeError:
+            pass     # the window went away underneath the answer
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -12007,6 +12286,22 @@ class Browser(QMainWindow):
         # IS Chromium, so drop the QtWebEngine token from the identity
         profile.setHttpUserAgent(
             re.sub(r"\s?QtWebEngine/[\d.]+", "", profile.httpUserAgent()))
+        # ...and the same story has to be told twice. Modern Chromium
+        # sends its identity a second time as client hints (Sec-CH-UA),
+        # and QtWebEngine's list has no "Google Chrome" in it -- so a
+        # site that reads both, as Google's sign-in does, sees a
+        # user-agent claiming Chrome and hints admitting Chromium,
+        # concludes "embedded browser" and refuses the login with "this
+        # browser or app may not be secure". Adding the brand (the
+        # existing entries stay) makes the two headers agree.
+        try:
+            hints = profile.clientHints()
+            brands = hints.fullVersionList()
+            brands["Google Chrome"] = hints.fullVersion()
+            hints.setFullVersionList(brands)
+        except (AttributeError, RuntimeError):
+            pass   # QWebEngineClientHints is Qt 6.8+; older is no worse
+                   # off than it was before
         lang = self.config.get("translateLang", "de")
         profile.setHttpAcceptLanguage(
             lang if lang.startswith("en") else lang + ",en")
@@ -15906,6 +16201,19 @@ def _launch_url(text):
     return text
 
 
+def _parse_handoff(message):
+    """What a second launch sent through the socket: the address to
+    open (None for "just come to the front") and whether the tab is
+    meant to stay in the background — "bg <url>" opens without raising
+    the window or leaving the tab the user is on, so a script can hand
+    the browser work without barging into anyone's screen."""
+    background = message.startswith("bg ")
+    if background:
+        message = message[3:].strip()
+    return (None if message in ("", "raise") else _launch_url(message),
+            background)
+
+
 def _pid_alive(pid):
     if sys.platform == "win32":
         import ctypes
@@ -15923,8 +16231,12 @@ def _pid_alive(pid):
 
 def main():
     # a URL argument means we were asked to open a link (e.g. as the
-    # system default browser)
-    url = _launch_url(sys.argv[1] if len(sys.argv) > 1 else None)
+    # system default browser); --background opens it without bringing
+    # the window up over whatever the user is doing
+    argv = sys.argv[1:]
+    background = "--background" in argv
+    argv = [a for a in argv if a != "--background"]
+    url = _launch_url(argv[0] if argv else None)
 
     # started by our own restart(): let the old process finish dying
     # so the profile and socket are free
@@ -15943,7 +16255,8 @@ def main():
     probe = QLocalSocket()
     probe.connectToServer(SINGLE_INSTANCE_SOCKET)
     if probe.waitForConnected(300):
-        probe.write((url or "raise").encode())
+        probe.write((("bg " if background and url else "")
+                     + (url or "raise")).encode())
         probe.flush()
         probe.waitForBytesWritten(300)
         return
@@ -15967,8 +16280,10 @@ def main():
 
         def read():
             message = bytes(conn.readAll()).decode().strip()
-            win.new_tab(url=None if message == "raise"
-                        else _launch_url(message))
+            url, background = _parse_handoff(message)
+            win.new_tab(url=url, switch=not background)
+            if background:
+                return  # asked to stay out of the way: no raise
             win.showNormal()
             win.raise_()
             win.activateWindow()
