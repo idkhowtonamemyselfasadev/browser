@@ -779,6 +779,17 @@ def a_bare_scheme_is_not_an_address():
     check("a local file passes untouched",
           B._launch_url("file:///anywhere/page.html")
           == "file:///anywhere/page.html")
+    # the handoff a second launch sends: "bg " opens out of the way
+    check("a background handoff keeps its URL and the request",
+          B._parse_handoff("bg https://example.com")
+          == ("https://example.com", True))
+    check("a plain handoff is a foreground open",
+          B._parse_handoff("https://example.com")
+          == ("https://example.com", False))
+    check("raise stays what it was",
+          B._parse_handoff("raise") == (None, False))
+    check("junk in the background is still junk",
+          B._parse_handoff("bg %u") == (None, True))
 
 
 section("(9) a bare scheme is not an address", a_bare_scheme_is_not_an_address)
