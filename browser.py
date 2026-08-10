@@ -15885,6 +15885,22 @@ def _install_theme_flags():
 SINGLE_INSTANCE_SOCKET = "browser-single-instance"
 
 
+def _launch_url(text):
+    """What a URL handed in from outside is worth as an address.
+
+    Desktop shortcuts "open the default browser" by asking for a bare
+    "https://" — a scheme with nothing behind it. That is a request
+    for the browser, not for a page, and a tab opened on it would sit
+    blank forever. Anything without a site in it maps to None, which
+    every caller already treats as "no address given"."""
+    if not text:
+        return None
+    url = QUrl(text)
+    if url.scheme() in ("http", "https") and not url.host():
+        return None
+    return text
+
+
 def _pid_alive(pid):
     if sys.platform == "win32":
         import ctypes
@@ -15903,7 +15919,7 @@ def _pid_alive(pid):
 def main():
     # a URL argument means we were asked to open a link (e.g. as the
     # system default browser)
-    url = sys.argv[1] if len(sys.argv) > 1 else None
+    url = _launch_url(sys.argv[1] if len(sys.argv) > 1 else None)
 
     # started by our own restart(): let the old process finish dying
     # so the profile and socket are free
@@ -15946,7 +15962,8 @@ def main():
 
         def read():
             message = bytes(conn.readAll()).decode().strip()
-            win.new_tab(url=None if message in ("", "raise") else message)
+            win.new_tab(url=None if message == "raise"
+                        else _launch_url(message))
             win.showNormal()
             win.raise_()
             win.activateWindow()
