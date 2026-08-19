@@ -8,6 +8,13 @@ import tempfile
 from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+# no browser booted for a test or a screenshot goes looking for library
+# updates: a real dnf/pip per boot would be slow, would depend on what the
+# distribution is shipping this morning, and could raise a toast over a
+# window under assertion. runall.sh sets this for its own runs, but a bare
+# `python3 test_wizard.py` (which stays up past LIB_FIRST_MS) would arm and
+# fire a real check without it -- so it belongs here too.
+os.environ.setdefault("BROWSER_NO_LIB_CHECK", "1")
 SCRATCH = Path(tempfile.mkdtemp(prefix="browsershot-"))
 os.environ["XDG_DATA_HOME"] = str(SCRATCH / "share")
 os.environ["XDG_CONFIG_HOME"] = str(SCRATCH / "config")

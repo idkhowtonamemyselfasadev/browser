@@ -11,6 +11,11 @@
 R=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$R" || exit 1
 export QT_QPA_PLATFORM=offscreen
+# no browser started in here goes looking for library updates: a real
+# dnf per test would be slow, would depend on what the distribution is
+# shipping this morning, and could raise a toast over a window another
+# test is inspecting. test_libs drives that check by hand instead.
+export BROWSER_NO_LIB_CHECK=1
 
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
@@ -31,7 +36,10 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_master.py test_masterrace.py test_providers.py \
          test_async.py test_upgrade.py test_op_page.py test_toolbar.py \
          test_wizard.py test_contrast.py test_themefix.py \
-         test_favorites.py test_favclip.py test_update.py; do
+         test_favorites.py test_favclip.py test_update.py \
+         test_libs.py test_looks.py test_navguard.py test_external.py \
+         test_lifecycle.py test_deadtab.py test_libguard.py test_clicks.py \
+         test_bpgame.py test_permreload.py test_callguard.py; do
   [ -f "$t" ] || continue
   run "$t" "$t"
 done

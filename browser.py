@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """A minimal, island-styled web browser. Tabs, search bar, start page."""
+import atexit
 import base64
 import csv
 import datetime
@@ -18,6 +19,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import unicodedata
 import uuid
@@ -35,19 +37,46 @@ if ("--blink-settings=preferredColorScheme=0"
         os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
         + " --blink-settings=preferredColorScheme=0")
 # the embedded inspector (DevTools) only serves its frontend resources
-# when remote debugging is enabled; bound to localhost by Chromium
-os.environ.setdefault("QTWEBENGINE_REMOTE_DEBUGGING", "127.0.0.1:9222")
+# when remote debugging is enabled. Qt can only turn this on before the
+# web engine starts, so it cannot be made fully lazy -- but a FIXED,
+# well-known port (9222) let any other local process drive the browser
+# over the DevTools protocol. Bind a free, unpredictable port instead, so
+# the surface is there for the one who opened the inspector and awkward
+# for anyone else. REMOTE_DEBUG_PORT carries the choice to toggle_inspector.
+def _pick_debug_port():
+    existing = os.environ.get("QTWEBENGINE_REMOTE_DEBUGGING", "")
+    if existing:
+        # a caller (or a restarted child) already fixed it; honour that
+        tail = existing.rsplit(":", 1)[-1]
+        try:
+            return int(tail)
+        except ValueError:
+            return 0
+    import socket as _socket
+    try:
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+    except OSError:
+        port = 0
+    if port:
+        os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "127.0.0.1:%d" % port
+    return port
+
+
+REMOTE_DEBUG_PORT = _pick_debug_port()
 
 from PyQt6.QtCore import (
-    QBuffer, QElapsedTimer, QEvent, QEventLoop, QFile, QIODevice, QObject,
-    QPoint, QProcess, QRect, QSize, QStringListModel, QTimer, QUrl,
-    QUrlQuery, Qt,
+    QBuffer, QElapsedTimer, QEvent, QEventLoop, QFile, QIODevice, QLocale,
+    QObject, QPoint, QProcess, QRect, QSize, QStringListModel, QTime,
+    QTimer, QUrl, QUrlQuery, Qt,
     pyqtProperty, pyqtSignal, pyqtSlot,
 )
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtGui import (
-    QColor, QDesktopServices, QIcon, QKeySequence, QPainter, QPen, QPixmap,
-    QShortcut, QGuiApplication,
+    QBrush, QColor, QDesktopServices, QIcon, QKeySequence, QLinearGradient,
+    QPainter, QPen, QPixmap, QShortcut, QGuiApplication,
 )
 from PyQt6.QtWidgets import (
     QApplication, QCompleter, QFileDialog, QFrame, QInputDialog, QLabel,
@@ -191,6 +220,18 @@ BOOKMARKS_DEPTH = 20
 # browser looks after its own foundations, on the same terms as
 # everything else in here: the looking is quiet and automatic, the
 # changing never happens without being asked for.
+# Some sites refuse to work embedded. Google deliberately blocks
+# non-mainstream browsers from its sign-in and mail with a "browser or
+# app may not be secure" wall; rather than hand him that wall, those
+# sites are handed to a real external browser instead of loading in-app.
+# externalHandoff turns the whole thing on (off by default);
+# externalSites is the list of domain suffixes; externalBrowser is what
+# to launch. The launch goes to that command DIRECTLY (never xdg-open:
+# this browser is the system default for https://, so xdg-open would
+# relaunch this very browser and loop).
+DEFAULT_EXTERNAL_SITES = ["accounts.google.com", "mail.google.com",
+                          "gmail.com"]
+DEFAULT_EXTERNAL_BROWSER = "firefox"
 LIB_UPDATE_DAYS = 2
 # A session left open for a fortnight would otherwise never look again,
 # so the gate is read on a slow tick as well as at startup.
@@ -246,6 +287,9 @@ GOOGLE_LIGHT_JS = r"""
 # the minimal web channel remote pages get are invisible from world 0.
 MAIN_WORLD_ID = QWebEngineScript.ScriptWorldId.MainWorld.value
 PW_WORLD_ID = QWebEngineScript.ScriptWorldId.UserWorld.value
+# and the world our own additions live in when the page must not see
+# them: the Google script and the userscripts already run there.
+APP_WORLD_ID = QWebEngineScript.ScriptWorldId.ApplicationWorld.value
 
 # how long a half-finished login (step one done, step two still to
 # come) is remembered. Long enough for a slow "Next", short enough that
@@ -924,7 +968,7 @@ UI_STRINGS = {
 "descPrivacy":"None of this leaves your computer. Choose what the browser remembers.",
 "descPasswords":"Where your logins, notes and cards are kept, and the way in to the password manager.",
 "descPlugins":"Small userscripts that run on the sites you tell them to \u2014 and the browser's own optional features.",
-"vaultPw":"Vault Password","vaultPwHint":"The built-in password manager: saves your logins and fills them back in, with secure notes, payment cards, two-factor codes and a generator. It ships with the browser and does nothing at all until you switch it on.","vaultKept":"Switching this off deletes nothing. Your saved passwords stay on this computer exactly as they are, and they are all there again the moment you switch it back on.","builtIn":"Built-in features","wizVaultT":"Vault Password","wizVaultHint":"A password manager built into the browser: it remembers your logins, fills them back in, and keeps secure notes, cards and two-factor codes. Leave it off and the browser never looks at a login form at all. You can switch it on later under Settings \u2192 Plugins.","wizMasterT":"Master password","wizNavMaster":"Master password","wizMasterP":"One password that locks all the others. This is the only choice here you cannot undo later, so it has a page to itself.","wizMasterLater":"You can also switch this on at any time under Settings \u2192 Passwords.","wizMasterAuto":"Once it is on, the browser locks itself again after 15 minutes of not using your passwords and asks for this password when you next need one. You can change that later under Settings \u2192 Passwords.","wizMasterNoVault":"Nothing to lock","wizMasterNoVaultHint":"The password manager is switched off, so the browser is not keeping any passwords to lock. Switch Vault Password on one step back if you want this.","wizMasterWarnB":"There is no way to reset a master password and no way round it. Nobody can recover it \u2014 not you, not this browser, not whoever wrote it. If you forget it, the passwords stay on this computer and stay unreadable for ever. Pick something you will not lose.","wizMasterHint":"Lock your saved passwords with a passphrase only you know. Without it the key sits in a file next to them, where anything running on this computer can read it.","wizMasterSet":"Set \u2713 \u2014 this is switched on when you finish setup.","wizMasterTyping":"Type it in both boxes to switch it on.","wizMasterHave":"You already have a master password. Change or remove it under Settings \u2192 Passwords.","wizMasterSum":"Master password","wizMasterSumSet":"On","wizMasterSumUnset":"Off \u2014 not finished",
+"vaultPw":"Vault Password","vaultPwHint":"Saves and fills your logins \u2014 plus secure notes, cards, 2FA codes and a generator. Off until you switch it on.","vaultKept":"Switching this off deletes nothing. Your saved passwords stay on this computer exactly as they are, and they are all there again the moment you switch it back on.","builtIn":"Built-in features","wizVaultT":"Vault Password","wizVaultHint":"A password manager built into the browser: it remembers your logins, fills them back in, and keeps secure notes, cards and two-factor codes. Leave it off and the browser never looks at a login form at all. You can switch it on later under Settings \u2192 Plugins.","wizMasterT":"Master password","wizNavMaster":"Master password","wizMasterP":"One password that locks all the others. This is the only choice here you cannot undo later, so it has a page to itself.","wizMasterLater":"You can also switch this on at any time under Settings \u2192 Passwords.","wizMasterAuto":"Once it is on, the browser locks itself again after 15 minutes of not using your passwords and asks for this password when you next need one. You can change that later under Settings \u2192 Passwords.","wizMasterNoVault":"Nothing to lock","wizMasterNoVaultHint":"The password manager is switched off, so the browser is not keeping any passwords to lock. Switch Vault Password on one step back if you want this.","wizMasterWarnB":"There is no way to reset a master password and no way round it. Nobody can recover it \u2014 not you, not this browser, not whoever wrote it. If you forget it, the passwords stay on this computer and stay unreadable for ever. Pick something you will not lose.","wizMasterHint":"Lock your saved passwords with a passphrase only you know. Without it the key sits in a file next to them, where anything running on this computer can read it.","wizMasterSet":"Set \u2713 \u2014 this is switched on when you finish setup.","wizMasterTyping":"Type it in both boxes to switch it on.","wizMasterHave":"You already have a master password. Change or remove it under Settings \u2192 Passwords.","wizMasterSum":"Master password","wizMasterSumSet":"On","wizMasterSumUnset":"Off \u2014 not finished",
 "descNetwork":"Route your traffic through a proxy \u2014 everywhere, or site by site.",
 "descUpdates":"Pull the newest version of the browser from its repository.",
 "descSetup":"Run the first-run walk-through again, any time.",
@@ -953,7 +997,7 @@ UI_STRINGS = {
 "newTabPosEnd":"At the end of the strip",
 "newTabPosEndSub":"Every new tab goes to the far right.",
 "newTabPosAfter":"Right after this tab",
-"newTabPosAfterSub":"The new tab lands next to the one it came from \u2014 from the last tab in the strip that is the same place as the end.",
+"newTabPosAfterSub":"Opens next to the tab it came from.",
 "newTabPage":"What a new tab shows",
 "newTabPageStart":"The start page",
 "newTabPageStartSub":"Clock, search bar and your quick links.",
@@ -981,8 +1025,24 @@ UI_STRINGS = {
 "toolbar":"Toolbar","descToolbar":"Which buttons sit at the top, and in what order.","tbHint":"A right-click on the toolbar itself opens the same list.","cardRendering":"How pages are drawn","cardSize":"Size","cardKept":"What is kept","cardInstalled":"Installed","tbShown":"On the toolbar","tbHidden":"Not shown","tbElsewhere":"Elsewhere in the chrome","tbElsewhereHint":"These sit where they sit \u2014 you can take one away, but not move it.","tbFixed":"Always there","tbFixedWhy":"This one stays. You can move it along the bar, but not take it away.","tbMoveUp":"Move earlier on the bar","tbMoveDown":"Move later on the bar","tbFixedHint":"Back, forward, reload and the address bar stay. A browser with no way back is a broken browser.","tbShortcutHint":"Taking a button away never touches its keyboard shortcut \u2014 Ctrl+P still prints.","tbReset":"Back to the usual set","tbCustomize":"Customise toolbar\u2026","tbBack":"Back","tbForward":"Forward","tbReload":"Reload","tbHome":"Start page","tbNewTab":"New tab","tbAddress":"Address bar","tbFind":"Find on page","tbHistory":"History","tbDownloads":"Downloads","tbBookmarks":"Bookmarks","tbPasswords":"Passwords","tbProxy":"Proxy","tbPrint":"Print","tbTranslate":"Translate","tbSettings":"Settings","tbFullscreen":"Full screen","tbStar":"Bookmark star","tbGroups":"Tab groups","tbFavorites":"Favourites",
 "privateTab":"Private","privateNew":"New private tab",
 "privateTip":"Private tab \u2014 nothing is kept once it closes",
-"masterPw":"Master password","masterPwName":"Lock the vault with a master password","masterPwHint":"The key to your saved passwords is worked out from a passphrase you type, instead of being kept in a file next to them. Until you unlock it, nothing on this computer can read them \u2014 not the browser, not anyone using your account.","masterWarnT":"If you forget it, your passwords are gone.","masterWarnB":"There is no way to reset a master password and no way round it. Nobody can recover it \u2014 not you, not this browser, not whoever wrote it. The passwords stay on this computer and stay unreadable for ever. Export them first if you want a way back, and keep that file somewhere safe.","masterSetT":"Set a master password","masterSetGo":"Switch it on","masterNewPh":"Master password","masterAgainPh":"Type it again","masterPassPh":"Master password","masterCurrentPh":"Current master password","masterMinHint":"At least 8 characters. A few unrelated words you will not forget beat a short one with punctuation in it.","masterMismatch":"The two do not match.","masterShort":"Too short \u2014 8 characters at the very least.","masterExportFirst":"Export passwords first\u2026","masterUnlockT":"Unlock passwords","masterUnlockAsk":"Type your master password to unlock the vault.","masterUnlockGo":"Unlock","masterWrong":"That was not it.","masterChangeT":"Change master password","masterChangeAsk":"Your saved passwords are not touched \u2014 only the key changes.","masterChangeGo":"Change it","masterChangeDone":"Master password changed \u2713","masterOnDone":"The vault is locked with your master password \u2713","masterOffT":"Switch the master password off?","masterOffB":"Your passwords all stay exactly where they are. But the key goes back into a file next to them, so anyone who can use this computer account will be able to read them again.","masterOffDone":"Master password removed","masterFailed":"That did not work \u2014 nothing was changed.","masterLockNow":"Lock now","masterChangeBtn":"Change master password\u2026","masterAuto":"Lock again after","masterAutoHint":"With nothing happening for this long, the vault shuts itself and asks again.","masterAutoNever":"Never","masterMinutes":"{} minutes","masterHour":"1 hour","masterOn":"On \u2014 unlocked","masterShut":"On \u2014 locked","masterOffState":"Off","masterLockedTitle":"The vault is locked","masterLockedBody":"Your saved passwords are unreadable until you type your master password.","masterUnlockBtn":"Unlock\u2026","masterLockedLine":"Locked \u2014 unlock the password manager to see what is saved.","masterEncHint":"Encrypted on this computer with your master password. Locked, nothing here can read them.",
-"privatePermHint":"Only in this private tab."},
+"crashTitle":"This page stopped responding and was closed.","crashReload":"Reload the page",
+"look":"Look","lookHint":"A look moves the furniture \u2014 where things sit and what shape they are. Every look works with every theme.",
+"descLook":"Where the furniture sits, and what shape it is.",
+"lookClassic":"Classic","lookClassicSub":"The browser as it is drawn. Nothing added.",
+"lookTaskbar":"Taskbar","lookTaskbarSub":"A strip along the bottom: a start button, your pinned sites and a clock.",
+"lookMacos":"Dock","lookMacosSub":"A floating dock over the page, rounded corners and roomier chrome.",
+"lookCircle":"Circle","lookCircleSub":"The start page becomes a ring: search in the middle, the wheel turns it.",
+"lookGlass":"Liquid Glass","lookGlassSub":"Frosted, translucent chrome - the wallpaper shows softly through the tabs, toolbar and menus.",
+"pinTaskbar":"Pin to taskbar","unpinTaskbar":"Unpin from taskbar",
+"pinDock":"Add to Dock","unpinDock":"Remove from Dock",
+"pinLinks":"Add to quick links","unpinLinks":"Remove from quick links",
+"pinCurrent":"Pin this page","unpin":"Unpin","pinned":"Pinned",
+"startMenu":"Start","startSearchPh":"Type to search, or type an address",
+"circleHint":"Scroll to turn the ring",
+"noPins":"Nothing pinned yet \u2014 right-click a page and pin it.",
+"nowPlaying":"Now playing","mediaPlay":"Play / Pause","mediaPrev":"Previous","mediaNext":"Next",
+"masterPw":"Master password","masterPwName":"Lock the vault with a master password","masterPwHint":"Your passwords are locked behind a passphrase you type \u2014 no key file on disk. Until you unlock, nothing on this computer can read them.","masterWarnT":"If you forget it, your passwords are gone.","masterWarnB":"There is no way to reset a master password and no way round it. Nobody can recover it \u2014 not you, not this browser, not whoever wrote it. The passwords stay on this computer and stay unreadable for ever. Export them first if you want a way back, and keep that file somewhere safe.","masterSetT":"Set a master password","masterSetGo":"Switch it on","masterNewPh":"Master password","masterAgainPh":"Type it again","masterPassPh":"Master password","masterCurrentPh":"Current master password","masterMinHint":"At least 8 characters. A few memorable words beat a short one with symbols.","masterMismatch":"The two do not match.","masterShort":"Too short \u2014 8 characters at the very least.","masterExportFirst":"Export passwords first\u2026","masterUnlockT":"Unlock passwords","masterUnlockAsk":"Type your master password to unlock the vault.","masterUnlockGo":"Unlock","masterWrong":"That was not it.","masterChangeT":"Change master password","masterChangeAsk":"Your saved passwords are not touched \u2014 only the key changes.","masterChangeGo":"Change it","masterChangeDone":"Master password changed \u2713","masterOnDone":"The vault is locked with your master password \u2713","masterOffT":"Switch the master password off?","masterOffB":"Your passwords all stay exactly where they are. But the key goes back into a file next to them, so anyone who can use this computer account will be able to read them again.","masterOffDone":"Master password removed","masterFailed":"That did not work \u2014 nothing was changed.","masterLockNow":"Lock now","masterChangeBtn":"Change master password\u2026","masterAuto":"Lock again after","masterAutoHint":"Locks itself again after this long idle.","masterAutoNever":"Never","masterMinutes":"{} minutes","masterHour":"1 hour","masterOn":"On \u2014 unlocked","masterShut":"On \u2014 locked","masterOffState":"Off","masterLockedTitle":"The vault is locked","masterLockedBody":"Your saved passwords are unreadable until you type your master password.","masterUnlockBtn":"Unlock\u2026","masterLockedLine":"Locked \u2014 unlock the password manager to see what is saved.","masterEncHint":"Encrypted on this computer with your master password. Locked, nothing here can read them.",
+"externalTitle":"Open some sites in another browser","externalHint":"Some sites refuse to work in this browser \u2014 Gmail and Google sign-in among them. Rather than a wall, they open in your other browser.","externalHandoff":"Hand these sites to another browser","externalHandoffSub":"Off = they load here like any other page.","externalSites":"Sites to open elsewhere","externalSitesSub":"One domain a line. A domain covers its sub-domains too.","externalOpened":"Opened in {}","externalMissing":"{} is not installed \u2014 opening here instead","externalSaved":"Saved \u2713","privatePermHint":"Only in this private tab."},
 "de": {"settings":"Einstellungen","search":"Suche","searchEngine":"Suchmaschine",
 "appearance":"Aussehen","whiteGoogle":"Wei\u00dfes Google",
 "whiteGoogleHint":"Aus = pechschwarzes Google",
@@ -1053,7 +1113,7 @@ UI_STRINGS = {
 "descPrivacy":"Nichts davon verl\u00e4sst deinen Computer. W\u00e4hle, woran sich der Browser erinnert.",
 "descPasswords":"Wo deine Logins, Notizen und Karten liegen \u2014 und der Weg in die Passwortverwaltung.",
 "descPlugins":"Kleine Userscripts, die auf den Seiten laufen, die du angibst \u2014 und die eigenen optionalen Funktionen des Browsers.",
-"vaultPw":"Vault Password","vaultPwHint":"Die eingebaute Passwortverwaltung: merkt sich deine Logins und f\u00fcllt sie wieder aus, mit sicheren Notizen, Zahlungskarten, Zwei-Faktor-Codes und Generator. Sie ist im Browser enthalten und tut gar nichts, bis du sie einschaltest.","vaultKept":"Ausschalten l\u00f6scht nichts. Deine gespeicherten Passw\u00f6rter bleiben genau so auf diesem Computer liegen und sind sofort wieder da, wenn du es wieder einschaltest.","builtIn":"Eingebaute Funktionen","wizVaultT":"Vault Password","wizVaultHint":"Eine Passwortverwaltung im Browser: sie merkt sich deine Logins, f\u00fcllt sie wieder aus und verwahrt sichere Notizen, Karten und Zwei-Faktor-Codes. L\u00e4sst du sie aus, schaut der Browser Anmeldeformulare gar nicht erst an. Du kannst sie sp\u00e4ter unter Einstellungen \u2192 Plugins einschalten.","wizMasterT":"Hauptpasswort","wizNavMaster":"Hauptpasswort","wizMasterP":"Ein Passwort, das alle anderen abschlie\u00dft. Es ist die einzige Entscheidung hier, die du sp\u00e4ter nicht r\u00fcckg\u00e4ngig machen kannst \u2014 deshalb hat sie eine eigene Seite.","wizMasterLater":"Du kannst das auch jederzeit unter Einstellungen \u2192 Passw\u00f6rter einschalten.","wizMasterAuto":"Sobald es an ist, schlie\u00dft sich der Browser nach 15 Minuten ohne Benutzung deiner Passw\u00f6rter wieder ab und fragt danach, wenn du das n\u00e4chste Mal eins brauchst. Das kannst du sp\u00e4ter unter Einstellungen \u2192 Passw\u00f6rter \u00e4ndern.","wizMasterNoVault":"Nichts abzuschlie\u00dfen","wizMasterNoVaultHint":"Die Passwortverwaltung ist ausgeschaltet, der Browser verwahrt also keine Passw\u00f6rter, die abgeschlossen werden k\u00f6nnten. Schalte einen Schritt zur\u00fcck Vault Password ein, wenn du das m\u00f6chtest.","wizMasterWarnB":"Ein Hauptpasswort l\u00e4sst sich nicht zur\u00fccksetzen und nicht umgehen. Niemand kann es wiederherstellen \u2014 du nicht, dieser Browser nicht, und auch nicht, wer ihn geschrieben hat. Wenn du es vergisst, bleiben die Passw\u00f6rter auf diesem Computer und bleiben f\u00fcr immer unlesbar. Nimm etwas, das du nicht verlierst.","wizMasterHint":"Sch\u00fctze deine gespeicherten Passw\u00f6rter mit einem Kennwort, das nur du kennst. Ohne eins liegt der Schl\u00fcssel in einer Datei daneben, wo ihn alles lesen kann, was auf diesem Computer l\u00e4uft.","wizMasterSet":"Gesetzt \u2713 \u2014 das wird eingeschaltet, wenn du die Einrichtung abschlie\u00dft.","wizMasterTyping":"Gib es in beide Felder ein, um es einzuschalten.","wizMasterHave":"Du hast bereits ein Hauptpasswort. \u00c4ndern oder entfernen kannst du es unter Einstellungen \u2192 Passw\u00f6rter.","wizMasterSum":"Hauptpasswort","wizMasterSumSet":"An","wizMasterSumUnset":"Aus \u2014 nicht fertig",
+"vaultPw":"Vault Password","vaultPwHint":"Merkt sich deine Logins und f\u00fcllt sie aus \u2014 mit Notizen, Karten, 2FA-Codes und Generator. Aus, bis du sie einschaltest.","vaultKept":"Ausschalten l\u00f6scht nichts. Deine gespeicherten Passw\u00f6rter bleiben genau so auf diesem Computer liegen und sind sofort wieder da, wenn du es wieder einschaltest.","builtIn":"Eingebaute Funktionen","wizVaultT":"Vault Password","wizVaultHint":"Eine Passwortverwaltung im Browser: sie merkt sich deine Logins, f\u00fcllt sie wieder aus und verwahrt sichere Notizen, Karten und Zwei-Faktor-Codes. L\u00e4sst du sie aus, schaut der Browser Anmeldeformulare gar nicht erst an. Du kannst sie sp\u00e4ter unter Einstellungen \u2192 Plugins einschalten.","wizMasterT":"Hauptpasswort","wizNavMaster":"Hauptpasswort","wizMasterP":"Ein Passwort, das alle anderen abschlie\u00dft. Es ist die einzige Entscheidung hier, die du sp\u00e4ter nicht r\u00fcckg\u00e4ngig machen kannst \u2014 deshalb hat sie eine eigene Seite.","wizMasterLater":"Du kannst das auch jederzeit unter Einstellungen \u2192 Passw\u00f6rter einschalten.","wizMasterAuto":"Sobald es an ist, schlie\u00dft sich der Browser nach 15 Minuten ohne Benutzung deiner Passw\u00f6rter wieder ab und fragt danach, wenn du das n\u00e4chste Mal eins brauchst. Das kannst du sp\u00e4ter unter Einstellungen \u2192 Passw\u00f6rter \u00e4ndern.","wizMasterNoVault":"Nichts abzuschlie\u00dfen","wizMasterNoVaultHint":"Die Passwortverwaltung ist ausgeschaltet, der Browser verwahrt also keine Passw\u00f6rter, die abgeschlossen werden k\u00f6nnten. Schalte einen Schritt zur\u00fcck Vault Password ein, wenn du das m\u00f6chtest.","wizMasterWarnB":"Ein Hauptpasswort l\u00e4sst sich nicht zur\u00fccksetzen und nicht umgehen. Niemand kann es wiederherstellen \u2014 du nicht, dieser Browser nicht, und auch nicht, wer ihn geschrieben hat. Wenn du es vergisst, bleiben die Passw\u00f6rter auf diesem Computer und bleiben f\u00fcr immer unlesbar. Nimm etwas, das du nicht verlierst.","wizMasterHint":"Sch\u00fctze deine gespeicherten Passw\u00f6rter mit einem Kennwort, das nur du kennst. Ohne eins liegt der Schl\u00fcssel in einer Datei daneben, wo ihn alles lesen kann, was auf diesem Computer l\u00e4uft.","wizMasterSet":"Gesetzt \u2713 \u2014 das wird eingeschaltet, wenn du die Einrichtung abschlie\u00dft.","wizMasterTyping":"Gib es in beide Felder ein, um es einzuschalten.","wizMasterHave":"Du hast bereits ein Hauptpasswort. \u00c4ndern oder entfernen kannst du es unter Einstellungen \u2192 Passw\u00f6rter.","wizMasterSum":"Hauptpasswort","wizMasterSumSet":"An","wizMasterSumUnset":"Aus \u2014 nicht fertig",
 "descNetwork":"Den Verkehr \u00fcber einen Proxy leiten \u2014 \u00fcberall oder pro Seite.",
 "descUpdates":"Die neueste Version des Browsers aus dem Repository holen.",
 "descSetup":"Die Ersteinrichtung jederzeit noch einmal durchlaufen.",
@@ -1082,7 +1142,7 @@ UI_STRINGS = {
 "newTabPosEnd":"Am Ende der Leiste",
 "newTabPosEndSub":"Jeder neue Tab geht ganz nach rechts.",
 "newTabPosAfter":"Direkt neben diesem Tab",
-"newTabPosAfterSub":"Der neue Tab landet neben dem, aus dem er kam \u2014 beim letzten Tab der Leiste ist das dieselbe Stelle wie das Ende.",
+"newTabPosAfterSub":"\u00d6ffnet neben dem Tab, aus dem er kam.",
 "newTabPage":"Was ein neuer Tab zeigt",
 "newTabPageStart":"Die Startseite",
 "newTabPageStartSub":"Uhr, Suchleiste und deine Schnelllinks.",
@@ -1110,8 +1170,24 @@ UI_STRINGS = {
 "toolbar":"Werkzeugleiste","descToolbar":"Welche Kn\u00f6pfe oben stehen und in welcher Reihenfolge.","tbHint":"Ein Rechtsklick auf die Leiste selbst zeigt dieselbe Liste.","cardRendering":"Wie Seiten gezeichnet werden","cardSize":"Gr\u00f6\u00dfe","cardKept":"Was gespeichert bleibt","cardInstalled":"Installiert","tbShown":"Auf der Leiste","tbHidden":"Nicht zu sehen","tbElsewhere":"Woanders im Rahmen","tbElsewhereHint":"Die bleiben, wo sie sind \u2014 wegnehmen geht, verschieben nicht.","tbFixed":"Immer da","tbFixedWhy":"Der bleibt. Verschieben geht, wegnehmen nicht.","tbMoveUp":"Weiter nach vorn auf der Leiste","tbMoveDown":"Weiter nach hinten auf der Leiste","tbFixedHint":"Zur\u00fcck, vor, neu laden und die Adressleiste bleiben. Ein Browser ohne Weg zur\u00fcck ist kaputt.","tbShortcutHint":"Einen Knopf wegnehmen r\u00fchrt sein Tastenk\u00fcrzel nicht an \u2014 Strg+P druckt weiterhin.","tbReset":"Zur\u00fcck zur \u00fcblichen Auswahl","tbCustomize":"Werkzeugleiste anpassen\u2026","tbBack":"Zur\u00fcck","tbForward":"Vorw\u00e4rts","tbReload":"Neu laden","tbHome":"Startseite","tbNewTab":"Neuer Tab","tbAddress":"Adressleiste","tbFind":"Auf der Seite suchen","tbHistory":"Verlauf","tbDownloads":"Downloads","tbBookmarks":"Lesezeichen","tbPasswords":"Passw\u00f6rter","tbProxy":"Proxy","tbPrint":"Drucken","tbTranslate":"\u00dcbersetzen","tbSettings":"Einstellungen","tbFullscreen":"Vollbild","tbStar":"Lesezeichenstern","tbGroups":"Tab-Gruppen","tbFavorites":"Favoriten",
 "privateTab":"Privat","privateNew":"Neuer privater Tab",
 "privateTip":"Privater Tab \u2014 nichts bleibt zur\u00fcck, wenn er zugeht",
-"masterPw":"Hauptpasswort","masterPwName":"Den Tresor mit einem Hauptpasswort abschlie\u00dfen","masterPwHint":"Der Schl\u00fcssel zu deinen gespeicherten Passw\u00f6rtern wird aus einem Kennwort berechnet, das du eintippst, statt in einer Datei daneben zu liegen. Solange du nicht aufschlie\u00dft, kann sie auf diesem Computer nichts lesen \u2014 weder der Browser noch irgendwer, der dein Benutzerkonto benutzt.","masterWarnT":"Wenn du es vergisst, sind deine Passw\u00f6rter weg.","masterWarnB":"Ein Hauptpasswort l\u00e4sst sich nicht zur\u00fccksetzen und nicht umgehen. Niemand kann es wiederherstellen \u2014 du nicht, dieser Browser nicht, und auch nicht, wer ihn geschrieben hat. Die Passw\u00f6rter bleiben auf diesem Computer und bleiben f\u00fcr immer unlesbar. Exportiere sie vorher, wenn du einen Weg zur\u00fcck willst, und bewahre diese Datei sicher auf.","masterSetT":"Hauptpasswort festlegen","masterSetGo":"Einschalten","masterNewPh":"Hauptpasswort","masterAgainPh":"Noch einmal eingeben","masterPassPh":"Hauptpasswort","masterCurrentPh":"Aktuelles Hauptpasswort","masterMinHint":"Mindestens 8 Zeichen. Ein paar zusammenhanglose W\u00f6rter, die du nicht vergisst, sind besser als etwas Kurzes mit Sonderzeichen.","masterMismatch":"Die beiden stimmen nicht \u00fcberein.","masterShort":"Zu kurz \u2014 mindestens 8 Zeichen.","masterExportFirst":"Passw\u00f6rter vorher exportieren\u2026","masterUnlockT":"Passw\u00f6rter aufschlie\u00dfen","masterUnlockAsk":"Gib dein Hauptpasswort ein, um den Tresor aufzuschlie\u00dfen.","masterUnlockGo":"Aufschlie\u00dfen","masterWrong":"Das war es nicht.","masterChangeT":"Hauptpasswort \u00e4ndern","masterChangeAsk":"An deinen gespeicherten Passw\u00f6rtern \u00e4ndert sich nichts \u2014 nur am Schl\u00fcssel.","masterChangeGo":"\u00c4ndern","masterChangeDone":"Hauptpasswort ge\u00e4ndert \u2713","masterOnDone":"Der Tresor ist mit deinem Hauptpasswort abgeschlossen \u2713","masterOffT":"Hauptpasswort ausschalten?","masterOffB":"Deine Passw\u00f6rter bleiben alle genau da, wo sie sind. Aber der Schl\u00fcssel liegt dann wieder in einer Datei daneben, und jeder, der dieses Computerkonto benutzen kann, kann sie wieder lesen.","masterOffDone":"Hauptpasswort entfernt","masterFailed":"Das hat nicht geklappt \u2014 es wurde nichts ge\u00e4ndert.","masterLockNow":"Jetzt abschlie\u00dfen","masterChangeBtn":"Hauptpasswort \u00e4ndern\u2026","masterAuto":"Wieder abschlie\u00dfen nach","masterAutoHint":"Passiert so lange nichts, schlie\u00dft sich der Tresor von selbst und fragt wieder.","masterAutoNever":"Nie","masterMinutes":"{} Minuten","masterHour":"1 Stunde","masterOn":"An \u2014 aufgeschlossen","masterShut":"An \u2014 abgeschlossen","masterOffState":"Aus","masterLockedTitle":"Der Tresor ist abgeschlossen","masterLockedBody":"Deine gespeicherten Passw\u00f6rter sind unlesbar, bis du dein Hauptpasswort eingibst.","masterUnlockBtn":"Aufschlie\u00dfen\u2026","masterLockedLine":"Abgeschlossen \u2014 schlie\u00dfe die Passwortverwaltung auf, um zu sehen, was gespeichert ist.","masterEncHint":"Auf diesem Computer mit deinem Hauptpasswort verschl\u00fcsselt. Solange abgeschlossen ist, kann sie hier nichts lesen.",
-"privatePermHint":"Nur in diesem privaten Tab."},
+"crashTitle":"Diese Seite reagierte nicht mehr und wurde geschlossen.","crashReload":"Seite neu laden",
+"look":"Aufbau","lookHint":"Ein Aufbau r\u00e4umt die M\u00f6bel um \u2014 wo etwas sitzt und welche Form es hat. Jeder Aufbau passt zu jedem Design.",
+"descLook":"Wo die M\u00f6bel stehen \u2014 und welche Form sie haben.",
+"lookClassic":"Klassisch","lookClassicSub":"Der Browser, wie er gezeichnet ist. Es kommt nichts dazu.",
+"lookTaskbar":"Taskleiste","lookTaskbarSub":"Ein Streifen unten: Startknopf, angepinnte Seiten und eine Uhr.",
+"lookMacos":"Dock","lookMacosSub":"Ein schwebendes Dock \u00fcber der Seite, runde Ecken, mehr Luft.",
+"lookCircle":"Kreis","lookCircleSub":"Die Startseite wird zum Ring: Suche in der Mitte, das Rad dreht ihn.",
+"lookGlass":"Milchglas","lookGlassSub":"Mattiertes, durchscheinendes Fenster - das Hintergrundbild schimmert weich durch Tabs, Leiste und Men\u00fcs.",
+"pinTaskbar":"An die Taskleiste anpinnen","unpinTaskbar":"Von der Taskleiste l\u00f6sen",
+"pinDock":"Zum Dock hinzuf\u00fcgen","unpinDock":"Aus dem Dock entfernen",
+"pinLinks":"Zu den Schnelllinks hinzuf\u00fcgen","unpinLinks":"Aus den Schnelllinks entfernen",
+"pinCurrent":"Diese Seite anpinnen","unpin":"L\u00f6sen","pinned":"Angepinnt",
+"startMenu":"Start","startSearchPh":"Tippen zum Suchen \u2014 oder eine Adresse",
+"circleHint":"Scrollen dreht den Ring",
+"noPins":"Noch nichts angepinnt \u2014 Rechtsklick auf eine Seite und anpinnen.",
+"nowPlaying":"L\u00e4uft gerade","mediaPlay":"Abspielen / Pause","mediaPrev":"Zur\u00fcck","mediaNext":"Weiter",
+"masterPw":"Hauptpasswort","masterPwName":"Den Tresor mit einem Hauptpasswort abschlie\u00dfen","masterPwHint":"Deine Passw\u00f6rter liegen hinter einem Kennwort, das du eintippst \u2014 kein Schl\u00fcssel als Datei. Abgeschlossen kann sie hier nichts lesen.","masterWarnT":"Wenn du es vergisst, sind deine Passw\u00f6rter weg.","masterWarnB":"Ein Hauptpasswort l\u00e4sst sich nicht zur\u00fccksetzen und nicht umgehen. Niemand kann es wiederherstellen \u2014 du nicht, dieser Browser nicht, und auch nicht, wer ihn geschrieben hat. Die Passw\u00f6rter bleiben auf diesem Computer und bleiben f\u00fcr immer unlesbar. Exportiere sie vorher, wenn du einen Weg zur\u00fcck willst, und bewahre diese Datei sicher auf.","masterSetT":"Hauptpasswort festlegen","masterSetGo":"Einschalten","masterNewPh":"Hauptpasswort","masterAgainPh":"Noch einmal eingeben","masterPassPh":"Hauptpasswort","masterCurrentPh":"Aktuelles Hauptpasswort","masterMinHint":"Mindestens 8 Zeichen. Ein paar merkbare W\u00f6rter sind besser als etwas Kurzes mit Sonderzeichen.","masterMismatch":"Die beiden stimmen nicht \u00fcberein.","masterShort":"Zu kurz \u2014 mindestens 8 Zeichen.","masterExportFirst":"Passw\u00f6rter vorher exportieren\u2026","masterUnlockT":"Passw\u00f6rter aufschlie\u00dfen","masterUnlockAsk":"Gib dein Hauptpasswort ein, um den Tresor aufzuschlie\u00dfen.","masterUnlockGo":"Aufschlie\u00dfen","masterWrong":"Das war es nicht.","masterChangeT":"Hauptpasswort \u00e4ndern","masterChangeAsk":"An deinen gespeicherten Passw\u00f6rtern \u00e4ndert sich nichts \u2014 nur am Schl\u00fcssel.","masterChangeGo":"\u00c4ndern","masterChangeDone":"Hauptpasswort ge\u00e4ndert \u2713","masterOnDone":"Der Tresor ist mit deinem Hauptpasswort abgeschlossen \u2713","masterOffT":"Hauptpasswort ausschalten?","masterOffB":"Deine Passw\u00f6rter bleiben alle genau da, wo sie sind. Aber der Schl\u00fcssel liegt dann wieder in einer Datei daneben, und jeder, der dieses Computerkonto benutzen kann, kann sie wieder lesen.","masterOffDone":"Hauptpasswort entfernt","masterFailed":"Das hat nicht geklappt \u2014 es wurde nichts ge\u00e4ndert.","masterLockNow":"Jetzt abschlie\u00dfen","masterChangeBtn":"Hauptpasswort \u00e4ndern\u2026","masterAuto":"Wieder abschlie\u00dfen nach","masterAutoHint":"Schlie\u00dft sich nach dieser Zeit ohne Nutzung von selbst wieder ab.","masterAutoNever":"Nie","masterMinutes":"{} Minuten","masterHour":"1 Stunde","masterOn":"An \u2014 aufgeschlossen","masterShut":"An \u2014 abgeschlossen","masterOffState":"Aus","masterLockedTitle":"Der Tresor ist abgeschlossen","masterLockedBody":"Deine gespeicherten Passw\u00f6rter sind unlesbar, bis du dein Hauptpasswort eingibst.","masterUnlockBtn":"Aufschlie\u00dfen\u2026","masterLockedLine":"Abgeschlossen \u2014 schlie\u00dfe die Passwortverwaltung auf, um zu sehen, was gespeichert ist.","masterEncHint":"Auf diesem Computer mit deinem Hauptpasswort verschl\u00fcsselt. Solange abgeschlossen ist, kann sie hier nichts lesen.",
+"externalTitle":"Manche Seiten in einem anderen Browser \u00f6ffnen","externalHint":"Manche Seiten funktionieren in diesem Browser nicht \u2014 darunter Gmail und die Google-Anmeldung. Statt einer Sperrseite \u00f6ffnen sie in deinem anderen Browser.","externalHandoff":"Diese Seiten an einen anderen Browser geben","externalHandoffSub":"Aus = sie laden hier wie jede andere Seite.","externalSites":"Seiten, die woanders \u00f6ffnen","externalSitesSub":"Eine Domain pro Zeile. Eine Domain gilt auch f\u00fcr ihre Subdomains.","externalOpened":"In {} ge\u00f6ffnet","externalMissing":"{} ist nicht installiert \u2014 wird hier ge\u00f6ffnet","externalSaved":"Gespeichert \u2713","privatePermHint":"Nur in diesem privaten Tab."},
 "fr": {"settings":"Param\u00e8tres","search":"Recherche","searchEngine":"Moteur de recherche",
 "appearance":"Apparence","whiteGoogle":"Google blanc",
 "whiteGoogleHint":"D\u00e9sactiv\u00e9 = Google noir",
@@ -1898,6 +1974,98 @@ QLabel#switchempty { color: #6c7086; }
     border-bottom: 1px solid rgba(108, 112, 134, 70);
 }
 QLabel#setescl { color: #6c7086; font-size: 12px; }
+
+/* ---- the looks -------------------------------------------------- */
+/* Furniture that only some looks build. Every colour in here is a
+   token out of the table below, so a taskbar in Gruvbox is a Gruvbox
+   taskbar without either of them having heard of the other. */
+
+/* the taskbar: a strip along the bottom of the window */
+#taskbar { background: #000000; border-top: 1px solid rgba(108, 112, 134, 50); }
+QToolButton#taskpin, QToolButton#taskmore, QToolButton#taskadd {
+    background: transparent;
+    color: #a6adc8;
+    border: none;
+    border-radius: 0px;
+    padding: 4px 8px;
+    font-weight: normal;
+}
+QToolButton#taskstart {
+    background: transparent;
+    color: #cdd6f4;
+    border: none;
+    border-radius: 0px;
+    padding: 4px 11px;
+    font-size: 15px;
+    font-weight: bold;
+}
+QToolButton#taskpin:hover, QToolButton#taskmore:hover,
+QToolButton#taskadd:hover, QToolButton#taskstart:hover {
+    background: #16161d; color: #ffffff;
+}
+QLabel#taskclock { color: #6c7086; font-size: 12px; }
+
+/* the start menu: a search box on top, the pinned grid under it. The
+   sheet behind it paints nothing at all - it is there to catch a click
+   that means "somewhere else", the same as the Favourites one. */
+#startshade { background: transparent; }
+#startgrid { background: transparent; }
+#startmenu { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 130); }
+QLineEdit#startsearch {
+    background: #000000;
+    color: #cdd6f4;
+    border: 1px solid rgba(108, 112, 134, 70);
+    border-radius: 0px;
+    padding: 8px 11px;
+    font-size: 14px;
+    selection-background-color: #45475a;
+    selection-color: #ffffff;
+}
+QLineEdit#startsearch:focus { border: 1px solid #a6adc8; }
+QLabel#starthead { color: #6c7086; font-size: 11px; }
+QLabel#startempty { color: #45475a; font-size: 12px; }
+#startmenu QScrollArea { background: transparent; border: none; }
+#startmenu QScrollArea > QWidget > QWidget { background: transparent; }
+QToolButton#starttile {
+    background: transparent;
+    color: #a6adc8;
+    border: none;
+    border-radius: 0px;
+    padding: 10px 2px;
+    font-size: 12px;
+    font-weight: normal;
+}
+QToolButton#starttile:hover { background: #16161d; color: #ffffff; }
+QToolButton#startfoot {
+    background: transparent;
+    color: #6c7086;
+    border: none;
+    border-radius: 0px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: normal;
+}
+QToolButton#startfoot:hover { background: #16161d; color: #cdd6f4; }
+
+/* the dock: a rounded glass island floating over the page. The island
+   itself is painted by the widget rather than by a rule here - a
+   gradient, a translucent fill, a top highlight and a soft shadow are
+   more than a sheet can say, and every colour in it still comes out of
+   the palette (see Dock._paint_glass). What is left here is the text
+   and the buttons that sit on it. */
+QLabel#docktitle { color: #cdd6f4; font-size: 12px; }
+QLabel#dockby { color: #6c7086; font-size: 11px; }
+QToolButton#dockbtn {
+    background: transparent;
+    color: #a6adc8;
+    border: none;
+    border-radius: 9px;
+    padding: 3px 7px;
+    font-size: 14px;
+    font-weight: normal;
+}
+QToolButton#dockbtn:hover { background: #16161d; color: #ffffff; }
+QToolButton#dockbtn:disabled { color: #45475a; background: transparent; }
 """
 
 
@@ -2368,6 +2536,549 @@ def wizard_themes():
     if ACTIVE_THEME not in keys:
         keys.append(ACTIVE_THEME)
     return [_theme_card(THEME_INDEX[k]) for k in keys if k in THEME_INDEX]
+
+
+# =====================================================================
+# Looks
+# =====================================================================
+# A theme is what colour the browser is. A look is what shape it is:
+# where the furniture stands, what it is called, how round it is. The
+# two are orthogonal on purpose, and the rule that keeps them that way
+# is simple - a look owns geometry and never a colour. Everything a
+# look paints is written in the same Mocha literals as the sheet above,
+# so all hundred and fifteen palettes come out right without any look
+# knowing that a single one of them exists.
+#
+# Classic is less a look than the absence of one: it builds no widget,
+# adds no stylesheet and sets no attribute on a page. The browser he
+# already has is exactly the browser he keeps.
+
+DEFAULT_LOOK = "classic"
+ACTIVE_LOOK = DEFAULT_LOOK
+
+LOOKS = [
+    {"key": "classic", "name": "lookClassic", "note": "lookClassicSub"},
+    {"key": "taskbar", "name": "lookTaskbar", "note": "lookTaskbarSub"},
+    {"key": "macos", "name": "lookMacos", "note": "lookMacosSub"},
+    {"key": "circle", "name": "lookCircle", "note": "lookCircleSub"},
+    {"key": "glass", "name": "lookGlass", "note": "lookGlassSub"},
+]
+LOOK_INDEX = {entry["key"]: entry for entry in LOOKS}
+
+# The looks that grow furniture for the pinned sites. The pins exist in
+# every look - they are the start page's quick links - but only these
+# two put them in the chrome.
+PINNED_LOOKS = ("taskbar", "macos")
+
+# What a look adds to the Qt sheet. Painted through tint(), so it is in
+# the theme's palette like everything else; classic has no entry at all,
+# which is how "classic changes nothing" is enforced rather than
+# promised.
+LOOK_QSS = {
+    "macos": """
+/* rounder, roomier, glassier - the same palette, a different shape */
+QLineEdit#urlbar { border-radius: 9px; padding: 9px 18px; }
+QToolButton { border-radius: 9px; padding: 6px 12px; }
+QTabBar::tab {
+    border-radius: 10px;
+    padding: 8px 8px 8px 16px;
+    margin: 5px 4px 7px 4px;
+}
+QMenu { border-radius: 10px; padding: 6px; }
+QMenu::item { border-radius: 7px; padding: 7px 20px; }
+#findbar, #toast, #permcard, #switchpanel, #sharepanel, #acctpanel,
+#favpanel, #startmenu, #dlitem { border-radius: 14px; }
+QLineEdit#findinput, QLineEdit#favsearch, QLineEdit#switchinput,
+QLineEdit#startsearch, QLineEdit#favsearch { border-radius: 8px; }
+QToolButton#bmitem, QToolButton#favbtn { border-radius: 8px; }
+#bmbar { border-top: none; }
+""",
+    "glass": """
+/* Liquid Glass: every chrome surface frosts, the page stays solid. The
+   window's own base goes transparent so the compositor's blur shows the
+   wallpaper softly through each translucent surface; the web view paints
+   itself opaque, so only the furniture around the page is glass. Every
+   colour is a Mocha token at an alpha, so it frosts in the theme's own
+   palette; nothing here is a colour of its own. */
+QMainWindow { background: transparent; }
+#chrome {
+    background: rgba(13, 13, 18, 165);
+    border-bottom: 1px solid rgba(108, 112, 134, 80);
+}
+#sessrow, #navbar { background: transparent; }
+#bmbar { background: transparent; border-top: 1px solid rgba(108, 112, 134, 45); }
+
+QLineEdit#urlbar {
+    background: rgba(13, 13, 18, 140);
+    border: 1px solid rgba(108, 112, 134, 90);
+    border-radius: 9px;
+}
+QLineEdit#urlbar:focus {
+    background: rgba(22, 22, 29, 210);
+    border: 1px solid #a6adc8;
+}
+
+QToolButton {
+    background: rgba(13, 13, 18, 90);
+    border-radius: 9px;
+}
+QToolButton:hover { background: rgba(22, 22, 29, 205); }
+
+/* the tab strip and its tabs: a frosted shelf with frosted tabs on it,
+   the selected one a touch more opaque so it reads as the front pane */
+QTabBar { background: rgba(13, 13, 18, 150); }
+QTabBar::tab {
+    background: rgba(13, 13, 18, 110);
+    border-radius: 9px 9px 0px 0px;
+}
+QTabBar::tab:selected {
+    background: rgba(22, 22, 29, 210);
+    border: 1px solid rgba(108, 112, 134, 110);
+    border-bottom: none;
+}
+
+#dlbar { background: rgba(13, 13, 18, 165); }
+#dlitem { background: rgba(13, 13, 18, 150); }
+
+/* menus and overlay panels: frosted islands, kept opaque enough that
+   their text keeps its contrast over a busy wallpaper. The hairline and
+   the rounded corner are what read as glass rather than as a hole. */
+QMenu {
+    background: rgba(13, 13, 18, 220);
+    border: 1px solid rgba(108, 112, 134, 120);
+    border-radius: 12px;
+}
+QMenu::item { border-radius: 7px; }
+#toast, #permcard, #switchpanel, #sharepanel, #acctpanel,
+#favpanel, #startmenu, #findbar, #dlitem { border-radius: 12px; }
+#toast { background: rgba(13, 13, 18, 220); }
+#permcard { background: rgba(13, 13, 18, 225); }
+#switchpanel { background: rgba(13, 13, 18, 220); }
+#sharepanel { background: rgba(13, 13, 18, 220); }
+#acctpanel { background: rgba(13, 13, 18, 220); }
+#favpanel { background: rgba(10, 10, 13, 220); }
+#startmenu { background: rgba(13, 13, 18, 220); }
+""",
+}
+
+
+
+def look_names():
+    return [entry["key"] for entry in LOOKS]
+
+
+def _select_look(name):
+    """Settle the look, the way _select_theme settles the theme: a
+    hand-edited config can hold anything at all where a look name
+    belongs, and a list is not something you can look up."""
+    global ACTIVE_LOOK
+    if not isinstance(name, str) or name not in LOOK_INDEX:
+        name = DEFAULT_LOOK
+    ACTIVE_LOOK = name
+    return name
+
+
+def active_look():
+    return ACTIVE_LOOK
+
+
+def look_is_pinned(look=None):
+    """Whether this look puts the pinned sites in the chrome."""
+    return (look or ACTIVE_LOOK) in PINNED_LOOKS
+
+
+def look_style(look=None, name=None):
+    """The look's own stylesheet, in the theme's colours.
+
+    Kept apart from theme_style() rather than folded into it, for the
+    same reason theme_style() keeps Mocha byte for byte: the sheet a
+    theme makes has to stay exactly what it is today, and Classic has to
+    add literally nothing to it."""
+    qss = LOOK_QSS.get(look or ACTIVE_LOOK, "")
+    return tint(qss, name) if qss else ""
+
+
+def look_payload(look=None):
+    """What the injected script hands one of our own pages."""
+    return look or ACTIVE_LOOK
+
+
+# The script that tells one of our own pages which look it is being
+# shown in. It carries the answer with it and sets the attribute at
+# document creation, so the page's own CSS is right from the first frame
+# instead of laying out twice. Same two gates as the painter below: our
+# own pages only, and a website never sees it at all.
+LOOK_JS = r"""
+(function () {
+  if (location.protocol !== "file:") return;
+  if (!/\/(start|settings|history|downloads|bookmarks|passwords)\.html$/
+        .test(location.pathname)) return;
+  var L = %(look)s;
+  function put() {
+    var root = document.documentElement;
+    if (!root) { setTimeout(put, 0); return; }
+    root.setAttribute("data-look", L);
+    document.dispatchEvent(new CustomEvent("lookchanged", {detail: L}));
+  }
+  window.__look = function () { return L; };
+  window.__applyLook = function (j) {
+    L = (typeof j === "string" && j.charAt(0) === "\"") ? JSON.parse(j) : j;
+    put();
+  };
+  put();
+})();
+"""
+
+
+# The script that lets the chrome work the transport of whatever page is
+# making the sound. There is no player in this browser, so there is
+# nothing of our own to control - what there is instead is the Media
+# Session API, which is how a site tells the desktop what its play,
+# pause and skip buttons do. This remembers the handlers a page
+# registers and calls them back on request; the native call always runs,
+# so no site loses anything by being watched. Nothing is read unless one
+# of the dock's three buttons is pressed, and nothing is ever kept.
+MEDIA_JS = r"""
+(function () {
+  if (!navigator.mediaSession) return;
+  var handlers = {};
+  var native = navigator.mediaSession.setActionHandler;
+  if (typeof native === "function") {
+    navigator.mediaSession.setActionHandler = function (action, fn) {
+      handlers[action] = fn;
+      return native.call(navigator.mediaSession, action, fn);
+    };
+  }
+  function element() {
+    var all = document.querySelectorAll("video, audio");
+    for (var i = 0; i < all.length; i++)
+      if (!all[i].paused && !all[i].ended) return all[i];
+    return all.length ? all[0] : null;
+  }
+  window.__mediaDo = function (action) {
+    var fn = handlers[action];
+    if (typeof fn === "function") { try { fn(); return true; } catch (e) {} }
+    var el = element();
+    if (!el) return false;
+    if (action === "play") { el.play(); return true; }
+    if (action === "pause") { el.pause(); return true; }
+    return false;
+  };
+  window.__mediaNow = function () {
+    var md = navigator.mediaSession.metadata, el = element();
+    return JSON.stringify({
+      title: (md && md.title) || "",
+      artist: (md && md.artist) || "",
+      playing: !!(el && !el.paused && !el.ended),
+      prev: typeof handlers.previoustrack === "function",
+      next: typeof handlers.nexttrack === "function"
+    });
+  };
+})();
+"""
+
+
+# ---- is a tab on a call? ------------------------------------------------
+#
+# A microphone held by a tab is worth knowing about outside the browser.
+# The desktop here mixes what the browser plays into a virtual microphone
+# (so a song can be shared into a call); when the call is IN the browser,
+# that same audio loops back into the microphone and echo cancellation
+# eats the speaker's voice. The cure is to stop sharing while a tab is
+# capturing - and the only thing that knows a tab is capturing is the
+# browser.
+#
+# So it says so, in the plainest way two programs can agree on: a file
+# that exists while a call is up. Nothing is written INTO it - not the
+# site, not the tab, not the number of tracks. Its existence is the whole
+# message and its mtime is the heartbeat, refreshed every few seconds so
+# that a browser killed with -9 cannot leave a lie behind: a reader that
+# sees a stale file knows the call is over.
+CALL_FLAG_NAME = "browser-call.on"
+#: how often the flag is refreshed, and how often the tabs are asked
+CALL_TICK_MS = 5000
+#: a page that has not answered for this long is not on a call any more.
+#: Under the fifteen seconds a reader waits before calling the file
+#: stale, so a wedged renderer is noticed here first.
+CALL_STALE = 12.0
+
+_call_flag_raised = False   # did WE put the file there?
+
+
+def call_flag_path():
+    """Where the flag lives: the session's runtime directory, which the
+    system empties at logout, and the temporary directory when there is
+    no such thing."""
+    base = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    return os.path.join(base, CALL_FLAG_NAME)
+
+
+def call_flag_raise():
+    """Put the flag up, or refresh the one already up."""
+    global _call_flag_raised
+    path = call_flag_path()
+    try:
+        # O_NOFOLLOW because the fallback directory is the shared
+        # temporary one: a symlink left there under this name by
+        # somebody else must not turn a heartbeat into a write to
+        # whatever it points at. Creating and touching are one
+        # operation on purpose - there is no window in which the file
+        # exists but looks stale.
+        fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
+        os.utime(path, None)
+        _call_flag_raised = True
+    except OSError:
+        pass
+
+
+def call_flag_drop():
+    """Take it down again - but only if it was ours to take down. Two
+    browsers can be running (a second one is meant to hand over and
+    quit, and does, but it exists for a moment), and the one not on a
+    call must not pull the flag out from under the one that is."""
+    global _call_flag_raised
+    if not _call_flag_raised:
+        return
+    _call_flag_raised = False
+    try:
+        os.remove(call_flag_path())
+    except OSError:
+        pass
+
+
+# the last resort. The ordinary way out is aboutToQuit (see Browser),
+# because the quit path calls os._exit and never reaches atexit; this
+# catches the ways out that are not Qt's.
+atexit.register(call_flag_drop)
+
+
+# What actually notices. Qt has no per-page "is it capturing" to ask, so
+# the question is put to the page's own JavaScript: getUserMedia is
+# wrapped - both the modern one and the callback-shaped one this engine
+# still carries - and every audio track it hands out is counted as live
+# until it ends, is stopped, or is replaced by a clone of itself.
+#
+# The wrapper is additive and nothing else. The original runs, with the
+# original arguments, on the original object; its promise is returned
+# unchanged in shape, so a rejection rejects with the same error and a
+# grant resolves with the same stream. The page's own stop() still runs,
+# and runs first. The tracks are remembered in a WeakMap in this
+# closure, so a stopped track is collected as if we had never seen it,
+# and each replacement is a Proxy of the function it replaces: same
+# name, same arity, same own property names, same "[native code]".
+# (A proxied function prints without the method's name inside the
+# string - that is the one tell left, and it is not worth a bigger
+# change to remove.)
+#
+# EVERYTHING this uses after the page has been allowed to run is taken
+# here, at document creation, while none of the page's own script has
+# executed: the dispatcher, the listener, the promise's then, the
+# WeakMap's own methods, apply itself, and the readyState and kind
+# accessors. That is not tidiness. Every one of them is a hook a page
+# can replace, and a replaced hook is a page that can be handed this
+# closure's innards or lie to it about the microphone - the two ways
+# this was broken when it read them late. Nothing here reads a hook
+# late any more.
+#
+# What that buys, exactly, and no more than this: a page cannot silence
+# a microphone it is genuinely holding in its own document, and cannot
+# read the token out of that document. What it does NOT buy: a page can
+# make an iframe of its own, replace that frame's dispatcher before
+# this script reaches it, and read the token out of the frame the
+# moment the frame captures something - and with the token it can
+# announce a call it is not on, or cancel the count in its own tab.
+# There is no fix for that inside this design: the two worlds meet on
+# the page's own DOM, so any name this script can meet the other half
+# under, a page that owns the frame can eventually listen for. A
+# per-frame token does not help - it would have to be arranged through
+# a rendezvous of the same kind, and the rendezvous is what leaks.
+# The one thing that WOULD close it is refusing to count in any frame
+# the embedder can reach into (window.frameElement), and that is a bad
+# trade: it buys silence about a nuisance and pays with a real call
+# gone unnoticed, which is the echo this whole thing exists to stop.
+# So it stands, written down here and in the changelog rather than
+# papered over. What a page can do with it is lie about ITS OWN tab:
+# claim a call it is not on, or drop the count on one it is. That
+# costs a shared song, and never a word about the person using it.
+#
+# It counts the MICROPHONE only. A shared screen's audio is not a voice
+# on a call and must not silence the music.
+CALL_WATCH_JS = r"""
+(function () {
+  var NAME = %(event)s;
+  var live = 0;
+
+  var W = window;
+  var Apply = W.Reflect && Reflect.apply;
+  var Dispatch = W.EventTarget && EventTarget.prototype.dispatchEvent;
+  var Listen = W.EventTarget && EventTarget.prototype.addEventListener;
+  var Custom = W.CustomEvent;
+  var Then = W.Promise && Promise.prototype.then;
+  var Slice = Array.prototype.slice;
+  var WMget = WeakMap.prototype.get;
+  var WMset = WeakMap.prototype.set;
+  var WMhas = WeakMap.prototype.has;
+  var doc = document;
+  var held = new WeakMap();           // track -> "it stopped" callback
+  if (!Apply || !Dispatch || !Listen || !Custom || !Then) return;
+
+  function getter(obj, name) {
+    try {
+      var d = Object.getOwnPropertyDescriptor(obj, name);
+      return (d && d.get) || null;
+    } catch (e) { return null; }
+  }
+
+  var trackProto = W.MediaStreamTrack && MediaStreamTrack.prototype;
+  var streamProto = W.MediaStream && MediaStream.prototype;
+  var audioTracks = streamProto && streamProto.getAudioTracks;
+  var readyState = getter(trackProto, "readyState");
+  var kind = getter(trackProto, "kind");
+
+  function tell() {
+    try {
+      Apply(Dispatch, doc, [new Custom(NAME, {detail: live})]);
+    } catch (e) {}
+  }
+
+  function reads(get, thing, want) {
+    if (!get) return false;
+    try { return Apply(get, thing, []) === want; } catch (e) { return false; }
+  }
+
+  function hold(track) {
+    if (!track) return;
+    try { if (Apply(WMhas, held, [track])) return; } catch (e) { return; }
+    if (reads(readyState, track, "ended")) return;   // nothing to hold
+    var done = false;
+    function ended() {
+      if (done) return;               // stop() twice is still one stop
+      done = true;
+      live--;
+      tell();
+    }
+    try { Apply(WMset, held, [track, ended]); } catch (e) {}
+    // the native listener, called with the track as its object: the
+    // page never sees this registration and is never handed `ended`
+    try { Apply(Listen, track, ["ended", ended]); } catch (e) {}
+    live++;
+    tell();
+  }
+
+  function stopped(track) {
+    var ended = null;
+    try { ended = Apply(WMget, held, [track]); } catch (e) {}
+    if (ended) ended();
+  }
+
+  function watch(stream) {
+    if (!audioTracks) return;
+    try {
+      var list = Apply(audioTracks, stream, []);
+      for (var i = 0; i < list.length; i++) hold(list[i]);
+    } catch (e) {}
+  }
+
+  // a Proxy of the original wherever the engine has one, so the page's
+  // objects gain nothing a native method does not already have
+  function wrap(obj, name, handler) {
+    if (!obj) return;
+    var d;
+    try { d = Object.getOwnPropertyDescriptor(obj, name); } catch (e) { return; }
+    if (!d || !d.configurable || typeof d.value !== "function") return;
+    var original = d.value, value;
+    if (typeof Proxy === "function") {
+      value = new Proxy(original, {apply: function (target, self, args) {
+        return Apply(handler, self, [target, args]);
+      }});
+    } else {
+      value = function () { return Apply(handler, this, [original, arguments]); };
+    }
+    try {
+      Object.defineProperty(obj, name, {
+        value: value, writable: d.writable, enumerable: d.enumerable,
+        configurable: true});
+    } catch (e) {}
+  }
+
+  // the page's own stop() still runs, and runs first
+  wrap(trackProto, "stop", function (original, args) {
+    var out = Apply(original, this, args);
+    stopped(this);
+    return out;
+  });
+
+  // a clone of a live microphone track is a live microphone. Stopping
+  // the original leaves the clone capturing, and the call is still on:
+  // without this the count would fall to nothing in the middle of it.
+  wrap(trackProto, "clone", function (original, args) {
+    var out = Apply(original, this, args);
+    try {
+      var known = Apply(WMhas, held, [this]);
+      if (known && out && reads(kind, out, "audio")) hold(out);
+    } catch (e) {}
+    return out;
+  });
+
+  var devices = navigator.mediaDevices;
+  wrap(devices && Object.getPrototypeOf(devices), "getUserMedia",
+       function (original, args) {
+    var out = Apply(original, this, args);
+    try {
+      // not `out.then`: reading it would go through the page again.
+      // Anything that is not a promise makes this throw, and then the
+      // page gets back exactly what the engine gave it.
+      return Apply(Then, out, [function (stream) {
+        watch(stream);
+        return stream;                // the page gets its own stream
+      }]);
+    } catch (e) { return out; }
+  });
+
+  // the callback-shaped one, which this engine still carries. A site
+  // using it would otherwise hold the microphone invisibly.
+  function legacy(original, args) {
+    var list;
+    try { list = Apply(Slice, args, []); }
+    catch (e) { return Apply(original, this, args); }
+    var ok = list[1];
+    if (typeof ok === "function")
+      list[1] = function (stream) {
+        watch(stream);
+        return Apply(ok, this, arguments);
+      };
+    return Apply(original, this, list);
+  }
+  var nav = W.Navigator && Navigator.prototype;
+  wrap(nav, "getUserMedia", legacy);
+  wrap(nav, "webkitGetUserMedia", legacy);
+  wrap(nav, "mozGetUserMedia", legacy);
+})();
+"""
+
+# The other half, in the isolated world. The count has to be readable by
+# the browser and not by the page, and those are two different places:
+# the wrapper must live in the page's own world to be able to wrap
+# anything at all, while what the browser reads must be somewhere the
+# page cannot write. The DOM is the one thing both worlds share, so the
+# count crosses on a DOM event whose name is a fresh random token each
+# run, dispatched and listened for through natives both sides took
+# before the page was allowed to run.
+CALL_RELAY_JS = r"""
+(function () {
+  var live = 0;
+  var Listen = EventTarget.prototype.addEventListener;
+  Listen.call(document, %(event)s, function (e) {
+    var n = e && e.detail;
+    live = (typeof n === "number" && n > 0) ? n : 0;
+  }, true);
+  window.__callLive = function () { return live; };
+})();
+"""
+
+#: what the browser asks each frame, in the isolated world
+CALL_ASK_JS = "window.__callLive ? window.__callLive() : 0"
 
 
 # The script that paints one of our own pages. It runs on nothing else:
@@ -2896,6 +3607,18 @@ _CATALOGUE = [
     ("newspaper", "Newspaper", "character", "Print, light",
      "#e9e7e1", "#fbfaf7", "#1a1a1a", "#8c1d18", "#2f5d3a", "#8a6d1f",
      "#a55b2a", "#8c1d18"),
+    # The sky has to be deep, not bright: an island only a shade off the
+    # background leaves the ladder of quiet greys nowhere to stand, and
+    # the whole rung chain collapses into white (see test_contrast (6)).
+    ("aero", "Frutiger Aero", "character", "Y2K glass, bubbles and sky",
+     "#062744", "#0b3a63", "#eaf6ff", "#7fd4ff", "#8ce06a", "#ffe27a",
+     "#ffb46b", "#ff7a8a"),
+    # Warm timber: a dark walnut ground, a medium wood-brown island, a
+    # parchment text, honey and amber for the lights. Built for the
+    # wooden-wheel start page, but a whole browser like any other palette.
+    ("wood", "Wood", "character", "Walnut, oak and honey",
+     "#21140b", "#3a2417", "#f3e6d0", "#e0a441", "#a9b95f", "#edc25b",
+     "#e19a5e", "#d76a54"),
 ]
 
 # The few themes that are more than a palette: an explicit token table
@@ -2916,9 +3639,6 @@ _THEME_EXTRAS = {
 
     "steampunk": {
         "bright": "#fff3d6",
-        # a slab face for the headings, a brass rule under them, and a
-        # brushed-metal sheen over the whole page. No image files: the
-        # texture is two repeating gradients.
         "css": """
 :root[data-theme="steampunk"] h1,
 :root[data-theme="steampunk"] h2,
@@ -2936,9 +3656,23 @@ _THEME_EXTRAS = {
 }
 :root[data-theme="steampunk"] body {
   background-image:
-    repeating-linear-gradient(115deg, rgb(255 231 178 / .028) 0 2px,
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221400%22%20height%3D%22900%22%20viewBox%3D%220%200%201400%20900%22%3E%20%3Cg%20stroke%3D%22%23c08a35%22%20fill%3D%22none%22%20stroke-opacity%3D%220.28%22%3E%20%3Cline%20x1%3D%22321.2%22%20y1%3D%22205.0%22%20x2%3D%22344.2%22%20y2%3D%22205.0%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22312.3%22%20y1%3D%22249.5%22%20x2%3D%22333.6%22%20y2%3D%22258.3%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22287.1%22%20y1%3D%22287.1%22%20x2%3D%22303.4%22%20y2%3D%22303.4%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22249.5%22%20y1%3D%22312.3%22%20x2%3D%22258.3%22%20y2%3D%22333.6%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22205.0%22%20y1%3D%22321.2%22%20x2%3D%22205.0%22%20y2%3D%22344.2%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22160.5%22%20y1%3D%22312.3%22%20x2%3D%22151.7%22%20y2%3D%22333.6%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22122.9%22%20y1%3D%22287.1%22%20x2%3D%22106.6%22%20y2%3D%22303.4%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%2297.7%22%20y1%3D%22249.5%22%20x2%3D%2276.4%22%20y2%3D%22258.3%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%2288.8%22%20y1%3D%22205.0%22%20x2%3D%2265.8%22%20y2%3D%22205.0%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%2297.7%22%20y1%3D%22160.5%22%20x2%3D%2276.4%22%20y2%3D%22151.7%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22122.9%22%20y1%3D%22122.9%22%20x2%3D%22106.6%22%20y2%3D%22106.6%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22160.5%22%20y1%3D%2297.7%22%20x2%3D%22151.7%22%20y2%3D%2276.4%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22205.0%22%20y1%3D%2288.8%22%20x2%3D%22205.0%22%20y2%3D%2265.8%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22249.5%22%20y1%3D%2297.7%22%20x2%3D%22258.3%22%20y2%3D%2276.4%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22287.1%22%20y1%3D%22122.9%22%20x2%3D%22303.4%22%20y2%3D%22106.6%22%20stroke-width%3D%2226.0%22%2F%3E%3Cline%20x1%3D%22312.3%22%20y1%3D%22160.5%22%20x2%3D%22333.6%22%20y2%3D%22151.7%22%20stroke-width%3D%2226.0%22%2F%3E%20%3Ccircle%20cx%3D%22205%22%20cy%3D%22205%22%20r%3D%22120%22%20stroke-width%3D%2214.3%22%2F%3E%20%3Ccircle%20cx%3D%22205%22%20cy%3D%22205%22%20r%3D%2272.0%22%20stroke-width%3D%228.8%22%2F%3E%20%3Ccircle%20cx%3D%22205%22%20cy%3D%22205%22%20r%3D%2236.0%22%20stroke-width%3D%228.8%22%2F%3E%20%3C%2Fg%3E%20%3Cg%20stroke%3D%22%23b5713f%22%20fill%3D%22none%22%20stroke-opacity%3D%220.24%22%3E%20%3Cline%20x1%3D%22182.0%22%20y1%3D%22360.0%22%20x2%3D%22194.2%22%20y2%3D%22360.0%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%22173.7%22%20y1%3D%22391.0%22%20x2%3D%22184.3%22%20y2%3D%22397.1%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%22151.0%22%20y1%3D%22413.7%22%20x2%3D%22157.1%22%20y2%3D%22424.3%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%22120.0%22%20y1%3D%22422.0%22%20x2%3D%22120.0%22%20y2%3D%22434.2%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%2289.0%22%20y1%3D%22413.7%22%20x2%3D%2282.9%22%20y2%3D%22424.3%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%2266.3%22%20y1%3D%22391.0%22%20x2%3D%2255.7%22%20y2%3D%22397.1%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%2258.0%22%20y1%3D%22360.0%22%20x2%3D%2245.8%22%20y2%3D%22360.0%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%2266.3%22%20y1%3D%22329.0%22%20x2%3D%2255.7%22%20y2%3D%22322.9%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%2289.0%22%20y1%3D%22306.3%22%20x2%3D%2282.9%22%20y2%3D%22295.7%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%22120.0%22%20y1%3D%22298.0%22%20x2%3D%22120.0%22%20y2%3D%22285.8%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%22151.0%22%20y1%3D%22306.3%22%20x2%3D%22157.1%22%20y2%3D%22295.7%22%20stroke-width%3D%2215.0%22%2F%3E%3Cline%20x1%3D%22173.7%22%20y1%3D%22329.0%22%20x2%3D%22184.3%22%20y2%3D%22322.9%22%20stroke-width%3D%2215.0%22%2F%3E%20%3Ccircle%20cx%3D%22120%22%20cy%3D%22360%22%20r%3D%2264%22%20stroke-width%3D%228.2%22%2F%3E%20%3Ccircle%20cx%3D%22120%22%20cy%3D%22360%22%20r%3D%2238.4%22%20stroke-width%3D%225.1%22%2F%3E%20%3Ccircle%20cx%3D%22120%22%20cy%3D%22360%22%20r%3D%2219.2%22%20stroke-width%3D%225.1%22%2F%3E%20%3C%2Fg%3E%20%3Cg%20stroke%3D%22%23c08a35%22%20fill%3D%22none%22%20stroke-opacity%3D%220.24%22%3E%20%3Cline%20x1%3D%221350.2%22%20y1%3D%22690.0%22%20x2%3D%221379.0%22%20y2%3D%22690.0%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221341.4%22%20y1%3D%22739.7%22%20x2%3D%221368.5%22%20y2%3D%22749.5%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221316.2%22%20y1%3D%22783.3%22%20x2%3D%221338.3%22%20y2%3D%22801.8%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221277.6%22%20y1%3D%22815.7%22%20x2%3D%221292.0%22%20y2%3D%22840.7%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221230.2%22%20y1%3D%22833.0%22%20x2%3D%221235.2%22%20y2%3D%22861.4%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221179.8%22%20y1%3D%22833.0%22%20x2%3D%221174.8%22%20y2%3D%22861.4%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221132.4%22%20y1%3D%22815.7%22%20x2%3D%221118.0%22%20y2%3D%22840.7%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221093.8%22%20y1%3D%22783.3%22%20x2%3D%221071.7%22%20y2%3D%22801.8%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221068.6%22%20y1%3D%22739.7%22%20x2%3D%221041.5%22%20y2%3D%22749.5%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221059.8%22%20y1%3D%22690.0%22%20x2%3D%221031.0%22%20y2%3D%22690.0%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221068.6%22%20y1%3D%22640.3%22%20x2%3D%221041.5%22%20y2%3D%22630.5%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221093.8%22%20y1%3D%22596.7%22%20x2%3D%221071.7%22%20y2%3D%22578.2%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221132.4%22%20y1%3D%22564.3%22%20x2%3D%221118.0%22%20y2%3D%22539.3%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221179.8%22%20y1%3D%22547.0%22%20x2%3D%221174.8%22%20y2%3D%22518.6%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221230.2%22%20y1%3D%22547.0%22%20x2%3D%221235.2%22%20y2%3D%22518.6%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221277.6%22%20y1%3D%22564.3%22%20x2%3D%221292.0%22%20y2%3D%22539.3%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221316.2%22%20y1%3D%22596.7%22%20x2%3D%221338.3%22%20y2%3D%22578.2%22%20stroke-width%3D%2230.0%22%2F%3E%3Cline%20x1%3D%221341.4%22%20y1%3D%22640.3%22%20x2%3D%221368.5%22%20y2%3D%22630.5%22%20stroke-width%3D%2230.0%22%2F%3E%20%3Ccircle%20cx%3D%221205%22%20cy%3D%22690%22%20r%3D%22150%22%20stroke-width%3D%2216.5%22%2F%3E%20%3Ccircle%20cx%3D%221205%22%20cy%3D%22690%22%20r%3D%2290.0%22%20stroke-width%3D%2210.2%22%2F%3E%20%3Ccircle%20cx%3D%221205%22%20cy%3D%22690%22%20r%3D%2245.0%22%20stroke-width%3D%2210.2%22%2F%3E%20%3C%2Fg%3E%20%3Cg%20stroke%3D%22%23b5713f%22%20fill%3D%22none%22%20stroke-opacity%3D%220.2%22%3E%20%3Cline%20x1%3D%221377.4%22%20y1%3D%22510.0%22%20x2%3D%221392.8%22%20y2%3D%22510.0%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221369.8%22%20y1%3D%22543.6%22%20x2%3D%221383.6%22%20y2%3D%22550.3%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221348.3%22%20y1%3D%22570.5%22%20x2%3D%221357.9%22%20y2%3D%22582.6%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221317.2%22%20y1%3D%22585.5%22%20x2%3D%221320.6%22%20y2%3D%22600.5%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221282.8%22%20y1%3D%22585.5%22%20x2%3D%221279.4%22%20y2%3D%22600.5%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221251.7%22%20y1%3D%22570.5%22%20x2%3D%221242.1%22%20y2%3D%22582.6%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221230.2%22%20y1%3D%22543.6%22%20x2%3D%221216.4%22%20y2%3D%22550.3%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221222.6%22%20y1%3D%22510.0%22%20x2%3D%221207.2%22%20y2%3D%22510.0%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221230.2%22%20y1%3D%22476.4%22%20x2%3D%221216.4%22%20y2%3D%22469.7%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221251.7%22%20y1%3D%22449.5%22%20x2%3D%221242.1%22%20y2%3D%22437.4%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221282.8%22%20y1%3D%22434.5%22%20x2%3D%221279.4%22%20y2%3D%22419.5%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221317.2%22%20y1%3D%22434.5%22%20x2%3D%221320.6%22%20y2%3D%22419.5%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221348.3%22%20y1%3D%22449.5%22%20x2%3D%221357.9%22%20y2%3D%22437.4%22%20stroke-width%3D%2218.0%22%2F%3E%3Cline%20x1%3D%221369.8%22%20y1%3D%22476.4%22%20x2%3D%221383.6%22%20y2%3D%22469.7%22%20stroke-width%3D%2218.0%22%2F%3E%20%3Ccircle%20cx%3D%221300%22%20cy%3D%22510%22%20r%3D%2280%22%20stroke-width%3D%229.9%22%2F%3E%20%3Ccircle%20cx%3D%221300%22%20cy%3D%22510%22%20r%3D%2248.0%22%20stroke-width%3D%226.1%22%2F%3E%20%3Ccircle%20cx%3D%221300%22%20cy%3D%22510%22%20r%3D%2224.0%22%20stroke-width%3D%226.1%22%2F%3E%20%3C%2Fg%3E%20%3C%2Fsvg%3E"),
+    radial-gradient(circle at 15px 15px, rgb(233 213 170 / .30) 0 2px,
+                    rgb(120 78 30 / .22) 2px 3.2px, transparent 3.6px),
+    radial-gradient(circle at 15px 15px, rgb(233 213 170 / .30) 0 2px,
+                    rgb(120 78 30 / .22) 2px 3.2px, transparent 3.6px),
+    repeating-linear-gradient(115deg, rgb(255 231 178 / .030) 0 2px,
                               rgb(0 0 0 / 0) 2px 5px),
-    radial-gradient(circle at 50% 0%, rgb(192 138 53 / .10), transparent 62%);
+    radial-gradient(120% 90% at 50% 42%, rgb(0 0 0 / 0) 40%,
+                    rgb(9 6 3 / .55) 100%),
+    radial-gradient(circle at 22% 8%, rgb(192 138 53 / .16), transparent 46%),
+    radial-gradient(circle at 88% 92%, rgb(181 113 63 / .14), transparent 48%),
+    radial-gradient(140% 120% at 50% 120%, rgb(168 54 43 / .10), transparent 55%);
+  background-repeat: no-repeat, repeat-x, repeat-x, repeat, no-repeat,
+                     no-repeat, no-repeat, no-repeat;
+  background-size: cover, 44px 44px, 44px 44px, auto, cover, cover, cover, cover;
+  background-position: center, top left, bottom left, 0 0, center, center,
+                       center, center;
   background-attachment: fixed;
 }
 """,
@@ -2949,25 +3683,55 @@ QLineEdit#urlbar, QMenu, QToolButton#groupbtn {
 }
 """,
     },
-
     "terminal": {
         "css": """
 :root[data-theme="terminal"] body, :root[data-theme="terminal"] * {
   font-family: "JetBrainsMono Nerd Font", "DejaVu Sans Mono",
                "Liberation Mono", monospace !important;
 }
-:root[data-theme="terminal"] h1, :root[data-theme="terminal"] h2,
-:root[data-theme="terminal"] body:not(.hasbg) #clock {
-  text-shadow: 0 0 8px rgb(51 255 102 / .55);
-}
-:root[data-theme="terminal"] body {
-  background-image: repeating-linear-gradient(rgb(0 0 0 / .22) 0 1px,
-                                              rgb(0 0 0 / 0) 1px 3px);
+:root[data-theme="terminal"] body:not(.hasbg) {
+  background-image:
+    /* team scrim: a soft central pool keeps the column readable */
+    radial-gradient(120% 78% at 50% 46%, rgb(0 18 0 / 0) 42%,
+                    rgb(0 18 0 / .5) 76%, rgb(0 18 0 / .78)),
+    /* lit-tube phosphor bloom */
+    radial-gradient(60% 44% at 50% 44%, rgb(51 255 102 / .10),
+                    rgb(51 255 102 / 0) 70%),
+    /* the faint shell session */
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='1000' viewBox='0 0 1600 1000' preserveAspectRatio='xMinYMin slice'><g font-family='monospace' font-size='26' fill='%2333ff66' fill-opacity='0.13' letter-spacing='1'><text x='64' y='92' xml:space='preserve'>[user@localhost ~]$ startx --phosphor</text><text x='64' y='132' xml:space='preserve'>booting display .......... [  ok  ]</text><text x='64' y='172' xml:space='preserve'>  scanlines .............. [  ok  ]</text><text x='64' y='212' xml:space='preserve'>  vignette ............... [  ok  ]</text><text x='64' y='252' xml:space='preserve'>  green glow ............. [  ok  ]</text><text x='64' y='292' xml:space='preserve'>[user@localhost ~]$ browser --new-tab</text><text x='64' y='332' xml:space='preserve'>opening start page_</text></g></svg>"),
+    /* tighter scanlines */
+    repeating-linear-gradient(rgb(0 0 0 / .34) 0 1px, rgb(0 0 0 / 0) 1px 3px),
+    /* CRT curvature vignette */
+    radial-gradient(125% 100% at 50% 50%, rgb(0 0 0 / 0) 55%, rgb(0 0 0 / .55));
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat, no-repeat;
+  background-position: center, center, left top, center, center;
   background-attachment: fixed;
 }
+:root[data-theme="terminal"] h1, :root[data-theme="terminal"] h2,
+:root[data-theme="terminal"] body:not(.hasbg) #clock {
+  text-shadow: 0 0 2px rgb(51 255 102 / .9), 0 0 9px rgb(51 255 102 / .6);
+}
+:root[data-theme="terminal"] body:not(.hasbg) #date {
+  color: #33ff66;
+  text-shadow: 0 0 8px rgb(51 255 102 / .5);
+}
+:root[data-theme="terminal"] h1::before,
+:root[data-theme="terminal"] h2::before { content: "> "; opacity: .65; }
+:root[data-theme="terminal"] .links a, :root[data-theme="terminal"] button,
+:root[data-theme="terminal"] #addbtn, :root[data-theme="terminal"] .thumb,
+:root[data-theme="terminal"] #addform input,
+:root[data-theme="terminal"] #settings,
+:root[data-theme="terminal"] form.search { border-radius: 0 !important; }
+:root[data-theme="terminal"] .links a:hover {
+  background-color: rgb(51 255 102 / .16);
+  text-shadow: 0 0 8px rgb(51 255 102 / .7);
+}
+""",
+        "qss": """
+QTabBar::tab, QToolButton, QLineEdit#urlbar, QMenu,
+QToolButton#groupbtn { border-radius: 0; }
 """,
     },
-
     "amber": {
         "css": """
 :root[data-theme="amber"] body, :root[data-theme="amber"] * {
@@ -2979,13 +3743,19 @@ QLineEdit#urlbar, QMenu, QToolButton#groupbtn {
   text-shadow: 0 0 9px rgb(255 176 0 / .5);
 }
 :root[data-theme="amber"] body {
-  background-image: repeating-linear-gradient(rgb(0 0 0 / .24) 0 1px,
-                                              rgb(0 0 0 / 0) 1px 3px);
+  background-image:
+    repeating-linear-gradient(rgb(0 0 0 / .30) 0 1px,
+                              rgb(0 0 0 / 0) 1px 3px),
+    repeating-linear-gradient(90deg, rgb(255 176 0 / .020) 0 1px,
+                              rgb(0 0 0 / 0) 1px 3px),
+    radial-gradient(60% 45% at 50% 42%, rgb(255 176 0 / .16),
+                    rgb(255 157 0 / .05) 55%, transparent 78%),
+    radial-gradient(130% 125% at 50% 50%, rgb(0 0 0 / 0) 52%,
+                    rgb(6 3 0 / .72) 100%);
   background-attachment: fixed;
 }
 """,
     },
-
     "blueprint": {
         "css": """
 :root[data-theme="blueprint"] h1, :root[data-theme="blueprint"] h2,
@@ -2996,46 +3766,128 @@ QLineEdit#urlbar, QMenu, QToolButton#groupbtn {
 }
 :root[data-theme="blueprint"] body {
   background-image:
-    repeating-linear-gradient(rgb(214 233 255 / .07) 0 1px,
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22900%22%20height%3D%22900%22%20viewBox%3D%220%200%20900%20900%22%3E%20%3Cg%20fill%3D%22none%22%20stroke%3D%22%23d6e9ff%22%20stroke-opacity%3D%220.16%22%3E%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22760%22%20r%3D%2296%22%20stroke-width%3D%221.4%22%2F%3E%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22760%22%20r%3D%2260%22%20stroke-width%3D%221%22%2F%3E%20%3Ccircle%20cx%3D%22150%22%20cy%3D%22760%22%20r%3D%228%22%20stroke-width%3D%221%22%2F%3E%20%3Cline%20x1%3D%22150%22%20y1%3D%22640%22%20x2%3D%22150%22%20y2%3D%22880%22%20stroke-width%3D%221%22%2F%3E%20%3Cline%20x1%3D%2230%22%20y1%3D%22760%22%20x2%3D%22270%22%20y2%3D%22760%22%20stroke-width%3D%221%22%2F%3E%20%3Cpath%20d%3D%22M150%20760%20L246%20706%22%20stroke-width%3D%221.4%22%2F%3E%20%3C%2Fg%3E%20%3Cg%20fill%3D%22none%22%20stroke%3D%22%237fd4ff%22%20stroke-opacity%3D%220.12%22%3E%20%3Crect%20x%3D%22700%22%20y%3D%22120%22%20width%3D%22150%22%20height%3D%22100%22%20stroke-width%3D%221.2%22%2F%3E%20%3Cline%20x1%3D%22700%22%20y1%3D%22150%22%20x2%3D%22850%22%20y2%3D%22150%22%20stroke-width%3D%221%22%2F%3E%20%3Cline%20x1%3D%22730%22%20y1%3D%22120%22%20x2%3D%22730%22%20y2%3D%22220%22%20stroke-width%3D%221%22%2F%3E%20%3C%2Fg%3E%20%3C%2Fsvg%3E"),
+    repeating-linear-gradient(rgb(214 233 255 / .16) 0 1px,
+                              rgb(0 0 0 / 0) 1px 112px),
+    repeating-linear-gradient(90deg, rgb(214 233 255 / .16) 0 1px,
+                              rgb(0 0 0 / 0) 1px 112px),
+    repeating-linear-gradient(rgb(214 233 255 / .06) 0 1px,
                               rgb(0 0 0 / 0) 1px 28px),
-    repeating-linear-gradient(90deg, rgb(214 233 255 / .07) 0 1px,
-                              rgb(0 0 0 / 0) 1px 28px);
+    repeating-linear-gradient(90deg, rgb(214 233 255 / .06) 0 1px,
+                              rgb(0 0 0 / 0) 1px 28px),
+    radial-gradient(120% 110% at 50% 44%, rgb(127 212 255 / .07) 0%,
+                    rgb(0 0 0 / 0) 42%, rgb(3 18 34 / .60) 100%);
+  background-repeat: no-repeat, repeat, repeat, repeat, repeat, no-repeat;
+  background-size: cover, auto, auto, auto, auto, cover;
+  background-position: center;
   background-attachment: fixed;
 }
 """,
     },
-
     "synthwave": {
         "css": """
 :root[data-theme="synthwave"] h1, :root[data-theme="synthwave"] h2,
 :root[data-theme="synthwave"] body:not(.hasbg) #clock {
-  text-shadow: 0 0 2px rgb(255 126 219 / .9), 0 0 14px rgb(255 126 219 / .6);
+  text-shadow: 0 0 2px rgb(255 126 219 / .95),
+               0 0 15px rgb(255 126 219 / .7),
+               0 0 34px rgb(114 241 184 / .4);
+  letter-spacing: .03em;
 }
-:root[data-theme="synthwave"] body {
+:root[data-theme="synthwave"] body:not(.hasbg) #date {
+  text-shadow: 0 0 4px rgb(30 26 43 / .95), 0 1px 8px rgb(30 26 43 / .9),
+               0 0 16px rgb(255 126 219 / .4);
+  color: #f6f2ff;
+}
+:root[data-theme="synthwave"] body:not(.hasbg) {
+  background-color: #1e1a2b;
   background-image:
-    linear-gradient(rgb(0 0 0 / 0) 55%, rgb(255 126 219 / .07)),
-    repeating-linear-gradient(90deg, rgb(114 241 184 / .05) 0 1px,
-                              rgb(0 0 0 / 0) 1px 42px);
+    /* team scrim: a soft band behind the centre column, plus a corner
+       vignette, both in the theme's own bg token at alpha */
+    linear-gradient(rgb(30 26 43 / 0) 26%, rgb(30 26 43 / .5) 44%,
+                    rgb(30 26 43 / .5) 66%, rgb(30 26 43 / 0) 82%),
+    radial-gradient(140% 90% at 50% 46%, rgb(30 26 43 / 0) 52%,
+                    rgb(20 15 30 / .55)),
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='1000' viewBox='0 0 1600 1000' preserveAspectRatio='xMidYMid slice'><defs><linearGradient id='sky' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='%231e1a2b'/><stop offset='0.42' stop-color='%23241a33'/><stop offset='0.66' stop-color='%233a1f45'/><stop offset='0.86' stop-color='%235a2350'/><stop offset='1' stop-color='%237a2a5e'/></linearGradient><linearGradient id='sun' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='%23fede5d'/><stop offset='0.4' stop-color='%23ff8b39'/><stop offset='0.72' stop-color='%23fe4450'/><stop offset='1' stop-color='%23ff7edb'/></linearGradient><linearGradient id='ground' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='%232a1636'/><stop offset='0.16' stop-color='%231c1428'/><stop offset='1' stop-color='%23140f1e'/></linearGradient><linearGradient id='fog' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='%23ff7edb' stop-opacity='0.55'/><stop offset='0.5' stop-color='%237a2a5e' stop-opacity='0'/></linearGradient><filter id='glow' x='-40%' y='-40%' width='180%' height='180%'><feGaussianBlur stdDeviation='7' result='b'/><feMerge><feMergeNode in='b'/><feMergeNode in='SourceGraphic'/></feMerge></filter><filter id='sunglow' x='-60%' y='-60%' width='220%' height='220%'><feGaussianBlur stdDeviation='26'/></filter></defs><rect x='0' y='0' width='1600' height='512' fill='url(%23sky)'/><circle cx='210' cy='90' r='1.6' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='430' cy='150' r='1.2' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='1180' cy='110' r='1.6' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='1350' cy='190' r='1.2' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='300' cy='240' r='1.1' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='1290' cy='300' r='1.3' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='150' cy='330' r='1.2' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='1450' cy='80' r='1.4' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='620' cy='70' r='1.2' fill='%23f6f2ff' fill-opacity='0.5'/><circle cx='800' cy='336' r='206' fill='%23ff7edb' fill-opacity='0.35' filter='url(%23sunglow)'/><clipPath id='disc'><circle cx='800' cy='336' r='176'/></clipPath><g clip-path='url(%23disc)'><circle cx='800' cy='336' r='176' fill='url(%23sun)'/><rect x='624' y='348' width='352' height='5' fill='%23241a33'/><rect x='624' y='365' width='352' height='8' fill='%23241a33'/><rect x='624' y='385' width='352' height='11' fill='%23241a33'/><rect x='624' y='408' width='352' height='14' fill='%23241a33'/><rect x='624' y='434' width='352' height='17' fill='%23241a33'/><rect x='624' y='463' width='352' height='20' fill='%23241a33'/><rect x='624' y='495' width='352' height='23' fill='%23241a33'/></g><rect x='0' y='512' width='1600' height='488' fill='url(%23ground)'/><g stroke='%23ff7edb' stroke-width='2' stroke-opacity='0.7' filter='url(%23glow)'><line x1='-1200' y1='1000' x2='800' y2='512'/><line x1='-1080' y1='1000' x2='800' y2='512'/><line x1='-960' y1='1000' x2='800' y2='512'/><line x1='-840' y1='1000' x2='800' y2='512'/><line x1='-720' y1='1000' x2='800' y2='512'/><line x1='-600' y1='1000' x2='800' y2='512'/><line x1='-480' y1='1000' x2='800' y2='512'/><line x1='-360' y1='1000' x2='800' y2='512'/><line x1='-240' y1='1000' x2='800' y2='512'/><line x1='-120' y1='1000' x2='800' y2='512'/><line x1='0' y1='1000' x2='800' y2='512'/><line x1='120' y1='1000' x2='800' y2='512'/><line x1='240' y1='1000' x2='800' y2='512'/><line x1='360' y1='1000' x2='800' y2='512'/><line x1='480' y1='1000' x2='800' y2='512'/><line x1='600' y1='1000' x2='800' y2='512'/><line x1='720' y1='1000' x2='800' y2='512'/><line x1='840' y1='1000' x2='800' y2='512'/><line x1='960' y1='1000' x2='800' y2='512'/><line x1='1080' y1='1000' x2='800' y2='512'/><line x1='1200' y1='1000' x2='800' y2='512'/><line x1='1320' y1='1000' x2='800' y2='512'/><line x1='1440' y1='1000' x2='800' y2='512'/><line x1='1560' y1='1000' x2='800' y2='512'/><line x1='1680' y1='1000' x2='800' y2='512'/><line x1='1800' y1='1000' x2='800' y2='512'/><line x1='1920' y1='1000' x2='800' y2='512'/><line x1='2040' y1='1000' x2='800' y2='512'/><line x1='2160' y1='1000' x2='800' y2='512'/><line x1='2280' y1='1000' x2='800' y2='512'/><line x1='2400' y1='1000' x2='800' y2='512'/><line x1='2520' y1='1000' x2='800' y2='512'/><line x1='2640' y1='1000' x2='800' y2='512'/><line x1='2760' y1='1000' x2='800' y2='512'/><line x1='0' y1='513.0' x2='1600' y2='513.0'/><line x1='0' y1='516.0' x2='1600' y2='516.0'/><line x1='0' y1='521.1' x2='1600' y2='521.1'/><line x1='0' y1='528.1' x2='1600' y2='528.1'/><line x1='0' y1='537.2' x2='1600' y2='537.2'/><line x1='0' y1='548.3' x2='1600' y2='548.3'/><line x1='0' y1='561.4' x2='1600' y2='561.4'/><line x1='0' y1='576.5' x2='1600' y2='576.5'/><line x1='0' y1='593.7' x2='1600' y2='593.7'/><line x1='0' y1='612.8' x2='1600' y2='612.8'/><line x1='0' y1='634.0' x2='1600' y2='634.0'/><line x1='0' y1='657.2' x2='1600' y2='657.2'/><line x1='0' y1='682.4' x2='1600' y2='682.4'/><line x1='0' y1='709.6' x2='1600' y2='709.6'/><line x1='0' y1='738.9' x2='1600' y2='738.9'/><line x1='0' y1='770.1' x2='1600' y2='770.1'/><line x1='0' y1='803.4' x2='1600' y2='803.4'/><line x1='0' y1='838.7' x2='1600' y2='838.7'/><line x1='0' y1='876.0' x2='1600' y2='876.0'/><line x1='0' y1='915.3' x2='1600' y2='915.3'/><line x1='0' y1='956.6' x2='1600' y2='956.6'/><line x1='0' y1='1000.0' x2='1600' y2='1000.0'/></g><g stroke='%2372f1b8' stroke-width='2' stroke-opacity='0.5'><line x1='800' y1='1000' x2='800' y2='512'/></g><rect x='0' y='512' width='1600' height='150' fill='url(%23fog)'/><rect x='0' y='510' width='1600' height='4' fill='%23ff7edb' filter='url(%23glow)'/></svg>");
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center bottom;
   background-attachment: fixed;
+}
+:root[data-theme="synthwave"] .links a, :root[data-theme="synthwave"] button,
+:root[data-theme="synthwave"] #addbtn, :root[data-theme="synthwave"] .thumb {
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgb(255 126 219 / .35),
+              0 0 12px rgb(255 126 219 / .22);
+}
+:root[data-theme="synthwave"] .links a:hover,
+:root[data-theme="synthwave"] button:hover {
+  box-shadow: 0 0 0 1px rgb(255 126 219 / .8),
+              0 0 20px rgb(255 126 219 / .5);
 }
 """,
     },
-
     "gameboy": {
         "css": """
 :root[data-theme="gameboy"] body, :root[data-theme="gameboy"] * {
   font-family: "JetBrainsMono Nerd Font", "DejaVu Sans Mono", monospace
                !important;
 }
-:root[data-theme="gameboy"] img { image-rendering: pixelated; }
-:root[data-theme="gameboy"] body {
-  background-image: repeating-linear-gradient(rgb(11 40 11 / .16) 0 1px,
-                                              rgb(0 0 0 / 0) 1px 2px);
+:root[data-theme="gameboy"] img, :root[data-theme="gameboy"] canvas {
+  image-rendering: pixelated;
+}
+:root[data-theme="gameboy"] body:not(.hasbg) {
+  background-color: #9bbc0f;
+  background-image:
+    /* team scrim: a screen-edge falloff + a soft glass sheen, both in
+       the theme's own greens */
+    radial-gradient(130% 120% at 50% 42%, rgb(155 188 15 / 0) 46%,
+                    rgb(11 40 11 / .22)),
+    linear-gradient(125deg, rgb(200 216 88 / .35) 0%,
+                    rgb(200 216 88 / 0) 34%),
+    /* the dot-matrix cell grid */
+    repeating-linear-gradient(0deg, rgb(11 40 11 / .22) 0 1px,
+                              rgb(0 0 0 / 0) 1px 6px),
+    repeating-linear-gradient(90deg, rgb(11 40 11 / .15) 0 1px,
+                              rgb(0 0 0 / 0) 1px 6px),
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240' viewBox='0 0 240 240'><defs><pattern id='dm' width='6' height='6' patternUnits='userSpaceOnUse'><rect width='6' height='6' fill='none'/><rect width='5' height='5' x='0.5' y='0.5' fill='%230b280b' fill-opacity='0.16'/></pattern></defs><rect width='240' height='240' fill='%239bbc0f'/><rect width='240' height='240' fill='url(%23dm)'/></svg>");
+  background-repeat: no-repeat, no-repeat, repeat, repeat, repeat;
   background-attachment: fixed;
+  box-shadow: inset 0 0 0 12px #8bac0f, inset 0 0 0 16px #144014;
+}
+/* pixels are dark ink on the lit screen */
+:root[data-theme="gameboy"] body:not(.hasbg) #clock,
+:root[data-theme="gameboy"] body:not(.hasbg) #date,
+:root[data-theme="gameboy"] h1, :root[data-theme="gameboy"] h2 {
+  color: #0b280b;
+  text-transform: uppercase; letter-spacing: .12em; font-weight: 700;
+  text-shadow: 2px 2px 0 rgb(155 188 15 / .55);
+}
+:root[data-theme="gameboy"] body:not(.hasbg) #date {
+  letter-spacing: .2em; font-size: 13px; font-weight: 700;
+}
+:root[data-theme="gameboy"] .links a, :root[data-theme="gameboy"] #addbtn,
+:root[data-theme="gameboy"] button, :root[data-theme="gameboy"] .thumb,
+:root[data-theme="gameboy"] .privbtns button {
+  border-radius: 0 !important; border-width: 2px !important;
+  box-shadow: 3px 3px 0 rgb(11 40 11 / .85);
+}
+:root[data-theme="gameboy"] form.search,
+:root[data-theme="gameboy"] #addform input,
+:root[data-theme="gameboy"] #addform,
+:root[data-theme="gameboy"] #settings {
+  border-radius: 0 !important; border-width: 2px !important;
+}
+:root[data-theme="gameboy"] .links a:hover,
+:root[data-theme="gameboy"] button:hover {
+  transform: translate(1px, 1px);
+  box-shadow: 2px 2px 0 rgb(11 40 11 / .85);
 }
 """,
+        "qss": """
+QTabBar::tab, QToolButton, QLineEdit#urlbar, QMenu,
+QToolButton#groupbtn { border-radius: 0; }
+""",
     },
-
     "c64": {
         "css": """
 :root[data-theme="c64"] body, :root[data-theme="c64"] * {
@@ -3043,9 +3895,49 @@ QLineEdit#urlbar, QMenu, QToolButton#groupbtn {
                !important;
   letter-spacing: .04em;
 }
+:root[data-theme="c64"] body:not(.hasbg) {
+  background-color: #40318d;
+  background-image:
+    /* team scrim: a soft central pool + corner vignette in the theme's
+       own bg blue, so the centre column reads over the screen */
+    radial-gradient(120% 80% at 50% 46%, rgb(53 41 140 / 0) 44%,
+                    rgb(53 41 140 / .55) 78%, rgb(53 41 140 / .9)),
+    /* CRT scanline */
+    repeating-linear-gradient(rgb(53 41 140 / .45) 0 2px,
+                              rgb(0 0 0 / 0) 2px 4px),
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='1000' viewBox='0 0 1600 1000' preserveAspectRatio='xMinYMin slice'><g font-family='monospace' font-size='30' fill='%23b8b0f0' fill-opacity='0.16' font-weight='700' letter-spacing='2'><text x='70' y='96' xml:space='preserve'>    %2A%2A%2A%2A COMMODORE 64 BASIC V2 %2A%2A%2A%2A</text><text x='70' y='188' xml:space='preserve'> 64K RAM SYSTEM  38911 BASIC BYTES FREE</text><text x='70' y='280' xml:space='preserve'>READY.</text></g><rect x='70' y='288' width='20' height='34' fill='%23b8b0f0' fill-opacity='0.16'/></svg>");
+  background-repeat: no-repeat, repeat, no-repeat;
+  background-attachment: fixed;
+  background-position: center, center, left top;
+  box-shadow: inset 0 0 0 26px #7c70da, inset 0 0 0 30px #35298c;
+}
+:root[data-theme="c64"] body:not(.hasbg) #clock,
+:root[data-theme="c64"] body:not(.hasbg) #date {
+  color: #b8b0f0;
+}
+:root[data-theme="c64"] h1, :root[data-theme="c64"] h2,
+:root[data-theme="c64"] body:not(.hasbg) #clock {
+  text-transform: uppercase; letter-spacing: .16em;
+}
+:root[data-theme="c64"] body:not(.hasbg) #date {
+  text-transform: uppercase; letter-spacing: .2em;
+}
+:root[data-theme="c64"] .links a, :root[data-theme="c64"] #addbtn,
+:root[data-theme="c64"] button, :root[data-theme="c64"] .thumb,
+:root[data-theme="c64"] .privbtns button {
+  border-radius: 0 !important; border-width: 2px !important;
+  box-shadow: 3px 3px 0 rgb(53 41 140 / .7);
+}
+:root[data-theme="c64"] form.search, :root[data-theme="c64"] #addform input,
+:root[data-theme="c64"] #settings {
+  border-radius: 0 !important; border-width: 2px !important;
+}
+""",
+        "qss": """
+QTabBar::tab, QToolButton, QLineEdit#urlbar, QMenu,
+QToolButton#groupbtn { border-radius: 0; }
 """,
     },
-
     "sepia": {
         "css": """
 :root[data-theme="sepia"] body, :root[data-theme="sepia"] h1,
@@ -3055,10 +3947,22 @@ QLineEdit#urlbar, QMenu, QToolButton#groupbtn {
 }
 :root[data-theme="sepia"] body {
   background-image:
-    repeating-linear-gradient(78deg, rgb(120 92 48 / .035) 0 2px,
-                              rgb(0 0 0 / 0) 2px 6px);
+    repeating-linear-gradient(78deg, rgb(120 92 48 / .05) 0 1px,
+                              transparent 1px 4px),
+    repeating-linear-gradient(166deg, rgb(120 92 48 / .04) 0 1px,
+                              transparent 1px 5px),
+    radial-gradient(70px 55px at 18% 24%, rgb(150 105 55 / .20), transparent 70%),
+    radial-gradient(95px 72px at 84% 30%, rgb(150 105 55 / .16), transparent 72%),
+    radial-gradient(62px 58px at 74% 78%, rgb(150 105 55 / .17), transparent 70%),
+    radial-gradient(84px 60px at 12% 82%, rgb(150 105 55 / .15), transparent 72%),
+    radial-gradient(52px 50px at 44% 62%, rgb(150 105 55 / .11), transparent 70%),
+    radial-gradient(120% 90% at 28% 18%, rgb(180 140 80 / .14), transparent 60%),
+    radial-gradient(72% 56% at 50% 42%, rgb(255 250 235 / .45), transparent 66%),
+    radial-gradient(130% 120% at 50% 50%, transparent 52%, rgb(74 63 48 / .20));
   background-attachment: fixed;
 }
+:root[data-theme="sepia"] #clock, :root[data-theme="sepia"] h1,
+:root[data-theme="sepia"] h2 { text-shadow: 0 1px 0 rgb(255 250 235 / .55); }
 """,
         "qss": """
 QLineEdit#urlbar, QMenu {
@@ -3067,13 +3971,92 @@ QLineEdit#urlbar, QMenu {
 }
 """,
     },
-
+    "aero": {
+        "css": """
+:root[data-theme="aero"] body {
+  background-image:
+    radial-gradient(20% 13% at 80% 7%, rgb(255 255 255 / .85), transparent 70%),
+    radial-gradient(40% 28% at 80% 7%, rgb(255 255 255 / .5), transparent 62%),
+    radial-gradient(26% 13% at 22% 20%, rgb(255 255 255 / .22), transparent 72%),
+    radial-gradient(30% 12% at 42% 13%, rgb(255 255 255 / .16), transparent 74%),
+    radial-gradient(22% 12% at 62% 25%, rgb(255 255 255 / .18), transparent 74%),
+    radial-gradient(circle 34px at 26% 66%, transparent 60%,
+                    rgb(255 255 255 / .30) 78%, transparent 82%),
+    radial-gradient(circle 22px at 70% 57%, transparent 58%,
+                    rgb(255 255 255 / .32) 76%, transparent 80%),
+    radial-gradient(circle 46px at 83% 73%, transparent 62%,
+                    rgb(255 255 255 / .22) 80%, transparent 84%),
+    radial-gradient(circle 15px at 16% 49%, transparent 54%,
+                    rgb(255 255 255 / .36) 74%, transparent 80%),
+    radial-gradient(circle 27px at 54% 80%, transparent 60%,
+                    rgb(255 255 255 / .24) 78%, transparent 82%),
+    radial-gradient(70% 40% at 50% 104%, rgb(140 224 106 / .34), transparent 66%),
+    radial-gradient(120% 46% at 50% 108%, rgb(127 212 255 / .42), transparent 60%),
+    linear-gradient(rgb(6 39 68) 0%, rgb(20 78 122) 44%,
+                    rgb(70 150 200) 72%, rgb(150 216 232) 100%);
+  background-attachment: fixed;
+}
+:root[data-theme="aero"] h1, :root[data-theme="aero"] h2,
+:root[data-theme="aero"] body:not(.hasbg) #clock {
+  text-shadow: 0 1px 0 rgb(255 255 255 / .45), 0 0 18px rgb(127 212 255 / .5);
+}
+:root[data-theme="aero"] .links a, :root[data-theme="aero"] .card,
+:root[data-theme="aero"] .panel, :root[data-theme="aero"] button,
+:root[data-theme="aero"] .wsw, :root[data-theme="aero"] #addbtn {
+  border-radius: 13px;
+  background-image: linear-gradient(rgb(255 255 255 / .34),
+                                    rgb(255 255 255 / .06) 46%,
+                                    rgb(255 255 255 / 0) 47%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .45),
+              0 6px 16px rgb(6 39 68 / .35);
+}
+:root[data-theme="aero"] form.search {
+  border-radius: 13px;
+  background-image: linear-gradient(rgb(255 255 255 / .30),
+                                    rgb(255 255 255 / .05) 46%,
+                                    rgb(255 255 255 / 0) 47%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .45),
+              0 8px 22px rgb(6 39 68 / .40);
+}
+:root[data-theme="aero"] .links a:hover, :root[data-theme="aero"] button:hover {
+  background-image: linear-gradient(rgb(255 255 255 / .5),
+                                    rgb(255 255 255 / .1) 46%,
+                                    rgb(255 255 255 / 0) 47%);
+}
+:root[data-theme="aero"] input, :root[data-theme="aero"] .search input {
+  border-radius: 13px;
+}
+""",
+        "qss": """
+QToolButton, QLineEdit#urlbar { border-radius: 11px; }
+QToolButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(255, 255, 255, 60),
+                                stop:0.46 rgba(255, 255, 255, 16),
+                                stop:0.47 rgba(255, 255, 255, 0));
+}
+QTabBar::tab { border-radius: 11px; }
+""",
+    },
     "newspaper": {
         "css": """
 :root[data-theme="newspaper"] body, :root[data-theme="newspaper"] h1,
 :root[data-theme="newspaper"] h2, :root[data-theme="newspaper"] p {
   font-family: "Bitstream Charter", "Charter", "Georgia",
                "Liberation Serif", "Times New Roman", serif !important;
+}
+:root[data-theme="newspaper"] body {
+  background-image:
+    repeating-radial-gradient(circle at 0 0, rgb(26 26 26 / .06) 0 1px,
+                              transparent 1.5px 5px),
+    repeating-linear-gradient(90deg, transparent 0 178px,
+                              rgb(26 26 26 / .12) 178px 180px),
+    repeating-linear-gradient(90deg, rgb(26 26 26 / .025) 0 1px,
+                              transparent 1px 3px),
+    radial-gradient(82% 60% at 50% 44%, rgb(255 255 255 / .42), transparent 60%),
+    linear-gradient(rgb(26 26 26 / .05), transparent 20%);
+  background-size: 5px 5px, auto, auto, cover, cover;
+  background-attachment: fixed;
 }
 :root[data-theme="newspaper"] h1 {
   border-top: 3px double rgb(26 26 26 / .8);
@@ -3089,6 +4072,52 @@ QLineEdit#urlbar, QMenu {
     font-family: "Bitstream Charter", "Charter", "Georgia",
                  "Liberation Serif", serif;
 }
+""",
+    },
+    "wood": {
+        "css": """
+:root[data-theme="wood"] body {
+  background-image:
+    repeating-linear-gradient(90deg,
+      rgb(0 0 0 / .18) 0 1px, transparent 1px 3px,
+      rgb(224 164 65 / .05) 3px 4px, transparent 4px 7px,
+      rgb(0 0 0 / .10) 7px 8px, transparent 8px 13px),
+    repeating-linear-gradient(90deg,
+      rgb(0 0 0 / .13) 0 6px, transparent 6px 26px,
+      rgb(120 78 40 / .14) 26px 34px, transparent 34px 62px),
+    repeating-linear-gradient(90deg,
+      rgb(0 0 0 / .35) 0 2px, transparent 2px 4px,
+      rgb(243 230 208 / .05) 4px 5px, transparent 5px 220px),
+    linear-gradient(rgb(224 164 65 / .10), rgb(224 164 65 / 0) 34%),
+    radial-gradient(120% 90% at 50% 40%, rgb(224 164 65 / .09), transparent 60%),
+    radial-gradient(130% 120% at 50% 50%, transparent 52%, rgb(0 0 0 / .34));
+  background-attachment: fixed;
+}
+:root[data-theme="wood"] h1, :root[data-theme="wood"] h2,
+:root[data-theme="wood"] .cname,
+:root[data-theme="wood"] body:not(.hasbg) #clock {
+  font-family: "Bitstream Charter", "Charter", "Georgia",
+               "Liberation Serif", "Times New Roman", serif !important;
+  letter-spacing: .01em;
+  text-shadow: 0 1px 2px rgb(0 0 0 / .6);
+}
+:root[data-theme="wood"] h1, :root[data-theme="wood"] h2 {
+  border-bottom: 2px solid rgb(224 164 65 / .40);
+  padding-bottom: 6px;
+}
+:root[data-theme="wood"] .links a, :root[data-theme="wood"] .card,
+:root[data-theme="wood"] .panel, :root[data-theme="wood"] button,
+:root[data-theme="wood"] #addbtn {
+  box-shadow: inset 0 1px 0 rgb(243 230 208 / .10),
+              0 4px 10px rgb(0 0 0 / .35);
+}
+""",
+        "qss": """
+QLineEdit#urlbar, QMenu {
+    font-family: "Bitstream Charter", "Charter", "Georgia",
+                 "Liberation Serif", serif;
+}
+QTabBar::tab { border-radius: 6px 6px 0 0; }
 """,
     },
 }
@@ -5717,6 +6746,10 @@ class Bridge(QObject):
         name, template = SEARCH_ENGINES[key]
         action, _, param = template.partition("?")
         tb = self._toolbar_state()
+        try:
+            lib_every = int(c.get("libUpdateEvery", LIB_UPDATE_DAYS) or 0)
+        except (TypeError, ValueError):
+            lib_every = LIB_UPDATE_DAYS      # junk in config -> the default
         return json.dumps({
             "searchEngine": key,
             "engines": [[k, v[0]] for k, v in SEARCH_ENGINES.items()],
@@ -5737,13 +6770,22 @@ class Bridge(QObject):
             # is configured and must not wait on a second round trip,
             # and twelve palettes cost nothing next to a hundred.
             "themePicks": wizard_themes(),
+            # the look: what shape the browser is, as opposed to what
+            # colour. Four cards, named here rather than in the page so
+            # they come out in his language like everything else.
+            "look": ACTIVE_LOOK,
+            "looks": [{"value": entry["key"],
+                       "name": self.browser._ui_str(entry["name"]),
+                       "sub": self.browser._ui_str(entry["note"])}
+                      for entry in LOOKS],
             "googleLight": c.get("googleLight", True),
             "forceDark": c.get("forceDark", True),
             "restoreTabs": c.get("restoreTabs", True),
             "zoom": c.get("zoom", 1.0),
             "minFont": c.get("minFont", 0),
-            "libUpdateEvery": int(c.get("libUpdateEvery",
-                                        LIB_UPDATE_DAYS) or 0),
+            "libUpdateEvery": lib_every,
+            # so the settings page need not hardcode the default itself
+            "libUpdateDefault": LIB_UPDATE_DAYS,
             "askDownload": bool(c.get("askDownload", False)),
             "downloadDir": str(self.browser.download_dir(create=False)),
             "downloadDirDefault": str(DOWNLOAD_DIR),
@@ -5769,6 +6811,10 @@ class Bridge(QObject):
             "spellLanguages": [[code, name] for code, name in SPELL_LANGUAGES],
             "newTabPos": c.get("newTabPos", "end"),
             "newTabUrl": c.get("newTabUrl", ""),
+            # sites handed to an external browser instead of loading here
+            "externalHandoff": bool(c.get("externalHandoff", False)),
+            "externalSites": self.browser._external_sites(),
+            "externalBrowser": self.browser._external_browser(),
             "startUrl": c.get("startUrl", ""),
             "translateLang": c.get("translateLang", "de"),
             "languages": [[code, name, LANGUAGE_ALIASES.get(code, "")]
@@ -5914,6 +6960,11 @@ class Bridge(QObject):
             # a theme also has to be painted, and this is where that
             # happens so the page does not need a second door for it
             browser.apply_theme(str(value))
+        elif key == "look":
+            # ...and the same for the shape: the furniture goes up or
+            # comes down, and every page of ours is told, without
+            # anything being restarted
+            browser.apply_look(str(value))
         elif key in ("forceDark", "smoothScroll", "blockAutoplay",
                      "pdfViewer"):
             browser.apply_web_attributes()
@@ -6507,6 +7558,10 @@ class Bridge(QObject):
         except ValueError:
             return
         self.browser.save_config()
+        # the quick links live in there, and the quick links are the
+        # pins: adding one on the start page lights it up on the
+        # taskbar without anything being restarted
+        self.browser.refresh_pins()
 
     @pyqtSlot()
     def openHistoryPage(self):
@@ -6851,6 +7906,12 @@ class WebPage(QWebEnginePage):
         # runs before the new document exists, so the channel is always
         # settled before any of that document's scripts can look
         if is_main_frame:
+            # a site that only works in a real browser is handed off
+            # before anything else happens to it: not counted as a page
+            # this tab ever visited, not bounced through the channel,
+            # just cancelled here and opened elsewhere.
+            if self.browser.maybe_open_external(url, nav_type, self._view):
+                return False
             self._count_navigation(url, nav_type)
             kind = "full" if is_internal_page(url) else "pw"
             if kind != self._channel_kind:
@@ -6978,12 +8039,39 @@ class WebView(QWebEngineView):
         # every getDisplayMedia() call died on the spot with AbortError
         page.desktopMediaRequested.connect(self._desktop_media)
         page.proxyAuthenticationRequired.connect(self.browser._proxy_auth)
+        # the engine's own context menu never calls reload() on the
+        # view - it triggers the page's Reload action - so the same
+        # gesture has to be caught in both places. Only the action:
+        # our own internal reloads (restore_trust, _heal_channel) call
+        # triggerAction directly, which leaves the action itself alone,
+        # and a page reloading itself never comes near either.
+        for act in (QWebEnginePage.WebAction.Reload,
+                    QWebEnginePage.WebAction.ReloadAndBypassCache):
+            page.action(act).triggered.connect(self._menu_reload)
         self.setPage(page)
         if old is not None and old is not page:
             try:
                 old.deleteLater()
             except RuntimeError:
                 pass  # Qt already disposed of the replaced page
+
+    def reload(self):
+        """Every reload the user asks for comes through here: the
+        toolbar button, Ctrl+R, F5, and the recovery reload after a
+        renderer death. A page reloading itself does not - that lives
+        inside Chromium and never reaches Qt - which is what makes this
+        a safe place to hand a site its questions back. The one
+        page-inducible path is the recovery reload: a site that kills
+        its own renderer earns a fresh ask, but never a fresh grant -
+        the card still waits for the user, and the 8-second gate keeps
+        it from becoming a drumbeat."""
+        self.browser._forget_denied_permissions(self.page())
+        super().reload()
+
+    def _menu_reload(self, _checked=False):
+        # the context menu's Reload, which goes straight to the page
+        # and skips reload() above
+        self.browser._forget_denied_permissions(self.page())
 
     def createWindow(self, wtype):
         # tab for a link opened by a page (ctrl+click, middle-click,
@@ -7011,6 +8099,47 @@ class WebView(QWebEngineView):
     def _fullscreen(self, request):
         request.accept()
         self.browser.set_fullscreen(request.toggleOn())
+
+    def contextMenuEvent(self, event):
+        """The engine's own menu, with pinning added to the end of it.
+
+        Pinning has to work from wherever he is - that is the whole
+        point of a taskbar - so it lives on the page menu rather than
+        only on the bar. What is pinned is the link under the cursor
+        when there is one and the page itself when there is not, and
+        only ever an http(s) address: a pin is a button in the chrome
+        and a click on it is a navigation the browser starts itself.
+
+        A private tab offers nothing: a pin is written to disk, and
+        nothing a private tab was ever on is written down. Neither does
+        the classic look, which has nowhere to put a pin: it is the
+        browser as it always was, menus included."""
+        menu = self.createStandardContextMenu()
+        request = self.lastContextMenuRequest()
+        link = request.linkUrl() if request is not None else QUrl()
+        url = link if not link.isEmpty() else self.url()
+        if (look_is_pinned() and not self.private
+                and url.scheme() in ("http", "https")):
+            browser = self.browser
+            pinned = browser.is_pinned(url)
+            add_key, drop_key = browser.pin_labels()
+            menu.addSeparator()
+            action = menu.addAction(
+                browser._ui_str(drop_key if pinned else add_key))
+            title = (request.linkText() if request is not None
+                     and not link.isEmpty() else self.title())
+
+            def toggle():
+                if pinned:
+                    browser.remove_pin(url)
+                else:
+                    browser.add_pin(url, title or url.host(),
+                                    _icon_data(self.icon(), 32)
+                                    if link.isEmpty() else "")
+
+            action.triggered.connect(toggle)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        menu.popup(event.globalPos())
 
 
 class PanePage(WebPage):
@@ -8138,12 +9267,17 @@ def _bookmark_key(url):
 ICON_PREFIX = "data:image/png;base64,"
 
 
-def _icon_data(icon):
+def _icon_data(icon, size=16):
     """A favicon as a small data: URL — that is what bookmarks.json
-    keeps, so a bookmark shows its icon before the site is visited."""
+    keeps, so a bookmark shows its icon before the site is visited.
+
+    A pin asks for a bigger one: the dock draws its icons at forty
+    points and up, and a sixteen-pixel square blown up that far is a
+    smear. Sixteen stays the default, so the bookmarks are byte for
+    byte what they were."""
     if icon is None or icon.isNull():
         return ""
-    pix = icon.pixmap(16, 16)
+    pix = icon.pixmap(size, size)
     if pix.isNull():
         return ""
     buf = QBuffer()
@@ -8185,6 +9319,25 @@ def _folder_icon():
     return QIcon(pix)
 
 
+def _start_icon(size=15):
+    """The taskbar's start button, drawn rather than borrowed.
+
+    U+229E is the obvious character for it and the font renders it as a
+    filled block, which is a tofu box by another name. Four panes with a
+    gap between them is what the button means anyway, and drawn here it
+    is in the palette's own colour like everything else."""
+    pix = QPixmap(size, size)
+    pix.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(pix)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(theme_color("text")))
+    pane = (size - 3) // 2
+    for x, y in ((0, 0), (pane + 3, 0), (0, pane + 3), (pane + 3, pane + 3)):
+        painter.drawRect(x, y, pane, pane)
+    painter.end()
+    return QIcon(pix)
+
+
 def _icon_from_data(text):
     """The stored data: URL back as a QIcon; anything odd gives a null
     icon rather than raising — bookmarks.json is a file on disk."""
@@ -8199,6 +9352,126 @@ def _icon_from_data(text):
     if not pix.loadFromData(raw, "PNG"):
         return QIcon()
     return QIcon(pix)
+
+
+# ---------------------------------------------------------------------
+# Pinned sites
+# ---------------------------------------------------------------------
+# The taskbar's pins, the dock's icons and the start page's quick links
+# are one list, not three. The list already existed: the start page
+# keeps it in localStorage under "quicklinks" and mirrors it, across
+# every cookie jar, into config["startPage"]. The chrome reads and
+# writes that same mirror, so pinning a site to the bar puts it on the
+# start page and taking it off the start page takes it off the bar. Two
+# lists could drift apart; one cannot.
+#
+# What sits under "quicklinks" is itself a JSON string, because what is
+# mirrored is raw localStorage. That is the page's contract and it is
+# left exactly as it was.
+
+PINS_KEY = "quicklinks"
+PINS_MAX = 40
+PIN_NAME_MAX = 40
+PIN_ICON_MAX = 20000
+# what the start page shows a jar that has never run setup, spelled the
+# same way here so the bar and the page agree before he has touched
+# either of them
+PIN_DEFAULTS = [{"name": "GitHub", "url": "https://github.com"},
+                {"name": "YouTube", "url": "https://www.youtube.com"}]
+
+
+def _pin_key(url):
+    """What makes two pins the same site. A www., a trailing slash and a
+    fragment are not a different page."""
+    parsed = url if isinstance(url, QUrl) else QUrl(str(url or ""))
+    host = parsed.host().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    key = host + parsed.path().rstrip("/")
+    if parsed.query():
+        key += "?" + parsed.query()
+    return key
+
+
+def _clean_pin(entry):
+    """One stored pin, or None if it is not one.
+
+    The start page stores whatever was typed into its box — it only ever
+    prefixes https:// when there is no scheme at all, so a javascript:
+    line survives that trip. A pin is a button in the chrome and a click
+    on it is a navigation the browser starts itself, so the chrome
+    checks rather than trusts, on the way in and on the way out."""
+    if not isinstance(entry, dict):
+        return None
+    url = entry.get("url")
+    if not isinstance(url, str):
+        return None
+    parsed = QUrl(url.strip())
+    if parsed.scheme() not in ("http", "https") or not parsed.host():
+        return None
+    name = entry.get("name")
+    if not isinstance(name, str) or not name.strip():
+        name = parsed.host()
+    icon = entry.get("icon")
+    if (not isinstance(icon, str) or not icon.startswith(ICON_PREFIX)
+            or len(icon) > PIN_ICON_MAX):
+        icon = ""
+    return {"name": name.strip()[:PIN_NAME_MAX],
+            "url": parsed.toString(), "icon": icon}
+
+
+def _clean_pins(raw):
+    """The stored list, filtered and de-duplicated. Anything at all can
+    be in there: it is a JSON string inside a config file, written by a
+    page and editable by hand."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    out, seen = [], set()
+    for entry in raw:
+        pin = _clean_pin(entry)
+        if pin is None:
+            continue
+        key = _pin_key(pin["url"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(pin)
+        if len(out) >= PINS_MAX:
+            break
+    return out
+
+
+def _square_pixmap(icon, size):
+    """One favicon as a square of exactly `size`, its own proportions
+    kept and the rest left transparent.
+
+    A favicon is whatever the site felt like shipping: sixteen pixels,
+    a hundred and twenty-eight, or a wide wordmark that is not square at
+    all. Drawn at its own size in a row, the big ones walk over their
+    neighbours; stretched to fit, the wide ones come out squashed. So
+    every one of them is fitted into the same square once, here, and
+    everything downstream can assume they all measure the same."""
+    out = QPixmap(size, size)
+    out.fill(QColor(0, 0, 0, 0))
+    if icon is None or icon.isNull():
+        return out
+    pixmap = icon.pixmap(size, size)
+    if pixmap.isNull():
+        return out
+    if pixmap.width() != size and pixmap.height() != size:
+        pixmap = pixmap.scaled(size, size,
+                               Qt.AspectRatioMode.KeepAspectRatio,
+                               Qt.TransformationMode.SmoothTransformation)
+    painter = QPainter(out)
+    painter.drawPixmap((size - pixmap.width()) // 2,
+                       (size - pixmap.height()) // 2, pixmap)
+    painter.end()
+    return out
 
 
 def _reparent_bookmarks(entries):
@@ -9695,6 +10968,727 @@ class AccountChooser(QWidget):
             self.cancel()
 
 
+# =====================================================================
+# The furniture a look builds
+# =====================================================================
+# None of this exists in the classic look. The taskbar and the dock show
+# the same list of pinned sites in two different shapes, so the
+# behaviour they share - what a click does, what the wheel of a menu
+# offers, which of them is open right now - lives in one place and the
+# shape lives in two.
+
+
+class PinButton(QToolButton):
+    """One pinned site as a button.
+
+    Left click opens it, or brings its tab forward if it is already
+    open; middle click opens it behind what he is reading; right click
+    offers the same three things a bookmark does. Written the way
+    BookmarkButton is written, including why the other two buttons are
+    caught on press: QToolButton only ever reacts to the left one."""
+
+    def __init__(self, browser, pin, parent=None, name="taskpin",
+                 icon_size=20, under=False):
+        super().__init__(parent, objectName=name)
+        self.browser = browser
+        self.pin = dict(pin)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setIconSize(QSize(icon_size, icon_size))
+        if under:
+            self.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self.set_pin(pin)
+        self.clicked.connect(self._open)
+
+    def set_pin(self, pin):
+        """The same button, told the entry changed - a favicon that
+        arrived late, or a rename. Rebuilding the row for one icon is
+        what used to freeze the bookmarks bar on a big collection."""
+        self.pin = dict(pin)
+        icon = _icon_from_data(self.pin.get("icon", ""))
+        if icon.isNull():
+            icon = _blank_favicon()
+        # fitted into one square first: a button's cell is a fixed width,
+        # so a wordmark that is four times as wide as it is tall must be
+        # made to measure the same as everything else rather than being
+        # squeezed into shape by the layout
+        size = self.iconSize().width()
+        self.setIcon(QIcon(_square_pixmap(icon, size)))
+        name = self.pin.get("name") or QUrl(self.pin["url"]).host()
+        if self.toolButtonStyle() != Qt.ToolButtonStyle.ToolButtonIconOnly:
+            # a plain character budget, not fontMetrics: the sheet's font
+            # only reaches the widget on polish, long after this
+            self.setText(name if len(name) <= 12
+                         else name[:11].rstrip() + "\u2026")
+        # a pin's name can be a page title, which is a string a website
+        # wrote: it is escaped into markup that renders back as itself
+        self.setToolTip(html.escape("%s\n%s" % (name, self.pin["url"])))
+
+    def _open(self):
+        self.browser.open_pin(self.pin["url"])
+
+    def _menu_later(self):
+        where = self.mapToGlobal(self.rect().bottomLeft())
+        pin = dict(self.pin)
+        QTimer.singleShot(0, lambda: self.browser.pin_menu(pin, where))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.browser.open_pin(self.pin["url"], new_tab=True,
+                                  background=True)
+            return
+        if event.button() == Qt.MouseButton.RightButton:
+            self._menu_later()
+            return
+        super().mousePressEvent(event)
+
+
+class TaskBar(QWidget):
+    """The taskbar look's strip along the bottom of the window.
+
+    It places its own children instead of handing them to a layout, and
+    that is the whole point - the same trap BookmarksBar documents: a
+    layout pushes the sum of its children's minimum widths up through
+    QMainWindow, so a dozen pinned sites would quietly decide that the
+    window may never be narrower than half a screen. This asks for no
+    width at all, fills the row with as many pins as really fit, and
+    puts the rest behind a menu.
+
+    The cluster is centred and the clock sits alone on the right, which
+    is where Windows 11 put them and why this look is recognisable at a
+    glance."""
+
+    HEIGHT = 46
+    ICON = 20
+    GAP = 2
+    MARGIN_X = 10
+    MAX_BUTTONS = 40
+
+    def __init__(self, browser):
+        super().__init__(objectName="taskbar")
+        self.browser = browser
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedHeight(self.HEIGHT)
+        self._pins = []
+        self._buttons = []
+        self._shown = 0
+
+        self.start = QToolButton(self, objectName="taskstart")
+        self.start.setIconSize(QSize(15, 15))
+        self.start.setIcon(_start_icon())
+        self.start.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.start.clicked.connect(browser.toggle_start_menu)
+        self.add = QToolButton(self, text="+", objectName="taskadd")
+        self.add.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add.clicked.connect(browser.pin_current_tab)
+        self.more = QToolButton(self, text="\u00bb", objectName="taskmore")
+        self.more.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.more.clicked.connect(self._overflow_menu)
+        self.more.hide()
+        self.clock = QLabel("", self, objectName="taskclock")
+        self._clock_timer = QTimer(self)
+        self._clock_timer.setInterval(20000)
+        self._clock_timer.timeout.connect(self._show_time)
+        self.retranslate()
+
+    # -- the bar never dictates how narrow the window may be
+    def minimumSizeHint(self):
+        return QSize(0, self.HEIGHT)
+
+    def sizeHint(self):
+        return QSize(0, self.HEIGHT)
+
+    def retranslate(self):
+        self.start.setIcon(_start_icon())   # drawn in the palette's colour
+        self.start.setToolTip(self.browser._ui_str("startMenu"))
+        self.add.setToolTip(self.browser._ui_str("pinCurrent"))
+        self.more.setToolTip(self.browser._ui_str("pinned"))
+        self._show_time()
+
+    def _show_time(self):
+        self.clock.setText(
+            QLocale().toString(QTime.currentTime(),
+                               QLocale.FormatType.ShortFormat))
+        self.clock.adjustSize()
+        self._relayout()
+
+    def set_pins(self, pins):
+        for button in self._buttons:
+            button.setParent(None)
+            button.deleteLater()
+        self._buttons = []
+        self._pins = list(pins)
+        self._relayout()
+
+    def update_pin(self, pin):
+        """One favicon landed. Just that button, please."""
+        key = _pin_key(pin["url"])
+        for button in self._buttons:
+            if _pin_key(button.pin["url"]) == key:
+                button.set_pin(pin)
+                return
+
+    def _button(self, index):
+        while len(self._buttons) <= index:
+            button = PinButton(self.browser, self._pins[len(self._buttons)],
+                               self, "taskpin", self.ICON)
+            button.ensurePolished()
+            button.resize(self.ICON + 18, self.HEIGHT - 10)
+            self._buttons.append(button)
+        return self._buttons[index]
+
+    def _relayout(self):
+        if not self.isVisible():
+            return
+        top = (self.HEIGHT - (self.HEIGHT - 10)) // 2
+        self.start.resize(self.start.sizeHint().width(), self.HEIGHT - 10)
+        self.add.resize(self.ICON + 18, self.HEIGHT - 10)
+        self.more.resize(self.more.sizeHint().width(), self.HEIGHT - 10)
+        self.clock.move(self.width() - self.MARGIN_X - self.clock.width(),
+                        (self.HEIGHT - self.clock.height()) // 2)
+        self.clock.show()
+
+        total = min(len(self._pins), self.MAX_BUTTONS)
+        pin_w = self.ICON + 18
+        # what the cluster wants, and what the row can spare either side
+        # of it without walking into the clock
+        room = (self.width() - 2 * self.MARGIN_X
+                - self.clock.width() - self.MARGIN_X)
+        fixed = self.start.width() + self.GAP + self.add.width() + self.GAP
+        fit = max(0, (room - fixed) // (pin_w + self.GAP))
+        shown = min(total, fit)
+        if shown < total:
+            fit = max(0, (room - fixed - self.more.width() - self.GAP)
+                      // (pin_w + self.GAP))
+            shown = min(total, fit)
+        width = (self.start.width() + self.GAP
+                 + shown * (pin_w + self.GAP) + self.add.width())
+        if shown < total:
+            width += self.GAP + self.more.width()
+        x = max(self.MARGIN_X, (self.width() - width) // 2)
+        self.start.move(x, top)
+        self.start.show()
+        x += self.start.width() + self.GAP
+        for i in range(shown):
+            button = self._button(i)
+            button.move(x, top)
+            button.show()
+            x += pin_w + self.GAP
+        for button in self._buttons[shown:]:
+            button.hide()
+        self._shown = shown
+        if shown < total:
+            self.more.move(x, top)
+            self.more.show()
+            self.more.raise_()
+            x += self.more.width() + self.GAP
+        else:
+            self.more.hide()
+        self.add.move(x, top)
+        self.add.show()
+        self.update()
+
+    def _overflow_menu(self):
+        menu = QMenu(self)
+        for pin in self._pins[self._shown:self.MAX_BUTTONS]:
+            action = menu.addAction(pin.get("name") or pin["url"])
+            icon = _icon_from_data(pin.get("icon", ""))
+            if not icon.isNull():
+                action.setIcon(icon)
+            action.setData(pin["url"])
+        chosen = menu.exec(self.more.mapToGlobal(
+            self.more.rect().topLeft()))
+        if chosen is not None and chosen.data():
+            self.browser.open_pin(chosen.data())
+
+    def paintEvent(self, event):
+        """The running mark: a pin whose site is open in a tab gets an
+        underline, drawn the way a tab in a group gets one, so it is the
+        theme's accent and nobody has to keep the two in step."""
+        super().paintEvent(event)
+        if not self._buttons:
+            return
+        painter = QPainter(self)
+        colour = QColor(theme_color("accent"))
+        for button in self._buttons[:self._shown]:
+            if self.browser.find_tab_for(button.pin["url"]) is None:
+                continue
+            rect = button.geometry()
+            painter.fillRect(rect.x() + 6, rect.bottom() - 2,
+                             rect.width() - 12, 3, colour)
+        painter.end()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._clock_timer.start()
+        self._show_time()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._clock_timer.stop()
+
+
+class StartMenu(QWidget):
+    """What the start button opens: a search box on top and the pinned
+    grid under it, which is the shape Windows 11 uses and the reason
+    that look is worth having at all.
+
+    It is a child of the window rather than a popup, so a click anywhere
+    else closes it and nothing of it survives being switched away from.
+    Free of the window's layout, it may use one of its own."""
+
+    WIDTH = 560
+    COLUMNS = 6
+
+    def __init__(self, browser):
+        super().__init__(browser, objectName="startshade")
+        self.browser = browser
+        self.hide()
+        self._tiles = []
+        self.panel = QWidget(self, objectName="startmenu")
+        self.panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        col = QVBoxLayout(self.panel)
+        col.setContentsMargins(16, 16, 16, 12)
+        col.setSpacing(10)
+
+        self.search = QLineEdit(self.panel, objectName="startsearch")
+        self.search.textEdited.connect(lambda _t: self.refresh())
+        self.search.returnPressed.connect(self._go)
+        col.addWidget(self.search)
+
+        self.head = QLabel("", self.panel, objectName="starthead")
+        col.addWidget(self.head)
+
+        self.area = QScrollArea(self.panel)
+        self.area.setWidgetResizable(True)
+        self.area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.grid_host = QWidget(objectName="startgrid")
+        self.grid = QGridLayout(self.grid_host)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(4)
+        self.area.setWidget(self.grid_host)
+        col.addWidget(self.area, 1)
+
+        self.empty = QLabel("", self.panel, objectName="startempty")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty.hide()
+        col.addWidget(self.empty)
+
+        foot = QHBoxLayout()
+        foot.setContentsMargins(0, 0, 0, 0)
+        self.settings_btn = QToolButton(self.panel, objectName="startfoot")
+        self.settings_btn.clicked.connect(
+            lambda: (self.dismiss(), browser.open_settings()))
+        self.downloads_btn = QToolButton(self.panel, objectName="startfoot")
+        self.downloads_btn.clicked.connect(
+            lambda: (self.dismiss(), browser.open_downloads()))
+        foot.addWidget(self.settings_btn)
+        foot.addWidget(self.downloads_btn)
+        foot.addStretch()
+        col.addLayout(foot)
+
+    def retranslate(self):
+        self.search.setPlaceholderText(
+            self.browser._ui_str("startSearchPh"))
+        self.head.setText(self.browser._ui_str("pinned"))
+        self.empty.setText(self.browser._ui_str("noPins"))
+        self.settings_btn.setText(self.browser._ui_str("settings"))
+        self.downloads_btn.setText(self.browser._ui_str("downloads"))
+
+    def refresh(self):
+        words = self.search.text().lower().split()
+        for tile in self._tiles:
+            tile.setParent(None)
+            tile.deleteLater()
+        self._tiles = []
+        row = column = 0
+        for pin in self.browser.pins():
+            hay = (pin.get("name", "") + " " + pin["url"]).lower()
+            if any(word not in hay for word in words):
+                continue
+            tile = PinButton(self.browser, pin, self.grid_host, "starttile",
+                             32, under=True)
+            tile.setFixedSize(84, 82)
+            tile.clicked.connect(self.dismiss)
+            self.grid.addWidget(tile, row, column)
+            self._tiles.append(tile)
+            column += 1
+            if column >= self.COLUMNS:
+                column = 0
+                row += 1
+        self.empty.setVisible(not self._tiles)
+        self.area.setVisible(bool(self._tiles))
+        self.place()
+
+    def _go(self):
+        """Enter with something typed: the first tile that matched, or -
+        when nothing did - whatever was typed, treated as an address or
+        a search, in a new tab. The same door the address bar uses."""
+        text = self.search.text().strip()
+        if self._tiles:
+            url = self._tiles[0].pin["url"]
+            self.dismiss()
+            self.browser.open_pin(url)
+            return
+        if not text:
+            return
+        self.dismiss()
+        self.browser.open_typed(text)
+
+    def open(self):
+        self.retranslate()
+        self.search.clear()
+        self.refresh()
+        self.show()
+        self.raise_()
+        self.search.setFocus()
+
+    def dismiss(self):
+        if not self.isVisible():
+            return
+        self.hide()
+        view = self.browser.current()
+        if view is not None and not self.browser._is_header(view):
+            view.setFocus()
+
+    def place(self):
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        self.setGeometry(parent.rect())
+        rows = max(1, (len(self._tiles) + self.COLUMNS - 1) // self.COLUMNS)
+        wanted = 150 + min(3, rows) * 86
+        width = min(self.WIDTH, max(0, self.width() - 32))
+        bar = getattr(self.browser, "taskbar", None)
+        bottom = self.height() - (bar.height() if bar is not None
+                                  and bar.isVisible() else 0) - 8
+        height = min(wanted, max(0, bottom - 16))
+        self.panel.setGeometry(max(8, (self.width() - width) // 2),
+                               max(8, bottom - height), width, height)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.dismiss()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        if not self.panel.geometry().contains(event.position().toPoint()):
+            self.dismiss()
+        else:
+            super().mousePressEvent(event)
+
+
+class Dock(QWidget):
+    """The macOS look's dock: a rounded glass island floating over the
+    page, with the pinned sites on it and, when something is making a
+    sound, what is playing and its transport.
+
+    **Every item gets the same cell.** A favicon can be any size and any
+    shape at all - 16x16, 128x128, a wide wordmark - and a row laid out
+    from what each icon happens to measure is a row where the big ones
+    walk over their neighbours. So the row is cells of a fixed width,
+    the icon is drawn into its cell keeping its own proportions, and
+    magnification grows it from that normalised size to `ICON_MAX`,
+    which is smaller than a cell. Nothing can overlap: not at rest, not
+    under the cursor, whatever the site shipped.
+
+    The icons are painted rather than built as buttons, because
+    magnification moves every one of them on every mouse move and
+    animating N widgets' geometry at sixty frames a second is where
+    that gets slow. A painter does not care.
+
+    **The glass is honest.** QtWebEngine renders the page in a layer of
+    its own, and Qt will not let a widget blur what is behind it, so
+    frosted-glass-over-the-website is not something this engine can do.
+    What is here instead is real translucency over the chrome beneath,
+    a vertical gradient between two of the palette's own greys, a
+    highlight along the top edge and a soft shadow under the island -
+    which is what makes glass read as glass. It is not a fake blur."""
+
+    CELL = 52           # one item's share of the row - the same for all
+    ICON = 34           # the icon at rest, inside that cell
+    ICON_MAX = 46       # ...and at its biggest, still inside that cell
+    SPREAD = 1.6        # how far the bulge reaches, in cells
+    PAD = 14            # inside the island, around the row
+    SHADOW = 12         # the transparent margin the shadow is painted in
+    RADIUS = 20
+    DOT = 4
+    GLASS_TOP = 150     # how solid the island is at the top edge...
+    GLASS_BOTTOM = 205  # ...and at the bottom, of 255
+
+    def __init__(self, browser):
+        super().__init__(browser.tabs, objectName="dock")
+        self.browser = browser
+        self.setMouseTracking(True)
+        self.hide()
+        self._pins = []
+        self._icons = []       # (pin, pixmap) normalised to one square
+        self._focus = None     # where the cursor is, in dock coordinates
+        self._reach = 0.0      # how far the magnification has eased in
+        self._ease = QTimer(self)
+        self._ease.setInterval(16)
+        self._ease.timeout.connect(self._step)
+
+        self.title = QLabel("", self, objectName="docktitle")
+        self.by = QLabel("", self, objectName="dockby")
+        # ...drawn with glyphs the browser's own font actually has.
+        # U+23EE and its neighbours are the obvious characters for this
+        # and JetBrains Mono does not carry any of them, so they would
+        # each come out as an empty box.
+        self.prev = QToolButton(self, text="\u25c0\u25c0",
+                                objectName="dockbtn")
+        self.play = QToolButton(self, text="\u25b6", objectName="dockbtn")
+        self.next = QToolButton(self, text="\u25b6\u25b6",
+                                objectName="dockbtn")
+        for button, action in ((self.prev, "previoustrack"),
+                               (self.play, "playpause"),
+                               (self.next, "nexttrack")):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                (lambda a: lambda: self.browser.media_do(a))(action))
+        self._music = False
+        self.set_music(None)
+        browser.tabs.installEventFilter(self)
+
+    def retranslate(self):
+        self.prev.setToolTip(self.browser._ui_str("mediaPrev"))
+        self.play.setToolTip(self.browser._ui_str("mediaPlay"))
+        self.next.setToolTip(self.browser._ui_str("mediaNext"))
+
+    # ---- what is on it ----
+    def set_pins(self, pins):
+        self._pins = list(pins)
+        self._icons = []
+        for pin in self._pins:
+            icon = _icon_from_data(pin.get("icon", ""))
+            if icon.isNull():
+                icon = _blank_favicon()
+            self._icons.append((pin, _square_pixmap(icon, self.ICON_MAX)))
+        self.place()
+        self.update()
+
+    def update_pin(self, pin):
+        self.set_pins(self._pins)
+
+    def set_music(self, now):
+        """None when nothing is making a sound, and the dock shrinks
+        back to its icons."""
+        showing = bool(now and (now.get("title") or now.get("playing")))
+        self._music = showing
+        for widget in (self.title, self.by, self.prev, self.play, self.next):
+            widget.setVisible(showing)
+        if showing:
+            set_plain(self.title, self.browser._elide(
+                now.get("title") or self.browser._ui_str("nowPlaying"), 26))
+            set_plain(self.by, self.browser._elide(now.get("artist", ""), 30))
+            # the button shows what pressing it does, which is the other
+            # half of saying whether the thing is playing
+            self.play.setText("\u2016" if now.get("playing") else "\u25b6")
+            self.prev.setEnabled(bool(now.get("prev")))
+            self.next.setEnabled(bool(now.get("next")))
+        self.place()
+        self.update()
+
+    # ---- geometry ----
+    def island(self):
+        """The glass itself. The widget is bigger than this: the extra
+        all round is where the shadow is painted."""
+        return self.rect().adjusted(self.SHADOW, self.SHADOW,
+                                    -self.SHADOW, -self.SHADOW)
+
+    def _music_width(self):
+        if not self._music:
+            return 0
+        return max(150, self.title.sizeHint().width(),
+                   self.by.sizeHint().width()) + 30
+
+    def _wanted(self):
+        row = max(len(self._icons), 1) * self.CELL
+        width = 2 * self.PAD + row + self._music_width() + 2 * self.SHADOW
+        height = (2 * self.PAD + self.ICON_MAX + self.DOT + 4
+                  + 2 * self.SHADOW)
+        return width, height
+
+    def place(self):
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        width, height = self._wanted()
+        width = min(width, max(160, parent.width() - 24))
+        x = (parent.width() - width) // 2
+        self.setGeometry(x, parent.height() - height - 12, width, height)
+        if self._music:
+            island = self.island()
+            base = self.baseline()
+            right = island.right() - self.PAD
+            for button in (self.next, self.play, self.prev):
+                button.resize(button.sizeHint())
+                right -= button.width()
+                button.move(right, base - button.height())
+            left = island.right() - self.PAD - self._music_width() + 8
+            self.title.adjustSize()
+            self.by.adjustSize()
+            self.title.move(left, base - self.title.height()
+                            - self.by.height() - 2)
+            self.by.move(left, base - self.by.height())
+
+    def baseline(self):
+        """What every icon stands on, however big it is drawn."""
+        return self.island().bottom() - self.PAD - self.DOT - 2
+
+    def cells(self):
+        """One rect per pinned site, all the same size and laid out at a
+        fixed pitch. These are what may never intersect - and by
+        construction they cannot."""
+        out = []
+        left = self.island().left() + self.PAD
+        top = self.baseline() - self.CELL
+        for i, (pin, pixmap) in enumerate(self._icons):
+            out.append((QRect(left + i * self.CELL, top,
+                              self.CELL, self.CELL), pin, pixmap))
+        return out
+
+    def _size_at(self, centre):
+        """How big the icon in the cell centred on `centre` is drawn. A
+        bump, not a step: the bulge falls off smoothly either side of
+        the cursor, which is the whole feel of the thing. It never
+        passes ICON_MAX, which is smaller than a cell, so a magnified
+        icon cannot reach its neighbour."""
+        if self._focus is None or self._reach <= 0.001:
+            return float(self.ICON)
+        away = abs(centre - self._focus) / (self.SPREAD * self.CELL)
+        grown = self.ICON * (1.0 + (self.ICON_MAX / float(self.ICON) - 1.0)
+                             * self._reach * math.exp(-away * away))
+        return min(float(self.ICON_MAX), grown)
+
+    def item_rects(self):
+        """Where the icons are actually drawn right now, magnification
+        and all. Each one is centred in its own cell and never larger
+        than ICON_MAX, so these cannot intersect either."""
+        out = []
+        base = self.baseline()
+        for cell, pin, pixmap in self.cells():
+            size = int(round(self._size_at(cell.center().x() + 0.5)))
+            out.append((QRect(cell.center().x() + 1 - size // 2,
+                              base - size, size, size), pin, pixmap))
+        return out
+
+    def hit(self, point):
+        """A click lands on a whole cell, not only on the icon in it -
+        a dock with gaps you can miss through is a dock that feels
+        broken."""
+        for cell, pin, _pixmap in self.cells():
+            if cell.contains(point):
+                return pin
+        return None
+
+    # ---- the bulge ----
+    def _step(self):
+        target = 1.0 if self._focus is not None else 0.0
+        self._reach += (target - self._reach) * 0.28
+        if abs(target - self._reach) < 0.01:
+            self._reach = target
+            self._ease.stop()
+            if target == 0.0:
+                self._focus = None
+        self.update()
+
+    def mouseMoveEvent(self, event):
+        point = event.position().toPoint()
+        inside = self.island().contains(point)
+        self._focus = point.x() if inside else None
+        if not self._ease.isActive():
+            self._ease.start()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self._focus = None
+        if not self._ease.isActive():
+            self._ease.start()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        pin = self.hit(event.position().toPoint())
+        if pin is None:
+            super().mousePressEvent(event)
+            return
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.browser.open_pin(pin["url"], new_tab=True, background=True)
+            return
+        if event.button() == Qt.MouseButton.RightButton:
+            where = self.mapToGlobal(event.position().toPoint())
+            entry = dict(pin)
+            QTimer.singleShot(0, lambda: self.browser.pin_menu(entry, where))
+            return
+        self.browser.open_pin(pin["url"])
+
+    # ---- painting ----
+    def _paint_glass(self, painter):
+        island = self.island()
+        radius = self.RADIUS
+        # the shadow: rings of black, each one wider and fainter, which
+        # is a soft edge without a blur pass to pay for
+        painter.setPen(Qt.PenStyle.NoPen)
+        for step in range(self.SHADOW, 0, -1):
+            painter.setBrush(QColor(0, 0, 0, max(2, 26 // step)))
+            painter.drawRoundedRect(
+                island.adjusted(-step, -step + 3, step, step + 3),
+                radius + step, radius + step)
+        # the glass: translucent, lighter at the top, over the palette's
+        # own two greys
+        top = QColor(theme_color("hover"))
+        top.setAlpha(self.GLASS_TOP)
+        bottom = QColor(theme_color("surface"))
+        bottom.setAlpha(self.GLASS_BOTTOM)
+        gradient = QLinearGradient(float(island.left()), float(island.top()),
+                                   float(island.left()),
+                                   float(island.bottom()))
+        gradient.setColorAt(0.0, top)
+        gradient.setColorAt(1.0, bottom)
+        painter.setBrush(QBrush(gradient))
+        edge = QColor(theme_color("overlay"))
+        edge.setAlpha(120)
+        painter.setPen(QPen(edge, 1))
+        painter.drawRoundedRect(island.adjusted(0, 0, -1, -1), radius, radius)
+        # and the highlight along the top edge, which is the thing that
+        # makes a flat rectangle read as something with a surface
+        shine = QColor(theme_color("bright"))
+        shine.setAlpha(46)
+        painter.setPen(QPen(shine, 1))
+        painter.drawLine(island.left() + radius, island.top() + 1,
+                         island.right() - radius, island.top() + 1)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self._paint_glass(painter)
+        if self._icons:
+            dot = QColor(theme_color("accent"))
+            for rect, pin, pixmap in self.item_rects():
+                if not pixmap.isNull():
+                    painter.drawPixmap(rect, pixmap)
+                if self.browser.find_tab_for(pin["url"]) is not None:
+                    painter.setBrush(dot)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.drawEllipse(rect.center().x() - self.DOT // 2,
+                                        self.baseline() + 3,
+                                        self.DOT, self.DOT)
+        painter.end()
+
+    def eventFilter(self, obj, event):
+        if (obj is self.browser.tabs and self.isVisible()
+                and event.type() == QEvent.Type.Resize):
+            self.place()
+        return super().eventFilter(obj, event)
+
+
 class Browser(QMainWindow):
     def __init__(self, initial_url=None):
         super().__init__()
@@ -9703,7 +11697,7 @@ class Browser(QMainWindow):
         self.resize(1280, 820)
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(theme_style())
+            app.setStyleSheet(theme_style() + look_style())
 
         try:
             self.config = json.loads(CONFIG_FILE.read_text())
@@ -9715,6 +11709,16 @@ class Browser(QMainWindow):
         # before the first cookie jar, because every jar carries the
         # script that paints our own pages in this theme
         _select_theme(self.config.get("theme", DEFAULT_THEME))
+        # ...and the look, which is the shape rather than the colour. It
+        # is settled here for the same reason: every cookie jar carries a
+        # script telling our own pages which look they are being shown
+        # in. The sheet above was painted before the config had been
+        # read, so it is painted again now that both are known - which
+        # for a classic browser on the default theme is the same string
+        # it already had.
+        _select_look(self.config.get("look", DEFAULT_LOOK))
+        if app is not None:
+            app.setStyleSheet(theme_style() + look_style())
         # what the browser was launched as: a light theme picked now
         # cannot reach the websites until the next start (see
         # _install_theme_flags), and Settings says so when they differ
@@ -9782,19 +11786,25 @@ class Browser(QMainWindow):
 
         # a cookie wipe asked for at shutdown may not outlive the
         # shutdown, so the request is written down and honoured here.
-        # "runOpen" is the other half: it is set for as long as a run is
-        # in progress and cleared on the way out, so finding it still
-        # set means the last run was killed rather than closed - and a
-        # wipe it never got to do is done now instead.
+        # "runOpen" is the other half: while a run is open it holds that
+        # run's identity (pid + the kernel's start-time for it), and a
+        # clean exit replaces it with False. A marker whose process is
+        # genuinely gone means the last run was killed rather than closed,
+        # so a wipe it never got to do is done now. A marker whose process
+        # is still alive means the browser never crashed -- it is a second
+        # launch that could not hand off, or a restart whose predecessor
+        # is still dying -- and must NOT be read as a crash: doing so wiped
+        # history and cookies out from under a healthy instance.
         pending = bool(self.config.pop("cookiesWipePending", False))
-        crashed = bool(self.config.pop("runOpen", False))
+        crashed = _run_was_crash(self.config.pop("runOpen", None))
         self._wipe_cookies_at_start = pending or (
             crashed and bool(self.config.get("clearCookiesExit")))
         if crashed and self.config.get("clearHistoryExit"):
             self.history = []
             self.save_history()
         self._exit_cleared = False
-        self.config["runOpen"] = True
+        self.config["runOpen"] = {"pid": os.getpid(),
+                                  "start": _proc_start_time(os.getpid())}
         self.save_config()
         self.profile = self._make_profile("browser")
         self._perm_queue = []
@@ -9960,6 +11970,36 @@ class Browser(QMainWindow):
         self.dllay.addStretch()  # toasts land between button and stretch
         self.dlbar.hide()
 
+        # the furniture a look builds. None of it exists in the
+        # classic look, and none of it is built until a look asks for
+        # it: a browser that has never worn the taskbar is not carrying
+        # a hidden one about.
+        self.taskbar = None
+        self.dock = None
+        self._start_menu = None
+        #: the view making a sound, for the dock's now-playing widget.
+        #: Never a private tab - see _audible_changed.
+        self._audible = None
+        self._media_timer = QTimer(self)
+        self._media_timer.setInterval(2000)
+        self._media_timer.timeout.connect(self._media_poll)
+
+        #: page id -> when that page last said it was capturing.
+        #: Empty means nobody is on a call, and that is the whole
+        #: state: the flag file is written from this and nothing
+        #: else. No address, no tab, no site is kept here.
+        self._call_live = {}
+        self._call_ids = 0        # a page's own name for this run
+        self._call_acc = {}       # this round's answers, per page
+        self._call_round = 0      # a late answer belongs to no round
+        self._call_timer = QTimer(self)
+        self._call_timer.setInterval(CALL_TICK_MS)
+        self._call_timer.timeout.connect(self._call_tick)
+        self._call_timer.start()
+        # every way out, including a restart after an update and the
+        # force-exit at the end of quit, which never reaches atexit
+        QApplication.instance().aboutToQuit.connect(call_flag_drop)
+
         root = QWidget()
         rlay = QVBoxLayout(root)
         rlay.setContentsMargins(0, 0, 0, 0)
@@ -9967,7 +12007,18 @@ class Browser(QMainWindow):
         rlay.addWidget(self.chrome)
         rlay.addWidget(self.tabs, 1)
         rlay.addWidget(self.dlbar)
+        self._rlay = rlay
         self.setCentralWidget(root)
+        # Liquid Glass paints the chrome with translucent (alpha)
+        # pixels; the window needs an alpha channel for the
+        # compositor's blur to show the wallpaper through them. Set
+        # once, before the first show(): the other looks paint their
+        # chrome with opaque literals, so an alpha-capable window is
+        # pixel-identical for them, and the web view always draws
+        # itself opaque - only the chrome around the page frosts.
+        self.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._rebuild_furniture()
 
         # A pane covers the window, chrome included. A shortcut that
         # opens a tab, closes one or jumps to the address bar would
@@ -9986,8 +12037,8 @@ class Browser(QMainWindow):
             "Ctrl+T": self.new_tab,
             "Ctrl+W": lambda: self.close_tab(self.tabs.currentIndex()),
             "Ctrl+L": self._focus_url,
-            "Ctrl+R": lambda: self.current().reload(),
-            "F5": lambda: self.current().reload(),
+            "Ctrl+R": self._tb_reload,
+            "F5": self._tb_reload,
             "Ctrl+Tab": lambda: self._cycle(1),
             "Ctrl+Shift+Tab": lambda: self._cycle(-1),
             "Shift+Tab": lambda: self._cycle_session(1),
@@ -10036,11 +12087,19 @@ class Browser(QMainWindow):
         # a slower tick. See _check_lib_updates.
         self._lib_checking = False
         self._lib_button = None
-        QTimer.singleShot(LIB_FIRST_MS, self._check_lib_updates)
-        self._lib_timer = QTimer(self)
-        self._lib_timer.setInterval(LIB_TICK_MS)
-        self._lib_timer.timeout.connect(self._check_lib_updates)
-        self._lib_timer.start()
+        self._lib_timer = None
+        # The offscreen suite runs dozens of browsers, and a real dnf
+        # behind each of them would be slow, would depend on what
+        # Fedora happens to be shipping today, and could put a toast on
+        # a window a test is making assertions about. The feature is
+        # still tested -- test_libs drives _check_lib_updates itself --
+        # it is only the automatic arming that the harness turns off.
+        if not os.environ.get("BROWSER_NO_LIB_CHECK"):
+            QTimer.singleShot(LIB_FIRST_MS, self._check_lib_updates)
+            self._lib_timer = QTimer(self)
+            self._lib_timer.setInterval(LIB_TICK_MS)
+            self._lib_timer.timeout.connect(self._check_lib_updates)
+            self._lib_timer.start()
         self._pw_pending = None
         # half-finished logins: (profile, host) -> the account whose
         # password step is still to come. See _pw_step_remember.
@@ -10291,6 +12350,8 @@ class Browser(QMainWindow):
     def _toast_result(self, msg):
         if not self._toast:
             return
+        if self._toast.property("libOffer"):
+            return           # the library offer manages its own lifetime
         self._toast_label.setText(msg)
         if msg.startswith("Updated"):
             restart = QToolButton(text="Restart now")
@@ -10338,7 +12399,7 @@ class Browser(QMainWindow):
         that could not be made at all. A laptop offline for a week is
         asked again tomorrow rather than told it is up to date."""
         self.config["libUpdateLast"] = int(time.time())
-        self.save_config()
+        self.save_config(quiet=True)
 
     def _lib_check_cmd(self):
         """"Is there anything newer?", as a command.
@@ -10470,6 +12531,12 @@ class Browser(QMainWindow):
         lay.addWidget(update)
         lay.addWidget(close)
 
+        # a mark the shared updateFinished handler (_toast_result, which
+        # the browser's own updater AND the plugin installer both reach)
+        # reads to keep its hands off: this offer runs its own lifetime
+        # through the _lib_* methods and must not be overwritten or
+        # re-timed from under itself.
+        toast.setProperty("libOffer", True)
         self._toast = toast
         self._lib_button = update
         self._toast_timer = QTimer(self)
@@ -10501,13 +12568,20 @@ class Browser(QMainWindow):
             self._lib_button.hide()
         self._toast_label.setText(self._ui_str("libUpdating"))
         self._place_toast()
+        # the toast this upgrade belongs to. pkexec can run for a long
+        # time, and the password-save prompt preempts toasts; capturing it
+        # here lets _lib_upgrade_done refuse to rewrite whatever is on
+        # screen when it finishes unless it is still this same toast.
+        toast = self._toast
         program, args = self._lib_upgrade_cmd()
         try:
-            self._lib_run(program, args, self._lib_upgrade_done)
+            self._lib_run(program, args,
+                          lambda code, out: self._lib_upgrade_done(
+                              code, out, toast))
         except Exception:
-            self._lib_upgrade_done(-1, "")
+            self._lib_upgrade_done(-1, "", toast)
 
-    def _lib_upgrade_done(self, code, _out):
+    def _lib_upgrade_done(self, code, _out, toast=None):
         """How it went. A cancelled polkit box exits non-zero, so a zero
         here really is "the libraries were replaced" and not "he was
         offered the chance"."""
@@ -10517,12 +12591,30 @@ class Browser(QMainWindow):
         # stamp goes down for a failure exactly as for a success -- the
         # thing that is not written down is a check that never happened.
         self._lib_stamp()
+        # touch nothing unless the toast on screen is still the one this
+        # upgrade started under. While pkexec ran, a login form he
+        # submitted could have raised the password-save prompt in its
+        # place; rewriting that prompt's label and stopping its 15s
+        # self-destruct would strand the plaintext password it is holding
+        # (_pw_pending) and its Restart button would restart mid-save.
         if self._toast is None:
             return   # dismissed while it ran; the work still counted
+        if toast is not None and self._toast is not toast:
+            return   # a different prompt owns the slot now: leave it be
+        if not self._toast.property("libOffer"):
+            # belt and braces: even a fire that lost its token must not
+            # rewrite a prompt that is not the library offer (the
+            # password-save prompt carries no libOffer mark)
+            return
         try:
             self._toast_label.setText(
                 self._ui_str("libUpdated" if ok else "libFailed"))
             if ok:
+                # the leftover (hidden) Update button has no purpose now;
+                # drop it so it does not sit in the row beside Restart
+                if self._lib_button is not None:
+                    self._lib_button.deleteLater()
+                    self._lib_button = None
                 # the new libraries are on disk; this process is still
                 # running the old ones and will be until it is restarted
                 restart = QToolButton(text=self._ui_str("restartNow"))
@@ -10544,6 +12636,7 @@ class Browser(QMainWindow):
         self._place_account_chooser()
         self._place_favorites()
         self._place_zoom_badge()
+        self._place_furniture()
 
     # ---- tabs ----
     def current(self):
@@ -10576,6 +12669,12 @@ class Browser(QMainWindow):
         view.urlChanged.connect(lambda u, v=view: self._url_changed(v, u))
         view.titleChanged.connect(lambda t, v=view: self._title_changed(v, t))
         view.iconChanged.connect(lambda ic, v=view: self._icon_changed(v, ic))
+        view.page().recentlyAudibleChanged.connect(
+            lambda on, v=view: self._audible_changed(v, on))
+        # a dead renderer (crash, OOM, killed) otherwise leaves a blank,
+        # unclickable tab forever; recover it rather than leave a ghost
+        view.page().renderProcessTerminated.connect(
+            lambda status, code, v=view: self._render_gone(v, status, code))
         view.loadFinished.connect(lambda ok, v=view: self._autofill(v, ok))
         view.printRequested.connect(lambda v=view: self._print_requested(v))
         after = (not at_end
@@ -10623,7 +12722,15 @@ class Browser(QMainWindow):
                 # for it, so the navigation is not bounced and re-issued
                 view.page().prime_trust(target)
                 view.load(target)
-                self._focus_url()
+                # only when the tab is actually being shown. "bg <url>"
+                # and a bare "raise" from a second launch both come
+                # through here with switch=False, and the address bar
+                # would take the keyboard away from the page he is
+                # reading: the next thing typed went into the bar, and
+                # Enter sent the tab he was on somewhere else. A tab that
+                # opens behind his back changes nothing he can see.
+                if switch:
+                    self._focus_url()
             elif lazy:
                 # the page loads only when the tab is first opened,
                 # so restored sessions cost no memory until used
@@ -10633,6 +12740,15 @@ class Browser(QMainWindow):
                 view._requested = url  # fallback for saving before commit
                 view.page().prime_trust(QUrl(url))
                 view.load(QUrl(url))
+                # the `music` command opens its tab in the background
+                # (switch=False) with a #autoplay marker. A non-current
+                # tab's page is hidden, so Chromium reports it as hidden
+                # and blocks autoplay + throttles its media -- the
+                # user's amazon-music-autoplay userscript then never gets
+                # a page that is allowed to start playing. Keep this one
+                # renderable so it can play, without switching to it.
+                if not switch and _wants_autoplay(url):
+                    self._pin_playing(view)
         if title:
             self.tabs.setTabText(i, title)
         elif lazy and url:
@@ -11412,6 +13528,36 @@ class Browser(QMainWindow):
         except (AttributeError, RuntimeError):
             return False
 
+    def _forget_denied_permissions(self, page=None):
+        """A reload the user asked for puts the site's question back on
+        the table.
+
+        A "no" was only ever remembered for this run, but there was no
+        way to take one back short of restarting the whole browser: the
+        deny was replayed in silence, so a microphone refused by one
+        mis-aimed click stayed refused for the rest of a call. Firefox
+        has the sane rule - a temporary block lasts until the page is
+        reloaded - and reloading is exactly the gesture of someone
+        trying again.
+
+        Every deny in the book goes, not only the ones matching the
+        address bar. The origin that asks is very often a cross-origin
+        iframe (see _request_is_live), so matching on the address would
+        spare precisely the Teams or Meet embed the reload was for. The
+        cost of clearing too much is one more card if another site
+        re-asks - and it can only re-ask when he goes back to it.
+
+        Yeses are left alone: nobody reloads to undo a permission he
+        granted, and an "always" he chose to store in the config is his
+        answer, not this run's. Only the reloading tab's own book is
+        touched - a private tab answers out of a jar of its own, and
+        the two must not empty each other.
+        """
+        book = (self._private_perms if self._page_is_private(page)
+                else self._session_perms)
+        for key in [k for k, granted in book.items() if not granted]:
+            del book[key]
+
     def _request_is_live(self, page):
         """Whether the tab the card belongs to is still there.
 
@@ -11846,24 +13992,157 @@ class Browser(QMainWindow):
                     break
 
     # ---- navigation ----
+    def _resolve_typed(self, text):
+        """What a line he typed means: an address, or a search for it.
+        The address bar and the start menu's box ask the same question,
+        so they ask it in the same place."""
+        if " " in text or ("." not in text and text != "localhost"):
+            engine = SEARCH_ENGINES.get(self.config.get("searchEngine", "google"),
+                                        SEARCH_ENGINES["google"])
+            return engine[1].format(QUrl.toPercentEncoding(text).data().decode())
+        if "://" in text:
+            return text
+        return "https://" + text
+
+    def open_typed(self, text, new_tab=True):
+        """A line typed somewhere that is not the address bar."""
+        text = (text or "").strip()
+        if not text:
+            return
+        url = self._resolve_typed(text)
+        if new_tab:
+            self.new_tab(url=url)
+        else:
+            view = self.current()
+            if view is None or self._is_header(view):
+                return
+            view._requested = url
+            view.load(QUrl(url))
+
     def _navigate(self):
         text = self.urlbar.text().strip()
         if not text:
             return
-        if " " in text or ("." not in text and text != "localhost"):
-            engine = SEARCH_ENGINES.get(self.config.get("searchEngine", "google"),
-                                        SEARCH_ENGINES["google"])
-            url = engine[1].format(QUrl.toPercentEncoding(text).data().decode())
-        elif "://" in text:
-            url = text
-        else:
-            url = "https://" + text
+        url = self._resolve_typed(text)
         view = self.current()
+        if view is None or self._is_header(view):
+            return
         # every other way of starting a load leaves the address behind
         # as a fallback; a shutdown mid-load must not lose this one
         view._requested = url
         view.load(QUrl(url))
         view.setFocus()
+
+    def _render_gone(self, view, status, code):
+        """A tab's render process died. Qt leaves the view blank and
+        unresponsive -- the "dead tab" that takes no clicks and never
+        loads. Recover it: reload once to get a fresh renderer, and only
+        if that dies too show a plain page offering a manual reload,
+        rather than leaving a black hole in the strip."""
+        try:
+            normal = (QWebEnginePage.RenderProcessTerminationStatus
+                      .NormalTerminationStatus)
+        except Exception:
+            normal = None
+        if normal is not None and status == normal:
+            return           # an ordinary, intended teardown
+        try:
+            url = view.url()
+        except RuntimeError:
+            return           # the view is already gone
+        target = (url.toString() or getattr(view, "_requested", "")
+                  or getattr(view, "_pending", ""))
+        now = time.time()
+        last = getattr(view, "_crash_reload_at", 0)
+        if target and now - last > 8:
+            # first death (or one long after the last): a reload usually
+            # brings the renderer straight back
+            view._crash_reload_at = now
+            QTimer.singleShot(50, lambda v=view: self._crash_reload(v))
+            return
+        # a reload just failed too, or there is nothing to reload: a quiet
+        # recovery page beats a blank tab
+        self._show_crash_page(view, target)
+
+    def _crash_reload(self, view):
+        try:
+            view.reload()
+        except RuntimeError:
+            pass             # the tab was closed before the reload fired
+
+    def _show_crash_page(self, view, target):
+        """The fallback when a reload cannot revive the tab: a themed
+        page saying so, with a link back to where it was so one click can
+        try again."""
+        esc = html.escape(target or "")
+        link = ('<p><a href="%s">%s</a></p>' % (esc, html.escape(
+            self._ui_str("crashReload"))) if target else "")
+        doc = (
+            "<!doctype html><meta charset=utf-8>"
+            "<style>html,body{height:100%%;margin:0}"
+            "body{background:%s;color:%s;font:14px system-ui,sans-serif;"
+            "display:flex;align-items:center;justify-content:center;"
+            "flex-direction:column;gap:6px}a{color:inherit}</style>"
+            "<p>%s</p>%s") % (
+                theme_color("bg"), theme_color("fg"),
+                html.escape(self._ui_str("crashTitle")), link)
+        try:
+            view.setHtml(doc, QUrl(target) if target else QUrl())
+        except RuntimeError:
+            pass
+
+    def _pin_playing(self, view):
+        """Keep a background media tab (the `music` command's #autoplay
+        tab) renderable so its page is allowed to start playing, even
+        though the tab is not the one in front.
+
+        A tab that is not current sits on a hidden page of the stack, and
+        QtWebEngine reports a hidden widget's page as not visible:
+        Chromium then treats it as a background tab -- document.hidden is
+        true, autoplay is refused and its media is throttled. That is why
+        `music` stopped playing once its launch became a quiet background
+        tab instead of a visible window. Forcing the page visible (and
+        pinning its lifecycle to Active so it is never frozen or
+        discarded) lets playback begin while the tab stays in the
+        background.
+
+        This moves NO keyboard focus and raises NO window: page
+        visibility is a render property of the web content only. The tab
+        is still not switched to (switch=False), and the window is left
+        exactly where it was, so nothing is stolen from what the user is
+        doing."""
+        page = view.page()
+
+        def wake():
+            try:
+                page.setLifecycleState(
+                    QWebEnginePage.LifecycleState.Active)
+                page.setVisible(True)
+            except (RuntimeError, AttributeError):
+                pass          # the tab was closed, or an older Qt
+
+        wake()
+        # inserting the tab as a hidden page, and later showing (or
+        # minimising) the window, can flip the page back to hidden
+        # underneath us; re-assert once the widget has settled, and again
+        # each time a load commits (Amazon Music is a single-page app that
+        # navigates within itself), so the tab stays playable.
+        view._keep_playing = True
+        view.loadFinished.connect(
+            lambda ok, v=view: self._pin_playing_again(v))
+        QTimer.singleShot(0, wake)
+        QTimer.singleShot(1500, wake)
+
+    def _pin_playing_again(self, view):
+        """Re-assert a music tab's playable state after a (re)load."""
+        try:
+            if not getattr(view, "_keep_playing", False):
+                return
+            view.page().setLifecycleState(
+                QWebEnginePage.LifecycleState.Active)
+            view.page().setVisible(True)
+        except (RuntimeError, AttributeError):
+            pass
 
     def _focus_url(self):
         self.urlbar.setFocus()
@@ -12032,6 +14311,7 @@ class Browser(QMainWindow):
         if i >= 0:
             self.tabs.setTabIcon(i, icon)
         self._fill_bookmark_icon(view, icon)
+        self._fill_pin_icon(view, icon)
 
     def _fill_bookmark_icon(self, view, icon):
         """A page bookmarked before its favicon had arrived gets it now.
@@ -12087,8 +14367,14 @@ class Browser(QMainWindow):
         except OSError:
             pass
 
-    def save_config(self):
-        _page_data_changed()
+    def save_config(self, quiet=False):
+        """quiet=True is for bookkeeping none of our own pages shows --
+        the library-check timestamp is the only one so far. Bumping the
+        revision for it would make Settings, History and Bookmarks all
+        reload behind him because a background check finished, which is
+        a visible cost for a number nobody can see."""
+        if not quiet:
+            _page_data_changed()
         try:
             CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
             CONFIG_FILE.write_text(json.dumps(self.config))
@@ -12254,6 +14540,13 @@ class Browser(QMainWindow):
     def set_fullscreen(self, on):
         self.chrome.setVisible(not on)
         self.tabs.tabBar().setVisible(not on)
+        # a video filling the screen is not the moment for a taskbar
+        if self.taskbar is not None:
+            self.taskbar.setVisible(not on and active_look() == "taskbar")
+        if self.dock is not None:
+            self.dock.setVisible(not on and active_look() == "macos")
+        if self._start_menu is not None:
+            self._start_menu.dismiss()
         self.showFullScreen() if on else self.showNormal()
 
     def _make_profile(self, storage):
@@ -12278,6 +14571,13 @@ class Browser(QMainWindow):
         # the start page is a local file; without this it may not navigate
         # to the web (search box / quick links -> ERR_NETWORK_ACCESS_DENIED)
         s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        # off by default in the engine, and the failure mode is cruel:
+        # the share picker and the compositor's dialogs all appear and
+        # work, and only after the user has answered every one of them
+        # does the engine refuse the stream ("AbortError: Invalid
+        # state"). The picker and the permission card still decide who
+        # may capture; this only stops the engine vetoing everyone.
+        s.setAttribute(QWebEngineSettings.WebAttribute.ScreenCaptureEnabled, True)
         # smooth scrolling, autoplay, the PDF viewer and force-dark are
         # all settings now: one place sets them, for every jar
         self.apply_web_attributes(profile)
@@ -12300,8 +14600,9 @@ class Browser(QMainWindow):
             brands["Google Chrome"] = hints.fullVersion()
             hints.setFullVersionList(brands)
         except (AttributeError, RuntimeError):
-            pass   # QWebEngineClientHints is Qt 6.8+; older is no worse
-                   # off than it was before
+            # QWebEngineClientHints arrived in Qt 6.8; on anything older
+            # the hints stay as they were, which is where we started
+            pass
         lang = self.config.get("translateLang", "de")
         profile.setHttpAcceptLanguage(
             lang if lang.startswith("en") else lang + ",en")
@@ -12311,6 +14612,17 @@ class Browser(QMainWindow):
         self._forget_opaque_permissions(profile)
         profile.scripts().insert(self._google_script())
         profile.scripts().insert(self._theme_script())
+        # what shape our own pages are drawn in, and what the dock's
+        # transport talks to. Every jar comes through here, including a
+        # virtual browser made later, so a look and a play button work
+        # the same in all of them.
+        profile.scripts().insert(self._look_script())
+        profile.scripts().insert(self._media_script())
+        # and what notices a call: every jar, including a private
+        # one and a virtual browser made later. A microphone held
+        # in a private tab is still a microphone held.
+        profile.scripts().insert(self._call_script())
+        profile.scripts().insert(self._call_relay_script())
         # Vault Password off means the watcher never reaches a page at
         # all — not injected and idle, simply absent. Every profile
         # comes through here, including a virtual browser made later,
@@ -12384,13 +14696,22 @@ class Browser(QMainWindow):
     # a button added to the registry needs nothing else anywhere.
 
     def _tb_back(self):
-        self.current().back()
+        view = self.current()
+        if view is None or self._is_header(view):
+            return
+        view.back()
 
     def _tb_forward(self):
-        self.current().forward()
+        view = self.current()
+        if view is None or self._is_header(view):
+            return
+        view.forward()
 
     def _tb_reload(self):
-        self.current().reload()
+        view = self.current()
+        if view is None or self._is_header(view):
+            return
+        view.reload()
 
     def _tb_newtab(self):
         self.new_tab()
@@ -13761,13 +16082,13 @@ class Browser(QMainWindow):
         # builds; the remote-debugging server serves the same DevTools
         # over http, which works everywhere
         cur = view.url().toString()
-        reply = self._nam.get(QNetworkRequest(
-            QUrl("http://127.0.0.1:9222/json/list")))
+        reply = self._nam.get(QNetworkRequest(QUrl(
+            "http://127.0.0.1:%d/json/list" % REMOTE_DEBUG_PORT)))
         reply.finished.connect(
             lambda r=reply, v=view, u=cur: self._open_inspector(r, v, u))
 
     def _open_inspector(self, reply, view, cur_url):
-        base = "http://127.0.0.1:9222"
+        base = "http://127.0.0.1:%d" % REMOTE_DEBUG_PORT
         frontend = base + "/"  # fallback: pick-a-page list
         try:
             targets = json.loads(bytes(reply.readAll()).decode())
@@ -13980,6 +16301,537 @@ class Browser(QMainWindow):
         bar = getattr(self, "tabs", None)
         if bar is not None:
             bar.tabBar().update()
+        # the two that paint a mark of their own rather than wearing one
+        # — the taskbar's start button is drawn in the palette's colour,
+        # so it is drawn again when the palette changes
+        for furniture in (getattr(self, "taskbar", None),
+                          getattr(self, "dock", None)):
+            if furniture is not None:
+                furniture.retranslate()
+                furniture.update()
+
+    # =================================================================
+    # Looks: the pins, the furniture, and what is making a sound
+    # =================================================================
+
+    def _elide(self, text, budget):
+        """A plain character budget, not fontMetrics: what is elided
+        here is drawn by a stylesheet whose font only reaches the widget
+        on polish."""
+        text = (text or "").strip()
+        return text if len(text) <= budget else text[:budget - 1].rstrip() \
+            + "\u2026"
+
+    # ---- the pinned sites ----
+    def pins(self):
+        """The pinned sites. They are the start page's quick links -
+        one list, read out of the store the page already shares across
+        every cookie jar, so the bar and the page can never drift."""
+        store = self.config.get("startPage")
+        raw = store.get(PINS_KEY) if isinstance(store, dict) else None
+        if raw is None:
+            # a jar that has never run setup has no list of its own yet:
+            # it sees the same two the start page would have shown it
+            return [dict(pin, icon="") for pin in PIN_DEFAULTS]
+        return _clean_pins(raw)
+
+    def set_pins(self, pins, save=True):
+        """Write the list back where the start page keeps it, tell the
+        furniture, and tell any of our own pages that are open - so a
+        start page in another tab redraws instead of going stale."""
+        store = self.config.get("startPage")
+        if not isinstance(store, dict):
+            store = {}
+            self.config["startPage"] = store
+        store[PINS_KEY] = json.dumps(pins)
+        if save:
+            self.save_config()
+        self.refresh_pins()
+        payload = json.dumps(json.dumps(pins))
+        for view in self._own_open_pages():
+            view.page().runJavaScript(
+                "window.__applyPins && window.__applyPins(%s)" % payload,
+                MAIN_WORLD_ID)
+
+    def is_pinned(self, url):
+        key = _pin_key(url)
+        return any(_pin_key(pin["url"]) == key for pin in self.pins())
+
+    def add_pin(self, url, name="", icon=""):
+        pin = _clean_pin({
+            "url": url.toString() if isinstance(url, QUrl) else url,
+            "name": name, "icon": icon})
+        if pin is None:
+            return False
+        pins = self.pins()
+        key = _pin_key(pin["url"])
+        if any(_pin_key(entry["url"]) == key for entry in pins):
+            return False
+        if len(pins) >= PINS_MAX:
+            return False
+        pins.append(pin)
+        self.set_pins(pins)
+        return True
+
+    def remove_pin(self, url):
+        key = _pin_key(url)
+        pins = self.pins()
+        keep = [pin for pin in pins if _pin_key(pin["url"]) != key]
+        if len(keep) == len(pins):
+            return False
+        self.set_pins(keep)
+        return True
+
+    def refresh_pins(self):
+        """The furniture, told the list changed."""
+        for furniture in (self.taskbar, self.dock):
+            if furniture is not None:
+                furniture.set_pins(self.pins())
+        if self._start_menu is not None and self._start_menu.isVisible():
+            self._start_menu.refresh()
+
+    def _fill_pin_icon(self, view, icon):
+        """A pinned site's favicon, filled in when it arrives. Only ever
+        fills a blank, so this cannot churn the config file."""
+        if getattr(view, "private", False):
+            return
+        url = view.url()
+        if url.scheme() not in ("http", "https"):
+            return
+        key = _pin_key(url)
+        pins = self.pins()
+        for pin in pins:
+            if _pin_key(pin["url"]) != key or pin.get("icon"):
+                continue
+            data = _icon_data(icon, 32)
+            if not data or len(data) > PIN_ICON_MAX:
+                return
+            pin["icon"] = data
+            self.set_pins(pins)
+            return
+
+    def pin_labels(self):
+        """What pinning is called here. The words follow the furniture
+        he can actually see — a dock is not a taskbar — and a look with
+        no furniture at all falls back to what the start page has always
+        called the list."""
+        look = active_look()
+        if look == "taskbar":
+            return "pinTaskbar", "unpinTaskbar"
+        if look == "macos":
+            return "pinDock", "unpinDock"
+        return "pinLinks", "unpinLinks"
+
+    def pin_menu(self, pin, where):
+        """The right-click menu on a pin, wherever it is drawn."""
+        menu = QMenu(self)
+        here = menu.addAction(self._ui_str("bmOpen"))
+        new = menu.addAction(self._ui_str("bmOpenNew"))
+        menu.addSeparator()
+        drop = menu.addAction(self._ui_str("unpin"))
+        chosen = menu.exec(where)
+        if chosen is here:
+            self.open_pin(pin["url"])
+        elif chosen is new:
+            self.open_pin(pin["url"], new_tab=True)
+        elif chosen is drop:
+            self.remove_pin(pin["url"])
+
+    def pin_current_tab(self):
+        """The + on the taskbar. A private tab is never written down."""
+        view = self.current()
+        if view is None or self._is_header(view) \
+                or getattr(view, "private", False):
+            return
+        self.add_pin(view.url(), view.title(), _icon_data(view.icon(), 32))
+
+    # ---- finding and opening ----
+    def _tab_url(self, widget):
+        """What a tab is showing, including one not woken up yet: a lazy
+        tab has no url() of its own until it loads."""
+        try:
+            url = widget.url().toString()
+        except (AttributeError, RuntimeError):
+            url = ""
+        return url or getattr(widget, "_pending", "") \
+            or getattr(widget, "_requested", "")
+
+    def find_tab_for(self, url):
+        """The open tab showing this site, if there is one. The tab in
+        front wins, so clicking a pin twice does not walk a row of tabs
+        on the same site."""
+        key = _pin_key(url)
+        if not key:
+            return None
+        here = self.current()
+        found = None
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            if self._is_header(widget) or not hasattr(widget, "url"):
+                continue
+            if getattr(widget, "private", False):
+                continue   # a pin never lands on a private tab
+            if _pin_key(self._tab_url(widget)) != key:
+                continue
+            if widget is here:
+                return widget
+            if found is None:
+                found = widget
+        return found
+
+    def open_pin(self, url, new_tab=False, background=False):
+        """A pin brings forward the tab already showing the site, and
+        opens a new one only when there is none - which is what a
+        taskbar button does and what a dock icon does."""
+        if not new_tab:
+            view = self.find_tab_for(url)
+            if view is not None:
+                self.focus_tab(view)
+                return
+        self.new_tab(url=url, switch=not background)
+
+    # ---- the start menu ----
+    def toggle_start_menu(self):
+        if self._start_menu is None:
+            self._start_menu = StartMenu(self)
+        if self._start_menu.isVisible():
+            self._start_menu.dismiss()
+        else:
+            self._start_menu.open()
+
+    # ---- building and placing ----
+    def _rebuild_furniture(self):
+        """What this look asks to be on screen. Built the first time it
+        is wanted and hidden rather than destroyed after that, so
+        switching back and forth costs nothing."""
+        look = active_look()
+        if look == "taskbar":
+            if self.taskbar is None:
+                self.taskbar = TaskBar(self)
+                self._rlay.addWidget(self.taskbar)
+            self.taskbar.retranslate()
+            self.taskbar.set_pins(self.pins())
+            self.taskbar.show()
+        elif self.taskbar is not None:
+            self.taskbar.hide()
+        if look == "macos":
+            if self.dock is None:
+                self.dock = Dock(self)
+            self.dock.retranslate()
+            self.dock.set_pins(self.pins())
+            self.dock.show()
+            self.dock.raise_()
+            self.dock.place()
+            self._media_timer.start()
+            self._media_poll()
+        else:
+            if self.dock is not None:
+                self.dock.hide()
+            self._media_timer.stop()
+        if self._start_menu is not None and look != "taskbar":
+            self._start_menu.dismiss()
+
+    def _place_furniture(self):
+        if self.dock is not None and self.dock.isVisible():
+            self.dock.place()
+        if self._start_menu is not None and self._start_menu.isVisible():
+            self._start_menu.place()
+
+    def apply_look(self, name, save=True):
+        """A look lands everywhere at once, the same as a theme does:
+        the window's sheet, the furniture, the jars that tell the next
+        page of ours which shape it is in, and every one of those pages
+        that is already open. Nothing restarts."""
+        name = _select_look(name)
+        if save:
+            self.config["look"] = name
+            self.save_config()
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(theme_style() + look_style())
+        self._rebuild_furniture()
+        self.refresh_look_scripts()
+        self._restyle_widgets()
+        payload = json.dumps(json.dumps(name))
+        for view in self._own_open_pages():
+            view.page().runJavaScript(
+                "window.__applyLook && window.__applyLook(%s)" % payload,
+                MAIN_WORLD_ID)
+
+    # ---- what is making a sound ----
+    def _audible_changed(self, view, audible):
+        """Which tab the dock's transport talks to.
+
+        A private tab is skipped on purpose: what is playing in one
+        would otherwise be written across the chrome, and a private tab
+        is the one place nothing about the page is shown anywhere but in
+        the page."""
+        if getattr(view, "private", False):
+            return
+        if audible:
+            self._audible = view
+        elif self._audible is view:
+            self._audible = None
+        self._media_poll()
+
+    def _audible_view(self):
+        view = self._audible
+        if view is None:
+            return None
+        try:
+            if self.tabs.indexOf(view) < 0:
+                return None      # the tab was closed while it played
+        except RuntimeError:
+            return None
+        return view
+
+    def media_do(self, action):
+        """Work the transport of whatever is playing. There is no player
+        of our own here - what this reaches is the site's own Media
+        Session handlers, the ones it registered for the desktop's media
+        keys, and a media element when it registered none."""
+        view = self._audible_view()
+        if view is None:
+            return
+        if action == "playpause":
+            js = ("(function(){ if (!window.__mediaDo) return false;"
+                  " var n = window.__mediaNow ?"
+                  " JSON.parse(window.__mediaNow()) : null;"
+                  " return window.__mediaDo(n && n.playing"
+                  " ? 'pause' : 'play'); })()")
+        else:
+            js = ("window.__mediaDo && window.__mediaDo(%s)"
+                  % json.dumps(action))
+        view.page().runJavaScript(js, MAIN_WORLD_ID)
+        # the site takes a moment to act; ask again once it has
+        QTimer.singleShot(400, self._media_poll)
+
+    def media_now(self, callback):
+        view = self._audible_view()
+        if view is None:
+            callback(None)
+            return
+
+        def got(raw):
+            try:
+                callback(json.loads(raw) if raw else None)
+            except (TypeError, ValueError):
+                callback(None)
+
+        view.page().runJavaScript(
+            "window.__mediaNow ? window.__mediaNow() : ''",
+            MAIN_WORLD_ID, got)
+
+    def _media_poll(self):
+        dock = self.dock
+        if dock is None or not dock.isVisible():
+            return
+        self.media_now(dock.set_music)
+
+    # ---- is anyone on a call? ----
+    # The two scripts are built here and inserted by _make_profile, so
+    # every cookie jar carries them - the main one, every virtual
+    # browser, and the off-the-record jar a private tab uses.
+
+    def _call_event_name(self):
+        """The name the two worlds meet under. One fresh token per run,
+        made on first use because the profiles are built before this
+        window has finished furnishing itself."""
+        key = getattr(self, "_call_key", None)
+        if not key:
+            key = self._call_key = "__call_" + secrets.token_hex(8)
+        return key
+
+    def _call_script(self):
+        script = QWebEngineScript()
+        script.setName("call-watch")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        # a meeting is very often held in a cross-origin frame - Teams
+        # and Meet both ask for the microphone from one - so this has to
+        # reach every frame, not only the one in the address bar
+        script.setRunsOnSubFrames(True)
+        script.setSourceCode(CALL_WATCH_JS % {
+            "event": json.dumps(self._call_event_name())})
+        return script
+
+    def _call_relay_script(self):
+        script = QWebEngineScript()
+        script.setName("call-relay")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+        script.setRunsOnSubFrames(True)
+        script.setSourceCode(CALL_RELAY_JS % {
+            "event": json.dumps(self._call_event_name())})
+        return script
+
+    def _call_page_key(self, page):
+        """What a page is called on that list.
+
+        Its id() would do until a page is deleted and the next one is
+        built at the same address, which would hand a brand new tab the
+        last one's call. A number handed out once and carried by the
+        page itself cannot be inherited."""
+        key = getattr(page, "_call_id", None)
+        if key is not None:
+            return key
+        self._call_ids += 1
+        try:
+            page._call_id = self._call_ids
+        except (AttributeError, RuntimeError):
+            return id(page)          # a page that will not be marked
+        return self._call_ids
+
+    def call_in_progress(self):
+        """Whether any tab is holding the microphone right now."""
+        return bool(self._call_live)
+
+    def _call_pages(self):
+        """Every page that could be holding it: the tabs - a background
+        one included, which is exactly where a call sits while he reads
+        something else - and the panes that have been built."""
+        pages = []
+        tabs = getattr(self, "tabs", None)
+        widgets = []
+        if tabs is not None:
+            widgets = [tabs.widget(i) for i in range(tabs.count())]
+        for pane in (getattr(self, "_panes", None) or {}).values():
+            widgets.append(getattr(pane, "view", None))
+        for w in widgets:
+            if w is None or self._is_header(w) or not hasattr(w, "page"):
+                continue
+            try:
+                page = w.page()
+            except RuntimeError:
+                continue          # the tab went away underneath us
+            if page is not None:
+                pages.append(page)
+        return pages
+
+    @staticmethod
+    def _call_frames(page):
+        """The page's frames, top one first. An advert in an iframe gets
+        asked too; it answers nothing, which costs one message."""
+        frames = []
+        try:
+            root = page.mainFrame()
+        except AttributeError:
+            # an engine without the frame API: the page itself answers
+            # for its main frame, which is where most calls are anyway
+            return [page]
+        except RuntimeError:
+            return frames        # the page is gone
+        stack = [root] if root is not None else []
+        while stack and len(frames) < 60:   # a bound, not a limit
+            frame = stack.pop()
+            try:
+                if frame is None or not frame.isValid():
+                    continue
+                frames.append(frame)
+                stack.extend(frame.children())
+            except (AttributeError, RuntimeError):
+                continue
+        return frames
+
+    def _call_tick(self):
+        """Once every CALL_TICK_MS: forget what is gone, say where we
+        stand, then ask again."""
+        now = time.monotonic()
+        alive = {self._call_page_key(p) for p in self._call_pages()}
+        # a tab that was closed, a renderer that died, a page that has
+        # simply stopped answering: none of them is on a call any more
+        self._call_live = {k: t for k, t in self._call_live.items()
+                           if k in alive and now - t < CALL_STALE}
+        self._call_apply()
+        self._call_poll()
+
+    def _call_poll(self):
+        self._call_round += 1
+        turn = self._call_round
+        self._call_acc = {}
+        for page in self._call_pages():
+            frames = self._call_frames(page)
+            if not frames:
+                continue
+            key = self._call_page_key(page)
+            self._call_acc[key] = [len(frames), 0]
+            for frame in frames:
+                try:
+                    frame.runJavaScript(
+                        CALL_ASK_JS, APP_WORLD_ID,
+                        lambda value, key=key, turn=turn:
+                        self._call_answer(key, value, turn))
+                except (AttributeError, RuntimeError):
+                    self._call_answer(key, 0, turn)
+
+    def _call_answer(self, key, value, turn):
+        """One frame's answer. A page goes on the list the moment any of
+        its frames says yes - a call must not wait for the adverts - and
+        comes off it only when every frame it was asked has said no."""
+        if turn != self._call_round:
+            return                    # an answer from a finished round
+        slot = self._call_acc.get(key)
+        if slot is None:
+            return
+        try:
+            live = int(value or 0)
+        except (TypeError, ValueError):
+            live = 0
+        slot[0] -= 1
+        if live > 0:
+            slot[1] += live
+            self._call_report(key, live)
+        elif slot[0] == 0 and slot[1] == 0:
+            self._call_report(key, 0)
+
+    def _call_report(self, key, live):
+        """What one page is holding, and what follows from it."""
+        if live > 0:
+            self._call_live[key] = time.monotonic()
+        else:
+            self._call_live.pop(key, None)
+        self._call_apply()
+
+    def _call_apply(self):
+        if self._call_live:
+            call_flag_raise()
+        else:
+            call_flag_drop()
+
+    # ---- the scripts our own pages and the media widget need ----
+    def _look_script(self):
+        """What tells one of the browser's own pages which look it is
+        being shown in, before it has drawn a frame."""
+        script = QWebEngineScript()
+        script.setName("look")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        script.setRunsOnSubFrames(False)
+        script.setSourceCode(LOOK_JS % {"look":
+                                        json.dumps(look_payload())})
+        return script
+
+    def refresh_look_scripts(self):
+        """Swap it in every cookie jar, so the next page he opens is in
+        the new shape too."""
+        for profile in self._all_profiles():
+            scripts = profile.scripts()
+            for old in scripts.find("look"):
+                scripts.remove(old)
+            scripts.insert(self._look_script())
+
+    def _media_script(self):
+        script = QWebEngineScript()
+        script.setName("media-session")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        script.setRunsOnSubFrames(False)
+        script.setSourceCode(MEDIA_JS)
+        return script
 
     def apply_theme(self, name, save=True):
         """A theme lands everywhere at once and nothing has to be
@@ -13994,7 +16846,7 @@ class Browser(QMainWindow):
             self.save_config()
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(theme_style(name))
+            app.setStyleSheet(theme_style(name) + look_style(name=name))
         self.refresh_theme_scripts()
         self._restyle_widgets()
         # force-dark and a light theme cannot both be right
@@ -15520,6 +18372,129 @@ class Browser(QMainWindow):
         # detached: closing the browser should not kill what he is watching
         proc.startDetached(player, [url])
 
+    # ---- open in an external browser ----
+    # Sites Google (and a few others) refuse to serve to an embedded
+    # browser are handed to a real one instead of loading in-app. Off
+    # unless externalHandoff is on. Everything about the launch goes
+    # through _launch_external so a test can watch it without spawning
+    # anything, and nothing here ever reaches for xdg-open or the system
+    # default browser: this browser IS the default for https://, so that
+    # would relaunch it and loop.
+
+    def _external_sites(self):
+        """The domain suffixes handed off. The default is applied only
+        when the key is ABSENT, so an empty list means 'never' rather
+        than 'fall back to the defaults'."""
+        sites = self.config.get("externalSites", DEFAULT_EXTERNAL_SITES)
+        if not isinstance(sites, list):
+            return []
+        out = []
+        for d in sites:
+            d = str(d).strip().lower().lstrip(".")
+            if d:
+                out.append(d)
+        return out
+
+    def _external_host_match(self, host):
+        host = (host or "").lower()
+        for d in self._external_sites():
+            if host == d or host.endswith("." + d):
+                return True
+        return False
+
+    def _external_browser(self):
+        cmd = str(self.config.get("externalBrowser",
+                                  DEFAULT_EXTERNAL_BROWSER) or "").strip()
+        return cmd or DEFAULT_EXTERNAL_BROWSER
+
+    def _external_which(self, cmd):
+        """Where the configured browser lives, or None. An absolute path
+        is taken as given; a bare name is looked up on PATH."""
+        if not cmd:
+            return None
+        if os.path.isabs(cmd):
+            return cmd if os.access(cmd, os.X_OK) else None
+        return shutil.which(cmd)
+
+    def _launch_external(self, cmd, url):
+        """The one seam every external launch goes through. QProcess
+        only — never xdg-open or the system default, which is this very
+        browser (Super+B binds xdg-open https:// to it). Detached, so
+        closing the browser does not close what he went to read. Tests
+        replace this to see the launch without spawning a browser."""
+        proc = QProcess(self)
+        return proc.startDetached(cmd, [url])
+
+    def maybe_open_external(self, url, nav_type, view=None):
+        """Hand a top-level navigation to an external browser instead of
+        loading it in-app. Returns True when it took the navigation (the
+        caller then cancels the in-app load), False to let it load as
+        usual.
+
+        Gated tightly, because cancelling a navigation the user did not
+        expect to leave is worse than loading a wall:
+          * off unless externalHandoff is on;
+          * only user-initiated main-frame navigations — an address
+            typed or a pin/bookmark loaded (Typed), a link clicked
+            (LinkClicked), a form submitted (FormSubmitted). Redirects,
+            back/forward and sub-frames are left alone, so an OAuth hop
+            in mid-flow is never yanked out into another browser;
+          * only real web addresses, and only hosts on externalSites.
+        If the configured browser is not installed the navigation loads
+        in-app exactly as it does today, with a short line saying why,
+        rather than being blackholed into a blank tab."""
+        if not self.config.get("externalHandoff", False):
+            return False
+        NT = QWebEnginePage.NavigationType
+        if nav_type not in (NT.NavigationTypeTyped,
+                            NT.NavigationTypeLinkClicked,
+                            NT.NavigationTypeFormSubmitted):
+            return False
+        if url.scheme() not in ("http", "https"):
+            return False
+        if not self._external_host_match(url.host()):
+            return False
+        cmd = self._external_browser()
+        name = os.path.basename(cmd) or cmd
+        if not self._external_which(cmd):
+            self._show_plain_toast(
+                self._ui_str("externalMissing").format(name))
+            return False
+        if not self._launch_external(cmd, url.toString()):
+            return False
+        self._external_notice(view, name)
+        return True
+
+    def _external_notice(self, view, name):
+        """A tab opened only to carry this navigation (target=_blank, a
+        ctrl-click) has nothing in it and no history: close it rather
+        than leave a blank tab staring back. A tab he was already using
+        stays put. Either way a short line says where the page went."""
+        if view is not None and self._tab_never_committed(view):
+            idx = self.tabs.indexOf(view)
+            if idx >= 0 and self.tabs.count() > 1:
+                self.close_tab(idx)
+        try:
+            self._show_plain_toast(
+                self._ui_str("externalOpened").format(name))
+        except Exception:
+            pass
+
+    def _tab_never_committed(self, view):
+        """A brand-new tab that never committed a document: no history
+        and an empty address. That is the tab createWindow makes for a
+        target=_blank link, and the one worth closing when its only
+        navigation is handed off. (Not _is_blank_tab: that name is the
+        session-save marker up by _save_groups, and a second def under
+        the same name shadowed it once.)"""
+        try:
+            if view.history().count() > 0:
+                return False
+            u = view.url()
+        except Exception:
+            return False
+        return u.isEmpty() or u.toString() in ("", "about:blank")
+
     def print_page(self):
         """Ctrl+P. Never two menus at once: the shortcut and a page's own
         window.print() can both land here for the same keypress. And
@@ -15641,6 +18616,22 @@ class Browser(QMainWindow):
         # printing is asynchronous: the printer has to outlive this call
         self._printer = printer
         view.print(printer)
+
+    def _handoff_message(self, message):
+        """Act on a message from a second launch handed to us over the
+        single-instance socket. A URL opens a tab -- a quiet background
+        tab when asked, which is not switched to and so never steals the
+        tab or the keyboard he is on. A message with no URL ("raise", a
+        bare "bg", an unsubstituted %u) opens no tab; it only decides
+        whether to come to the front."""
+        url, background = _parse_handoff(message)
+        if url is not None:
+            self.new_tab(url=url, switch=not background)
+        if background:
+            return  # asked to stay out of the way: no raise
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     def restart(self):
         """Relaunch the browser (used after an update)."""
@@ -16169,6 +19160,10 @@ def _install_theme_flags():
     except (OSError, ValueError):
         config = {}
     name = _select_theme(config.get("theme", DEFAULT_THEME))
+    # the look too, and for a related reason: the first stylesheet is
+    # painted before the window exists, so a browser wearing the taskbar
+    # must not flash a classic one on the way up
+    _select_look(config.get("look", DEFAULT_LOOK))
     env = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     env = re.sub(r"\s*--blink-settings=preferredColorScheme=\d", "", env)
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
@@ -16201,6 +19196,19 @@ def _launch_url(text):
     return text
 
 
+def _wants_autoplay(url):
+    """Whether a URL carries the `#autoplay` marker the `music` command
+    appends. That marker is the signal the user's autoplay userscript
+    keys off, and here it is what tells a background tab to keep itself
+    renderable so playback can actually start. Accepts a string or a
+    QUrl; anything else is not autoplay."""
+    try:
+        text = url.toString() if isinstance(url, QUrl) else str(url or "")
+    except Exception:
+        return False
+    return QUrl(text).fragment().lower() == "autoplay"
+
+
 def _parse_handoff(message):
     """What a second launch sent through the socket: the address to
     open (None for "just come to the front") and whether the tab is
@@ -16229,6 +19237,73 @@ def _pid_alive(pid):
         return False
 
 
+def _proc_start_time(pid):
+    """The kernel's start-time for a pid, so a recycled pid is not taken
+    for the process that recorded it. Linux /proc field 22 (jiffies since
+    boot); None where it cannot be read -- another OS, or the process is
+    already gone -- and callers treat None as "cannot tell"."""
+    try:
+        with open("/proc/%d/stat" % int(pid), "rb") as fh:
+            data = fh.read()
+        # the comm field can hold spaces and parentheses; the fields we
+        # want all sit after the last ')'
+        rest = data[data.rindex(b")") + 1:].split()
+        return int(rest[19])          # starttime, field 22 overall
+    except Exception:
+        return None
+
+
+def _run_was_crash(marker):
+    """Whether the previous run died without cleaning up.
+
+    `marker` is what the last run wrote into config["runOpen"] while it
+    was open: {"pid": ..., "start": ...}. A clean exit replaces it with
+    False. A crash leaves it as it was, pointing at a process that is now
+    gone -- that, and only that, is a crash. A marker whose process is
+    STILL ALIVE means the browser never crashed: it is a second launch
+    that could not hand off, or a restart whose predecessor has not
+    finished dying. Reading that as a crash is what wiped history and
+    cookies out from under a healthy instance, so it returns False."""
+    if not isinstance(marker, dict):
+        return False                  # False, None, or a legacy bool
+    pid = marker.get("pid")
+    if not isinstance(pid, int):
+        return False
+    if not _pid_alive(pid):
+        return True                   # owner gone, marker never cleared
+    # the pid is alive, but pids get recycled. If the process behind it
+    # is provably a different one, the recorder is gone (a crash); if it
+    # is the same process, the browser is genuinely still running.
+    start = marker.get("start")
+    now = _proc_start_time(pid)
+    if start is not None and now is not None and start != now:
+        return True
+    return False
+
+
+def _handoff_to_existing(background, url, timeout=1500):
+    """Hand this launch to a browser already running, if one answers.
+
+    Returns True when a live instance took the message (this process
+    should just exit), False when nobody was there to take it. Never
+    removes the socket: a launch that cannot reach the primary is not
+    entitled to decide the primary is dead -- that call is made once, by
+    the would-be primary, only after listen() is refused."""
+    probe = QLocalSocket()
+    probe.connectToServer(SINGLE_INSTANCE_SOCKET)
+    if not probe.waitForConnected(timeout):
+        probe.abort()
+        return False
+    probe.write((("bg " if background and url else "")
+                 + (url or "raise")).encode())
+    probe.flush()
+    probe.waitForBytesWritten(timeout)
+    probe.disconnectFromServer()
+    if probe.state() != QLocalSocket.LocalSocketState.UnconnectedState:
+        probe.waitForDisconnected(timeout)
+    return True
+
+
 def main():
     # a URL argument means we were asked to open a link (e.g. as the
     # system default browser); --background opens it without bringing
@@ -16251,14 +19326,15 @@ def main():
             time.sleep(0.1)
 
     # single instance: two instances sharing one profile breaks Chromium's
-    # network/cache storage, so hand the link to the running one instead
-    probe = QLocalSocket()
-    probe.connectToServer(SINGLE_INSTANCE_SOCKET)
-    if probe.waitForConnected(300):
-        probe.write((("bg " if background and url else "")
-                     + (url or "raise")).encode())
-        probe.flush()
-        probe.waitForBytesWritten(300)
+    # network/cache storage, so a relaunch hands its link to the running
+    # one instead of starting a second browser on the same profile. The
+    # rule that keeps exactly one primary alive: whoever the socket lets
+    # listen() is it. We ask an existing instance to take the launch
+    # first; only if listen() is later refused do we ask again and, if
+    # STILL nobody answers, treat the socket as stale (its owner was
+    # killed without cleaning up) and reclaim it -- never orphaning a live
+    # instance, never handing off into a dead socket.
+    if _handoff_to_existing(background, url):
         return
 
     QGuiApplication.setDesktopFileName("browser")
@@ -16268,11 +19344,28 @@ def main():
     app.setApplicationName("browser")
     app.setWindowIcon(QIcon(str(APP_DIR / "icon.svg")))
     app.setStyleSheet(theme_style())
-    win = Browser(initial_url=url)
 
-    QLocalServer.removeServer(SINGLE_INSTANCE_SOCKET)
     server = QLocalServer()
-    server.listen(SINGLE_INSTANCE_SOCKET)
+    if not server.listen(SINGLE_INSTANCE_SOCKET):
+        # the name is taken. Either a live instance beat us to it in the
+        # same instant, or a killed predecessor left the socket file
+        # behind. Ask once more before deciding it is dead.
+        if _handoff_to_existing(background, url):
+            return
+        # nobody answered a socket that refuses us: it is stale. Clear it
+        # and take over. If that still fails something we cannot use is
+        # holding it, and starting a rival on the shared profile is worse
+        # than not starting -- so bow out rather than double up.
+        QLocalServer.removeServer(SINGLE_INSTANCE_SOCKET)
+        if not server.listen(SINGLE_INSTANCE_SOCKET):
+            return
+
+    # --background (the `music` command) with a URL and no running
+    # instance to hand off to: start as the primary, but keep the window
+    # out of the way and drop the URL into a background tab, exactly as a
+    # hand-off would have. The visible tab is the ordinary start page.
+    bg_launch = bool(background and url)
+    win = Browser(initial_url=None if bg_launch else url)
     win._instance_server = server
 
     def handoff():
@@ -16280,19 +19373,27 @@ def main():
 
         def read():
             message = bytes(conn.readAll()).decode().strip()
-            url, background = _parse_handoff(message)
-            win.new_tab(url=url, switch=not background)
-            if background:
-                return  # asked to stay out of the way: no raise
-            win.showNormal()
-            win.raise_()
-            win.activateWindow()
+            win._handoff_message(message)
         conn.readyRead.connect(read)
 
     server.newConnection.connect(handoff)
 
-    win.show()
-    sys.exit(app.exec())
+    # the process can hang in Chromium/NVIDIA teardown after the window is
+    # gone, leaving a windowless ghost that still holds the profile and
+    # the single-instance socket. Everything worth keeping is written out
+    # by the aboutToQuit handlers connected inside Browser (groups,
+    # sessions, history, config) which run before this one; once they
+    # have, end the process outright rather than wait on a teardown that
+    # may never finish. os._exit skips the hang without skipping a save.
+    app.aboutToQuit.connect(lambda: os._exit(0))
+
+    if bg_launch:
+        win.new_tab(url=url, switch=False)
+        win.showMinimized()
+    else:
+        win.show()
+    app.exec()
+    os._exit(0)
 
 
 if __name__ == "__main__":
