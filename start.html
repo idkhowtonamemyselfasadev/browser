@@ -60,7 +60,7 @@
     position: relative;
     background: rgba(0, 0, 0, 0.85);
     border: 1px solid rgba(137, 180, 250, 0.15);
-    border-radius: 12px;
+    border-radius: 4px;
     color: #a6adc8;
     text-decoration: none;
     padding: 9px 18px;
@@ -89,10 +89,132 @@
   }
   .links a:hover .rm { display: block; }
 
+  /* ---- looks --------------------------------------------------- */
+  /* The taskbar and the dock carry the quick links themselves, so the
+     page does not show the same list twice. Adding and removing happens
+     on the bar in those looks, or from any page's right-click menu. */
+  :root[data-look="taskbar"] .links, :root[data-look="macos"] .links,
+  :root[data-look="taskbar"] #addform, :root[data-look="macos"] #addform,
+  :root[data-look="circle"] .links { display: none; }
+
+  /* The circle look turns the start page into a big rimmed DISC that
+     fills the background, with the quick-link pins arranged around its
+     rim and the search box as the hub in the middle. Turn the wheel (or
+     the arrow keys) and the ring rotates with an eased glide while the
+     pins sway left-to-right on a shared underdamped spring - a pendulum
+     wobble, weighted so the low pins swing wider, that overshoots once
+     and settles. The pins are only ever translated, never rotated, so
+     their labels stay upright. No images (the CSP blocks them) and no
+     per-frame filter: the disc is plain CSS and the motion is nothing
+     but cheap transforms, so it stays smooth. */
+  #ringdisc { display: none; }
+  :root[data-look="circle"] #ringdisc {
+    display: block;
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+    /* a big rimmed ring: a bevelled band around a faint hollow, drawn
+       out of shadows so it needs no image */
+    border: 2px solid rgba(137, 180, 250, 0.22);
+    background:
+      radial-gradient(closest-side, rgba(137, 180, 250, 0.06),
+                      rgba(137, 180, 250, 0.02) 72%, transparent 78%);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.6),
+      0 24px 64px rgba(0, 0, 0, 0.45),
+      inset 0 0 60px rgba(0, 0, 0, 0.45),
+      inset 0 0 0 12px rgba(137, 180, 250, 0.04);
+  }
+  /* the hub sits above the disc so the search box is never behind it */
+  :root[data-look="circle"] form.search,
+  :root[data-look="circle"] #clock,
+  :root[data-look="circle"] #date { position: relative; z-index: 1; }
+  #ring { display: none; }
+  :root[data-look="circle"] #ring {
+    display: block;
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  /* Each pin is centred on its own point on the rim ellipse (an ellipse,
+     not a circle: a circle wide enough to clear the search box would run
+     off the top and bottom of a laptop). The whole pill is translated
+     sideways by the sway; the label never rotates, so it stays upright
+     and readable. */
+  #ring .ritem {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 170px;
+    padding: 8px 13px;
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(137, 180, 250, 0.18);
+    border-radius: 11px;
+    box-shadow: 0 7px 18px rgba(0, 0, 0, 0.5);
+    color: #a6adc8;
+    font-size: 13px;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transform: translate(-50%, -50%);
+    transition: color .15s, border-color .15s, box-shadow .15s;
+  }
+  /* the "favicon": a carved monogram chip, the first letter of the name,
+     so it needs no image file to survive the CSP */
+  #ring .ritem .mono {
+    flex: 0 0 auto;
+    width: 19px;
+    height: 19px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #89b4fa;
+    color: #000000;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  #ring .ritem .plabel {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #ring .ritem:hover, #ring .ritem:focus {
+    color: #cdd6f4;
+    border-color: rgba(137, 180, 250, 0.45);
+  }
+  #ring .ritem:focus { outline: none; }
+  #ring .ritem.add {
+    color: #89b4fa;
+    font-size: 17px;
+    padding: 6px 15px;
+    justify-content: center;
+  }
+  :root[data-look="circle"] #ringhint {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 18px;
+    text-align: center;
+    color: #45475a;
+    font-size: 11px;
+  }
+  #ringhint { display: none; }
+
   #addbtn {
     background: rgba(0, 0, 0, 0.85);
     border: 1px solid rgba(137, 180, 250, 0.25);
-    border-radius: 50%;
+    border-radius: 4px;
     width: 38px;
     height: 38px;
     color: #89b4fa;
@@ -110,7 +232,7 @@
     display: none;
     background: rgba(0, 0, 0, 0.9);
     border: 1px solid rgba(137, 180, 250, 0.25);
-    border-radius: 14px;
+    border-radius: 4px;
     padding: 10px;
     gap: 8px;
   }
@@ -118,7 +240,7 @@
   #addform input {
     background: #000000;
     border: 1px solid rgba(108, 112, 134, 0.4);
-    border-radius: 9px;
+    border-radius: 4px;
     color: #cdd6f4;
     font: inherit;
     font-size: 13px;
@@ -130,7 +252,7 @@
   #addform button {
     background: #89b4fa;
     border: none;
-    border-radius: 9px;
+    border-radius: 4px;
     color: #000000;
     font: inherit;
     font-size: 13px;
@@ -189,7 +311,7 @@
     gap: 10px;
     background: rgba(0, 0, 0, 0.95);
     border: 1px solid rgba(137, 180, 250, 0.25);
-    border-radius: 14px;
+    border-radius: 4px;
     padding: 14px;
     z-index: 2;
   }
@@ -208,7 +330,7 @@
   }
   .thumb {
     height: 52px;
-    border-radius: 9px;
+    border-radius: 4px;
     background-color: #000000;
     background-size: cover;
     background-position: center;
@@ -264,7 +386,7 @@
     flex: 1;
     background: #000000;
     border: 1px solid rgba(108, 112, 134, 0.4);
-    border-radius: 9px;
+    border-radius: 4px;
     color: #a6adc8;
     font: inherit;
     font-size: 12px;
@@ -278,6 +400,14 @@
 
 
   form.search.custompos { position: fixed; margin: 0; }
+
+  /* A hidden extra that only ever shows in one theme, summoned by a
+     secret. It paints its whole world on the canvas, so it carries no
+     theme colours of its own beyond the ground it sits on. */
+  #bpgame { display: none; position: fixed; inset: 0; z-index: 60;
+            background: #000000; cursor: none; }
+  #bpgame.on { display: block; }
+  #bpgame canvas { display: block; width: 100%; height: 100%; }
 
   /* ---------- first-run setup wizard: a full-screen, one-decision-
      per-page walk-through. Pitch black, square, no blue. ---------- */
@@ -780,6 +910,10 @@
   <form class="search" action="https://www.google.com/search">
     <input name="q" placeholder="Search Google" autofocus autocomplete="off">
   </form>
+  <div id="ringdisc"></div>
+  <div id="ring"></div>
+  <div id="ringhint"></div>
+  <div id="bpgame" aria-hidden="true"><canvas id="bpcanvas"></canvas></div>
   <div class="links" id="links"></div>
   <form id="addform" autocomplete="off">
     <input id="addurl" placeholder="wikipedia.org" list="sites">
@@ -977,12 +1111,183 @@
     plus.id = "addbtn";
     plus.textContent = "+";
     plus.title = "Add a link";
-    plus.onclick = () => {
-      document.getElementById("addform").classList.toggle("open");
-      document.getElementById("addname").focus();
-    };
+    plus.onclick = openAdd;
     box.appendChild(plus);
+    renderRing();
   }
+
+  // ---- the circle look: the disc and the pendulum sway ----------------
+  // Only ever drawn in the circle look; every other look leaves #ring
+  // display:none and this builds nothing at all.
+  const ring = document.getElementById("ring");
+  // ringAngle is where the ring is now; ringTarget is where a turn is
+  // sending it. The ring glides toward the target and eases to a stop -
+  // a smooth settle, not a spin with momentum.
+  let ringAngle = 0, ringTarget = 0, ringRaf = 0;
+  const RING_EASE = 0.16;
+  // The pins share one underdamped spring: sway is the sideways offset in
+  // px, swayVel its velocity. A wheel impulse shoves swayVel; every frame
+  // the spring pulls sway back toward zero and overshoots, so the pins
+  // swing left-to-right and settle. The shove each pin feels is weighted
+  // by how low it hangs (gravity), so the low pins swing wider - a mobile
+  // under gravity.
+  let sway = 0, swayVel = 0;
+  const SWAY_SPRING = 0.10, SWAY_DAMP = 0.86;
+
+  function lookNow() {
+    return document.documentElement.getAttribute("data-look") || "classic";
+  }
+
+  function openAdd() {
+    document.getElementById("addform").classList.toggle("open");
+    document.getElementById("addname").focus();
+  }
+
+  // How big the ring is. Wider than it is tall, and wide enough that a
+  // pin can never sit on top of the search box in the middle: the hub is
+  // what the ring is drawn around, so the hub decides the width.
+  function ringGeometry() {
+    const wide = innerWidth, high = innerHeight;
+    const hub = document.querySelector("form.search");
+    const hubWidth = (hub && hub.offsetWidth) || 520;
+    return {
+      cx: wide / 2,
+      cy: high / 2,
+      rx: Math.min(wide / 2 - 96, Math.max(hubWidth / 2 + 150, wide * 0.34)),
+      ry: Math.min(high / 2 - 76, Math.max(170, high * 0.40)),
+    };
+  }
+
+  // the disc is sized to frame the pin ellipse, so the pins ride its rim
+  function placeDisc() {
+    const disc = document.getElementById("ringdisc");
+    if (!disc) return;
+    const g = ringGeometry();
+    disc.style.left = g.cx + "px";
+    disc.style.top = g.cy + "px";
+    disc.style.width = Math.round(g.rx * 2) + "px";
+    disc.style.height = Math.round(g.ry * 2) + "px";
+  }
+
+  // how far down the rim a pin at height y hangs: ~0.4 at the top, 1 at
+  // the bottom, so the low pins are shoved harder and swing wider - the
+  // way a mobile hangs under gravity.
+  function hangAt(y, g) {
+    return 0.4 + 0.6 * ((y - (g.cy - g.ry)) / (2 * g.ry || 1));
+  }
+
+  function placeRing() {
+    if (!ring) return;
+    const items = ring.children;
+    if (!items.length) return;
+    const g = ringGeometry();
+    const step = 360 / items.length;
+    for (let i = 0; i < items.length; i++) {
+      const rad = (ringAngle + i * step) * Math.PI / 180;
+      const x = g.cx + g.rx * Math.sin(rad);
+      const y = g.cy - g.ry * Math.cos(rad);
+      const s = sway * hangAt(y, g);   // the shared sway, gravity-weighted
+      items[i].style.left = Math.round(x) + "px";
+      items[i].style.top = Math.round(y) + "px";
+      // translated only, so the label stays upright and readable
+      items[i].style.transform =
+        "translate(-50%, -50%) translateX(" + s.toFixed(2) + "px)";
+    }
+  }
+
+  function renderRing() {
+    if (!ring) return;
+    ring.textContent = "";
+    if (lookNow() !== "circle") return;
+    const make = (label, url, add) => {
+      const a = document.createElement(add ? "button" : "a");
+      a.className = "ritem" + (add ? " add" : "");
+      if (add) {
+        a.type = "button";
+        a.onclick = openAdd;
+        a.title = STR.add || "Add";
+      } else {
+        a.href = url;
+        // no favicon file survives the CSP, so the "favicon" is a carved
+        // monogram: the first letter of the link's name.
+        const mono = document.createElement("span");
+        mono.className = "mono";
+        mono.textContent = ((label || "?").trim().charAt(0) || "?");
+        a.appendChild(mono);
+      }
+      const cap = document.createElement("span");
+      cap.className = "plabel";
+      cap.textContent = add ? "+" : label;
+      a.appendChild(cap);
+      ring.appendChild(a);
+    };
+    links.forEach((l) => make(l.name, l.url, false));
+    make("", "", true);
+    placeDisc();
+    placeRing();
+    const hint = document.getElementById("ringhint");
+    if (hint) hint.textContent = STR.circleHint || "";
+  }
+
+  function ringSpin() {
+    // the ring glides toward its target angle and eases to a stop
+    ringAngle += (ringTarget - ringAngle) * RING_EASE;
+    const spinDone = Math.abs(ringTarget - ringAngle) < 0.05;
+    if (spinDone) ringAngle = ringTarget;
+    // the shared spring: overshoot once, then settle back to rest
+    swayVel += -sway * SWAY_SPRING;
+    swayVel *= SWAY_DAMP;
+    sway += swayVel;
+    const swayDone = Math.abs(sway) < 0.05 && Math.abs(swayVel) < 0.05;
+    if (swayDone) { sway = 0; swayVel = 0; }
+    placeRing();
+    ringRaf = (spinDone && swayDone) ? 0 : requestAnimationFrame(ringSpin);
+  }
+
+  // A turn sends the ring toward a new target angle (an eased glide) and
+  // shoves the shared pendulum, clamped so a fast flick does not fling
+  // the pins off screen. A steady hold hands out no fresh shove, so the
+  // pins hang still once they have settled.
+  function turnRing(spin) {
+    ringTarget += spin;
+    swayVel += Math.max(-14, Math.min(14, spin * 1.1));
+    if (!ringRaf) ringRaf = requestAnimationFrame(ringSpin);
+  }
+
+  window.addEventListener("wheel", (e) => {
+    if (lookNow() !== "circle" || !links.length) return;
+    e.preventDefault();          // the wheel turns; the page does not scroll
+    turnRing(e.deltaY * 0.03);
+  }, { passive: false });
+
+  window.addEventListener("keydown", (e) => {
+    if (lookNow() !== "circle" || e.ctrlKey || e.altKey || e.metaKey) return;
+    const on = document.activeElement;
+    if (on && (on.tagName === "INPUT" || on.tagName === "TEXTAREA")) return;
+    if (e.key === "ArrowLeft") turnRing(-6);
+    else if (e.key === "ArrowRight") turnRing(6);
+  });
+
+  window.addEventListener("resize", renderRing);
+  document.addEventListener("lookchanged", () => {
+    render();
+    applySearchPos();
+  });
+
+  // the browser pinned or unpinned something somewhere else - on the
+  // taskbar, in the dock, from a page's right-click menu. The list is
+  // the same list, so it lands here too, without a reload and without
+  // being sent straight back where it came from.
+  window.__applyPins = function (j) {
+    try {
+      const list = (typeof j === "string") ? JSON.parse(j) : j;
+      if (!Array.isArray(list)) return;
+      links = list;
+      localStorage.setItem("quicklinks", JSON.stringify(links));
+      render();
+      renderWiz();
+    } catch (e) {}
+  };
 
   // auto-fill the name from the address: "wikipedia.org" -> "Wikipedia"
   document.getElementById("addurl").addEventListener("input", () => {
@@ -1122,7 +1427,9 @@
   const searchForm = document.querySelector("form.search");
   function applySearchPos() {
     const pos = JSON.parse(localStorage.getItem("searchpos") || "null");
-    if (!pos) {
+    // in the circle look the hub IS the position: a search box dragged
+    // to a corner would leave the ring turning around nothing
+    if (!pos || lookNow() === "circle") {
       searchForm.classList.remove("custompos");
       searchForm.style.left = searchForm.style.top = "";
       return;
@@ -2246,6 +2553,329 @@
   }
   tick();
   setInterval(tick, 1000);
+</script>
+<script>
+// A small extra that keeps entirely to itself. It costs nothing until it
+// is summoned: the only thing running the rest of the time is one keydown
+// listener that, unless the right theme is on, does nothing but reset a
+// counter. Everything below draws on a canvas, needs no image or network,
+// and stops dead the moment it is closed or the theme changes.
+(function () {
+  "use strict";
+  var overlay = document.getElementById("bpgame");
+  var canvas  = document.getElementById("bpcanvas");
+  if (!overlay || !canvas || !canvas.getContext) return;
+  var ctx = canvas.getContext("2d");
+
+  // state ---------------------------------------------------------------
+  var running = false, raf = 0, last = 0;
+  var W = 0, H = 0, groundY = 0, DPR = 1;
+  var player = null, keys = {}, obs = [], spawnX = 0;
+  var dist = 0, best = 0, scroll = 0, dead = false, tRun = 0;
+  var GRID = 24;
+
+  // Colours are never written into this script: it reads the live palette
+  // out of the theme's custom properties (the same --bg, --text, --accent
+  // the browser sets) and paints with those, so the world always wears the
+  // theme it is hiding in. The numeric fallbacks are plain integers, not
+  // colours, for the one frame before the properties resolve.
+  var C = null;
+  function toRGB(s, da, db, dc) {
+    s = (s || "").trim();
+    if (s.charAt(0) === "#") {
+      var h = s.slice(1);
+      if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16),
+              parseInt(h.slice(4, 6), 16)];
+    }
+    var m = s.match(/(\d+)[ ,]+(\d+)[ ,]+(\d+)/);
+    return m ? [+m[1], +m[2], +m[3]] : [da, db, dc];
+  }
+  function readPalette() {
+    var cs = getComputedStyle(document.documentElement);
+    C = {
+      bg:     toRGB(cs.getPropertyValue("--bg"), 6, 41, 74),
+      line:   toRGB(cs.getPropertyValue("--accent"), 127, 212, 255),
+      ink:    toRGB(cs.getPropertyValue("--text"), 214, 233, 255),
+      hazard: toRGB(cs.getPropertyValue("--red"), 255, 138, 138)
+    };
+  }
+  function col(a, alpha) {
+    return "rgba(" + a[0] + "," + a[1] + "," + a[2] + ","
+           + (alpha === undefined ? 1 : alpha) + ")";
+  }
+
+  function themeNow() {
+    return document.documentElement.getAttribute("data-theme") || "";
+  }
+  function typing() {
+    var a = document.activeElement;
+    return !!(a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA"
+                    || a.isContentEditable));
+  }
+  function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+  // the secret: the Konami code, and only while the one theme is on ----
+  var CODE = ["arrowup", "arrowup", "arrowdown", "arrowdown",
+              "arrowleft", "arrowright", "arrowleft", "arrowright", "b", "a"];
+  var step = 0;
+  window.addEventListener("keydown", function (e) {
+    if (running || themeNow() !== "blueprint" || typing() ||
+        e.ctrlKey || e.altKey || e.metaKey) { step = 0; return; }
+    var k = e.key.toLowerCase();
+    if (k === CODE[step]) {
+      step++;
+      if (step === CODE.length) { step = 0; start(); }
+    } else {
+      step = (k === CODE[0]) ? 1 : 0;
+    }
+  });
+
+  // controls while playing ---------------------------------------------
+  window.addEventListener("keydown", function (e) {
+    if (!running) return;
+    var k = e.key.toLowerCase();
+    if (k === "escape") { stop(); e.preventDefault(); return; }
+    if (dead) {
+      if (k === " " || k === "spacebar" || k === "enter" || k === "r") {
+        reset();
+      }
+      e.preventDefault();
+      return;
+    }
+    if (k === "arrowleft" || k === "a") keys.left = true;
+    else if (k === "arrowright" || k === "d") keys.right = true;
+    else if (k === " " || k === "spacebar" || k === "arrowup" || k === "w")
+      jump();
+    else return;
+    e.preventDefault();
+  }, true);
+  window.addEventListener("keyup", function (e) {
+    if (!running) return;
+    var k = e.key.toLowerCase();
+    if (k === "arrowleft" || k === "a") keys.left = false;
+    else if (k === "arrowright" || k === "d") keys.right = false;
+  }, true);
+
+  document.addEventListener("themepainted", function (e) {
+    if (running && e.detail !== "blueprint") stop();
+  });
+  window.addEventListener("resize", function () { if (running) resize(); });
+
+  // lifecycle -----------------------------------------------------------
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = overlay.clientWidth || window.innerWidth;
+    H = overlay.clientHeight || window.innerHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    groundY = Math.round(H * 0.8);
+  }
+  function reset() {
+    player = { x: Math.max(90, W * 0.22), y: groundY - 26,
+               w: 18, h: 26, vy: 0, onGround: true, jumps: 0 };
+    keys = {}; obs = []; spawnX = W * 0.7;
+    dist = 0; scroll = 3.4; dead = false; tRun = 0;
+    while (spawnX < W + 320) spawn();
+  }
+  function start() {
+    running = true;
+    overlay.classList.add("on");
+    if (document.activeElement && document.activeElement.blur)
+      document.activeElement.blur();
+    readPalette(); resize(); reset();
+    last = performance.now();
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(loop);
+  }
+  function stop() {
+    running = false;
+    overlay.classList.remove("on");
+    cancelAnimationFrame(raf); raf = 0;
+    keys = {};
+  }
+  function jump() {
+    if (player.jumps < 2) {
+      player.vy = -8.6; player.onGround = false; player.jumps++;
+    }
+  }
+  function die() {
+    if (dead) return;
+    dead = true;
+    best = Math.max(best, Math.floor(dist / 10));
+  }
+
+  // world ---------------------------------------------------------------
+  function spawn() {
+    spawnX += 150 + Math.random() * 170;
+    if (Math.random() < 0.42) {
+      obs.push({ t: "pit", x: spawnX, w: 42 + Math.random() * 50 });
+      spawnX += obs[obs.length - 1].w + 40;
+    } else {
+      obs.push({ t: "block", x: spawnX,
+                 w: 18 + Math.random() * 16, h: 20 + Math.random() * 32 });
+    }
+  }
+  function overPit(px) {
+    for (var i = 0; i < obs.length; i++) {
+      var o = obs[i];
+      if (o.t === "pit" && px > o.x && px < o.x + o.w) return true;
+    }
+    return false;
+  }
+  function update(f) {
+    if (dead) return;
+    dist += scroll * f;
+    scroll = 3.4 + Math.min(4.4, dist * 0.0005);
+    tRun += f;
+    if (keys.left)  player.x -= 2.6 * f;
+    if (keys.right) player.x += 2.6 * f;
+    player.x = clamp(player.x, 24, W * 0.6);
+    player.vy += 0.42 * f;
+    player.y += player.vy * f;
+
+    var d = scroll * f;
+    for (var i = 0; i < obs.length; i++) obs[i].x -= d;
+    spawnX -= d;
+    while (obs.length && obs[0].x + obs[0].w < -80) obs.shift();
+    while (spawnX < W + 320) spawn();
+
+    var feet = player.y + player.h, cx = player.x + player.w / 2;
+    var pit = overPit(cx);
+    if (!pit && feet >= groundY) {
+      player.y = groundY - player.h; player.vy = 0;
+      player.onGround = true; player.jumps = 0;
+    } else {
+      player.onGround = false;
+    }
+    if (pit && player.y > H + 30) { die(); return; }
+
+    for (i = 0; i < obs.length; i++) {
+      var o = obs[i];
+      if (o.t !== "block") continue;
+      var oy = groundY - o.h;
+      if (player.x + player.w > o.x + 3 && player.x < o.x + o.w - 3 &&
+          player.y + player.h > oy + 2) { die(); return; }
+    }
+  }
+
+  // paint ---------------------------------------------------------------
+  function grid() {
+    ctx.fillStyle = col(C.bg);
+    ctx.fillRect(0, 0, W, H);
+    var off = (dist * 0.6) % GRID;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = col(C.line, 0.1);
+    ctx.beginPath();
+    for (var x = -off; x < W; x += GRID) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (var y = 0; y < H; y += GRID) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.strokeStyle = col(C.line, 0.2);
+    ctx.beginPath();
+    for (x = -((dist * 0.6) % (GRID * 5)); x < W; x += GRID * 5) {
+      ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    }
+    ctx.stroke();
+  }
+  function ground() {
+    var pits = [];
+    for (var i = 0; i < obs.length; i++)
+      if (obs[i].t === "pit") pits.push([obs[i].x, obs[i].x + obs[i].w]);
+    pits.sort(function (a, b) { return a[0] - b[0]; });
+    ctx.strokeStyle = col(C.ink); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, groundY);
+    for (i = 0; i < pits.length; i++) {
+      var s = pits[i][0], e = pits[i][1];
+      if (e < 0 || s > W) continue;
+      ctx.lineTo(clamp(s, 0, W), groundY);
+      ctx.moveTo(clamp(e, 0, W), groundY);
+    }
+    ctx.lineTo(W, groundY); ctx.stroke();
+    // hatch under the ground
+    ctx.strokeStyle = col(C.line, 0.22); ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (var hx = -((dist * 0.6) % 14); hx < W; hx += 14) {
+      if (overPit(hx)) continue;
+      ctx.moveTo(hx, groundY); ctx.lineTo(hx - 9, groundY + 14);
+    }
+    ctx.stroke();
+  }
+  function drawObs() {
+    ctx.lineWidth = 2;
+    for (var i = 0; i < obs.length; i++) {
+      var o = obs[i];
+      if (o.t === "block") {
+        var oy = groundY - o.h;
+        ctx.strokeStyle = col(C.ink);
+        ctx.strokeRect(o.x, oy, o.w, o.h);
+        ctx.strokeStyle = col(C.ink, 0.4);
+        ctx.beginPath();
+        ctx.moveTo(o.x, oy); ctx.lineTo(o.x + o.w, oy + o.h);
+        ctx.moveTo(o.x + o.w, oy); ctx.lineTo(o.x, oy + o.h);
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = col(C.hazard, 0.7);
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(o.x, groundY); ctx.lineTo(o.x, groundY + 22);
+        ctx.moveTo(o.x + o.w, groundY); ctx.lineTo(o.x + o.w, groundY + 22);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+  function drawPlayer() {
+    var y = player.y, h = player.h, cx = player.x + player.w / 2;
+    // swing is a run cycle on the ground, a fixed leap pose in the air
+    var sw = player.onGround ? Math.sin(tRun * 0.35) : 0.7;
+    ctx.strokeStyle = col(C.ink); ctx.lineWidth = 2;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.arc(cx, y + 4, 4, 0, Math.PI * 2);        // head
+    ctx.moveTo(cx, y + 8);  ctx.lineTo(cx, y + 17); // torso
+    ctx.moveTo(cx - 6, y + 11 + sw * 4);            // arms
+    ctx.lineTo(cx, y + 12);
+    ctx.lineTo(cx + 6, y + 11 - sw * 4);
+    ctx.moveTo(cx - 6 + sw * 3, y + h);             // legs
+    ctx.lineTo(cx, y + 17);
+    ctx.lineTo(cx + 6 - sw * 3, y + h);
+    ctx.stroke();
+  }
+  function text(s, x, y, col, size, align) {
+    ctx.fillStyle = col; ctx.font = (size || 14) +
+      "px 'JetBrainsMono Nerd Font', 'DejaVu Sans Mono', monospace";
+    ctx.textAlign = align || "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(s, x, y);
+  }
+  function pad(n, w) {
+    n = String(n); while (n.length < w) n = "0" + n; return n;
+  }
+  function draw() {
+    grid(); ground(); drawObs(); drawPlayer();
+    text("DISTANCE " + pad(Math.floor(dist / 10), 5), 18, 30,
+         col(C.ink), 15);
+    text("BEST " + pad(best, 5), W - 18, 30, col(C.ink, 0.6), 13, "right");
+    text("▸ RUN . JUMP", 18, H - 18, col(C.line, 0.55), 12);
+    text("SPACE / ↑  jump    ← →  move    ESC  close",
+         W - 18, H - 18, col(C.line, 0.55), 12, "right");
+    if (dead) {
+      ctx.fillStyle = col(C.bg, 0.72);
+      ctx.fillRect(0, 0, W, H);
+      text("CONNECTION LOST", W / 2, H / 2 - 10, col(C.hazard), 34, "center");
+      text("distance " + Math.floor(dist / 10) + "   ·   SPACE to retry"
+           + "   ·   ESC to close",
+           W / 2, H / 2 + 24, col(C.ink), 15, "center");
+    }
+  }
+  function loop(now) {
+    if (!running) return;
+    var f = clamp((now - last) / 16.667, 0.5, 2.2);
+    last = now;
+    update(f); draw();
+    raf = requestAnimationFrame(loop);
+  }
+})();
 </script>
 </body>
 </html>

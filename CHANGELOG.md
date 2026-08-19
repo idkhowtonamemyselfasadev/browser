@@ -1,5 +1,114 @@
 # Changelog
 
+## 2026-08-14 — The browser says when a tab is on a call
+
+- **A call in a tab is now announced to the rest of the machine.** While
+  at least one tab holds a live microphone track, the browser keeps a
+  file at `$XDG_RUNTIME_DIR/browser-call.on` (the temporary directory if
+  there is no runtime one) and refreshes its timestamp every five
+  seconds; it is removed when the last capture ends, when the capturing
+  tab closes, and on the way out. Nothing is written *into* it — not the
+  site, not the tab, not the number of tracks. Its existence is the
+  whole message, and the timestamp is there so that a browser killed
+  outright cannot leave a lie behind: anything reading it treats a file
+  older than fifteen seconds as over.
+  - Why: a desktop that mixes browser audio into a virtual microphone
+    (to share a song into a call) feeds the call's own audio back into
+    the microphone when the call is in the browser, and echo
+    cancellation then eats the speaker's voice. The audio side can stop
+    sharing while a call is up — it only needed to be told.
+  - How: the engine has no per-page "is it capturing" to ask, so
+    `getUserMedia` is wrapped in the page's own world — both the modern
+    one and the callback-shaped one the engine still carries — and every
+    audio track it hands out is counted as live until it ends, is
+    stopped, or is replaced by a clone of itself. The wrapper is
+    additive and nothing else: the original runs, with the original
+    arguments, and its promise comes back with the same stream or the
+    same error; the page's own `stop()` still runs, and runs first. Each
+    wrapped function is a proxy of the one it replaces, so it carries
+    the same name, the same arity and the same own properties a native
+    method has — the one visible difference is that a proxied function
+    prints without the method's name inside its `[native code]` string.
+    Everything the wrapper uses after the page is allowed to run — the
+    dispatcher, the listener, the promise's `then`, the `readyState`
+    and `kind` accessors — is taken at document creation, before a line
+    of the page's own script has run, so a site cannot hand itself the
+    wrapper's internals or lie to it about its own microphone: a page
+    holding the microphone cannot make this browser believe it is not.
+    The count crosses to the browser in an isolated world, on a DOM
+    event whose name is a fresh random token each run.
+  - What this deliberately does not promise: a page can create an
+    iframe of its own, replace that frame's dispatcher before the
+    wrapper reaches it, and read the token out of the frame as soon as
+    the frame captures anything — and with the token it can claim a
+    call it is not on, or drop the count on one it is. Only for its own
+    tab, and only for the flag: no other tab is reachable and nothing
+    about the person using the browser is in the file at all. It is not
+    fixable inside this design (the two worlds meet on the page's own
+    DOM, so any rendezvous the wrapper can use, a page that owns the
+    frame can eventually listen for), and the fix that would work —
+    refusing to count in frames the embedder can reach into — would
+    trade a nuisance for a real call going unnoticed, which is the echo
+    this exists to stop. So it is written down instead.
+  - Every cookie jar carries it, including a private tab's — a
+    microphone held there is still a microphone held — and every frame,
+    because a meeting is very often in an iframe.
+
+## 2026-08-13 — A denied permission is not a life sentence
+
+- **Reloading a page lets it ask again.** A "no" to a microphone, camera
+  or notification card used to hold for the whole run of the browser —
+  one mis-click and only a restart could take it back. Now the answer
+  lasts until you reload: the toolbar button, Ctrl+R, F5 or the context
+  menu all hand the site its questions back. Only your reloads count — a
+  page reloading itself gets nothing — and only denials are forgotten;
+  an "always allow" you granted stays granted.
+- **Screen sharing actually shares.** The engine ships with screen
+  capture switched off, and the way it says no is cruel: the picker and
+  the compositor's dialogs all appear and work, and only after the last
+  of them is answered does the stream die ("AbortError: Invalid
+  state"). The capture switch is now on; the picker and the site's own
+  controls still decide what is shared, this only stops the engine
+  vetoing everyone at the finish line.
+
+## 2026-08-11 — Looks: the browser in four shapes
+
+- **A look is what shape the browser is, the way a theme is what colour it
+  is.** There are four, in Settings → Look, and the setting is orthogonal
+  to the theme: every look works with every one of the palettes, because a
+  look owns geometry and never a colour. Switching one lands the way
+  switching a theme lands — the window, the furniture, the cookie jars and
+  every one of the browser's own pages that is already open, all at once,
+  with nothing restarted.
+  - **Classic** is the default and is the browser exactly as it was. It
+    builds no widget and adds nothing at all to the stylesheet, so
+    "unchanged" is enforced rather than promised — a test asserts the
+    sheet is byte for byte the theme's own.
+  - **Taskbar** puts a strip along the bottom of the window: a start
+    button, your pinned sites, a `+` that pins the page you are on, and a
+    clock. A pin whose site is already open is underlined, and clicking it
+    brings that tab forward instead of opening the site twice. The start
+    button opens a search box over a grid of the pins, which is the shape
+    Windows 11 uses.
+  - **Dock** floats a rounded island over the page with the same pins on
+    it, magnifying under the cursor, and rounds and loosens the rest of
+    the chrome to match. It also carries a now-playing widget: when a tab
+    is making a sound, its title appears there and the three transport
+    buttons work the site's own play, pause and skip.
+  - **Circle** turns the start page into a ring — the search box in the
+    middle, the quick links orbiting it, the mouse wheel turning them and
+    the labels staying upright as they go. The caret still lands in the
+    search box, as it always did.
+- **Pinned sites are the start page's quick links.** One list, not two:
+  pin from any page's right-click menu, from the `+` on the taskbar, or by
+  adding a quick link on the start page, and the other places show it
+  immediately — an open start page redraws without a reload. Only http(s)
+  addresses are ever pinned, and never from a private tab.
+- **A 115th theme: Frutiger Aero.** Deep sky, aqua glass and a white
+  highlight down every panel — the y2k look, on the With character shelf.
+  It is an ordinary palette in every other respect, so it works in all
+  four looks like the rest of them.
+
 ## 2026-07-30 — Update says what is wrong
 
 - **The Update button on a copy unpacked from a zip now says so**, instead

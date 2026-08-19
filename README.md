@@ -108,13 +108,36 @@ account, no sync. Browsing data stays in `~/.local/share/browser/`.
 - **Start page** — clock, search, editable quick links, background images
   (bundled or your own)
 - **Userscripts** — Greasemonkey-style `*.user.js` files, per profile
-- **Themes** — 114 of them (Settings → Theme), grouped Dark / Light / With
+- **Themes** — 115 of them (Settings → Theme), grouped Dark / Light / With
   character, searchable, each shown as a swatch of its own colours and
   applied on the spot. Most are credited palettes (Catppuccin, Gruvbox,
   Nord, Dracula, Solarized, Tokyo Night, Everforest, Rosé Pine, Kanagawa,
   Monokai, Ayu, Material, Oxocarbon, Nightfox, GitHub, VS Code…); a few
   bring a face and a texture of their own — Steampunk, Terminal Green,
-  Amber CRT, Blueprint, Newspaper, Game Boy. The default is unchanged.
+  Amber CRT, Blueprint, Newspaper, Game Boy, Frutiger Aero. The default is
+  unchanged.
+- **Looks** (Settings → Look) — a theme is what colour the browser is; a
+  look is what shape it is. Four of them, and every one works with every
+  one of the 115 palettes, because a look owns geometry and never a
+  colour:
+  - **Classic** — the browser as it is drawn. The default, and nothing
+    about it changes when the others exist.
+  - **Taskbar** — a strip along the bottom with a start button, your
+    pinned sites and a clock. The start button opens a search box over a
+    grid of the pins.
+  - **Dock** — a floating, rounded dock over the page with icon
+    magnification, roomier and rounder chrome throughout, and a
+    now-playing widget whose play, pause and skip work the transport of
+    whatever page is making the sound.
+  - **Circle** — the start page becomes a ring: the search box in the
+    middle, the quick links orbiting it, the mouse wheel turning them.
+    The caret still lands in the search box.
+
+  **Pinned sites are the start page's quick links** — one list, not two.
+  Pin from any page's right-click menu, from the `+` on the taskbar, or by
+  adding a quick link on the start page; whichever you use, the other
+  places show it at once. Clicking a pin brings its tab forward if it is
+  already open instead of opening a second one.
 - **Interface translations** — the UI follows the language you choose
 - **Single instance** — links from other applications open as tabs in the
   running window; works as the system default browser

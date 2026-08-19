@@ -414,14 +414,15 @@
   }
   button.primary:hover { background: #ffffff; border-color: #ffffff; color: #000000; }
   #clearhist:hover, #clearcookies:hover { color: #f38ba8; border-color: #f38ba8; }
-  input[type=text], input[type=password], input[type=number] {
+  input[type=text], input[type=password], input[type=number], textarea {
     background: #000000; border: 1px solid rgba(108, 112, 134, .4);
     border-radius: 0; color: #cdd6f4; font: inherit; font-size: 13px;
     padding: 9px 12px; outline: none;
   }
+  textarea { resize: vertical; }
   input[type=text]:focus, input[type=password]:focus,
-  input[type=number]:focus { border-color: #cdd6f4; }
-  input::placeholder { color: #a6adc8; }
+  input[type=number]:focus, textarea:focus { border-color: #cdd6f4; }
+  input::placeholder, textarea::placeholder { color: #a6adc8; }
 
   /* ---- sliders: a square block on a hairline track ---- */
   input[type=range] {
@@ -441,7 +442,7 @@
   }
   input[type=range]:hover::-webkit-slider-thumb,
   input[type=range]:focus::-webkit-slider-thumb { background: #ffffff; }
-  #zoomval, #minfontval {
+  #zoomval, #minfontval, #libdaysval {
     min-width: 58px; text-align: right; color: #cdd6f4; font-size: 13px;
   }
   #dlpath {
@@ -460,7 +461,7 @@
   /* the theme picker: one card per palette, each showing its own
      colours — a window, an island on it, a line of text, an accent.
      A gallery, not a list of settings, so it is not put in a card:
-     114 palettes painting themselves want a plain backdrop. */
+     115 palettes painting themselves want a plain backdrop. */
   #themelist { display: flex; flex-direction: column; gap: 20px; }
   .tglabel {
     font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
@@ -669,6 +670,14 @@
       <div id="themelist"></div>
     </section>
 
+    <section data-group="gen" data-desc="descLook">
+      <h2 data-str="look">Look</h2>
+      <p class="hint" data-str="lookHint">A look moves the furniture &mdash; where things sit and what shape they are. Every look works with every theme.</p>
+      <div class="panel">
+        <div class="cards" id="lookcards"></div>
+      </div>
+    </section>
+
     <section data-group="gen" data-desc="descBrowsing">
       <h2 id="t_browsing">Browsing</h2>
       <div class="panel">
@@ -727,6 +736,31 @@
           <input type="checkbox" id="pdfviewer"><span class="wsw"></span>
         </label>
         </div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_externalTitle">Open some sites in another browser</h2>
+        <div class="wsub" id="t_externalHint">Some sites refuse to work in this browser — Gmail and Google sign-in among them. Rather than a wall, they open in your other browser.</div>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_externalHandoff">Hand these sites to another browser</span>
+            <span class="wsub" id="t_externalHandoffSub">Off = they load here like any other page.</span>
+          </span>
+          <input type="checkbox" id="externalhandoff"><span class="wsw"></span>
+        </label>
+        </div>
+        <div class="wrow" id="externalsitesrow" style="align-items:flex-start">
+          <span class="wlabel">
+            <span class="wname" id="t_externalSites">Sites to open elsewhere</span>
+            <span class="wsub" id="t_externalSitesSub">One domain a line. A domain covers its sub-domains too.</span>
+          </span>
+          <textarea id="externalsites" rows="3" style="flex:1;min-width:200px" placeholder="mail.google.com"></textarea>
+        </div>
+        <div class="wrow" style="justify-content:flex-end">
+          <button id="externalsitessave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="externalsitesmsg" class="urlmsg"></div>
       </div>
     </section>
 
@@ -881,7 +915,7 @@
       <label class="wrow">
         <span class="wlabel">
           <span class="wname" id="t_vaultPw">Vault Password</span>
-          <span class="wsub" id="t_vaultPwHint">The built-in password manager: saves your logins and fills them back in, with secure notes, payment cards, two-factor codes and a generator. It ships with the browser and does nothing at all until you switch it on.</span>
+          <span class="wsub" id="t_vaultPwHint">Saves and fills your logins &mdash; plus secure notes, cards, 2FA codes and a generator. Off until you switch it on.</span>
           <span class="wnote" id="t_vaultKept"></span>
         </span>
         <input type="checkbox" id="vaultpw"><span class="wsw"></span>
@@ -942,6 +976,14 @@
         <div class="wrow">
           <span id="updmsg"></span>
           <button id="updatebtn">Check for updates</button>
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_libUpdates">Keep the libraries up to date</span>
+            <span class="wsub" id="t_libUpdatesHint">How often to look for a newer web engine (PyQt6 and QtWebEngine). Nothing is ever installed without asking.</span>
+          </span>
+          <input type="range" id="libdays" min="0" max="14" step="1">
+          <span id="libdaysval"></span>
         </div>
       </div>
     </section>
@@ -1015,6 +1057,13 @@
                          ? (S.vaultKept || "") : "";
     }
     buildNav();
+  }
+
+  function libDaysText(v) {
+    // 0 is off, and "0 days" would read like "constantly"
+    const S = window.STR || {};
+    if (!v) return S.off || "Off";
+    return v + " " + (v === 1 ? (S.day || "day") : (S.days || "days"));
   }
 
   function paintRange(el) {
@@ -1202,6 +1251,10 @@
                                        sub: ENGINE_SITES[key] || ""})),
       s.searchEngine,
       (v) => saveSetting("searchEngine", v));
+    // the look is a card picker like the others, and the four names
+    // arrive in his language already translated
+    renderCards("lookcards", s.looks || [], s.look || "classic",
+                (v) => saveSetting("look", v));
     window._theme = s.theme;
     window._launchDark = s.themeLaunchDark;
     // named in its own right: reported as part of "settings" it would
@@ -1216,6 +1269,9 @@
     document.getElementById("suggestions").checked = s.searchSuggestions;
     document.getElementById("blockautoplay").checked = s.blockAutoplay;
     document.getElementById("pdfviewer").checked = s.pdfViewer;
+    document.getElementById("externalhandoff").checked = s.externalHandoff;
+    document.getElementById("externalsites").value =
+      (s.externalSites || []).join("\n");
     document.getElementById("clearhistexit").checked = s.clearHistoryExit;
     document.getElementById("clearcookiesexit").checked = s.clearCookiesExit;
     document.getElementById("savepasswords").checked = s.savePasswords;
@@ -1255,6 +1311,13 @@
     document.getElementById("minfontval").textContent =
       (s.minFont ? s.minFont + "px" : (window.STR && window.STR.off) || "Off");
     paintRange(mf);
+    const ld = document.getElementById("libdays");
+    ld.value = s.libUpdateEvery === undefined
+      ? (s.libUpdateDefault === undefined ? 2 : s.libUpdateDefault)
+      : s.libUpdateEvery;
+    document.getElementById("libdaysval").textContent =
+      libDaysText(parseInt(ld.value) || 0);
+    paintRange(ld);
     tbTake(s.toolbarItems, s.toolbarButtons);
     window._activeProxy = s.activeProxy || "system";
     window._proxyProfiles = s.proxyProfiles || [];
@@ -1749,7 +1812,7 @@
     showTheme();
   }
 
-  // 114 palettes is more than a list you scroll: the box above them
+  // 115 palettes is more than a list you scroll: the box above them
   // narrows it, and the rail's own search finds the section because
   // every name is in it
   function filterThemes(text) {
@@ -1820,6 +1883,7 @@
             t_privacy:"privacy", t_saveHistory:"saveHistory",
             t_histHint:"wizHistHint",
             t_cookiesHint:"cookiesHint", t_updates:"updates",
+            t_libUpdates:"libUpdates", t_libUpdatesHint:"libUpdatesHint",
             t_setup:"setupT", t_setupHint:"setupHint",
             t_plugins:"plugins", t_pluginsHint:"pluginsHint",
             t_quickInstall:"quickInstall", t_network:"network",
@@ -1843,6 +1907,11 @@
             t_blockAutoplay:"blockAutoplay",
             t_blockAutoplayHint:"blockAutoplayHint",
             t_pdfViewer:"pdfViewer", t_pdfViewerHint:"pdfViewerHint",
+            t_externalTitle:"externalTitle", t_externalHint:"externalHint",
+            t_externalHandoff:"externalHandoff",
+            t_externalHandoffSub:"externalHandoffSub",
+            t_externalSites:"externalSites",
+            t_externalSitesSub:"externalSitesSub",
             t_downloads:"downloads", t_downloadFolder:"downloadFolder",
             t_downloadFolderHint:"downloadFolderHint",
             t_clearHistExit:"clearHistExit",
@@ -1866,6 +1935,8 @@
           document.getElementById("clearhist").textContent = S.clearHistory;
           document.getElementById("clearcookies").textContent = S.clearCookies;
           document.getElementById("updatebtn").textContent = S.checkUpdates;
+          document.getElementById("libdaysval").textContent =
+            libDaysText(parseInt(document.getElementById("libdays").value) || 0);
           document.getElementById("rerunsetup").textContent = S.runSetup;
           document.getElementById("reloadplugins").textContent = S.reloadPlugins;
           document.getElementById("fromfile").textContent = S.fromFile;
@@ -1959,6 +2030,25 @@
   bindSwitch("suggestions", "searchSuggestions");
   bindSwitch("blockautoplay", "blockAutoplay");
   bindSwitch("pdfviewer", "pdfViewer");
+  bindSwitch("externalhandoff", "externalHandoff");
+  // the domain list: one a line or comma-separated, tidied the same way
+  // the browser tidies it, and saved on the button.
+  function saveExternalSites() {
+    const raw = document.getElementById("externalsites").value || "";
+    const seen = {}, sites = [];
+    for (let d of raw.split(/[\s,]+/)) {
+      d = d.trim().toLowerCase().replace(/^\.+/, "");
+      if (d && !seen[d]) { seen[d] = 1; sites.push(d); }
+    }
+    saveSetting("externalSites", sites);
+    document.getElementById("externalsites").value = sites.join("\n");
+    const S = window.STR || {};
+    const el = document.getElementById("externalsitesmsg");
+    el.textContent = S.externalSaved || "Saved";
+    el.className = "urlmsg on";
+    setTimeout(() => { el.className = "urlmsg"; el.textContent = ""; }, 1800);
+  }
+  document.getElementById("externalsitessave").onclick = saveExternalSites;
   bindSwitch("clearhistexit", "clearHistoryExit");
   bindSwitch("clearcookiesexit", "clearCookiesExit");
   bindSwitch("savepasswords", "savePasswords");
@@ -2008,8 +2098,15 @@
     paintRange(e.target);
     saveSetting("minFont", v);
   };
+  document.getElementById("libdays").oninput = (e) => {
+    const v = parseInt(e.target.value) || 0;
+    document.getElementById("libdaysval").textContent = libDaysText(v);
+    paintRange(e.target);
+    saveSetting("libUpdateEvery", v);
+  };
   paintRange(document.getElementById("zoom"));
   paintRange(document.getElementById("minfont"));
+  paintRange(document.getElementById("libdays"));
   document.getElementById("langfilter").oninput = (e) => fillLangs(e.target.value);
   document.getElementById("translatelang").onchange = (e) => {
     window._tlang = e.target.value;
