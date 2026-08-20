@@ -282,6 +282,50 @@ GOOGLE_LIGHT_JS = r"""
 })();
 """
 
+# The headers already say Chrome (user-agent + client hints, see
+# _make_profile). But Google's sign-in also reads window.chrome from
+# page JS: real Chrome fills it with loadTimes/csi/app, and QtWebEngine
+# ships the object EMPTY. A UA claiming Chrome over an empty window.chrome
+# is exactly the "embedded browser" tell that trips "this browser or app
+# may not be secure" AFTER the email is submitted. Fill the object in so
+# the two stories agree. MainWorld at DocumentCreation, so it is in place
+# before any page script looks. Idempotent; leaves a populated object
+# alone. Values are shaped like real Chrome's, timed off this page's own
+# navigation (no Date.now surprises), not meant to be exact.
+CHROME_STUB_JS = r"""
+(function () {
+  try {
+    var c = window.chrome = window.chrome || {};
+    if (c.loadTimes && c.csi) return;
+    var t0 = (performance.timeOrigin || 0) / 1000;
+    if (!c.loadTimes) c.loadTimes = function () {
+      return {
+        requestTime: t0, startLoadTime: t0, commitLoadTime: t0 + 0.05,
+        finishDocumentLoadTime: t0 + 0.2, finishLoadTime: t0 + 0.3,
+        firstPaintTime: t0 + 0.25, firstPaintAfterLoadTime: 0,
+        navigationType: "Other", wasFetchedViaSpdy: true,
+        wasNpnNegotiated: true, npnNegotiatedProtocol: "h2",
+        wasAlternateProtocolAvailable: false, connectionInfo: "h2"
+      };
+    };
+    if (!c.csi) c.csi = function () {
+      return { onloadT: t0 * 1000, startE: t0 * 1000,
+               pageT: performance.now(), tran: 15 };
+    };
+    if (!c.app) c.app = {
+      isInstalled: false,
+      InstallState: { DISABLED: "disabled", INSTALLED: "installed",
+                      NOT_INSTALLED: "not_installed" },
+      RunningState: { CANNOT_RUN: "cannot_run",
+                      READY_TO_RUN: "ready_to_run", RUNNING: "running" },
+      getDetails: function () { return null; },
+      getIsInstalled: function () { return false; },
+      runningState: function () { return "cannot_run"; }
+    };
+  } catch (e) {}
+})();
+"""
+
 # script worlds: 0 (MainWorld) belongs to the page's own JavaScript.
 # The password machinery lives in UserWorld — its watcher script and
 # the minimal web channel remote pages get are invisible from world 0.
@@ -14611,6 +14655,7 @@ class Browser(QMainWindow):
             int(self.config.get("minFont", 0) or 0))
         self._forget_opaque_permissions(profile)
         profile.scripts().insert(self._google_script())
+        profile.scripts().insert(self._chrome_stub_script())
         profile.scripts().insert(self._theme_script())
         # what shape our own pages are drawn in, and what the dock's
         # transport talks to. Every jar comes through here, including a
@@ -14654,6 +14699,19 @@ class Browser(QMainWindow):
         for permission in stored:
             if not permission.origin().host():
                 permission.reset()
+
+    def _chrome_stub_script(self):
+        """Fill window.chrome so a UA claiming Chrome isn't betrayed by an
+        empty object — the tell Google's sign-in reads (see CHROME_STUB_JS).
+        MainWorld at DocumentCreation so it lands before the page's own JS."""
+        script = QWebEngineScript()
+        script.setName("chrome-stub")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        script.setRunsOnSubFrames(True)
+        script.setSourceCode(CHROME_STUB_JS)
+        return script
 
     def _google_script(self):
         script = QWebEngineScript()
