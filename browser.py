@@ -36,6 +36,69 @@ if ("--blink-settings=preferredColorScheme=0"
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
         os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
         + " --blink-settings=preferredColorScheme=0")
+# Widevine: the module Amazon Music, Spotify and Netflix decrypt their
+# streams with. The engine underneath is Chromium and knows perfectly
+# well how to load it, but no Linux distribution is allowed to ship the
+# module itself -- so on a clean Fedora there is nothing to load, every
+# encrypted stream fails, and the site blames the browser instead of the
+# gap ("update Chrome", on a Chromium newer than the one it asks for).
+# Google's own Chrome carries the module and keeps it current, so if
+# Chrome is on the machine we borrow its copy. Nothing is downloaded and
+# nothing is installed here: found, or not found -- and not found simply
+# leaves things exactly as they were. Set before the engine starts, like
+# the flags above, and idempotent for the same reason.
+def _find_widevine():
+    """The newest libwidevinecdm.so on this machine, or None.
+
+    Chrome ships one inside its own directory and its updater drops
+    newer ones, each in a versioned directory, into the user's profile
+    -- so both shapes are searched and the highest version wins.
+    WIDEVINE_PATH overrides the search outright."""
+    override = os.environ.get("WIDEVINE_PATH", "")
+    if override:
+        return override if Path(override).is_file() else None
+    leaf = "_platform_specific/linux_x64/libwidevinecdm.so"
+    roots = ["/opt/google/chrome", "/opt/google/chrome-beta",
+             "/opt/google/chrome-unstable", "/opt/brave.com/brave",
+             "/opt/microsoft/msedge", "/usr/lib64/chromium-browser",
+             "/usr/lib/chromium-browser",
+             Path.home() / ".config/google-chrome",
+             Path.home() / ".config/chromium"]
+    found = []
+    for root in roots:
+        base = Path(root) / "WidevineCdm"
+        # the bundled copy sits directly under WidevineCdm; the ones the
+        # updater fetches sit one versioned directory deeper
+        try:
+            candidates = [base / leaf] + sorted(base.glob("*/" + leaf))
+        except OSError:
+            continue
+        found += [c for c in candidates if c.is_file()]
+    if not found:
+        return None
+
+    def version(path):
+        # the manifest two directories up from _platform_specific
+        try:
+            manifest = json.loads(
+                (path.parents[2] / "manifest.json").read_text())
+            return tuple(int(p) for p in str(manifest["version"]).split("."))
+        except (OSError, ValueError, KeyError, TypeError):
+            return (0,)
+    return str(max(found, key=version))
+
+
+# Qt splits this variable on spaces to build the engine's command line,
+# so a path with a space in it cannot be passed this way at all. Better
+# to leave DRM off than to hand the engine half a path and a flag it
+# cannot parse.
+_WIDEVINE_CDM = _find_widevine()
+if (_WIDEVINE_CDM and " " not in _WIDEVINE_CDM
+        and "--widevine-path=" not in os.environ.get(
+            "QTWEBENGINE_CHROMIUM_FLAGS", "")):
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+        + " --widevine-path=" + _WIDEVINE_CDM)
 # the embedded inspector (DevTools) only serves its frontend resources
 # when remote debugging is enabled. Qt can only turn this on before the
 # web engine starts, so it cannot be made fully lazy -- but a FIXED,
