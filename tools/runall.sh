@@ -39,7 +39,7 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_favorites.py test_favclip.py test_update.py \
          test_libs.py test_looks.py test_navguard.py test_external.py \
          test_lifecycle.py test_deadtab.py test_libguard.py test_clicks.py \
-         test_bpgame.py test_permreload.py test_callguard.py; do
+         test_bpgame.py test_permreload.py test_callguard.py test_agent.py; do
   [ -f "$t" ] || continue
   run "$t" "$t"
 done
