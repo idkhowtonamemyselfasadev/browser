@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-11 — An agent bridge: scripts can drive the tabs
+
+- **A second local socket, `browser-agent`, lets a script on this
+  machine drive the browser** (`agent_bridge.py`, client `agent.py`).
+  One JSON request per line; open/close/select/nav a tab, run JS, read
+  text or HTML, wait for a selector, click, type (native-setter inputs
+  and contenteditable editors both react), press a key, scroll,
+  screenshot, or ask for the browser's own restart. Everything works on
+  background tabs and never raises the window: the point is that an
+  assistant can use the web without taking the screen away from whoever
+  is at the PC. `agent.py chatgpt "..."` is the one composite command —
+  it keeps a hidden chatgpt.com tab and returns the finished answer.
+- Off switch: `"agentBridge": false` in the config, or `BROWSER_NO_AGENT=1`.
+  The socket is user-owned; it is not reachable from the network.
+- `test_agent.py` (offscreen, scratch data, its own socket name) covers
+  the whole protocol and is part of `tools/runall.sh`.
+
 ## 2026-08-14 — The browser says when a tab is on a call
 
 - **A call in a tab is now announced to the rest of the machine.** While

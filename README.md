@@ -239,6 +239,30 @@ stored under `~/.local/share/browser/`. Saved passwords are obfuscated with a
 per-install key file; the security boundary is your operating system account,
 not a master password.
 
+## Driving the browser from a script (agent bridge)
+
+The browser is also an automation target: while it runs it listens on a
+second local socket, `$TMPDIR/browser-agent` (`/tmp/browser-agent`), and
+`agent.py` is the terminal client. A script can open a background tab,
+read a page, click, type, wait for a node and take a screenshot — all on
+tabs that are not the visible one, without the window ever coming to the
+front. It exists so an assistant on this machine (Claude Code) can look
+things up and ask other sites questions without borrowing the screen.
+
+```
+python3 agent.py tabs                      # what is open
+python3 agent.py open https://example.org  # background tab; prints its id
+python3 agent.py text --tab 7              # the page as text
+python3 agent.py click 'button.go' --tab 7
+python3 agent.py type '#q' hello --enter --tab 7
+python3 agent.py shot /tmp/page.png --tab 7
+python3 agent.py chatgpt 'three names for a frost sword'
+```
+
+The socket is a Unix socket owned by your user; nothing off the machine
+can reach it. Switch it off with `"agentBridge": false` in `config.json`
+or `BROWSER_NO_AGENT=1`. `test_agent.py` is its offscreen test.
+
 ## Security updates
 
 Most of what could go wrong in a browser goes wrong in the engine, and the

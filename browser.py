@@ -12119,12 +12119,19 @@ class Browser(QMainWindow):
         # Liquid Glass paints the chrome with translucent (alpha)
         # pixels; the window needs an alpha channel for the
         # compositor's blur to show the wallpaper through them. Set
-        # once, before the first show(): the other looks paint their
-        # chrome with opaque literals, so an alpha-capable window is
-        # pixel-identical for them, and the web view always draws
-        # itself opaque - only the chrome around the page frosts.
-        self.setAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # once, before the first show(). Only that look asks for it:
+        # the others paint their chrome with opaque literals, and an
+        # alpha-capable window is *not* free for them - a surface with
+        # an alpha channel and no opaque region makes the compositor
+        # blend the whole window every frame and gives up the
+        # fullscreen direct-scanout path, which costs real frames on a
+        # video playing fullscreen. Qt only acts on this attribute
+        # when it is turned on, and only while the window has yet to
+        # be created, so a look switched later settles at the next
+        # start rather than this instant.
+        if active_look() == "glass":
+            self.setAttribute(
+                Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._rebuild_furniture()
 
         # A pane covers the window, chrome included. A shortcut that
@@ -16662,7 +16669,11 @@ class Browser(QMainWindow):
         """A look lands everywhere at once, the same as a theme does:
         the window's sheet, the furniture, the jars that tell the next
         page of ours which shape it is in, and every one of those pages
-        that is already open. Nothing restarts."""
+        that is already open. Nothing restarts - with one seam: the
+        alpha channel Liquid Glass blurs through is a property of the
+        window itself, fixed when it was created, so switching into or
+        out of glass gets its blur (and gives back the fullscreen
+        frame rate) at the next start."""
         name = _select_look(name)
         if save:
             self.config["look"] = name
@@ -19489,12 +19500,27 @@ def main():
     win = Browser(initial_url=None if bg_launch else url)
     win._instance_server = server
 
+    # the agent bridge: a second local socket a script can drive tabs
+    # through (agent.py). Optional -- a failure here never stops the
+    # browser from starting.
+    try:
+        import agent_bridge
+        agent_bridge.install(win)
+    except Exception as e:
+        print("agent bridge not started: %s" % e, file=sys.stderr)
+
     def handoff():
         conn = server.nextPendingConnection()
 
         def read():
             message = bytes(conn.readAll()).decode().strip()
-            win._handoff_message(message)
+
+            def reply(text):
+                if conn.state() == QLocalSocket.LocalSocketState.ConnectedState:
+                    conn.write(text.encode())
+                    conn.flush()
+                    conn.disconnectFromServer()
+            win._handoff_message(message, reply)
         conn.readyRead.connect(read)
 
     server.newConnection.connect(handoff)
