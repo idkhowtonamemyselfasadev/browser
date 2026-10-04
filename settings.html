@@ -206,7 +206,7 @@
   }
   /* beats .active: a section whose feature is not installed stays
      down even if it was the one showing when it was switched off */
-  section[hidden] { display: none !important; }
+  section[hidden], .wrow[hidden] { display: none !important; }
   section > h2:first-child { display: none; }  /* it is the page title */
 
   /* ---- the card ---- */
@@ -587,6 +587,13 @@
             <span class="wsub" id="t_darkHint">Bright pages get darkened so they don't blind you at night.</span>
           </span>
           <input type="checkbox" id="forcedark"><span class="wsw"></span>
+        </label>
+        <label class="wrow" id="themewebrow">
+          <span class="wlabel">
+            <span class="wname" id="t_themeWeb">Theme websites</span>
+            <span class="wsub" id="t_themeWebHint">Websites take on the browser's theme and colours. Right-click a page to leave that site alone.</span>
+          </span>
+          <input type="checkbox" id="themeweb"><span class="wsw"></span>
         </label>
         <label class="wrow">
           <span class="wlabel">
@@ -1262,6 +1269,9 @@
     guard("themes", renderThemes);
     document.getElementById("googlelight").checked = s.googleLight;
     document.getElementById("forcedark").checked = s.forceDark;
+    document.getElementById("themeweb").checked = s.themeWeb;
+    // no theme_web module next to the browser: nothing to switch
+    document.getElementById("themewebrow").hidden = !s.themeWebAvailable;
     document.getElementById("smoothscroll").checked = s.smoothScroll;
     document.getElementById("restoretabs").checked = s.restoreTabs;
     document.getElementById("askdownload").checked = s.askDownload;
@@ -1873,6 +1883,7 @@
             t_theme:"theme", t_themeHint:"themeHint",
             t_whiteGoogle:"whiteGoogle", t_whiteGoogleHint:"whiteGoogleHint",
             t_autoDarken:"autoDarken", t_darkHint:"wizDarkHint",
+            t_themeWeb:"themeWebName", t_themeWebHint:"themeWebHint",
             t_pageZoom:"pageZoom", t_zoomHint:"zoomHint",
             t_minFont:"minFont", t_minFontHint:"minFontHint",
             t_browsing:"browsing", t_reopenTabs:"reopenTabs",
@@ -2023,6 +2034,7 @@
   };
   bindSwitch("googlelight", "googleLight");
   bindSwitch("forcedark", "forceDark");
+  bindSwitch("themeweb", "themeWeb");
   bindSwitch("smoothscroll", "smoothScroll");
   bindSwitch("restoretabs", "restoreTabs");
   bindSwitch("askdownload", "askDownload");

@@ -24,15 +24,20 @@ Three layers, all in one injected script:
                      bubbles; and so on. Animations respect
                      prefers-reduced-motion.
 
-While this is enabled, Chromium's ForceDarkMode auto-darkening is held
-off (browser.force_dark_on) — the adaptive pass replaces it with the
-actual palette instead of an inversion.
+On a site this themes, Chromium's ForceDarkMode auto-darkening is held
+off (Browser._apply_page_force_dark asks themes_host) — the adaptive
+pass replaces it with the actual palette instead of an inversion. Sites
+that are dark by design (NATIVE_DARK_SITES), Google (which has its own
+light/dark switch) and every host he excluded from the page's
+right-click menu are left alone, and auto-darken treats them as before.
 
-Opt-in: set "themeWeb": true in ~/.local/share/browser/config.json.
-browser.py only calls script()/refresh()/repaint_open_sites()/enabled().
+The switch is Settings > Appearance > "Theme websites" ("themeWeb").
+browser.py calls script()/refresh()/repaint_open_sites()/
+undo_open_sites()/enabled()/themes_host()/toggle_host().
 """
 
 import json
+import re
 import sys
 
 from PyQt6.QtWebEngineCore import QWebEngineScript
@@ -54,9 +59,46 @@ def _mod(browser):
 
 
 def enabled(browser):
-    # opt-in until it reads every site: it rewrites the colours of
-    # every website in every jar, and has no switch in Settings yet
-    return bool(browser.config.get("themeWeb", False))
+    return bool(browser.config.get("themeWeb", True))
+
+
+def _skipped(browser):
+    """Hosts never themed: dark by design, Google, and his own list."""
+    mod = _mod(browser)
+    own = browser.config.get("themeWebSkip") or []
+    return sorted(set(mod.NATIVE_DARK_SITES)
+                  | {h for h in own if isinstance(h, str) and h})
+
+
+def _host(host):
+    return (host or "").lower().removeprefix("www.")
+
+
+def themes_host(browser, host):
+    """Would a page on this host be themed right now?"""
+    if not enabled(browser):
+        return False
+    host = _host(host)
+    if not host or re.fullmatch(r"google\.[a-z.]+", host):
+        return False
+    return not any(host == d or host.endswith("." + d)
+                   for d in _skipped(browser))
+
+
+def toggle_host(browser, host):
+    """Exclude a host from theming, or let it be themed again. Returns
+    whether it is themed afterwards."""
+    host = _host(host)
+    own = [h for h in (browser.config.get("themeWebSkip") or [])
+           if isinstance(h, str) and h]
+    if host in own:
+        own.remove(host)
+    else:
+        own.append(host)
+    browser.config["themeWebSkip"] = sorted(own)
+    browser.save_config()
+    refresh(browser)
+    return themes_host(browser, host)
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +134,9 @@ input, textarea {{ caret-color: {p['accent']}; }}
   border: 3px solid {p['bg']};
 }}
 ::-webkit-scrollbar-thumb:hover {{ background: {p['muted']}; }}
-{media_filter}body, div, section, article, main, header, footer, nav, td, th, li,
-input, button, textarea, select, a, p, h1, h2, h3, h4, h5, h6 {{
+{media_filter}html.__st-live :is(body, div, section, article, main, header, footer,
+nav, td, th, li, input, button, textarea, select, a, p, h1, h2, h3, h4,
+h5, h6) {{
   transition: background-color .35s ease, color .35s ease,
               border-color .35s ease;
 }}
@@ -382,6 +425,16 @@ SITE_JS = """(function () {
   if (location.protocol === "file:") return;
   var CSS = %(css)s;
   var TOK = %(tokens)s;
+  var SKIP = %(skip)s;
+  var host = location.hostname.toLowerCase().replace(/^www\\./, "");
+  if (/^google\\.[a-z.]+$/.test(host)) return;
+  for (var k = 0; k < SKIP.length; k++)
+    if (host === SKIP[k] || host.slice(-SKIP[k].length - 1) === "." + SKIP[k]) {
+      // excluded while open (another tab's right-click, a live re-theme):
+      // take off what an earlier run of this put here
+      if (window.__stUndo) window.__stUndo();
+      return;
+    }
 
   function paint() {
     var root = document.documentElement;
@@ -393,6 +446,17 @@ SITE_JS = """(function () {
       root.appendChild(el);
     }
     el.textContent = CSS;
+    // a Content-Security-Policy without 'unsafe-inline' (gov.uk) drops
+    // the <style>, and the adaptive pass alone writes light text onto
+    // the page's white: carry the sheet as a constructed one instead
+    if (!el.sheet && window.CSSStyleSheet && "adoptedStyleSheets" in document) {
+      try {
+        var sh = window.__stSheet || (window.__stSheet = new CSSStyleSheet());
+        sh.replaceSync(CSS);
+        if (document.adoptedStyleSheets.indexOf(sh) < 0)
+          document.adoptedStyleSheets = document.adoptedStyleSheets.concat([sh]);
+      } catch (e) {}
+    }
     return true;
   }
 
@@ -412,6 +476,22 @@ SITE_JS = """(function () {
     // inline text: dark text in a span inside a white card stays dark
     // after the card turns dark unless the span is looked at as well
     "span,strong,b,em,i,small,font,mark,cite,time,abbr,sup,sub,u,s,q,kbd";
+
+  // custom elements (<a-color-scheme>, web components) carry their own
+  // backgrounds too: a light text inside one left white is unreadable
+  var TAGS = {};
+  SEL.toUpperCase().split(",").forEach(function (t) { TAGS[t] = 1; });
+  function wanted(el) {
+    var t = el.tagName;
+    return TAGS[t] === 1 || t.indexOf("-") > 0;
+  }
+  function collect(root) {
+    var all = root && root.querySelectorAll ? root.querySelectorAll("*") : [];
+    var out = [];
+    for (var i = 0; i < all.length && out.length < 8000; i++)
+      if (wanted(all[i])) out.push(all[i]);
+    return out;
+  }
 
   var PROPS = ["background-color", "background-image", "color",
                "border-color"];
@@ -444,11 +524,25 @@ SITE_JS = """(function () {
       else el.style.removeProperty(p);
     }
     saved.set = false;
+    saved.put = {};
   }
 
   function put(el, saved, prop, value) {
     saved.set = true;
     el.style.setProperty(prop, value, "important");
+    (saved.put = saved.put || {})[prop] = el.style.getPropertyValue(prop);
+  }
+
+  // a page that rewrites an element's style attribute (OneTrust's
+  // banner sets style="bottom: 0px") wipes the override but not the
+  // text colour put on its children: dark text on the dark banner
+  function reput(el) {
+    var saved = orig.get(el);
+    if (!saved || !saved.set || !saved.put) return;
+    for (var p in saved.put)
+      if (el.style.getPropertyValue(p) !== saved.put[p]
+          || el.style.getPropertyPriority(p) !== "important")
+        el.style.setProperty(p, saved.put[p], "important");
   }
 
   function adaptOne(el) {
@@ -457,14 +551,21 @@ SITE_JS = """(function () {
     restore(el, saved);
     var bg = parseColor(saved.bg);
     var bgL = bg && bg.a > .35 ? lum(bg) : null;
+    // a translucent fill is a scrim or a tint: it keeps its alpha, or a
+    // modal's rgba(0,0,0,.5) backdrop turns into an opaque sheet that
+    // hides the whole page on a light theme
+    function fill(t) {
+      return bg.a > .98 ? t : "color-mix(in srgb, " + t + " "
+        + Math.round(bg.a * 100) + "%%, transparent)";
+    }
     if (bgL !== null) {
       if (TOK.dark && bgL > 110) {
         var t = bgL > 235 ? TOK.surface : (bgL > 195 ? TOK.surfaceAlt : TOK.hover);
-        put(el, saved, "background-color", t);
+        put(el, saved, "background-color", fill(t));
         if (saved.bgi && saved.bgi.indexOf("gradient") >= 0)
           put(el, saved, "background-image", "none");
       } else if (!TOK.dark && bgL < 90) {
-        put(el, saved, "background-color", bgL < 40 ? TOK.surface : TOK.hover);
+        put(el, saved, "background-color", fill(bgL < 40 ? TOK.surface : TOK.hover));
         if (saved.bgi && saved.bgi.indexOf("gradient") >= 0)
           put(el, saved, "background-image", "none");
       }
@@ -491,11 +592,9 @@ SITE_JS = """(function () {
 
   function adapt(root) {
     var els;
-    try {
-      els = root && root.querySelectorAll ? root.querySelectorAll(SEL) : [];
-    } catch (e) { return; }
-    var n = Math.min(els.length, 8000), self = false, i;
-    try { self = !!(root && root.matches && root.matches(SEL)); }
+    try { els = collect(root); } catch (e) { return; }
+    var n = els.length, self = false, i;
+    try { self = !!(root && root.tagName && wanted(root)); }
     catch (e) {}
     if (self) remember(root);
     for (i = 0; i < n; i++) remember(els[i]);
@@ -505,6 +604,33 @@ SITE_JS = """(function () {
   window.__stAdapt = adapt;  // ApplicationWorld only; the page can't see it
 
   function full() { paint(); adapt(document); }
+
+  // switched off in Settings: take back everything this put on the page
+  window.__stUndo = function () {
+    var el = document.getElementById("__sitetheme");
+    if (el) el.remove();
+    if (window.__stSheet && document.adoptedStyleSheets)
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+        function (x) { return x !== window.__stSheet; });
+    if (window.__stObs) { window.__stObs.disconnect(); window.__stObs = null; }
+    if (document.documentElement)
+      document.documentElement.classList.remove("__st-live");
+    var all = document.querySelectorAll("*");
+    for (var i = 0; i < all.length; i++) {
+      var saved = orig.get(all[i]);
+      if (saved) restore(all[i], saved);
+    }
+  };
+
+  // colours ease between themes, but a page loading does not fade in
+  function live() {
+    setTimeout(function () {
+      if (document.documentElement)
+        document.documentElement.classList.add("__st-live");
+    }, 1200);
+  }
+  if (document.readyState === "complete") live();
+  else window.addEventListener("load", live);
 
   if (!paint()) {
     document.addEventListener("readystatechange", function once() {
@@ -534,6 +660,7 @@ SITE_JS = """(function () {
     }
     window.__stObs = new MutationObserver(function (muts) {
       for (var i = 0; i < muts.length; i++) {
+        if (muts[i].type === "attributes") { reput(muts[i].target); continue; }
         var added = muts[i].addedNodes;
         for (var j = 0; j < added.length; j++)
           if (added[j].nodeType === 1) queue.push(added[j]);
@@ -543,7 +670,9 @@ SITE_JS = """(function () {
     function arm() {
       if (document.documentElement)
         window.__stObs.observe(document.documentElement,
-                               { childList: true, subtree: true });
+                               { childList: true, subtree: true,
+                                 attributes: true,
+                                 attributeFilter: ["style"] });
       else setTimeout(arm, 50);
     }
     arm();
@@ -561,7 +690,8 @@ def _source(browser):
         "accent": p["accent"], "accentLt": p["accentLt"],
     }
     return SITE_JS % {"css": json.dumps(_site_css(browser)),
-                      "tokens": json.dumps(tokens)}
+                      "tokens": json.dumps(tokens),
+                      "skip": json.dumps(_skipped(browser))}
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +717,27 @@ def refresh(browser):
         for old in scripts.find(SCRIPT_NAME):
             scripts.remove(old)
         scripts.insert(script(browser))
+
+
+def _open_sites(browser):
+    for i in range(browser.tabs.count()):
+        view = browser.tabs.widget(i)
+        if browser._is_header(view) or not hasattr(view, "page"):
+            continue
+        try:
+            if view.url().scheme() == "file":
+                continue
+        except AttributeError:
+            continue
+        yield view
+
+
+def undo_open_sites(browser):
+    """Switched off: open tabs lose the theme now, not at their next load."""
+    mod = _mod(browser)
+    for view in _open_sites(browser):
+        view.page().runJavaScript(
+            "window.__stUndo && window.__stUndo()", mod.APP_WORLD_ID)
 
 
 def repaint_open_sites(browser):

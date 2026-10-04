@@ -1165,7 +1165,9 @@ UI_STRINGS = {
 "en": {"settings":"Settings","search":"Search","searchEngine":"Search engine",
 "appearance":"Appearance","whiteGoogle":"White Google",
 "whiteGoogleHint":"Off = pitch-black Google",
-"autoDarken":"Auto-darken light websites","pageZoom":"Page zoom",
+"autoDarken":"Auto-darken light websites",
+"themeWebName":"Theme websites","themeWebHint":"Websites take on the browser's theme and colours. Right-click a page to leave that site alone.",
+"themeSiteOff":"Don't theme this site","themeSiteOn":"Theme this site","pageZoom":"Page zoom",
 "zoomHint":"Makes everything on a website bigger or smaller. Ctrl + and Ctrl \u2212 zoom one tab; Ctrl 0 puts it back to this.",
 "minFont":"Minimum text size","minFontHint":"Forces tiny website text to be at least this big.",
 "browsing":"Browsing","reopenTabs":"Reopen tabs from last time",
@@ -1307,7 +1309,9 @@ UI_STRINGS = {
 "de": {"settings":"Einstellungen","search":"Suche","searchEngine":"Suchmaschine",
 "appearance":"Aussehen","whiteGoogle":"Wei\u00dfes Google",
 "whiteGoogleHint":"Aus = pechschwarzes Google",
-"autoDarken":"Helle Seiten abdunkeln","pageZoom":"Seitenzoom",
+"autoDarken":"Helle Seiten abdunkeln",
+"themeWebName":"Websites einf\u00e4rben","themeWebHint":"Websites \u00fcbernehmen das Design und die Farben des Browsers. Rechtsklick auf eine Seite l\u00e4sst diese Seite in Ruhe.",
+"themeSiteOff":"Diese Seite nicht einf\u00e4rben","themeSiteOn":"Diese Seite einf\u00e4rben","pageZoom":"Seitenzoom",
 "zoomHint":"Macht alles auf einer Webseite gr\u00f6\u00dfer oder kleiner. Strg + und Strg \u2212 zoomen einen Tab; Strg 0 setzt ihn hierhin zur\u00fcck.",
 "minFont":"Minimale Textgr\u00f6\u00dfe","minFontHint":"Erzwingt, dass winziger Text mindestens so gro\u00df ist.",
 "browsing":"Surfen","reopenTabs":"Tabs vom letzten Mal \u00f6ffnen",
@@ -7301,6 +7305,9 @@ class Bridge(QObject):
                       for entry in LOOKS],
             "googleLight": c.get("googleLight", True),
             "forceDark": c.get("forceDark", True),
+            "themeWeb": bool(theme_web is not None
+                             and theme_web.enabled(self.browser)),
+            "themeWebAvailable": theme_web is not None,
             "restoreTabs": c.get("restoreTabs", True),
             "zoom": c.get("zoom", 1.0),
             "minFont": c.get("minFont", 0),
@@ -7496,6 +7503,14 @@ class Bridge(QObject):
         elif key in ("forceDark", "smoothScroll", "blockAutoplay",
                      "pdfViewer"):
             browser.apply_web_attributes()
+        elif key == "themeWeb" and theme_web is not None:
+            theme_web.refresh(browser)
+            if value:
+                theme_web.repaint_open_sites(browser)
+            else:
+                theme_web.undo_open_sites(browser)
+            # auto-darken steps back in (or out) on the sites it covers
+            browser._refresh_page_force_dark()
         elif key in ("spellCheck", "spellCheckLang"):
             browser.apply_spellcheck()
         elif key == "zoom":
@@ -8675,9 +8690,37 @@ class WebView(QWebEngineView):
                                     if link.isEmpty() else "")
 
             action.triggered.connect(toggle)
+        self._theme_site_action(menu)
         self._image_action(menu, request, event.pos())
         menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         menu.popup(event.globalPos())
+
+    def _theme_site_action(self, menu):
+        """"Don't theme this site" / "Theme this site", for a site the
+        site theme gets wrong. Only offered while site theming is on,
+        on a web page, and never for a site that is excluded anyway."""
+        browser = self.browser
+        if theme_web is None or not theme_web.enabled(browser):
+            return
+        url = self.url()
+        if url.scheme() not in ("http", "https"):
+            return
+        host = url.host().removeprefix("www.")
+        own = browser.config.get("themeWebSkip") or []
+        themed = theme_web.themes_host(browser, host)
+        if not themed and host not in own:
+            return              # dark by design, or Google: not ours
+        menu.addSeparator()
+        action = menu.addAction(browser._ui_str(
+            "themeSiteOff" if themed else "themeSiteOn"))
+
+        def toggle():
+            theme_web.toggle_host(browser, host)
+            # every open tab on this site follows, not only this one
+            theme_web.repaint_open_sites(browser)
+            browser._refresh_page_force_dark()
+            self.reload()
+        action.triggered.connect(toggle)
 
     def _image_action(self, menu, request, pos):
         """"Save image" for the pictures the engine's menu has no entry
@@ -14755,7 +14798,7 @@ class Browser(QMainWindow):
             "display:flex;align-items:center;justify-content:center;"
             "flex-direction:column;gap:6px}a{color:inherit}</style>"
             "<p>%s</p>%s") % (
-                theme_color("bg"), theme_color("fg"),
+                theme_color("bg"), theme_color("text"),
                 html.escape(self._ui_str("crashTitle")), link)
         try:
             view.setHtml(doc, QUrl(target) if target else QUrl())
@@ -14907,9 +14950,14 @@ class Browser(QMainWindow):
                        or any(host == d or host.endswith("." + d)
                               for d in NATIVE_DARK_SITES)
                        or bool(re.fullmatch(r"google\.[a-z.]+", host)))
+        # a site the theme recolours gets the palette instead of an
+        # inversion: both at once darkens what was already darkened
+        themed = (theme_web is not None and not own_page
+                  and url.scheme() in ("http", "https")
+                  and theme_web.themes_host(self, host))
         view.page().settings().setAttribute(
             QWebEngineSettings.WebAttribute.ForceDarkMode,
-            self.force_dark_on() and not native_dark)
+            self.force_dark_on() and not native_dark and not themed)
 
     def _refresh_page_force_dark(self):
         """The same question re-asked of every tab and every pane that
