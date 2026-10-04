@@ -566,7 +566,7 @@ gsheet = B.look_style("glass")
 check("its sheet frosts the chrome with translucent surfaces",
       "rgba(" in gsheet and "transparent" in gsheet, gsheet[:40])
 check("and turns the window's own base transparent so the blur shows through",
-      "QMainWindow { background: transparent" in gsheet)
+      "QMainWindow, #root { background: transparent" in gsheet)
 check("a window built on an opaque look carries no alpha channel - one it "
       "never blurs through still costs the compositor a blend of the whole "
       "window every frame, and the fullscreen scanout a video wants",
@@ -574,7 +574,7 @@ check("a window built on an opaque look carries no alpha channel - one it "
 win.apply_look("glass")
 spin(200)
 check("choosing glass puts its frosted sheet on the window",
-      "QMainWindow { background: transparent" in app.styleSheet())
+      "QMainWindow, #root { background: transparent" in app.styleSheet())
 check("the page behind the glass stays fully opaque - only the chrome frosts",
       view.page().backgroundColor().alpha() == 255,
       view.page().backgroundColor().alpha())

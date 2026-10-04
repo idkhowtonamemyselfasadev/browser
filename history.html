@@ -63,7 +63,7 @@
   }
   .entry:hover { border-color: rgba(137, 180, 250, 0.35); background: rgba(13, 13, 18, 0.95); }
   .entry img { width: 16px; height: 16px; border-radius: 4px; }
-  .entry .time { color: #6c7086; font-size: 12px; width: 44px; flex-shrink: 0; }
+  .entry .time { color: #6c7086; font-size: 12px; min-width: 44px; white-space: nowrap; flex-shrink: 0; }
   .entry .title {
     color: #cdd6f4;
     font-size: 13px;
@@ -118,6 +118,8 @@
     document.getElementById("empty").hidden = shown.length > 0;
     let lastDay = null;
     for (const e of [...shown].reverse()) {
+      let host;   // one hand-edited entry must not end the whole list
+      try { host = new URL(e.url).hostname.replace(/^www\./, ""); } catch (err) { continue; }
       const label = dayLabel(e.t);
       if (label !== lastDay) {
         const h = document.createElement("div");
@@ -126,7 +128,6 @@
         list.appendChild(h);
         lastDay = label;
       }
-      const host = new URL(e.url).hostname.replace(/^www\./, "");
       const a = document.createElement("a");
       a.className = "entry";
       a.href = e.url;
@@ -134,7 +135,7 @@
       icon.src = "https://www.google.com/s2/favicons?sz=32&domain=" + host;
       const time = document.createElement("span");
       time.className = "time";
-      time.textContent = new Date(e.t * 1000).toLocaleTimeString([],
+      time.textContent = new Date(e.t * 1000).toLocaleTimeString(STR.lang || [],
         { hour: "2-digit", minute: "2-digit" });
       const title = document.createElement("span");
       title.className = "title";

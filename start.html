@@ -1308,6 +1308,7 @@
     let url = document.getElementById("addurl").value.trim();
     if (!name || !url) return;
     if (!url.includes("://")) url = "https://" + url;
+    if (!/^https?:\/\//i.test(url)) return;   // no javascript: on a page holding the bridge
     links.push({ name, url });
     save();
     document.getElementById("addname").value = "";
