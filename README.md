@@ -35,6 +35,10 @@ account, no sync. Browsing data stays in `~/.local/share/browser/`.
   its own cookie jar and logins; sign in to the same site twice without
   signing out
 - **Find in page** (`Ctrl+F`) — match count, next/previous, match case
+- **Save any image** — right-click → *Save image* works on whatever is drawn
+  under the cursor: a picture under an overlay, a CSS background, a canvas,
+  an inline SVG. `Shift` + right-click brings the menu up on sites that
+  block it
 - **Tab search** (`Ctrl+Shift+A`) — every open tab of every virtual browser in
   one filtered list
 - **Reopen closed tab** (`Ctrl+Shift+T`) — restores its position and its group

@@ -36,6 +36,22 @@ if ("--blink-settings=preferredColorScheme=0"
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
         os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
         + " --blink-settings=preferredColorScheme=0")
+# WebRTC auto gain control (Discord, any call site) otherwise turns the
+# mic's system volume down while you talk and never back up -- the
+# QuadCast crept down to 16%. Calls still get their own digital gain.
+if ("WebRtcAllowInputVolumeAdjustment"
+        not in os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")):
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+        + " --disable-features=WebRtcAllowInputVolumeAdjustment")
+# Hardware video decode needs a VA-API driver named before the engine
+# starts. NVIDIA offers its decoder through libva-nvidia-driver, and the
+# direct backend does not want a running X server for it. Both are left
+# alone if the environment already names a driver, so a machine with
+# other hardware is never told the wrong one.
+if Path("/proc/driver/nvidia/version").exists():
+    os.environ.setdefault("LIBVA_DRIVER_NAME", "nvidia")
+    os.environ.setdefault("NVD_BACKEND", "direct")
 # Widevine: the module Amazon Music, Spotify and Netflix decrypt their
 # streams with. The engine underneath is Chromium and knows perfectly
 # well how to load it, but no Linux distribution is allowed to ship the
@@ -148,11 +164,11 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QTabWidget, QTabBar, QTreeWidget, QTreeWidgetItem,
     QAbstractItemView, QHeaderView,
     QToolButton, QWidgetAction, QMessageBox, QDialog, QDialogButtonBox,
-    QCheckBox,
+    QCheckBox, QToolTip,
 )
 from PyQt6.QtWebEngineCore import (
     QWebEnginePermission, QWebEngineProfile, QWebEnginePage, QWebEngineScript,
-    QWebEngineSettings,
+    QWebEngineSettings, QWebEngineContextMenuRequest,
 )
 from PyQt6.QtNetwork import (
     QLocalServer, QLocalSocket, QNetworkAccessManager, QNetworkProxy,
@@ -170,6 +186,24 @@ try:
 except ImportError:  # pragma: no cover - depends on the installation
     QPrintDialog = QPrinter = None
     HAVE_PRINTER = False
+
+# the experimental home-grown engine pane (Ctrl+Shift+E); everything about
+# it lives in engine_pane.py, and the browser works the same without it
+try:
+    import engine_pane
+    HAVE_ENGINE_PANE = True
+except ImportError:  # pragma: no cover - optional sibling module
+    engine_pane = None
+    HAVE_ENGINE_PANE = False
+
+# site theming (theme_web.py): the active theme recolours real websites,
+# not only the browser's own pages; remove the file and nothing changes
+try:
+    import theme_web
+    HAVE_THEME_WEB = True
+except ImportError:  # pragma: no cover - optional sibling module
+    theme_web = None
+    HAVE_THEME_WEB = False
 
 APP_DIR = Path(__file__).resolve().parent
 # version query defeats the renderer's cache of local pages, so a new
@@ -355,6 +389,88 @@ GOOGLE_LIGHT_JS = r"""
 # before any page script looks. Idempotent; leaves a populated object
 # alone. Values are shaped like real Chrome's, timed off this page's own
 # navigation (no Date.now surprises), not meant to be exact.
+# What is drawn at a point on the page, for "Save image" on anything
+# that is not a plain <img> the engine already knows how to save: the
+# picture under a transparent overlay, a CSS background, a <picture>, a
+# poster, an inline SVG, a canvas. elementsFromPoint hands back the whole
+# stack under the cursor, top to bottom, and the first thing in it that
+# carries an image wins. Runs in the application world, so a page's own
+# overrides never see it.
+IMAGE_AT_POINT_JS = r"""
+(function (x, y) {
+  function fromBg(el) {
+    var b = getComputedStyle(el).backgroundImage || "";
+    var m = /url\((['"]?)(.*?)\1\)/.exec(b);
+    return m && m[2] && !/^linear-gradient|^radial-gradient/.test(m[2]) ? m[2] : null;
+  }
+  function pic(el) {
+    var t = (el.tagName || "").toLowerCase(), im;
+    if (t === "img" && (el.currentSrc || el.src)) return el.currentSrc || el.src;
+    if (t === "picture") {
+      im = el.querySelector("img");
+      if (im && (im.currentSrc || im.src)) return im.currentSrc || im.src;
+    }
+    if (t === "video" && el.poster) return el.poster;
+    if (t === "image" && el.href && el.href.baseVal) return el.href.baseVal;
+    if (t === "canvas") { try { return el.toDataURL("image/png"); } catch (e) {} }
+    if (t === "svg") {
+      try {
+        return "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(
+          new XMLSerializer().serializeToString(el))));
+      } catch (e) {}
+    }
+    return fromBg(el);
+  }
+  // 1. what the browser itself would hit: the stack under the point, top to
+  //    bottom, following into shadow trees and same-origin frames
+  function stack(root, x, y) {
+    var els = root.elementsFromPoint(x, y), u, i, el, t, r, inner;
+    for (i = 0; i < els.length; i++) {
+      el = els[i]; t = (el.tagName || "").toLowerCase();
+      if (el.shadowRoot && (u = stack(el.shadowRoot, x, y))) return u;
+      if (t === "iframe") {
+        try {
+          inner = el.contentDocument; r = el.getBoundingClientRect();
+          if (inner && (u = stack(inner, x - r.left, y - r.top))) return u;
+        } catch (e) {}
+      }
+      if ((u = pic(el))) return u;
+    }
+    return null;
+  }
+  // 2. a zoom viewer draws its picture with pointer-events:none and takes the
+  //    gestures on a box above it; hit-testing never reports such an element.
+  //    Anything drawn at the point counts, the last in document order (the
+  //    one painted on top) wins.
+  function anywhere(root, x, y) {
+    var all = root.querySelectorAll("*"), best = null, i, el, r, u, cs;
+    for (i = 0; i < all.length; i++) {
+      el = all[i]; r = el.getBoundingClientRect();
+      if (!r.width || !r.height || x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+      cs = getComputedStyle(el);
+      if (cs.visibility === "hidden" || cs.display === "none" || cs.opacity === "0") continue;
+      if ((u = pic(el))) best = u;
+      if (el.shadowRoot && (u = anywhere(el.shadowRoot, x, y))) best = u;
+    }
+    return best;
+  }
+  var url = stack(document, x, y) || anywhere(document, x, y);
+  return url ? {url: url} : null;
+})(%d, %d)
+"""
+
+# Shift + right-click always brings up the browser's menu, even on a
+# site that swallows the gesture to keep its pictures. Capture phase on
+# the window runs before anything the page registered, and stopping the
+# event there means no handler of the page's ever gets to preventDefault
+# it. A plain right-click is left to the site, which may have a menu of
+# its own worth keeping.
+FORCE_MENU_JS = r"""
+window.addEventListener("contextmenu", function (e) {
+  if (e.shiftKey) e.stopImmediatePropagation();
+}, true);
+"""
+
 CHROME_STUB_JS = r"""
 (function () {
   try {
@@ -1056,6 +1172,8 @@ UI_STRINGS = {
 "findCase":"Match case","findClose":"Close find bar",
 "savePdf":"Save as PDF","printTo":"Print\u2026",
 "pdfSaving":"Saving as PDF\u2026","pdfFailed":"Could not save the PDF",
+"saveImage":"Save image","imgSaving":"Saving image\u2026",
+"imgFailed":"Could not save the image","imgNone":"No image under the cursor",
 "tabSearchPh":"Search tabs\u2026","noTabs":"No matching tabs.",
 "startPageName":"Start page",
 "bookmarks":"Bookmarks","bmAdd":"Bookmark this page","bmRemove":"Remove bookmark","bmBar":"Bookmarks bar","bmBarEmpty":"No bookmarks yet \u2014 press Ctrl+D on a page you like.","bmOpen":"Open","bmOpenNew":"Open in new tab","bmOpenAll":"Open all in new tabs","bmRename":"Rename","bmEditUrl":"Edit address\u2026","bmDelete":"Delete","bmManage":"Bookmark manager","bmNewFolder":"New folder","bmFolderName":"Folder name","bmNoBookmarks":"No bookmarks.","bmSearch":"Search bookmarks","bmName":"Name","bmUrl":"Address","bmSave":"Save","bmCancel":"Cancel","bmUp":"Up","bmDown":"Down","bmNoFolder":"Bookmarks bar","bmShowBar":"Show bookmarks bar","bmEmptyFolder":"Empty","bmNewName":"New name","bmSure":"Sure?","bmMore":"More bookmarks","bmDeleteFolder":"Delete the folder and its contents ({})","bmMoveTo":"Move to folder","bmFavHint":"Click a folder to open it.",
@@ -1201,6 +1319,8 @@ UI_STRINGS = {
 "savePdf":"Als PDF speichern","printTo":"Drucken\u2026",
 "pdfSaving":"Wird als PDF gespeichert\u2026",
 "pdfFailed":"PDF konnte nicht gespeichert werden",
+"saveImage":"Bild speichern","imgSaving":"Bild wird gespeichert\u2026",
+"imgFailed":"Bild konnte nicht gespeichert werden","imgNone":"Kein Bild unter dem Mauszeiger",
 "tabSearchPh":"Tabs durchsuchen\u2026","noTabs":"Keine passenden Tabs.",
 "startPageName":"Startseite",
 "bookmarks":"Lesezeichen","bmAdd":"Diese Seite als Lesezeichen","bmRemove":"Lesezeichen entfernen","bmBar":"Lesezeichenleiste","bmBarEmpty":"Noch keine Lesezeichen \u2014 Strg+D auf einer Seite, die dir gef\u00e4llt.","bmOpen":"\u00d6ffnen","bmOpenNew":"In neuem Tab \u00f6ffnen","bmOpenAll":"Alle in neuen Tabs \u00f6ffnen","bmRename":"Umbenennen","bmEditUrl":"Adresse bearbeiten\u2026","bmDelete":"L\u00f6schen","bmManage":"Lesezeichenverwaltung","bmNewFolder":"Neuer Ordner","bmFolderName":"Ordnername","bmNoBookmarks":"Keine Lesezeichen.","bmSearch":"Lesezeichen durchsuchen","bmName":"Name","bmUrl":"Adresse","bmSave":"Speichern","bmCancel":"Abbrechen","bmUp":"Hoch","bmDown":"Runter","bmNoFolder":"Lesezeichenleiste","bmShowBar":"Lesezeichenleiste anzeigen","bmEmptyFolder":"Leer","bmNewName":"Neuer Name","bmSure":"Sicher?","bmMore":"Weitere Lesezeichen","bmDeleteFolder":"Ordner samt Inhalt l\u00f6schen ({})","bmMoveTo":"In Ordner verschieben","bmFavHint":"Auf einen Ordner klicken, um ihn zu \u00f6ffnen.",
@@ -1555,12 +1675,24 @@ STARTER_PLUGINS = {
 // @name Skip YouTube ads
 // @match *://*.youtube.com/*
 // ==/UserScript==
+var wasMuted = null;
 setInterval(function () {
   var b = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
   if (b) b.click();
   var ad = document.querySelector('.ad-showing');
   var v = document.querySelector('video');
-  if (ad && v && v.duration) { v.currentTime = v.duration; v.muted = true; }
+  if (!v) return;
+  // A livestream reports duration Infinity, which is truthy: seeking to
+  // it wedges the MSE buffer and the player spins forever. Only skip
+  // ads on videos with a real, finite length.
+  if (ad && isFinite(v.duration) && v.duration > 0) {
+    if (wasMuted === null) wasMuted = v.muted;
+    v.currentTime = v.duration;
+    v.muted = true;
+  } else if (!ad && wasMuted !== null) {
+    v.muted = wasMuted;
+    wasMuted = null;
+  }
 }, 500);
 """),
     "yt-hide-shorts": ("Hide YouTube Shorts",
@@ -8245,8 +8377,40 @@ class WebView(QWebEngineView):
                                     if link.isEmpty() else "")
 
             action.triggered.connect(toggle)
+        self._image_action(menu, request, event.pos())
         menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         menu.popup(event.globalPos())
+
+    def _image_action(self, menu, request, pos):
+        """"Save image" for the pictures the engine's menu has no entry
+        for. A right-click straight on an <img> already gets the
+        engine's own "Save image", so that case adds nothing; every
+        other click gets ours, which looks at what is drawn under the
+        cursor when it is chosen (see IMAGE_AT_POINT_JS) and says so
+        when there is nothing."""
+        if (request is not None and request.mediaType()
+                == QWebEngineContextMenuRequest.MediaType.MediaTypeImage):
+            return
+        menu.addSeparator()
+        action = menu.addAction(self.browser._ui_str("saveImage"))
+        action.triggered.connect(lambda: self.save_image_at(pos))
+
+    def save_image_at(self, pos):
+        """Find the image drawn at a view position and save it."""
+        zoom = float(self.zoomFactor() or 1.0)
+        x, y = int(pos.x() / zoom), int(pos.y() / zoom)
+        where = self.mapToGlobal(pos)
+
+        def found(result):
+            url = (result or {}).get("url") if isinstance(result, dict) else None
+            if not url:
+                QToolTip.showText(where, self.browser._ui_str("imgNone"), self)
+                return
+            self.browser.save_image(self, url)
+
+        self.page().runJavaScript(
+            IMAGE_AT_POINT_JS % (x, y),
+            QWebEngineScript.ScriptWorldId.ApplicationWorld, found)
 
 
 class PanePage(WebPage):
@@ -12194,6 +12358,10 @@ class Browser(QMainWindow):
         }.items():
             QShortcut(QKeySequence(key), self).activated.connect(fn)
 
+        if HAVE_ENGINE_PANE:
+            QShortcut(QKeySequence("Ctrl+Shift+E"), self).activated.connect(
+                lambda: engine_pane.toggle(self))
+
         self.bridge.updateFinished.connect(self._toast_result)
         QTimer.singleShot(3000, self._check_updates)
         self._toast = None
@@ -14726,12 +14894,15 @@ class Browser(QMainWindow):
         self._forget_opaque_permissions(profile)
         profile.scripts().insert(self._google_script())
         profile.scripts().insert(self._chrome_stub_script())
+        profile.scripts().insert(self._force_menu_script())
         profile.scripts().insert(self._theme_script())
         # what shape our own pages are drawn in, and what the dock's
         # transport talks to. Every jar comes through here, including a
         # virtual browser made later, so a look and a play button work
         # the same in all of them.
         profile.scripts().insert(self._look_script())
+        if HAVE_THEME_WEB:
+            profile.scripts().insert(theme_web.script(self))
         profile.scripts().insert(self._media_script())
         # and what notices a call: every jar, including a private
         # one and a virtual browser made later. A microphone held
@@ -14781,6 +14952,19 @@ class Browser(QMainWindow):
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         script.setRunsOnSubFrames(True)
         script.setSourceCode(CHROME_STUB_JS)
+        return script
+
+    def _force_menu_script(self):
+        """Shift + right-click reaches the browser's menu on every site
+        (FORCE_MENU_JS). MainWorld at DocumentCreation, every frame: it
+        has to be registered before the page's own listeners are."""
+        script = QWebEngineScript()
+        script.setName("force-menu")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        script.setRunsOnSubFrames(True)
+        script.setSourceCode(FORCE_MENU_JS)
         return script
 
     def _google_script(self):
@@ -16988,6 +17172,9 @@ class Browser(QMainWindow):
             view.page().runJavaScript(
                 "window.__applyTheme && window.__applyTheme(%s)" % payload,
                 MAIN_WORLD_ID)
+        if HAVE_THEME_WEB:
+            theme_web.refresh(self)
+            theme_web.repaint_open_sites(self)
 
     def refresh_password_script(self):
         """Installing or removing Vault Password takes effect on the
@@ -18737,6 +18924,60 @@ class Browser(QMainWindow):
         except RuntimeError:
             pass  # he dismissed the toast while the PDF was rendering
 
+    def save_image(self, view, url):
+        """One image, into the download folder. Anything with an address
+        the engine fetches itself, so it lands like any other download
+        (cookies, the private-tab rule, the downloads page). A data: URL
+        - a canvas, an inline SVG, an embedded picture - has no
+        address to fetch: its bytes are already here and are written
+        straight down, listed the way a printed PDF is."""
+        if not url.startswith("data:"):
+            view.page().download(QUrl(url))
+            return
+        head, sep, body = url.partition(",")
+        if not sep:
+            return
+        mime = head[5:].split(";")[0].strip().lower() or "application/octet-stream"
+        try:
+            data = (base64.b64decode(body) if ";base64" in head
+                    else QUrl.fromPercentEncoding(body.encode()).encode("utf-8"))
+        except (ValueError, UnicodeError):
+            return
+        ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
+               "image/webp": ".webp", "image/svg+xml": ".svg",
+               "image/avif": ".avif", "image/bmp": ".bmp"}.get(mime, "")
+        folder = self.download_dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        private = self._page_is_private(view.page())
+        name = self._unique_download_name(
+            self._page_filename(view, ext or ".bin"), hold=private)
+        path = folder / name
+        entry = self._add_download_entry(
+            {"name": name, "dir": str(folder),
+             "url": view.url().toString(), "t": int(time.time()),
+             "state": "active", "received": 0, "size": 0, "paused": False,
+             "local": True},
+            record=not private)
+        widget = LocalFileWidget(name, self._dismiss_download)
+        widget.info.setText(self._ui_str("imgSaving"))
+        self.dllay.insertWidget(self.dllay.count() - 1, widget)
+        self.dlbar.show()
+        self.bridge.downloadsChanged.emit()
+        ok = True
+        try:
+            path.write_bytes(data)
+        except OSError:
+            ok = False
+        entry["state"] = "done" if ok else "failed"
+        entry["received"] = entry["size"] = len(data) if ok else 0
+        self.save_downloads()
+        self.bridge.downloadsChanged.emit()
+        widget.finished(path, len(data), ok, self._ui_str("dlDone"),
+                        self._ui_str("imgFailed"))
+
     def print_to_printer(self):
         view = self.current()
         if view is None or self._is_header(view) or not HAVE_PRINTER:
@@ -18749,13 +18990,16 @@ class Browser(QMainWindow):
         self._printer = printer
         view.print(printer)
 
-    def _handoff_message(self, message):
+    def _handoff_message(self, message, reply=None):
         """Act on a message from a second launch handed to us over the
         single-instance socket. A URL opens a tab -- a quiet background
         tab when asked, which is not switched to and so never steals the
         tab or the keyboard he is on. A message with no URL ("raise", a
         bare "bg", an unsubstituted %u) opens no tab; it only decides
         whether to come to the front."""
+        if message.startswith("cmd "):
+            self._handoff_command(message[4:].strip(), reply)
+            return
         url, background = _parse_handoff(message)
         if url is not None:
             self.new_tab(url=url, switch=not background)
@@ -18764,6 +19008,47 @@ class Browser(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def _handoff_command(self, name, reply=None):
+        """Run a named command sent over the single-instance socket.
+
+        Unlike a URL hand-off this never raises the window: these arrive
+        from a macro key pressed while another window - a game, usually -
+        has the screen, and coming to the front is the one thing that
+        must not happen. The answer goes back down the socket so the
+        caller can say what happened."""
+        say = reply or (lambda _text: None)
+        if name == "mute-discord":
+            self.toggle_discord_mute(say)
+        else:
+            say("unknown-command")
+
+    def toggle_discord_mute(self, done):
+        """Toggle mute in whichever tab has Discord open."""
+        self._run_in_discord(_DISCORD_MUTE_JS, done)
+
+    def _run_in_discord(self, js, done):
+        """Run JS in whichever tab has Discord open, and answer with what
+        it returned.
+
+        The tab keeps its own DOM whether or not it is the visible one,
+        so this works while the browser is not even the focused window.
+        Every virtual browser's tabs are searched, since Discord may be
+        signed in under any of them."""
+        for i in range(self.tabs.count()):
+            view = self.tabs.widget(i)
+            if self._is_header(view) or not hasattr(view, "url"):
+                continue
+            url = (view.url().toString() or getattr(view, "_pending", "")
+                   or getattr(view, "_requested", ""))
+            host = QUrl(url).host().lower()
+            if host != "discord.com" and not host.endswith(".discord.com"):
+                continue
+            view.page().runJavaScript(
+                js, APP_WORLD_ID,
+                lambda state, _d=done: _d(str(state) if state else "no-answer"))
+            return
+        done("no-discord-tab")
 
     def restart(self):
         """Relaunch the browser (used after an update)."""
@@ -19198,8 +19483,20 @@ def _install_proxy_flags():
     # Where there is none the flag changes nothing. Broadcasters stream
     # HEVC (ARD's live channels do), and without it their player retries
     # a decoder it cannot have and gives up with "Wiedergabefehler".
+    # Chromium honours only the LAST --enable-features on the command
+    # line, so everything asked for has to travel in this one flag.
+    # The Vaapi* features are hardware video decode: the engine ships
+    # with it off on Linux, so every frame is decoded on the CPU. A 4K
+    # stream then saturates a core in the renderer and another in the
+    # compositor, the audio thread starves, and fullscreen video
+    # stutters with the sound cutting out -- while the decoder on the
+    # card sits at 0%. Where there is no usable VA-API driver the
+    # features change nothing, the same way the HEVC one does.
     if "PlatformHEVCDecoderSupport" not in env:
-        env += " --enable-features=PlatformHEVCDecoderSupport"
+        env += (" --enable-features=PlatformHEVCDecoderSupport"
+                ",VaapiVideoDecoder,VaapiVideoDecodeLinuxGL"
+                ",AcceleratedVideoDecodeLinuxGL"
+                " --ignore-gpu-blocklist")
     cdm = _widevine_path()
     if cdm:
         env += ' --widevine-path="%s"' % cdm
@@ -19341,6 +19638,33 @@ def _wants_autoplay(url):
     return QUrl(text).fragment().lower() == "autoplay"
 
 
+# Discord's own mute control, clicked in the page. The button keeps the same
+# aria-label either way - it is aria-checked that says whether the mic is off
+# right now - so the answer is worked out before the click and inverted, rather
+# than read back out of a DOM React has not re-rendered yet. Some layouts (a
+# popped-out call) have no such button, so the fallback is Discord's own
+# Ctrl+Shift+M binding, dispatched at the window the way a real key would
+# arrive: its keybind layer listens for the event, not for a trusted one.
+_DISCORD_MUTE_JS = """
+(function () {
+  var b = document.querySelector('button[aria-label="Mute"], button[aria-label="Unmute"]');
+  if (b) {
+    var wasMuted = b.getAttribute('aria-checked') === 'true'
+                || b.getAttribute('aria-label') === 'Unmute';
+    b.click();
+    return wasMuted ? 'live' : 'muted';
+  }
+  ['keydown', 'keyup'].forEach(function (type) {
+    window.dispatchEvent(new KeyboardEvent(type, {
+      key: 'M', code: 'KeyM', keyCode: 77, which: 77,
+      ctrlKey: true, shiftKey: true, bubbles: true
+    }));
+  });
+  return 'toggled';
+})();
+"""
+
+
 def _parse_handoff(message):
     """What a second launch sent through the socket: the address to
     open (None for "just come to the front") and whether the tab is
@@ -19436,7 +19760,37 @@ def _handoff_to_existing(background, url, timeout=1500):
     return True
 
 
+def _send_command(name, timeout=3000):
+    """Ask the running browser to run a command; print what it answers.
+
+    Returns an exit status, so this doubles as the body of the CLI: no
+    browser listening is a failure the caller should hear about rather
+    than a silent no-op."""
+    probe = QLocalSocket()
+    probe.connectToServer(SINGLE_INSTANCE_SOCKET)
+    if not probe.waitForConnected(timeout):
+        probe.abort()
+        print("not-running")
+        return 1
+    probe.write(("cmd " + name).encode())
+    probe.flush()
+    probe.waitForBytesWritten(timeout)
+    answer = ""
+    if probe.waitForReadyRead(timeout):
+        answer = bytes(probe.readAll()).decode().strip()
+    probe.disconnectFromServer()
+    print(answer or "no-answer")
+    return 0 if answer and not answer.startswith("no-") else 1
+
+
 def main():
+    # a control command (--mute-discord) is not a launch: it is handed to
+    # the running browser, which answers, and nothing is started if none
+    # is running.
+    for arg in sys.argv[1:]:
+        if arg.startswith("--") and arg[2:] in ("mute-discord",):
+            return _send_command(arg[2:])
+
     # a URL argument means we were asked to open a link (e.g. as the
     # system default browser); --background opens it without bringing
     # the window up over whatever the user is doing
@@ -19544,4 +19898,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

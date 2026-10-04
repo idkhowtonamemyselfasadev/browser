@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-09-18 — Save any image
+
+- **Right-click → *Save image* on anything drawn under the cursor.** The
+  engine's own entry only appears on a bare `<img>`; this one looks at the
+  whole stack under the pointer (`IMAGE_AT_POINT_JS`) and takes the first
+  picture in it: an image under a transparent overlay, a `<picture>`, a
+  video poster, a CSS background, an inline SVG, a canvas. Things with an
+  address download through the engine as usual; a canvas or inline SVG has
+  none and is written straight into the download folder, listed like a
+  printed PDF. A spot with no picture says so in a tooltip.
+- **`Shift` + right-click always opens the browser's menu**, even on sites
+  that swallow the gesture to keep their pictures (`FORCE_MENU_JS`, capture
+  phase on the window, every frame). A plain right-click is still the
+  site's.
+- `test_saveimage.py` covers all of it and is in `tools/runall.sh`.
+
 ## 2026-09-11 — An agent bridge: scripts can drive the tabs
 
 - **A second local socket, `browser-agent`, lets a script on this
