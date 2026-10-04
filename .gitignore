@@ -19,3 +19,6 @@ passwords.key
 # agent worktrees and session files - never part of the browser
 .claude/
 CLAUDE.md
+
+# compiled artifact of ~/claude/web-engine — built, not committed
+web_engine.so
