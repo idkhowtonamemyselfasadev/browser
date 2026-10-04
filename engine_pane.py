@@ -10,6 +10,7 @@ browser.py is only touched to import this module and bind the shortcut;
 everything else lives here.
 """
 
+import re
 import sys
 
 from PyQt6.QtCore import QEvent, Qt, QTimer
@@ -71,7 +72,42 @@ def toggle(browser):
     if pane is None:
         pane = browser._engine_pane = EnginePane(browser)
     url = view.url().toString()
-    view.page().toHtml(lambda html: pane.show_html(html, url))
+
+    def measured(depth):
+        # the engine recurses once per level and overflows its stack on
+        # a DOM nested ~15000 deep (a script-built one; no real page
+        # gets near). Asked of the live page, which is cheap, rather
+        # than parsed out of the HTML here.
+        if isinstance(depth, (int, float)) and depth > MAX_DEPTH:
+            pane.show_message(
+                "This page nests more than %d elements deep; the engine"
+                " stops there." % MAX_DEPTH, url)
+            return
+        view.page().toHtml(lambda html: pane.show_html(_unthemed(html), url))
+    view.page().runJavaScript(DEPTH_JS, _mod(browser).APP_WORLD_ID, measured)
+
+
+MAX_DEPTH = 4000
+SITE_THEME_RE = re.compile(r'<style id="__sitetheme">.*?</style>', re.S)
+
+
+def _unthemed(html):
+    """The page without theme_web's sheet: the engine reads its
+    ::-webkit-scrollbar { height: 12px } as a rule for every element and
+    squashes the page to 12px, and it brings its own theme_css anyway."""
+    return SITE_THEME_RE.sub("", html or "", count=1)
+DEPTH_JS = """(function () {
+  var max = 0, stack = [[document.documentElement, 1]];
+  while (stack.length) {
+    var top = stack.pop(), el = top[0], d = top[1];
+    if (!el) continue;
+    if (d > max) max = d;
+    if (max > 4000) return max;
+    for (var c = el.firstElementChild; c; c = c.nextElementSibling)
+      stack.push([c, d + 1]);
+  }
+  return max;
+})()"""
 
 
 class EnginePane(QWidget):
@@ -130,6 +166,18 @@ class EnginePane(QWidget):
         self.raise_()
         self.setFocus()
 
+    def show_message(self, text, url):
+        self._html = ""
+        self._url = url or ""
+        self.title.setText(f"My Engine — {url}" if url else "My Engine")
+        self._retheme()
+        self.place()
+        self.image.setPixmap(QPixmap())
+        self.image.setText(text)
+        self.show()
+        self.raise_()
+        self.setFocus()
+
     def dismiss(self):
         self.hide()
         view = self.browser.current()
@@ -144,6 +192,8 @@ class EnginePane(QWidget):
     # -- rendering --------------------------------------------------------
 
     def render_page(self):
+        if not getattr(self, "_html", ""):
+            return      # a message is up (see show_message): keep it
         engine = _engine()
         if engine is None:
             # install with a rename, never an in-place cp: a running

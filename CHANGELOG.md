@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-04 — websites in your theme
+
+- **Websites take on the browser's theme.** Every site is recoloured in
+  the palette of the theme you picked, and the character themes bring
+  their own face (Terminal glows, Newspaper prints in serif). It is on
+  by default and switched in Settings > Appearance > "Theme websites".
+- **Right-click a page > "Don't theme this site"** for a site it gets
+  wrong; "Theme this site" brings it back. Sites that are dark by design
+  and Google (which has its own switch) are left alone.
+- On a themed site auto-darken steps aside, so pages are not darkened
+  twice; on everything else it works as before.
+- Switching it off takes the theme off open tabs at once, without a
+  reload. Pages no longer fade in from white as they load.
+- Works on sites with a strict security policy, keeps cookie-banner
+  backdrops see-through, and keeps up with pages that restyle themselves.
+- The engine pane (Ctrl+Shift+E) says so instead of crashing on a page
+  nested deeper than it can draw, and is no longer squashed to a strip
+  on themed pages.
+- The "page stopped responding" message is readable again.
+
 ## 2026-10-04 — Update never throws work away
 
 - **Update no longer wipes uncommitted changes in a git copy.** When a
