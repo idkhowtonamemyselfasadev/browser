@@ -170,6 +170,10 @@ class AgentBridge:
 
     # ---- lifecycle ---------------------------------------------------
     def listen(self):
+        # 0700 regardless of the umask: whoever reaches this socket can run
+        # JS in every tab, logged-in ones included
+        self.server.setSocketOptions(
+            QLocalServer.SocketOption.UserAccessOption)
         if not self.server.listen(SOCKET_NAME):
             # a dead predecessor's socket file; nobody else uses this name
             QLocalServer.removeServer(SOCKET_NAME)
@@ -260,6 +264,11 @@ class AgentBridge:
 
     def _run(self, v, code, done, world=APP_WORLD):
         v.page().runJavaScript(code, world, done)
+
+    @staticmethod
+    def _gone(v):
+        from PyQt6 import sip
+        return sip.isdeleted(v) or sip.isdeleted(v.page())
 
     # ---- ops ---------------------------------------------------------
     def op_ping(self, conn, req):
@@ -382,6 +391,10 @@ class AgentBridge:
                 QTimer.singleShot(step, poll)
             if conn.state() != QLocalSocket.LocalSocketState.ConnectedState:
                 return  # the caller gave up; stop polling
+            if self._gone(v):
+                self._reply(conn, {"ok": False, "error": "no-such-tab",
+                                   "waited": waited[0]})
+                return  # the tab was closed while we waited
             self._run(v, code, got)
         poll()
 

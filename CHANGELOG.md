@@ -1,5 +1,107 @@
 # Changelog
 
+## 2026-10-04 — Update never throws work away
+
+- **Update no longer wipes uncommitted changes in a git copy.** When a
+  pull could not fast-forward, it ran `git reset --hard origin/HEAD`:
+  uncommitted edits were gone, unpushed commits dropped out of sight, and
+  a feature branch was moved onto main - and it said "Updated!". Now it
+  stops and says why when there are uncommitted changes, resets only onto
+  the branch's own upstream, and keeps the old version as a branch
+  `update-backup-<time>` first.
+- The agent bridge socket is owner-only (0700) whatever the umask, and
+  its `wait` answers no-such-tab instead of hanging when the tab closes.
+- Widevine: WIDEVINE_PATH and Chrome's own updated copies are used again
+  instead of being dropped when the proxy flags were installed.
+
+## 2026-10-04 — the bug sweep (from the Windows edition)
+
+- **Logins survive closing the browser.** It used to end itself before
+  Chromium had written its cookies to disk (it does that only every
+  thirty seconds or so), so whatever you had just signed in to was
+  forgotten at the next start. The cookie jars are now closed properly
+  first.
+- **No more see-through window.** Every look made the window
+  translucent, and Windows does not blur what is behind one: the
+  desktop showed straight through, with a strip under the tabs that
+  filled with leftover junk. The window is solid on Windows now, Liquid
+  Glass included — it keeps its shapes on the theme's own base.
+- **Themes are readable again.** Most of the "unreadable" was text
+  drawn over the desktop through that hole. The browser also uses one
+  style of its own on Windows now, instead of Windows 11's, which mixed
+  light system colours into dark themes.
+- **Search suggestions no longer run into each other.** The highlighted
+  row stands out, the scroll bar is dark, and the last row is no longer
+  cut off.
+- **Update works.** A fresh install did not know which version it was,
+  so it always said "Update available" and "Updated!" changed nothing;
+  it now checks its own files. The check no longer uses GitHub's API,
+  which stopped answering after sixty checks an hour from one network.
+  An update is written beside the old files and swapped in, so an
+  interrupted one cannot leave a broken browser behind.
+- **Saved passwords are no longer destroyed on Windows.** Windows
+  quietly turned every line-feed byte in the password files into two
+  bytes, so after a restart the vault read as empty or the master
+  password was refused. Fixed — and a vault damaged that way is
+  repaired the next time it is opened, so passwords that "vanished"
+  come back, as long as no password was saved since.
+- **A lost password key no longer costs the vault.** The vault it
+  belonged to is put aside as passwords.json.unreadable-… instead of
+  being written over, so restoring the key from a backup still opens it.
+- **No more crash when a site joins a call** (Meet, Discord): a
+  Linux-only option ended the browser on the spot.
+- **A website can no longer install a plugin without asking.** A
+  download named *.user.js went straight into the plugins folder and ran
+  on every site from then on. You are asked first now, and No saves it
+  as an ordinary download.
+- **Your data files are written safely.** Settings, history, bookmarks,
+  downloads and known sites are written beside the old file and swapped
+  in, so a crash or power cut mid-save leaves the old file rather than
+  half of one; a file that cannot be read is put aside
+  (name.corrupt-…), not silently replaced with nothing.
+- **Open tabs survive a crash.** They are saved every thirty seconds,
+  not only when the browser closes normally.
+- **An unexpected error no longer makes the window vanish.** The
+  browser keeps going and writes what happened to crash.log in its data
+  folder.
+- 1Password: names and passwords with umlauts are no longer garbled, and
+  no console window flashes up on every call.
+- A second Windows user on the same PC can open the browser while the
+  first has it open.
+- Downloads go to your real Downloads folder, even when it was moved to
+  another drive.
+- install.bat makes the shortcut start the same Python it installed
+  into; with two Pythons on the PC the shortcut used to do nothing.
+- "Open in player" finds VLC where Windows installs it.
+- Crash detection works on Windows.
+- **Esc leaves video fullscreen.** It reached the video and the window
+  stayed fullscreen; closing or leaving that tab stranded the window
+  with no tabs and no address bar.
+- **Shift+Tab moves back through a form again.** It was taken for
+  switching virtual browsers, which also closed Settings mid-form. That
+  is Ctrl+Alt+PgDown / Ctrl+Alt+PgUp now.
+- **Pop-ups need a click.** Any page could open tabs on its own.
+- The address bar understands localhost:3000, 127.0.0.1:8000, router
+  addresses, http://… and file:///… typed out, and a Windows path
+  pasted from Explorer — instead of searching Google for them.
+- Opening a new tab and closing it at once no longer crashes the
+  browser.
+- A link opened from a tab in another virtual browser lands in that
+  browser instead of as an empty tab.
+- Renaming a group keeps it in its own virtual browser; "Add tab to
+  group" only offers the tab's own browser's groups.
+- Closing the last private tab no longer kills its downloads, and
+  closing a virtual browser with private tabs forgets their cookies.
+- A permission question goes away with the tab that asked it.
+- Picking a suggestion with Enter loads the page once, not twice.
+- **A proxy profile with a bad port can no longer stop the browser
+  starting**, and picking a proxy profile in Settings selects it
+  instead of deleting it.
+- Frutiger Aero: the bottom of the Settings sidebar and footer are
+  readable again.
+- One broken address in the history no longer hides every older entry;
+  the time column no longer wraps in 12-hour locales.
+
 ## 2026-09-18 — Save any image
 
 - **Right-click → *Save image* on anything drawn under the cursor.** The

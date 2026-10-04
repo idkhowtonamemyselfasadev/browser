@@ -251,6 +251,37 @@ SEARCH_ENGINES = {
 }
 SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
 DOWNLOAD_DIR = Path.home() / "Downloads"
+
+
+def _windows_downloads():
+    """Where Windows keeps this user's Downloads. Explorer lets anyone
+    move it to another drive (Properties > Location), and Path.home()
+    / "Downloads" then names a folder that is no longer used."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [("a", wintypes.DWORD), ("b", wintypes.WORD),
+                        ("c", wintypes.WORD), ("d", ctypes.c_ubyte * 8)]
+        # FOLDERID_Downloads {374DE290-123F-4565-9164-39C4925E467B}
+        fid = GUID(0x374DE290, 0x123F, 0x4565,
+                   (ctypes.c_ubyte * 8)(0x91, 0x64, 0x39, 0xC4,
+                                        0x92, 0x5E, 0x46, 0x7B))
+        out = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(
+                ctypes.byref(fid), 0, None, ctypes.byref(out)) != 0:
+            return None
+        try:
+            return Path(out.value)
+        finally:
+            ctypes.windll.ole32.CoTaskMemFree(out)
+    except Exception:
+        return None
+
+
+if sys.platform == "win32":
+    DOWNLOAD_DIR = _windows_downloads() or DOWNLOAD_DIR
 # spell-check needs a Chromium .bdic dictionary on disk; these are
 # the ones worth offering, and the UI says so when one is missing
 SPELL_LANGUAGES = [
@@ -296,7 +327,7 @@ ZOOM_STEPS = (0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25,
 # Where a private tab's cookies live. It is filed with the virtual
 # browsers so that every "for every cookie jar" loop in here reaches
 # it too, but it is deliberately not one of them: it is absent from
-# self.sessions, so it gets no pill, no Shift+Tab stop and no line in
+# self.sessions, so it gets no pill, no Ctrl+Alt+PgDown stop and no line in
 # the config. The name cannot collide - a real sid is "main" or eight
 # hex characters.
 PRIVATE_SESSION = "private"
@@ -1210,7 +1241,7 @@ UI_STRINGS = {
 "downloadFolder":"Download folder",
 "downloadFolderHint":"Where files land when you are not asked.",
 "chooseFolder":"Choose\u2026",
-"useDefault":"Use ~/Downloads",
+"useDefault":"Use the Downloads folder",
 "clearHistExit":"Clear history when the browser closes",
 "clearCookiesExit":"Clear cookies when the browser closes",
 "clearExitHint":"Cookies go for every virtual browser, so you start each session logged out. A site that keeps your login in its own storage rather than in a cookie can still recognise you \u2014 log out on the site itself for those.",
@@ -1357,7 +1388,7 @@ UI_STRINGS = {
 "downloadFolder":"Download-Ordner",
 "downloadFolderHint":"Wo Dateien landen, wenn nicht gefragt wird.",
 "chooseFolder":"Ausw\u00e4hlen\u2026",
-"useDefault":"~/Downloads verwenden",
+"useDefault":"Downloads-Ordner verwenden",
 "clearHistExit":"Verlauf beim Schlie\u00dfen l\u00f6schen",
 "clearCookiesExit":"Cookies beim Schlie\u00dfen l\u00f6schen",
 "clearExitHint":"Cookies verschwinden f\u00fcr jeden virtuellen Browser \u2014 du startest also \u00fcberall abgemeldet. Eine Seite, die deinen Login im eigenen Speicher statt in einem Cookie h\u00e4lt, kann dich trotzdem wiedererkennen \u2014 melde dich daf\u00fcr auf der Seite selbst ab.",
@@ -1889,7 +1920,7 @@ TOOLBAR_DEFAULT = [i["name"] for i in TOOLBAR_ITEMS if i["on"]]
 
 STYLE = """
 * { font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif; font-size: 13px; }
-QMainWindow, #chrome { background: #000000; }
+QMainWindow, #chrome, #root { background: #000000; }
 
 QLineEdit#urlbar {
     background: rgba(13, 13, 18, 230);
@@ -2839,7 +2870,7 @@ QToolButton#bmitem, QToolButton#favbtn { border-radius: 8px; }
    itself opaque, so only the furniture around the page is glass. Every
    colour is a Mocha token at an alpha, so it frosts in the theme's own
    palette; nothing here is a colour of its own. */
-QMainWindow { background: transparent; }
+QMainWindow, #root { background: transparent; }
 #chrome {
     background: rgba(13, 13, 18, 165);
     border-bottom: 1px solid rgba(108, 112, 134, 80);
@@ -2933,7 +2964,14 @@ def look_style(look=None, name=None):
     same reason theme_style() keeps Mocha byte for byte: the sheet a
     theme makes has to stay exactly what it is today, and Classic has to
     add literally nothing to it."""
-    qss = LOOK_QSS.get(look or ACTIVE_LOOK, "")
+    look = look or ACTIVE_LOOK
+    qss = LOOK_QSS.get(look, "")
+    if look == "glass" and sys.platform == "win32":
+        # Windows composites an alpha window with no blur behind it, so
+        # the "frost" is a hole straight through to the desktop, and the
+        # strips no widget repaints keep whatever was there last. Glass
+        # keeps its shapes here and sits on the theme's solid base.
+        qss += "\nQMainWindow, #root { background: #000000; }\n"
     return tint(qss, name) if qss else ""
 
 
@@ -3063,7 +3101,8 @@ def call_flag_raise():
         # whatever it points at. Creating and touching are one
         # operation on purpose - there is no window in which the file
         # exists but looks stale.
-        fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        fd = os.open(path, os.O_CREAT | os.O_WRONLY | _O_BINARY
+                     | getattr(os, "O_NOFOLLOW", 0), 0o600)
         os.close(fd)
         os.utime(path, None)
         _call_flag_raised = True
@@ -4235,6 +4274,9 @@ QLineEdit#urlbar, QMenu {
                     rgb(70 150 200) 72%, rgb(150 216 232) 100%);
   background-attachment: fixed;
 }
+:root[data-theme="aero"] #rail, :root[data-theme="aero"] #foot {
+  background: rgb(6 39 68 / .78);   /* the sky turns near-white down here */
+}
 :root[data-theme="aero"] h1, :root[data-theme="aero"] h2,
 :root[data-theme="aero"] body:not(.hasbg) #clock {
   text-shadow: 0 1px 0 rgb(255 255 255 / .45), 0 0 18px rgb(127 212 255 / .5);
@@ -4389,10 +4431,15 @@ COMPLETER_QSS = """
             QListView {
                 background: #0d0d12; color: #cdd6f4;
                 border: 1px solid rgba(108, 112, 134, 110);
-                border-radius: 10px; padding: 4px; outline: 0;
+                padding: 2px; outline: 0;
             }
-            QListView::item { padding: 6px 10px; border-radius: 7px; }
-            QListView::item:selected { background: #16161d; color: #ffffff; }
+            QListView::item { padding: 6px 10px; }
+            QListView::item:hover { background: #16161d; }
+            QListView::item:selected { background: #313244; color: #ffffff; }
+            QScrollBar:vertical { background: #0d0d12; width: 8px; margin: 0; }
+            QScrollBar::handle:vertical { background: #45475a; border-radius: 4px; min-height: 24px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
         """
 
 
@@ -4525,11 +4572,30 @@ def _qwebchannel_source():
     return _QWC_SRC
 
 
+#: Windows opens an os.open() descriptor in TEXT mode unless told
+#: otherwise, and its C runtime then writes every LF byte as CR LF -
+#: even through os.fdopen(fd, "wb"). That is how the key file, the
+#: vault and the sealed token were all damaged on Windows: see
+#: _undo_text_mode for getting them back.
+_O_BINARY = getattr(os, "O_BINARY", 0)
+
+
+def _undo_text_mode(data):
+    """Undo what a text-mode descriptor did to bytes written through it.
+
+    Every LF became CR LF, and nothing else changed - an LF that already
+    had a CR in front of it became CR CR LF - so turning each CR LF back
+    into LF is the exact inverse. Only ever tried on a file that will
+    not open as it is."""
+    return data.replace(b"\r\n", b"\n")
+
+
 def _write_private(path, data):
     """Write bytes with owner-only permissions (0600), creating the
     directory as needed; an existing file is clamped to 0600 too."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_BINARY,
+                 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
     os.chmod(path, 0o600)
@@ -4563,12 +4629,27 @@ def _write_atomic(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".new")
     try:
-        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_BINARY,
+                     0o600)
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(str(tmp), str(path))
+        if sys.platform == "win32":
+            # the new file has the folder's inherited ACL, not the
+            # owner-only one the key file gets: give it the same
+            _restrict_to_owner(tmp)
+        for attempt in range(10):
+            try:
+                os.replace(str(tmp), str(path))
+                break
+            except PermissionError:
+                # an antivirus or the search indexer holding the old
+                # file open for a moment refuses the swap on Windows;
+                # a moment later it goes through
+                if attempt == 9 or sys.platform != "win32":
+                    raise
+                time.sleep(0.05)
     except OSError:
         try:
             tmp.unlink()
@@ -4584,6 +4665,49 @@ def _write_atomic(path, data):
     except OSError:
         pass
     return True
+
+
+def _write_json(path, obj):
+    """config, history, bookmarks, downloads, hosts: written beside the
+    file and swapped in, so a kill or a power cut mid-save leaves the old
+    file rather than half of one (which the next start used to read as
+    nothing, and the next save made true). No fsync and no ACL work -
+    history is written on every navigation and has to stay cheap."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".new")
+    tmp.write_text(json.dumps(obj), encoding="utf-8")
+    for attempt in range(10):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            # Windows: an antivirus or the indexer has the old file open
+            if attempt == 9 or sys.platform != "win32":
+                raise
+            time.sleep(0.05)
+
+
+def _load_json(path, kind, default):
+    """A data file, or `default`. A file that is there but is not a
+    `kind` is moved aside (name.corrupt-<time>) instead of being read as
+    empty and then overwritten by the next save, so what was in it can
+    still be got back."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return default
+    try:
+        data = json.loads(raw.decode("utf-8"))
+        if isinstance(data, kind):
+            return data
+    except ValueError:
+        pass
+    try:
+        path.replace(path.with_name(
+            "%s.corrupt-%d" % (path.name, int(time.time()))))
+    except OSError:
+        pass
+    return default
 
 
 # ---- the master password ----
@@ -4741,6 +4865,9 @@ class VaultLock:
         #: it is the whole of the locked state
         self._vault_key = None
         self._used = time.monotonic()
+        #: the last read could not open a vault that is there, so what
+        #: the caller holds is not its contents and nothing may be saved
+        self._blind = False
 
     # ---- what is on the disk ----
     def _raw(self):
@@ -4863,14 +4990,47 @@ class VaultLock:
         Only ever reached when there is no master password: this is
         the old scheme, and it is the one the honest note on
         FileVaultProvider is about."""
-        try:
-            key = self.key_file.read_bytes()
-        except OSError:
-            key = b""
+        key = None
+        for attempt in range(10):
+            try:
+                key = self.key_file.read_bytes()
+                break
+            except FileNotFoundError:
+                key = b""
+                break
+            except OSError:
+                # there, but unreadable this moment (an antivirus has it
+                # open): wait a little, and never mint a new one over it
+                if sys.platform != "win32" or attempt == 9:
+                    return None
+                time.sleep(0.05)
+        if len(key) != 32 and len(_undo_text_mode(key)) == 32:
+            # written by a Windows build that put a CR before every LF
+            # byte; a key with n LF bytes in it grew by exactly n, so
+            # this is never a guess. Put it back the way it was meant
+            # to be instead of replacing it, which would lose every
+            # password sealed under it.
+            key = _undo_text_mode(key)
+            _write_private(self.key_file, key)
         if len(key) != 32:
+            if self._raw().startswith(VAULT_MAGIC):
+                # the vault's key is gone and a new key cannot open it.
+                # The next save would have written over every password
+                # in it; put it aside instead, where restoring the old
+                # key file (from a backup) can still open it
+                self._set_aside()
             key = os.urandom(32)
             _write_private(self.key_file, key)
         return key
+
+    def _set_aside(self):
+        """Move a vault nothing here can open out of the way, by name,
+        rather than let the next save destroy it."""
+        try:
+            self.file.replace(self.file.with_name(
+                "%s.unreadable-%d" % (self.file.name, int(time.time()))))
+        except OSError:
+            pass
 
     def _tidy(self):
         """Leftovers of a migration that was cut off half way.
@@ -4900,11 +5060,23 @@ class VaultLock:
         not is a damaged file, not an unlocked one, and saying yes to
         it would hand back an empty vault that the next write would
         make true."""
-        head, body = self._split(self._raw())
-        if head is None:
-            return False
-        key = self._unwrap(head, passphrase)
-        if key is None or _unseal(key, body, aad=MASTER_MAGIC) is None:
+        raw = self._raw()
+        for candidate in dict.fromkeys((raw, _undo_text_mode(raw))):
+            head, body = self._split(candidate)
+            if head is None:
+                continue
+            key = self._unwrap(head, passphrase)
+            if key is None or _unseal(key, body, aad=MASTER_MAGIC) is None:
+                continue
+            if candidate is not raw:
+                # the right passphrase, refused only because a Windows
+                # build wrote the file in text mode: repair it on disk
+                try:
+                    _write_atomic(self.file, candidate)
+                except OSError:
+                    pass
+            break
+        else:
             return False
         self._vault_key = key
         self.touch()
@@ -4929,10 +5101,13 @@ class VaultLock:
             self._tidy()
             if self._vault_key is None:
                 return {}
-            head, body = self._split(raw)
-            if head is None:
-                return {}
-            plain = _unseal(self._vault_key, body, aad=MASTER_MAGIC)
+            plain = None
+            for candidate in dict.fromkeys((raw, _undo_text_mode(raw))):
+                head, body = self._split(candidate)
+                if head is not None:
+                    plain = _unseal(self._vault_key, body, aad=MASTER_MAGIC)
+                if plain is not None:
+                    break
             if plain is None:
                 return {}
             try:
@@ -4942,12 +5117,29 @@ class VaultLock:
             return data if isinstance(data, dict) else {}
         if not raw.startswith(VAULT_MAGIC) or len(raw) < 20:
             return {}
-        nonce, body = raw[4:20], raw[20:]
-        try:
-            data = json.loads(_keystream_xor(self._plain_key(), nonce, body))
-        except (ValueError, UnicodeDecodeError):
-            return {}   # wrong or lost key file: start over, never crash
-        return data if isinstance(data, dict) else {}
+        key = self._plain_key()
+        if key is None:
+            self._blind = True
+            return {}
+        self._blind = False
+        raw = self._raw()       # _plain_key may have set a vault aside
+        if not raw.startswith(VAULT_MAGIC) or len(raw) < 20:
+            return {}
+        for candidate in dict.fromkeys((raw, _undo_text_mode(raw))):
+            nonce, body = candidate[4:20], candidate[20:]
+            try:
+                data = json.loads(_keystream_xor(key, nonce, body))
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if candidate is not raw and isinstance(data, dict):
+                # a vault a Windows build wrote in text mode: it opens
+                # with the damage undone, so keep it that way on disk
+                try:
+                    _write_atomic(self.file, candidate)
+                except OSError:
+                    pass
+            return data if isinstance(data, dict) else {}
+        return {}   # wrong or lost key file: start over, never crash
 
     def write(self, data):
         """Persist the snapshot in whichever shape the vault is in.
@@ -4964,10 +5156,28 @@ class VaultLock:
                 return False
             self.touch()
             return self._write_master(data, self._vault_key, None)
+        key = self._plain_key()
+        if key is None or self._blind:
+            return False       # the key file cannot be / was not read
+        raw = self._raw()
+        if raw.startswith(VAULT_MAGIC) and len(raw) >= 20 and not any(
+                self._plain_opens(c, key)
+                for c in (raw, _undo_text_mode(raw))):
+            # a vault this key does not open: what the browser holds in
+            # memory is not what is in it, so keep it rather than write
+            # over it
+            self._set_aside()
         nonce = os.urandom(16)
-        body = _keystream_xor(self._plain_key(), nonce,
-                              json.dumps(data).encode())
+        body = _keystream_xor(key, nonce, json.dumps(data).encode())
         return _write_atomic(self.file, VAULT_MAGIC + nonce + body)
+
+    @staticmethod
+    def _plain_opens(raw, key):
+        try:
+            json.loads(_keystream_xor(key, raw[4:20], raw[20:]))
+            return True
+        except (ValueError, UnicodeDecodeError):
+            return False
 
     def _write_master(self, data, key, head):
         """One sealed vault, header and body together, in one step."""
@@ -5017,6 +5227,8 @@ class VaultLock:
         if self.enabled() or not passphrase or self.foreign():
             return False
         data = self.read()
+        if self._blind:
+            return False       # never seal {} over a vault it could not read
         token = self._token_plain()
         key = self._install(data, passphrase)
         if key is None:
@@ -5113,8 +5325,11 @@ class VaultLock:
             return raw
         if self._vault_key is None:
             return None
-        return _unseal(self._vault_key, raw[len(TOKEN_MAGIC):],
-                       aad=TOKEN_MAGIC)
+        return (_unseal(self._vault_key, raw[len(TOKEN_MAGIC):],
+                        aad=TOKEN_MAGIC)
+                or _unseal(self._vault_key,
+                           _undo_text_mode(raw)[len(TOKEN_MAGIC):],
+                           aad=TOKEN_MAGIC))
 
     def seal_token(self, data):
         return TOKEN_MAGIC + _seal(self._vault_key, data, aad=TOKEN_MAGIC)
@@ -5592,6 +5807,13 @@ class OnePasswordProvider(VaultProvider):
             done = subprocess.run(
                 [self.binary] + list(args), env=env, capture_output=True,
                 text=True, timeout=self.TIMEOUT, check=False,
+                # op speaks UTF-8; Windows would otherwise decode it as
+                # cp1252, garbling umlauts in names and passwords, and
+                # die outright on a byte cp1252 has no character for
+                encoding="utf-8", errors="replace",
+                # op.exe is a console program: under pythonw every call
+                # would flash a console window up without this
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 # always a pipe, even when there is nothing to send, so
                 # `op` never inherits a terminal and never waits on one
                 input=stdin if stdin is not None else "")
@@ -6812,7 +7034,41 @@ class Bridge(QObject):
             "zip, or replace this folder with a git clone of the "
             "repo and the button will work from then on.")
 
-    def _reset_to_origin(self):
+    def _git_quick(self, *args):
+        """A short git question asked synchronously: (exit code, stdout).
+        Anything that keeps git from answering is (-1, "")."""
+        try:
+            r = subprocess.run(["git", *args], cwd=str(APP_DIR),
+                               capture_output=True, text=True, timeout=15,
+                               creationflags=getattr(
+                                   subprocess, "CREATE_NO_WINDOW", 0))
+            return r.returncode, r.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return -1, ""
+
+    def _reset_blocker(self):
+        """Why a hard reset must NOT run here, or None when it may.
+
+        A reset --hard throws away every uncommitted edit in the tree,
+        and moving the branch drops its unpushed commits from sight. A
+        developer's checkout (a feature branch, work in progress) is
+        exactly the copy that diverges, so: never with uncommitted
+        changes, only onto this branch's own upstream, and only after
+        HEAD has been kept under a backup branch."""
+        code, dirty = self._git_quick(
+            "status", "--porcelain", "--untracked-files=no")
+        if code != 0 or dirty:
+            return ("Update stopped: this copy has changes that are not "
+                    "committed, so nothing was replaced. Commit or stash "
+                    "them and try again.")
+        code, up = self._git_quick(
+            "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+        if code != 0 or not up:
+            return ("Update stopped: this branch does not follow one on "
+                    "GitHub, so there is nothing to take.")
+        return None
+
+    def _reset_to_origin(self, target="@{u}", backup=""):
         """Take what GitHub has, wholesale.
 
         Reached only when a pull cannot fast-forward. The folder holds the
@@ -6823,6 +7079,7 @@ class Bridge(QObject):
 
         `fetch` then `reset --hard FETCH_HEAD`, because after a rewrite
         upstream the local branch's idea of origin/main is itself stale."""
+        self._reset_target, self._reset_backup = target, backup
         proc = QProcess(self)
         self._updating = proc
         proc.setWorkingDirectory(str(APP_DIR))
@@ -6846,7 +7103,8 @@ class Bridge(QObject):
         hard.setWorkingDirectory(str(APP_DIR))
         hard.finished.connect(lambda *_: self._reset_finished(hard))
         hard.errorOccurred.connect(lambda *_: self._reset_finished(hard))
-        hard.start("git", ["reset", "--hard", "origin/HEAD"])
+        hard.start("git", ["reset", "--hard",
+                           getattr(self, "_reset_target", "@{u}")])
 
     def _reset_finished(self, proc):
         if self._updating is not proc:
@@ -6857,8 +7115,11 @@ class Bridge(QObject):
               and proc.exitCode() == 0)
         proc.deleteLater()
         if ok:
+            backup = getattr(self, "_reset_backup", "")
             self.updateFinished.emit(
-                "Updated! Restart the browser to finish.")
+                "Updated! Restart the browser to finish."
+                + (" (the old version is kept as branch %s)" % backup
+                   if backup else ""))
         else:
             last = (err.strip().splitlines() or ["unknown error"])[-1]
             self.updateFinished.emit("Update failed: " + last)
@@ -6897,9 +7158,25 @@ class Bridge(QObject):
                 # that genuinely causes this is the history being rewritten
                 # upstream, after which a pull can never succeed again and
                 # the copy is stranded on old files for good. Take what is
-                # published instead of explaining the deadlock.
-                self._reset_to_origin()
-                return
+                # published instead of explaining the deadlock -- but only
+                # onto this branch's own upstream, never over uncommitted
+                # work, and with the old HEAD kept under a backup branch.
+                blocker = self._reset_blocker()
+                if blocker:
+                    msg = blocker
+                else:
+                    backup = "update-backup-" + time.strftime(
+                        "%Y%m%d-%H%M%S")
+                    if self._git_quick("branch", backup, "HEAD")[0] != 0:
+                        backup = ""
+                    if backup:
+                        self._reset_to_origin("@{u}", backup)
+                        return
+                    msg = "Update stopped: could not keep a backup first."
+            elif "would be overwritten" in err:
+                msg = ("Update stopped: this copy has changes that are not "
+                       "committed, and the update touches the same files. "
+                       "Commit or stash them and try again.")
             elif "unresolved conflict" in last or "MERGE_HEAD" in last:
                 msg = ("Update failed: a half-finished merge is in the way. "
                        "Try once more — this clears it first now.")
@@ -7147,7 +7424,14 @@ class Bridge(QObject):
         name = (prof.get("name") or "").strip()
         if not name or name in ("system", "direct"):
             return
+        try:
+            port = int(prof.get("port") or 0)
+        except (TypeError, ValueError):
+            return
+        if not 1 <= port <= 65535:
+            return
         prof["name"] = name
+        prof["port"] = port
         profs = [p for p in self.browser.config.get("proxyProfiles", [])
                  if p.get("name") != name]
         profs.append(prof)
@@ -8225,8 +8509,8 @@ class WebPage(QWebEnginePage):
         catches a navigation still in flight, the URL catches one that
         has already committed. Never hand the bridge to a document
         that is no longer ours."""
-        if has_channel or self._healed:
-            return
+        if has_channel or self._healed or sip.isdeleted(self):
+            return   # (a closed tab answers the pending probe with None)
         if self._channel_kind != "full" or not is_internal_page(self.url()):
             return
         self._healed = True
@@ -8321,8 +8605,17 @@ class WebView(QWebEngineView):
         # a link followed out of a private tab opens in another private
         # tab: letting it land in the normal jar would hand the site he
         # was reading anonymously his real cookies
+        # the new page must share the opener's profile, or Qt refuses to
+        # adopt it ("Can not adopt content from a different
+        # WebEngineProfile") and leaves an empty tab: so it joins the
+        # opener's virtual browser and group, not whichever tab is in front
+        session = getattr(self, "session", None) or "main"
+        group = None if self.private else getattr(self, "group", None)
+        if session != self.browser.active_session:
+            background = True
         return self.browser.new_tab(switch=not background, blank=True,
-                                    private=self.private)
+                                    private=self.private, group=group,
+                                    session=session)
 
     def _permission(self, permission):
         # the page comes along: a permission's origin is "file:///" for
@@ -8337,7 +8630,7 @@ class WebView(QWebEngineView):
 
     def _fullscreen(self, request):
         request.accept()
-        self.browser.set_fullscreen(request.toggleOn())
+        self.browser._page_fullscreen(self, request.toggleOn())
 
     def contextMenuEvent(self, event):
         """The engine's own menu, with pinning added to the end of it.
@@ -8790,6 +9083,14 @@ class PagePane(QWidget):
         The document has to be this pane's own page, arrived in one
         piece (a failed load records nothing), and asked for under the
         same address, key and all."""
+        pending = self._loading
+        if (pending is not None and self.view.page().isLoading()
+                and pending[1] == _page_data_rev
+                and QUrl(pending[0]) == QUrl(url)):
+            # the same document is already on its way; loading it again
+            # throws the half-built one away mid-handshake, and its
+            # channel's late replies land in the new one
+            return False
         if self._loaded is None:
             return True
         was_url, was_rev = self._loaded
@@ -9390,7 +9691,12 @@ class DownloadWidget(QWidget):
             self.info.setText("Failed: " + self.req.interruptReasonString())
 
     def _cancel_or_dismiss(self):
-        if self.req.state() == self.req.DownloadState.DownloadInProgress:
+        try:
+            running = (self.req.state()
+                       == self.req.DownloadState.DownloadInProgress)
+        except RuntimeError:
+            running = False      # its profile is gone, and it with it
+        if running:
             self.req.cancel()
         else:
             self.on_dismiss(self)
@@ -9474,7 +9780,7 @@ def load_downloads():
     a hand-edited or half-written file must never keep the browser from
     starting, and a "still running" entry can only be a leftover."""
     try:
-        raw = json.loads(DOWNLOADS_FILE.read_text())
+        raw = _load_json(DOWNLOADS_FILE, list, [])
     except Exception:
         return []
     if not isinstance(raw, list):
@@ -9797,7 +10103,7 @@ def load_bookmarks():
     javascript: or file: URL would otherwise be a way to aim the
     browser at something it should never load from a click."""
     try:
-        raw = json.loads(BOOKMARKS_FILE.read_text())
+        raw = _load_json(BOOKMARKS_FILE, list, [])
     except Exception:
         return []
     if not isinstance(raw, list):
@@ -11970,10 +12276,7 @@ class Browser(QMainWindow):
         if app is not None:
             app.setStyleSheet(theme_style() + look_style())
 
-        try:
-            self.config = json.loads(CONFIG_FILE.read_text())
-        except Exception:
-            self.config = {}
+        self.config = _load_json(CONFIG_FILE, dict, {})
         # host-only permission keys predate both ports and local files
         stale = self.config.get("permissionsKeyVersion", 1) < 2
         _migrate_permission_config(self.config)
@@ -12001,10 +12304,9 @@ class Browser(QMainWindow):
         if VAULT_PASSWORD_KEY not in self.config:
             self.config[VAULT_PASSWORD_KEY] = _vault_password_default(
                 self.config, CONFIG_FILE.parent)
-        try:
-            self.history = json.loads(HISTORY_FILE.read_text())
-        except Exception:
-            self.history = []
+        self.history = [e for e in _load_json(HISTORY_FILE, list, [])
+                        if isinstance(e, dict)
+                        and isinstance(e.get("url"), str)]
         # saved logins. Which store they live in is an explicit
         # setting, never a guess — and if the chosen one cannot be
         # reached the browser says so and uses the built-in file vault
@@ -12272,6 +12574,7 @@ class Browser(QMainWindow):
         QApplication.instance().aboutToQuit.connect(call_flag_drop)
 
         root = QWidget()
+        root.setObjectName("root")
         rlay = QVBoxLayout(root)
         rlay.setContentsMargins(0, 0, 0, 0)
         rlay.setSpacing(0)
@@ -12319,7 +12622,8 @@ class Browser(QMainWindow):
             "F5": self._tb_reload,
             "Ctrl+Tab": lambda: self._cycle(1),
             "Ctrl+Shift+Tab": lambda: self._cycle(-1),
-            "Shift+Tab": lambda: self._cycle_session(1),
+            "Ctrl+Alt+PgDown": lambda: self._cycle_session(1),
+            "Ctrl+Alt+PgUp": lambda: self._cycle_session(-1),
             "Ctrl+D": self.toggle_bookmark,
             "Ctrl+Shift+B": self.toggle_bookmarks_bar,
             "Ctrl+Shift+G": self.generate_to_clipboard,
@@ -12338,7 +12642,9 @@ class Browser(QMainWindow):
                 out_of_pane(fn))
         for key, fn in {
             "Ctrl+Q": self.close,
-            "F11": lambda: self.set_fullscreen(not self.isFullScreen()),
+            "F11": lambda: (self._exit_page_fullscreen()
+                            if self._fs_view is not None
+                            else self.set_fullscreen(not self.isFullScreen())),
             "Ctrl+,": self.toggle_settings,
             "Ctrl+H": self.toggle_history,
             "Ctrl+J": self.toggle_downloads,
@@ -12407,6 +12713,15 @@ class Browser(QMainWindow):
         esc.activated.connect(self._pane_escape)
         esc.setEnabled(False)
         self._pane_esc = esc
+        # Qt WebEngine leaves leaving element fullscreen to the embedder:
+        # without this, Esc reached the video and the window stayed
+        # fullscreen with no chrome and no tab strip
+        self._fs_view = None
+        fs_esc = QShortcut(QKeySequence("Esc"), self)
+        fs_esc.setContext(Qt.ShortcutContext.WindowShortcut)
+        fs_esc.activated.connect(self._exit_page_fullscreen)
+        fs_esc.setEnabled(False)
+        self._fs_esc = fs_esc
         self._esc_turn = 0      # which Esc an answer belongs to
         self._esc_timer = None  # the fallback that closes on silence
         self._findbar = None  # built on first Ctrl+F, reused after
@@ -12414,6 +12729,13 @@ class Browser(QMainWindow):
 
         # virtual browsers and groups survive restarts
         QApplication.instance().aboutToQuit.connect(self._save_groups)
+        # ...and every 30 s, because a crash, a kill or a power cut never
+        # reaches aboutToQuit and used to lose every open tab
+        self._session_timer = QTimer(self)
+        self._session_timer.setInterval(30000)
+        self._session_timer.timeout.connect(
+            lambda: self._save_groups(quiet=True))
+        self._session_timer.start()
         # every way out, not just the window's close button: quit from
         # the menu, a restart after an update, a Ctrl+Q
         QApplication.instance().aboutToQuit.connect(self._clear_on_exit)
@@ -12469,7 +12791,7 @@ class Browser(QMainWindow):
                                  switch=False, lazy=True, title=t,
                                  at_end=True)
 
-    def _save_groups(self):
+    def _save_groups(self, quiet=False):
         data = []
         for g in self.groups:
             urls = []
@@ -12519,7 +12841,14 @@ class Browser(QMainWindow):
                 {"u": u, "t": self.tabs.tabText(i)})
         self.config["sessionTabs"] = session_tabs
         self.config["sessions"] = self.sessions
-        self.save_config()
+        # the 30 s autosave writes only when something changed: an
+        # idle browser rewriting its config forever is disk churn, and
+        # a fresh write is what a power cut is most likely to catch
+        snap = json.dumps([data, session_tabs, self.sessions])
+        if quiet and snap == getattr(self, "_session_snap", None):
+            return
+        self._session_snap = snap
+        self.save_config(quiet=quiet)
 
     def _restore_groups(self):
         for entry in self.config.get("tabGroups", []):
@@ -13348,8 +13677,11 @@ class Browser(QMainWindow):
         if w is None or self._is_header(w):
             return
         private = getattr(w, "private", False)
+        if w is getattr(self, "_fs_view", None):
+            self._exit_page_fullscreen()
         # first of all, while the tab is still whole
         self._drop_share(w)
+        self._drop_permission_asks(w)
         bar = getattr(self, "_findbar", None)
         if bar is not None:
             bar.forget(w)
@@ -13579,7 +13911,7 @@ class Browser(QMainWindow):
 
     # ---- virtual browsers ----
     def _cycle_session(self, step):
-        """Shift+Tab hops to the next virtual browser."""
+        """Ctrl+Alt+PgDown/PgUp hop to the next or previous virtual browser."""
         if len(self.sessions) < 2:
             return
         sids = [e["sid"] for e in self.sessions]
@@ -13752,6 +14084,9 @@ class Browser(QMainWindow):
             self.group_sessions.pop(g, None)
         self.sessions = [e for e in self.sessions if e["sid"] != sid]
         self.session_profiles.pop(sid, None)
+        # private tabs of that browser went with it: so must their jar,
+        # or the next private tab opens already logged in
+        self._drop_private_profile()
         self._closed_tabs = [t for t in self._closed_tabs
                              if t.get("session") != sid]
         if self.active_session == sid:
@@ -13895,6 +14230,7 @@ class Browser(QMainWindow):
         row.addWidget(allow)
         v.addLayout(row)
         self._perm_widget = card
+        card._page = page
 
         def decide(granted):
             # the tab may have navigated away or closed while the card
@@ -13921,6 +14257,27 @@ class Browser(QMainWindow):
         self._place_perm()
         card.show()
         card.raise_()
+
+    def _drop_permission_asks(self, view):
+        """A tab is closing: its unanswered questions go with it, rather
+        than staying up to store an "always allow" for a page that no
+        longer exists."""
+        try:
+            page = view.page()
+        except (RuntimeError, AttributeError):
+            return
+        for item in [q for q in self._perm_queue if q[1] is page]:
+            self._perm_queue.remove(item)
+            try:
+                item[0].deny()
+            except RuntimeError:
+                pass
+        card = self._perm_widget
+        if card is not None and getattr(card, "_page", None) is page:
+            card.hide()
+            card.deleteLater()
+            self._perm_widget = None
+            self._next_permission()
 
     def _place_perm(self):
         card = getattr(self, "_perm_widget", None)
@@ -14123,6 +14480,8 @@ class Browser(QMainWindow):
         self.collapsed[new] = self.collapsed.pop(old, False)
         if old in self.group_ids:
             self.group_ids[new] = self.group_ids.pop(old)
+        if old in self.group_sessions:
+            self.group_sessions[new] = self.group_sessions.pop(old)
         self.tabs.tabBar().update()
 
     def ungroup(self, group):
@@ -14153,9 +14512,12 @@ class Browser(QMainWindow):
         elif group is None:
             menu.addAction("Add tab to new group\u2026").triggered.connect(
                 lambda: self._tab_to_new_group(self.tabs.indexOf(view)))
-            if self.groups:
+            mine = [g for g in self.groups
+                    if self.group_sessions.get(g, "main")
+                    == getattr(view, "session", "main")]
+            if mine:
                 sub = menu.addMenu("Add tab to group")
-                for g in self.groups:
+                for g in mine:
                     sub.addAction(self._group_dot(g), g).triggered.connect(
                         lambda _, g=g: self._move_tab_to_group(
                             self.tabs.indexOf(view), g))
@@ -14278,7 +14640,22 @@ class Browser(QMainWindow):
         """What a line he typed means: an address, or a search for it.
         The address bar and the start menu's box ask the same question,
         so they ask it in the same place."""
-        if " " in text or ("." not in text and text != "localhost"):
+        if re.match(r"^[A-Za-z]:[\\/]", text):
+            # a Windows path, pasted from Explorer: C:\x\y.pdf
+            return QUrl.fromLocalFile(text.replace("\\", "/")).toString()
+        if " " not in text:
+            if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", text):
+                return text                  # http://localhost:8000, file:///C:/x
+            head = text.split("/", 1)[0]
+            host, colon, port = head.rpartition(":")
+            if not colon:
+                host = head
+            if (host == "localhost" or host.startswith("[")
+                    or re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", host)):
+                return "http://" + text      # dev servers, routers: no TLS
+            if colon and port.isdigit() and "." in host:
+                return "http://" + text
+        if " " in text or "." not in text:
             engine = SEARCH_ENGINES.get(self.config.get("searchEngine", "google"),
                                         SEARCH_ENGINES["google"])
             return engine[1].format(QUrl.toPercentEncoding(text).data().decode())
@@ -14309,6 +14686,13 @@ class Browser(QMainWindow):
         view = self.current()
         if view is None or self._is_header(view):
             return
+        # Enter on a highlighted suggestion arrives twice: returnPressed
+        # and the completer's activated. One load, not two.
+        now = time.monotonic()
+        if getattr(self, "_last_nav", None) == (url, id(view)) \
+                and now - getattr(self, "_last_nav_t", 0) < 0.5:
+            return
+        self._last_nav, self._last_nav_t = (url, id(view)), now
         # every other way of starting a load leaves the address behind
         # as a fallback; a shutdown mid-load must not lose this one
         view._requested = url
@@ -14486,7 +14870,7 @@ class Browser(QMainWindow):
             self.known_hosts.add(host)
             try:
                 HOSTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-                HOSTS_FILE.write_text(json.dumps(sorted(self.known_hosts)))
+                _write_json(HOSTS_FILE, sorted(self.known_hosts))
             except OSError:
                 pass
 
@@ -14645,7 +15029,7 @@ class Browser(QMainWindow):
         _page_data_changed()
         try:
             HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            HISTORY_FILE.write_text(json.dumps(self.history))
+            _write_json(HISTORY_FILE, self.history)
         except OSError:
             pass
 
@@ -14659,7 +15043,7 @@ class Browser(QMainWindow):
             _page_data_changed()
         try:
             CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            CONFIG_FILE.write_text(json.dumps(self.config))
+            _write_json(CONFIG_FILE, self.config)
         except OSError:
             pass
 
@@ -14728,6 +15112,9 @@ class Browser(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _tab_changed(self, index):
+        if (getattr(self, "_fs_view", None) is not None
+                and self.tabs.widget(index) is not self._fs_view):
+            self._exit_page_fullscreen()
         self._update_private_marks()
         w = self.tabs.widget(index)
         if w is not None and self._is_header(w):
@@ -14819,6 +15206,21 @@ class Browser(QMainWindow):
             self.tabs.setCurrentIndex(index)
             view.setFocus()
 
+    def _page_fullscreen(self, view, on):
+        self._fs_view = view if on else None
+        self._fs_esc.setEnabled(on)
+        self.set_fullscreen(on)
+
+    def _exit_page_fullscreen(self):
+        view = self._fs_view
+        self._page_fullscreen(None, False)
+        if view is not None:
+            try:
+                view.page().triggerAction(
+                    QWebEnginePage.WebAction.ExitFullScreen)
+            except RuntimeError:
+                pass
+
     def set_fullscreen(self, on):
         self.chrome.setVisible(not on)
         self.tabs.tabBar().setVisible(not on)
@@ -14850,6 +15252,9 @@ class Browser(QMainWindow):
         profile.downloadRequested.connect(self._download)
         s = profile.settings()
         s.setAttribute(QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True)
+        # on by default in the engine: any page could open tabs with no
+        # click at all (pop-unders, a background tab stealing the front)
+        s.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, False)
         # the start page is a local file; without this it may not navigate
         # to the web (search box / quick links -> ERR_NETWORK_ACCESS_DENIED)
         s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
@@ -16156,6 +16561,9 @@ class Browser(QMainWindow):
 
         `started` is the caller's stopwatch for BROWSER_TIMING=1 - only
         open_settings keeps one."""
+        if self._fs_view is not None:
+            # one Esc at a time: the pane's, not the video's
+            self._exit_page_fullscreen()
         pane = self._panes.get(name)
         if pane is None:
             pane = self._panes[name] = PagePane(
@@ -16442,8 +16850,13 @@ class Browser(QMainWindow):
         kind = (QNetworkProxy.ProxyType.Socks5Proxy
                 if prof.get("type") == "socks5"
                 else QNetworkProxy.ProxyType.HttpProxy)
-        proxy = QNetworkProxy(kind, prof.get("host", ""),
-                              int(prof.get("port") or 0))
+        try:
+            port = int(prof.get("port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        if not 0 <= port <= 65535:
+            port = 0     # a hand-typed 70000 must not stop the browser starting
+        proxy = QNetworkProxy(kind, str(prof.get("host", "")), port)
         if prof.get("user"):
             proxy.setUser(prof["user"])
             proxy.setPassword(prof.get("password", ""))
@@ -17351,6 +17764,10 @@ class Browser(QMainWindow):
         private tab is forgotten here too."""
         if self.private_tabs():
             return
+        if self._private_downloads_running():
+            # the jar owns its downloads: deleting it now kills them
+            # half-written. Tried again as each one ends.
+            return
         self._private_perms.clear()
         profile = self.session_profiles.pop(PRIVATE_SESSION, None)
         if profile is not None:
@@ -17358,6 +17775,17 @@ class Browser(QMainWindow):
             # queue and has to go first, or the profile would be pulled
             # out from under a page still holding it
             QTimer.singleShot(0, profile.deleteLater)
+
+    def _private_downloads_running(self):
+        out = []
+        for w in self.dlbar.findChildren(DownloadWidget):
+            try:
+                if (getattr(w, "private", False) and w.req.state()
+                        == w.req.DownloadState.DownloadInProgress):
+                    out.append(w.req)
+            except RuntimeError:
+                pass
+        return out
 
     def _session_profile(self, sid):
         if sid == "main":
@@ -17388,7 +17816,14 @@ class Browser(QMainWindow):
             page.restore_trust()
         # a .user.js is a plugin: install it straight into the folder
         name = request.downloadFileName()
-        if name.endswith(".user.js") and not self._page_is_private(page):
+        if (name.endswith(".user.js") and not self._page_is_private(page)
+                and QMessageBox.question(
+                    self, "Install plugin?",
+                    "%s wants to install the plugin \u201c%s\u201d.\n\n"
+                    "A plugin runs on every website you open. Only "
+                    "install plugins you trust."
+                    % (request.url().host() or request.url().toString(),
+                       name)) == QMessageBox.StandardButton.Yes):
             # ...but never out of a private tab. A userscript puts
             # itself in the plugins folder and runs on every page from
             # then on, which is about as far from "nothing is kept" as a
@@ -17425,6 +17860,10 @@ class Browser(QMainWindow):
         like any other; the list of what he has fetched is a record, and
         a private tab keeps none."""
         widget = DownloadWidget(request, self._dismiss_download)
+        widget.private = self._page_is_private(self._download_page(request))
+        if widget.private:
+            request.isFinishedChanged.connect(
+                lambda: QTimer.singleShot(0, self._drop_private_profile))
         self.dllay.insertWidget(self.dllay.count() - 1, widget)
         self.dlbar.show()
         if not self._page_is_private(self._download_page(request)):
@@ -17582,7 +18021,7 @@ class Browser(QMainWindow):
         try:
             DOWNLOADS_FILE.parent.mkdir(parents=True, exist_ok=True)
             done = [e for e in self.downloads if e.get("state") != "active"]
-            DOWNLOADS_FILE.write_text(json.dumps(done[-DOWNLOADS_MAX:]))
+            _write_json(DOWNLOADS_FILE, done[-DOWNLOADS_MAX:])
         except OSError:
             pass
 
@@ -17601,7 +18040,7 @@ class Browser(QMainWindow):
             BOOKMARKS_FILE.parent.mkdir(parents=True, exist_ok=True)
             # written whole: the cap is kept on the way in, so
             # nothing here may silently fall off the end
-            BOOKMARKS_FILE.write_text(json.dumps(self.bookmarks))
+            _write_json(BOOKMARKS_FILE, self.bookmarks)
         except OSError:
             pass
 
@@ -18620,7 +19059,8 @@ class Browser(QMainWindow):
         whatever the umask happened to say for as long as the write
         took, and skipped the chmod altogether if writerows threw."""
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_BINARY,
+                         0o600)
             try:
                 os.fchmod(fd, 0o600)   # O_CREAT does not re-mode a file
             except (OSError, AttributeError):
@@ -18685,6 +19125,14 @@ class Browser(QMainWindow):
         if not url.startswith(("http://", "https://")):
             return  # our own pages have nothing to hand over
         player = shutil.which("mpv") or shutil.which("vlc")
+        if not player and sys.platform == "win32":
+            # VLC's installer does not put it on PATH
+            for var in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
+                base = os.environ.get(var)
+                exe = Path(base) / "VideoLAN/VLC/vlc.exe" if base else None
+                if exe is not None and exe.is_file():
+                    player = str(exe)
+                    break
         if not player:
             return  # nothing installed to hand it to; stay quiet
         proc = QProcess(self)
@@ -19497,7 +19945,11 @@ def _install_proxy_flags():
                 ",VaapiVideoDecoder,VaapiVideoDecodeLinuxGL"
                 ",AcceleratedVideoDecodeLinuxGL"
                 " --ignore-gpu-blocklist")
-    cdm = _widevine_path()
+    # the import-time finder honours WIDEVINE_PATH and picks the newest
+    # copy (incl. Chrome's updater ones under ~/.config); the other is
+    # the fallback. The flag it set was stripped just above.
+    cdm = (_find_widevine() if sys.platform != "win32" else "") \
+        or _widevine_path()
     if cdm:
         env += ' --widevine-path="%s"' % cdm
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
@@ -19602,6 +20054,13 @@ def _install_theme_flags():
 
 
 SINGLE_INSTANCE_SOCKET = "browser-single-instance"
+if sys.platform == "win32":
+    # a named pipe is one per machine, not per user: with a second
+    # account signed in (fast user switching) the first one's browser
+    # held the name, the second could neither reach it nor take it, and
+    # its browser quietly never opened. One name per profile folder.
+    SINGLE_INSTANCE_SOCKET += "-" + hashlib.sha1(
+        str(DATA_DIR).lower().encode("utf-8")).hexdigest()[:12]
 
 
 def _launch_url(text):
@@ -19697,7 +20156,32 @@ def _proc_start_time(pid):
     """The kernel's start-time for a pid, so a recycled pid is not taken
     for the process that recorded it. Linux /proc field 22 (jiffies since
     boot); None where it cannot be read -- another OS, or the process is
-    already gone -- and callers treat None as "cannot tell"."""
+    already gone -- and callers treat None as "cannot tell".
+
+    Windows has no /proc; its creation time (100 ns ticks since 1601)
+    does the same job there, and matters more, since Windows hands
+    pids out again quickly."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.windll.kernel32
+            k32.OpenProcess.restype = wintypes.HANDLE
+            handle = k32.OpenProcess(0x1000, False, int(pid))
+            if not handle:
+                return None
+            try:
+                times = [wintypes.FILETIME() for _ in range(4)]
+                if not k32.GetProcessTimes(
+                        wintypes.HANDLE(handle),
+                        *[ctypes.byref(t) for t in times]):
+                    return None
+                created = times[0]
+                return (created.dwHighDateTime << 32) | created.dwLowDateTime
+            finally:
+                k32.CloseHandle(wintypes.HANDLE(handle))
+        except Exception:
+            return None
     try:
         with open("/proc/%d/stat" % int(pid), "rb") as fh:
             data = fh.read()
@@ -19745,10 +20229,18 @@ def _handoff_to_existing(background, url, timeout=1500):
     removes the socket: a launch that cannot reach the primary is not
     entitled to decide the primary is dead -- that call is made once, by
     the would-be primary, only after listen() is refused."""
-    probe = QLocalSocket()
-    probe.connectToServer(SINGLE_INSTANCE_SOCKET)
-    if not probe.waitForConnected(timeout):
+    names = [SINGLE_INSTANCE_SOCKET]
+    if sys.platform == "win32":
+        # a build from before the per-user name, still running because
+        # Update was pressed and the browser not yet restarted
+        names.append("browser-single-instance")
+    for name in names:
+        probe = QLocalSocket()
+        probe.connectToServer(name)
+        if probe.waitForConnected(timeout if name is names[0] else 200):
+            break
         probe.abort()
+    else:
         return False
     probe.write((("bg " if background and url else "")
                  + (url or "raise")).encode())
@@ -19783,7 +20275,35 @@ def _send_command(name, timeout=3000):
     return 0 if answer and not answer.startswith("no-") else 1
 
 
+def _log_uncaught(kind, value, tb):
+    """Where an exception nothing caught ends up.
+
+    PyQt ends the whole process on one raised inside a slot unless a
+    hook is installed, and under pythonw - how the desktop shortcut
+    starts us - there is no console either, so the window simply
+    vanished and nobody could say why. With this the browser keeps
+    going and the traceback lands in crash.log beside the config."""
+    import traceback
+    text = "".join(traceback.format_exception(kind, value, tb))
+    try:
+        if sys.stderr is not None:
+            sys.stderr.write(text)
+    except Exception:
+        pass
+    try:
+        log = DATA_DIR / "crash.log"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if log.exists() and log.stat().st_size > 512 * 1024:
+            log.unlink()    # keep the newest, never let it grow forever
+        with open(log, "a", encoding="utf-8") as f:
+            f.write("--- %s\n%s\n" % (
+                datetime.datetime.now().isoformat(timespec="seconds"), text))
+    except Exception:
+        pass
+
+
 def main():
+    sys.excepthook = _log_uncaught
     # a control command (--mute-discord) is not a launch: it is handed to
     # the running browser, which answers, and nothing is started if none
     # is running.
@@ -19829,6 +20349,12 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("browser")
     app.setWindowIcon(QIcon(str(APP_DIR / "icon.svg")))
+    if sys.platform == "win32":
+        # Qt picks the native windows11 style there, which draws what the
+        # sheet leaves out (scroll bars, popups' frames, check marks) in
+        # the system's light palette and ignores parts of the sheet
+        # outright. Fusion draws everything from the sheet, as on Linux.
+        app.setStyle("Fusion")
     app.setStyleSheet(theme_style())
 
     server = QLocalServer()
@@ -19865,28 +20391,57 @@ def main():
 
     def handoff():
         conn = server.nextPendingConnection()
+        if conn is None:
+            return
+        # one readyRead is not promised to carry a whole message, and a
+        # URL cut inside a UTF-8 character used to raise here. A URL's
+        # sender writes and hangs up, so that is read until it hangs up;
+        # a "cmd " sender waits on the line for its answer, so that is
+        # acted on as soon as it is in (command names are short ASCII).
+        buf = bytearray()
+        seen = []
+
+        def reply(text):
+            if conn.state() == QLocalSocket.LocalSocketState.ConnectedState:
+                conn.write(text.encode())
+                conn.flush()
+                conn.disconnectFromServer()
+
+        def act():
+            if seen:
+                return
+            seen.append(True)
+            message = bytes(buf).decode("utf-8", "replace").strip()
+            if message:
+                win._handoff_message(message, reply)
 
         def read():
-            message = bytes(conn.readAll()).decode().strip()
+            buf.extend(bytes(conn.readAll()))
+            if bytes(buf).startswith(b"cmd "):
+                act()
 
-            def reply(text):
-                if conn.state() == QLocalSocket.LocalSocketState.ConnectedState:
-                    conn.write(text.encode())
-                    conn.flush()
-                    conn.disconnectFromServer()
-            win._handoff_message(message, reply)
+        def done():
+            read()
+            act()
+            conn.deleteLater()
         conn.readyRead.connect(read)
+        conn.disconnected.connect(done)
+        if conn.state() == QLocalSocket.LocalSocketState.UnconnectedState:
+            done()
 
     server.newConnection.connect(handoff)
 
     # the process can hang in Chromium/NVIDIA teardown after the window is
     # gone, leaving a windowless ghost that still holds the profile and
-    # the single-instance socket. Everything worth keeping is written out
-    # by the aboutToQuit handlers connected inside Browser (groups,
-    # sessions, history, config) which run before this one; once they
-    # have, end the process outright rather than wait on a teardown that
-    # may never finish. os._exit skips the hang without skipping a save.
-    app.aboutToQuit.connect(lambda: os._exit(0))
+    # the single-instance socket. Everything of ours is written out by
+    # the aboutToQuit handlers connected inside Browser (groups,
+    # sessions, history, config) which run before this one. Chromium's
+    # own store is not: it commits cookies to disk every thirty seconds
+    # or so and the rest only when the profile is torn down, so ending
+    # the process outright logged him out of whatever he had just signed
+    # in to. _end_process tears the profiles down first, under a guard
+    # that still ends the process if that teardown hangs.
+    app.aboutToQuit.connect(lambda: _end_process(win))
 
     if bg_launch:
         win.new_tab(url=url, switch=False)
@@ -19894,6 +20449,53 @@ def main():
     else:
         win.show()
     app.exec()
+    _end_process(win)
+
+
+def _end_process(win):
+    """Close the cookie jars properly, then end the process outright.
+
+    A profile writes its cookies out when it is destroyed, and it is
+    only destroyed once no page uses it any more, so the views go first,
+    then any page left over (hidden tabs, prerendered ones), then the
+    profiles. A few hundred milliseconds of event loop lets Chromium's
+    store finish the write. If any of that hangs, the guard thread ends
+    the process anyway, which is what used to happen straight away."""
+    guard = threading.Timer(5.0, lambda: os._exit(0))
+    guard.daemon = True
+    guard.start()
+    try:
+        # nothing of ours may run during the teardown: the session
+        # autosave firing with the views gone would write an empty
+        # session over the one aboutToQuit just saved. The instance name
+        # is kept until the very end, so a launch in this second hands
+        # off to a dying window rather than opening the same profile
+        # twice; restart() lets go of it itself.
+        for timer in win.findChildren(QTimer):
+            timer.stop()
+        import gc
+        profiles = []
+        try:
+            profiles = [p for p in win._all_profiles() if p is not None]
+        except Exception:
+            pass
+        for view in win.findChildren(QWebEngineView):
+            if not sip.isdeleted(view):
+                sip.delete(view)
+        for page in [o for o in gc.get_objects()
+                     if isinstance(o, QWebEnginePage)]:
+            if not sip.isdeleted(page):
+                sip.delete(page)
+        for profile in profiles:
+            if not sip.isdeleted(profile):
+                sip.delete(profile)
+        app = QApplication.instance()
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+    except Exception:
+        pass
     os._exit(0)
 
 

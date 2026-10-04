@@ -780,7 +780,7 @@
           <span class="wsub" id="t_downloadFolderHint">Where files land when you are not asked.</span>
         </span>
         <button id="dlpick">Choose&hellip;</button>
-        <button id="dldefault">Use ~/Downloads</button>
+        <button id="dldefault">Use the Downloads folder</button>
       </div>
       <div id="dlpath"></div>
       </div>
@@ -2182,7 +2182,7 @@
         ({name:p.name, label:p.name + "  (" + p.type + " " + p.host + ":" + p.port + ")",
           user:true})));
     for (const r of rows) {
-      const row = document.createElement("label");
+      const row = document.createElement("div");   // not <label>: it would forward every click to the ✕
       row.className = "row switchrow"; row.style.cursor = "pointer";
       const dot = document.createElement("span");
       dot.style.flex = "0 0 auto";
@@ -2259,7 +2259,7 @@
       type: document.getElementById("ptype").value,
       host: document.getElementById("phost").value.trim(),
       port: parseInt(document.getElementById("pport").value) || 0};
-    if (!prof.name || !prof.host) return;
+    if (!prof.name || !prof.host || prof.port < 1 || prof.port > 65535) return;
     if (bridge) bridge.saveProxyProfile(JSON.stringify(prof));
     window._proxyProfiles = (window._proxyProfiles||[]).filter(p=>p.name!==prof.name).concat([prof]);
     document.getElementById("pname").value = "";
