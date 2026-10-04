@@ -12,15 +12,29 @@ everything else lives here.
 
 import sys
 
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
-try:
-    import web_engine
-except ImportError:  # pragma: no cover - the .so is built separately
-    web_engine = None
+# web_engine.so is loaded on first use, not when the browser starts: a
+# native module that is missing, truncated or built against other
+# libraries must never keep the browser from starting, and one that is
+# mapped into every running browser can be pulled out from under it
+# (SIGBUS) by a rebuild that overwrites the file in place.
+web_engine = None
+_load_error = None
+
+
+def _engine():
+    global web_engine, _load_error
+    if web_engine is None and _load_error is None:
+        try:
+            import web_engine as mod
+            web_engine = mod
+        except Exception as exc:  # ImportError, or a panic in PyInit
+            _load_error = exc
+    return web_engine
 
 MARGIN = 28  # gap between the pane and the window edge
 
@@ -95,6 +109,10 @@ class EnginePane(QWidget):
         self.scroll.setWidget(self.image)
         col.addWidget(self.scroll, 1)
 
+        # a window drag sends a Resize per step; render once it settles
+        self._rerender = QTimer(self, singleShot=True, interval=150)
+        self._rerender.timeout.connect(self.render_page)
+
         self._retheme()
         self.hide()
         browser.installEventFilter(self)
@@ -126,17 +144,23 @@ class EnginePane(QWidget):
     # -- rendering --------------------------------------------------------
 
     def render_page(self):
-        if web_engine is None:
+        engine = _engine()
+        if engine is None:
+            # install with a rename, never an in-place cp: a running
+            # browser that has the old file mapped crashes when it is
+            # truncated underneath it
             self.image.setText(
-                "web_engine.so is missing next to browser.py.\n"
+                "web_engine.so could not be loaded (%s).\n"
                 "Build it: cd ~/claude/web-engine && "
                 "cargo build --release --features python && "
-                "cp target/release/libweb_engine.so ~/browser/web_engine.so")
+                "cp target/release/libweb_engine.so ~/browser/web_engine.so.new"
+                " && mv -f ~/browser/web_engine.so.new ~/browser/web_engine.so"
+                % (_load_error or "missing"))
             return
         palette = _mod(self.browser).theme_palette()
         width = max(400, self.panel.width() - 24)
         try:
-            w, h, buf = web_engine.render(
+            w, h, buf = engine.render(
                 self._html, theme_css=theme_css(palette), width=width)
         except BaseException as exc:  # engine panics arrive as exceptions
             self.image.setText(f"engine error: {exc}")
@@ -180,7 +204,7 @@ class EnginePane(QWidget):
         if (obj is self.browser and self.isVisible()
                 and event.type() == QEvent.Type.Resize):
             self.place()
-            self.render_page()
+            self._rerender.start()
         return False
 
     def changeEvent(self, event):
