@@ -28,7 +28,7 @@ While this is enabled, Chromium's ForceDarkMode auto-darkening is held
 off (browser.force_dark_on) — the adaptive pass replaces it with the
 actual palette instead of an inversion.
 
-Kill switch: set "themeWeb": false in ~/.local/share/browser/config.json.
+Opt-in: set "themeWeb": true in ~/.local/share/browser/config.json.
 browser.py only calls script()/refresh()/repaint_open_sites()/enabled().
 """
 
@@ -54,7 +54,9 @@ def _mod(browser):
 
 
 def enabled(browser):
-    return bool(browser.config.get("themeWeb", True))
+    # opt-in until it reads every site: it rewrites the colours of
+    # every website in every jar, and has no switch in Settings yet
+    return bool(browser.config.get("themeWeb", False))
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +69,7 @@ def _base_css(p, dark):
 html {{ background-color: {p['bg']} !important; }}
 body {{ background-color: {p['bg']} !important; color: {p['text']} !important; }}
 h1, h2, h3, h4, h5, h6 {{ color: {p['accent']} !important; }}
-a, a:visited, a * {{ color: {p['accentLt']} !important; }}
+a, a:visited {{ color: {p['accentLt']} !important; }}
 input, textarea, select {{
   background-color: {p['surface']} !important;
   color: {p['text']} !important;
@@ -406,31 +408,65 @@ SITE_JS = """(function () {
   var orig = window.__stOrig = window.__stOrig || new WeakMap();
   var SEL = "div,section,article,main,aside,header,footer,nav,ul,ol,table," +
     "tr,td,th,form,p,li,blockquote,pre,code,button,input,textarea,select," +
-    "label,h1,h2,h3,h4,h5,h6,a,dl,dt,dd,figure,figcaption,summary,details";
+    "label,h1,h2,h3,h4,h5,h6,a,dl,dt,dd,figure,figcaption,summary,details," +
+    // inline text: dark text in a span inside a white card stays dark
+    // after the card turns dark unless the span is looked at as well
+    "span,strong,b,em,i,small,font,mark,cite,time,abbr,sup,sub,u,s,q,kbd";
+
+  var PROPS = ["background-color", "background-image", "color",
+               "border-color"];
+
+  // Reads first, writes after (see adapt): a computed style read right
+  // after a write forces a full style recalc, once per element.
+  function remember(el) {
+    var saved = orig.get(el), cs, i, p;
+    if (saved) return saved;
+    try { cs = getComputedStyle(el); } catch (e) { return null; }
+    saved = { bg: cs.backgroundColor, color: cs.color,
+              bgi: cs.backgroundImage,
+              border: cs.borderTopColor, bw: cs.borderTopWidth,
+              inl: {}, set: false };
+    for (i = 0; i < PROPS.length; i++) {
+      p = PROPS[i];
+      saved.inl[p] = [el.style.getPropertyValue(p),
+                      el.style.getPropertyPriority(p)];
+    }
+    orig.set(el, saved);
+    return saved;
+  }
+
+  // a re-theme (dark to light) must not keep what the last theme set
+  function restore(el, saved) {
+    if (!saved.set) return;
+    for (var i = 0, p, o; i < PROPS.length; i++) {
+      p = PROPS[i]; o = saved.inl[p];
+      if (o[0]) el.style.setProperty(p, o[0], o[1]);
+      else el.style.removeProperty(p);
+    }
+    saved.set = false;
+  }
+
+  function put(el, saved, prop, value) {
+    saved.set = true;
+    el.style.setProperty(prop, value, "important");
+  }
 
   function adaptOne(el) {
-    var cs;
-    try { cs = getComputedStyle(el); } catch (e) { return; }
-    var saved = orig.get(el);
-    if (!saved) {
-      saved = { bg: cs.backgroundColor, color: cs.color,
-                bgi: cs.backgroundImage,
-                border: cs.borderTopColor, bw: cs.borderTopWidth };
-      orig.set(el, saved);
-    }
+    var saved = remember(el);
+    if (!saved) return;
+    restore(el, saved);
     var bg = parseColor(saved.bg);
     var bgL = bg && bg.a > .35 ? lum(bg) : null;
     if (bgL !== null) {
-      if (TOK.dark && bgL > 150) {
+      if (TOK.dark && bgL > 110) {
         var t = bgL > 235 ? TOK.surface : (bgL > 195 ? TOK.surfaceAlt : TOK.hover);
-        el.style.setProperty("background-color", t, "important");
+        put(el, saved, "background-color", t);
         if (saved.bgi && saved.bgi.indexOf("gradient") >= 0)
-          el.style.setProperty("background-image", "none", "important");
+          put(el, saved, "background-image", "none");
       } else if (!TOK.dark && bgL < 90) {
-        el.style.setProperty("background-color",
-          bgL < 40 ? TOK.surface : TOK.hover, "important");
+        put(el, saved, "background-color", bgL < 40 ? TOK.surface : TOK.hover);
         if (saved.bgi && saved.bgi.indexOf("gradient") >= 0)
-          el.style.setProperty("background-image", "none", "important");
+          put(el, saved, "background-image", "none");
       }
     }
     var col = parseColor(saved.color);
@@ -438,11 +474,9 @@ SITE_JS = """(function () {
       var CL = lum(col);
       var isLink = el.tagName === "A";
       if (TOK.dark && CL < 110) {
-        el.style.setProperty("color",
-          isLink ? TOK.accentLt : TOK.text, "important");
-      } else if (!TOK.dark && CL > 170 && (bgL === null || bgL >= 150)) {
-        el.style.setProperty("color",
-          isLink ? TOK.accent : TOK.text, "important");
+        put(el, saved, "color", isLink ? TOK.accentLt : TOK.text);
+      } else if (!TOK.dark && CL > 130 && (bgL === null || bgL >= 150)) {
+        put(el, saved, "color", isLink ? TOK.accent : TOK.text);
       }
     }
     if (saved.bw && saved.bw !== "0px") {
@@ -450,7 +484,7 @@ SITE_JS = """(function () {
       if (bc && bc.a > .2) {
         var BL = lum(bc);
         if ((TOK.dark && BL > 130) || (!TOK.dark && BL < 120))
-          el.style.setProperty("border-color", TOK.sunken, "important");
+          put(el, saved, "border-color", TOK.sunken);
       }
     }
   }
@@ -460,10 +494,13 @@ SITE_JS = """(function () {
     try {
       els = root && root.querySelectorAll ? root.querySelectorAll(SEL) : [];
     } catch (e) { return; }
-    var n = Math.min(els.length, 8000);
-    for (var i = 0; i < n; i++) adaptOne(els[i]);
-    try { if (root && root.matches && root.matches(SEL)) adaptOne(root); }
+    var n = Math.min(els.length, 8000), self = false, i;
+    try { self = !!(root && root.matches && root.matches(SEL)); }
     catch (e) {}
+    if (self) remember(root);
+    for (i = 0; i < n; i++) remember(els[i]);
+    for (i = 0; i < n; i++) adaptOne(els[i]);
+    if (self) adaptOne(root);
   }
   window.__stAdapt = adapt;  // ApplicationWorld only; the page can't see it
 

@@ -442,7 +442,12 @@ IMAGE_AT_POINT_JS = r"""
       if (im && (im.currentSrc || im.src)) return im.currentSrc || im.src;
     }
     if (t === "video" && el.poster) return el.poster;
-    if (t === "image" && el.href && el.href.baseVal) return el.href.baseVal;
+    // an SVG <image> keeps its href as written: resolve it, or the
+    // download gets a relative address and fails without a word
+    if (t === "image" && el.href && el.href.baseVal) {
+      try { return new URL(el.href.baseVal, el.ownerDocument.baseURI).href; }
+      catch (e) { return null; }
+    }
     if (t === "canvas") { try { return el.toDataURL("image/png"); } catch (e) {} }
     if (t === "svg") {
       try {
@@ -19940,11 +19945,18 @@ def _install_proxy_flags():
     # stutters with the sound cutting out -- while the decoder on the
     # card sits at 0%. Where there is no usable VA-API driver the
     # features change nothing, the same way the HEVC one does.
+    # On NVIDIA the engine refuses VA-API outright unless
+    # VaapiOnNvidiaGPUs is on, and the blocklist is only overridden
+    # there, on the hardware this was tried on: --ignore-gpu-blocklist
+    # switches on every GPU feature (raster, WebGL, ...) for drivers
+    # Chromium knows to be broken, not only video decode.
     if "PlatformHEVCDecoderSupport" not in env:
+        nvidia = Path("/proc/driver/nvidia/version").exists()
         env += (" --enable-features=PlatformHEVCDecoderSupport"
                 ",VaapiVideoDecoder,VaapiVideoDecodeLinuxGL"
                 ",AcceleratedVideoDecodeLinuxGL"
-                " --ignore-gpu-blocklist")
+                + (",VaapiOnNvidiaGPUs --ignore-gpu-blocklist"
+                   if nvidia else ""))
     # the import-time finder honours WIDEVINE_PATH and picks the newest
     # copy (incl. Chrome's updater ones under ~/.config); the other is
     # the fallback. The flag it set was stripped just above.
