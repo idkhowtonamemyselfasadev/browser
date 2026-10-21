@@ -507,6 +507,30 @@ window.addEventListener("contextmenu", function (e) {
 }, true);
 """
 
+# Amazon hands this browser a product page with the product cut out
+# (header, footer and carousels, an empty #dp) whenever it is opened
+# straight - address bar, a link from another site, a new tab. Opened
+# from inside Amazon it comes whole. Measured: 400 KB empty versus
+# 2-3 MB whole, same URL, same cookies. Headers replayed with curl get
+# the whole page, so it is the session, not a header we could fix. The
+# repair is the move that works: reload from inside the page, once per
+# address, which Amazon counts as a same-site navigation.
+AMAZON_DP_JS = r"""
+(function () {
+  try {
+    if (!/(^|\.)amazon\.[a-z.]+$/.test(location.hostname)) return;
+    if (!/\/(dp|gp\/product)\//.test(location.pathname)) return;
+    var dp = document.getElementById("dp");
+    if (!dp || document.getElementById("productTitle")) return;
+    if (document.getElementById("captchacharacters")) return;
+    var key = "__amazonDpRetry", url = location.href;
+    if (sessionStorage.getItem(key) === url) return;   // tried once already
+    sessionStorage.setItem(key, url);
+    location.replace(url);
+  } catch (e) {}
+})();
+"""
+
 CHROME_STUB_JS = r"""
 (function () {
   try {
@@ -1037,9 +1061,20 @@ PERMISSION_LABELS = {
     QWebEnginePermission.PermissionType.Notifications:
         "show notifications",
 }
-# no desktop capture in that list on purpose: Qt never routes it through
-# permissionRequested. getDisplayMedia() raises desktopMediaRequested
-# instead, which SharePicker answers.
+# no desktop capture in that list on purpose: getDisplayMedia() first
+# raises desktopMediaRequested, which SharePicker answers. Once a screen
+# or window is picked there, Qt (6.8 on) asks a second time through
+# permissionRequested with a Desktop*Capture type - see SHARE_PERMISSIONS.
+
+# The engine only gets as far as this second question when SharePicker
+# has handed it a source - with nothing chosen it refuses the request
+# itself before asking. So the pick already was the yes, and these are
+# granted without a card. Left unanswered, the share hung forever:
+# Discord and TeamSpeak sat on "starting" and never got a frame.
+SHARE_PERMISSIONS = {
+    QWebEnginePermission.PermissionType.DesktopVideoCapture,
+    QWebEnginePermission.PermissionType.DesktopAudioVideoCapture,
+}
 
 # the port a scheme means when the URL does not spell one out
 DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -14144,6 +14179,9 @@ class Browser(QMainWindow):
 
     # ---- site permissions (microphone, camera, notifications) ----
     def _permission_requested(self, permission, page=None):
+        if permission.permissionType() in SHARE_PERMISSIONS:
+            permission.grant()  # the SharePicker pick was the answer
+            return
         label = PERMISSION_LABELS.get(permission.permissionType())
         if label is None:
             return  # let the engine keep its default for exotic requests
@@ -15353,6 +15391,7 @@ class Browser(QMainWindow):
         profile.scripts().insert(self._google_script())
         profile.scripts().insert(self._chrome_stub_script())
         profile.scripts().insert(self._force_menu_script())
+        profile.scripts().insert(self._amazon_dp_script())
         profile.scripts().insert(self._theme_script())
         # what shape our own pages are drawn in, and what the dock's
         # transport talks to. Every jar comes through here, including a
@@ -15423,6 +15462,17 @@ class Browser(QMainWindow):
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         script.setRunsOnSubFrames(True)
         script.setSourceCode(FORCE_MENU_JS)
+        return script
+
+    def _amazon_dp_script(self):
+        """Reload an Amazon product page once when it arrives with the
+        product missing (AMAZON_DP_JS). DocumentReady, top frame only."""
+        script = QWebEngineScript()
+        script.setName("amazon-dp")
+        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+        script.setRunsOnSubFrames(False)
+        script.setSourceCode(AMAZON_DP_JS)
         return script
 
     def _google_script(self):
