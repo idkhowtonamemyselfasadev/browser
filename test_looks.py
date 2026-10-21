@@ -66,10 +66,11 @@ def js(page, code):
 
 
 # ---------------------------------------------------------------- (1)
-print("\n(1) the five looks")
+print("\n(1) the looks")
 check("classic is the default", B.DEFAULT_LOOK == "classic")
-check("there are five of them, classic first",
-      B.look_names() == ["classic", "taskbar", "macos", "circle", "glass"],
+check("they are in order, classic first",
+      B.look_names() == ["classic", "taskbar", "macos", "circle", "glass",
+                         "flat"],
       ", ".join(B.look_names()))
 check("every look names itself and says what it does",
       all(B.UI_STRINGS["en"].get(entry["name"])

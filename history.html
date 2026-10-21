@@ -81,6 +81,71 @@
      couple of them a ring that cannot be seen at all. */
   ::selection { background: #cdd6f4; color: #000000; }
   :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+  /* ---- the second wave: filters, views and picking rows ---- */
+  .bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-bottom: 16px;
+  }
+  .bar select, .bar input[type=text] {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 10px; color: #cdd6f4; font: inherit; font-size: 12px;
+    padding: 7px 10px; outline: none;
+  }
+  .bar select:focus, .bar input[type=text]:focus { border-color: #89b4fa; }
+  .bar button {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 10px; color: #cdd6f4; font: inherit; font-size: 12px;
+    padding: 7px 11px; cursor: pointer;
+  }
+  .bar button:hover { border-color: #89b4fa; }
+  .bar button.warn { border-color: rgba(243, 139, 168, 0.35); color: #f38ba8; }
+  .bar button.on { border-color: #89b4fa; color: #89b4fa; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .tabs button {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: #6c7086; font: inherit; font-size: 13px; padding: 6px 10px;
+    cursor: pointer;
+  }
+  .tabs button.on { color: #cdd6f4; border-bottom-color: #89b4fa; }
+  .entry input[type=checkbox] { accent-color: #89b4fa; flex-shrink: 0; }
+  .entry.pick { border-color: rgba(137, 180, 250, 0.5); }
+  .fold {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(13, 13, 18, 0.6); border: 1px solid transparent;
+    border-radius: 11px; padding: 9px 14px; margin-bottom: 5px;
+    cursor: pointer;
+  }
+  .fold:hover { border-color: rgba(137, 180, 250, 0.35); }
+  .fold .count { color: #6c7086; font-size: 12px; }
+  .kids { margin-left: 24px; }
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    background: rgba(13, 13, 18, 0.6); border: 1px solid transparent;
+    border-radius: 11px; padding: 9px 14px; margin-bottom: 5px;
+  }
+  .row .num { color: #6c7086; font-size: 12px; min-width: 44px; }
+  .row .grow { flex: 1; overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; font-size: 13px; }
+  .row a { color: #89b4fa; text-decoration: none; }
+  .chart { display: flex; align-items: flex-end; gap: 6px; height: 120px;
+           margin: 10px 0 18px; }
+  .chart div { background: #89b4fa; border-radius: 4px 4px 0 0;
+               flex: 1; min-height: 2px; }
+  .chart span { display: block; }
+  .legend { color: #6c7086; font-size: 11px; display: flex; gap: 6px; }
+  .legend span { flex: 1; text-align: center; }
+  #undo {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: rgba(13, 13, 18, 0.97);
+    border: 1px solid rgba(137, 180, 250, 0.45);
+    border-radius: 12px; padding: 10px 16px; font-size: 13px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  #undo button { background: none; border: none; color: #89b4fa;
+                 font: inherit; cursor: pointer; }
+  #undo[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -90,12 +155,52 @@
       <input id="search" placeholder="Search history" autocomplete="off">
       <button id="clear">Clear all</button>
     </header>
+
+    <div class="tabs">
+      <button id="v_list" class="on">Pages</button>
+      <button id="v_sites">Most visited</button>
+      <button id="v_searches">Searches</button>
+      <button id="v_stats">Statistics</button>
+    </div>
+
+    <div class="bar" id="filters">
+      <select id="range">
+        <option value="0">All time</option>
+        <option value="3600">Last hour</option>
+        <option value="today">Today</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="604800">Last 7 days</option>
+        <option value="2592000">Last 30 days</option>
+      </select>
+      <input type="text" id="site" placeholder="site" style="width:130px">
+      <select id="session"><option value="">Every browser</option></select>
+      <button id="bygroup">Group by site</button>
+      <button id="shownoise">Show hops</button>
+      <button id="export">Export</button>
+      <button id="delrange" class="warn">Delete this range</button>
+    </div>
+
+    <div class="bar" id="picked" hidden>
+      <span id="pickcount"></span>
+      <button id="popen">Open</button>
+      <button id="pgroup">Open as a group</button>
+      <button id="pbookmark">Bookmark</button>
+      <button id="pcopy">Copy</button>
+      <button id="pdelete" class="warn">Delete</button>
+      <button id="pnone">Clear</button>
+    </div>
+
     <div id="list"></div>
     <div id="empty" hidden>No history.</div>
   </div>
+  <div id="undo" hidden>
+    <span id="undotext"></span>
+    <button id="undobtn">Undo</button>
+  </div>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
-  let bridge = null, entries = [];
+  let bridge = null, entries = [], view = "list", picked = {};
+  let byGroup = false, showNoise = false, undoTimer = null;
   let STR = {history: "History", searchHistory: "Search history",
     clearAll: "Clear all", noHistory: "No history.",
     today: "Today", yesterday: "Yesterday", lang: undefined};
@@ -109,43 +214,275 @@
       { weekday: "long", day: "numeric", month: "long" });
   }
 
-  function render() {
-    const q = document.getElementById("search").value.toLowerCase();
+  function hostOf(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ""); }
+    catch (err) { return ""; }
+  }
+
+  function iconFor(host) {
+    const img = document.createElement("img");
+    img.src = "https://www.google.com/s2/favicons?sz=32&domain=" + host;
+    return img;
+  }
+
+  // What the range picker means, as a pair of seconds. "today" and
+  // "yesterday" are days rather than spans of hours, which is what
+  // anybody means by them.
+  function rangeOf() {
+    const v = document.getElementById("range").value;
+    const now = Math.floor(Date.now() / 1000);
+    const d = new Date();
+    const midnight = Math.floor(
+      new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000);
+    if (v === "today") return [midnight, now];
+    if (v === "yesterday") return [midnight - 86400, midnight];
+    const secs = parseInt(v, 10);
+    if (!secs) return [null, null];
+    return [now - secs, now];
+  }
+
+  function filterJson(extra) {
+    const [since, until] = rangeOf();
+    return JSON.stringify(Object.assign({
+      q: document.getElementById("search").value,
+      host: document.getElementById("site").value.trim(),
+      session: document.getElementById("session").value,
+      since: since, until: until, noise: showNoise, limit: 2000
+    }, extra || {}));
+  }
+
+  function pickedUrls() { return Object.keys(picked); }
+
+  function syncPicked() {
+    const n = pickedUrls().length;
+    document.getElementById("picked").hidden = n === 0;
+    document.getElementById("pickcount").textContent =
+      (STR.histPicked || "%d picked").replace("%d", n);
+  }
+
+  function togglePick(url, on) {
+    if (on) picked[url] = 1; else delete picked[url];
+    syncPicked();
+  }
+
+  function entryRow(e) {
+    const host = hostOf(e.url);
+    const wrap = document.createElement("div");
+    wrap.className = "entry";
+    const tick = document.createElement("input");
+    tick.type = "checkbox";
+    tick.checked = !!picked[e.url];
+    tick.onchange = () => {
+      togglePick(e.url, tick.checked);
+      wrap.classList.toggle("pick", tick.checked);
+    };
+    const link = document.createElement("a");
+    link.href = e.url;
+    link.className = "title";
+    link.textContent = e.title || e.url;
+    const time = document.createElement("span");
+    time.className = "time";
+    time.textContent = new Date(e.t * 1000).toLocaleTimeString(STR.lang || [],
+      { hour: "2-digit", minute: "2-digit" });
+    const hostEl = document.createElement("span");
+    hostEl.className = "host";
+    hostEl.textContent = host;
+    const forget = document.createElement("button");
+    forget.className = "host";
+    forget.style.cssText = "background:none;border:none;color:#6c7086;cursor:pointer";
+    forget.textContent = "✕";
+    forget.title = STR.histForget || "Forget this page";
+    forget.onclick = () => {
+      if (!bridge) return;
+      bridge.deleteHistory(JSON.stringify({urls: [e.url]}), (n) => {
+        offerUndo(n); load();
+      });
+    };
+    wrap.append(tick, iconFor(host), time, link, hostEl, forget);
+    if (e.s && e.s !== "main") {
+      const sid = document.createElement("span");
+      sid.className = "host";
+      sid.textContent = e.s;
+      wrap.append(sid);
+    }
+    return wrap;
+  }
+
+  function renderList() {
     const list = document.getElementById("list");
     list.innerHTML = "";
-    const shown = entries.filter(e =>
-      e.title.toLowerCase().includes(q) || e.url.toLowerCase().includes(q));
-    document.getElementById("empty").hidden = shown.length > 0;
-    let lastDay = null;
-    for (const e of [...shown].reverse()) {
-      let host;   // one hand-edited entry must not end the whole list
-      try { host = new URL(e.url).hostname.replace(/^www\./, ""); } catch (err) { continue; }
-      const label = dayLabel(e.t);
-      if (label !== lastDay) {
-        const h = document.createElement("div");
-        h.className = "day";
-        h.textContent = label;
-        list.appendChild(h);
-        lastDay = label;
+    document.getElementById("empty").hidden = entries.length > 0;
+    if (!byGroup) {
+      let lastDay = null;
+      for (const e of entries) {
+        const label = dayLabel(e.t);
+        if (label !== lastDay) {
+          const h = document.createElement("div");
+          h.className = "day";
+          h.textContent = label;
+          list.appendChild(h);
+          lastDay = label;
+        }
+        list.appendChild(entryRow(e));
       }
-      const a = document.createElement("a");
-      a.className = "entry";
-      a.href = e.url;
-      const icon = document.createElement("img");
-      icon.src = "https://www.google.com/s2/favicons?sz=32&domain=" + host;
-      const time = document.createElement("span");
-      time.className = "time";
-      time.textContent = new Date(e.t * 1000).toLocaleTimeString(STR.lang || [],
-        { hour: "2-digit", minute: "2-digit" });
-      const title = document.createElement("span");
-      title.className = "title";
-      title.textContent = e.title;
-      const hostEl = document.createElement("span");
-      hostEl.className = "host";
-      hostEl.textContent = host;
-      a.append(icon, time, title, hostEl);
-      list.appendChild(a);
+      return;
     }
+    // many visits to one site, folded into one row
+    const groups = {};
+    const order = [];
+    for (const e of entries) {
+      const host = hostOf(e.url) || "?";
+      if (!groups[host]) { groups[host] = []; order.push(host); }
+      groups[host].push(e);
+    }
+    for (const host of order) {
+      const rows = groups[host];
+      const fold = document.createElement("div");
+      fold.className = "fold";
+      const count = document.createElement("span");
+      count.className = "count";
+      count.textContent = rows.length;
+      const name = document.createElement("span");
+      name.className = "grow";
+      name.textContent = host;
+      fold.append(iconFor(host), name, count);
+      const kids = document.createElement("div");
+      kids.className = "kids";
+      kids.hidden = true;
+      for (const e of rows) kids.appendChild(entryRow(e));
+      fold.onclick = () => { kids.hidden = !kids.hidden; };
+      list.append(fold, kids);
+    }
+  }
+
+  function renderSites(rows) {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+    document.getElementById("empty").hidden = rows.length > 0;
+    let n = 0;
+    for (const r of rows) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const num = document.createElement("span");
+      num.className = "num";
+      num.textContent = ++n;
+      const name = document.createElement("span");
+      name.className = "grow";
+      name.textContent = r.host;
+      const visits = document.createElement("span");
+      visits.className = "host";
+      visits.textContent = (STR.histVisits || "%d visits")
+        .replace("%d", r.visits);
+      const forget = document.createElement("button");
+      forget.style.cssText = "background:none;border:none;color:#f38ba8;cursor:pointer";
+      forget.textContent = STR.histForgetSite || "Forget this site";
+      forget.onclick = () => {
+        if (!bridge) return;
+        bridge.forgetHistorySite(r.host, (gone) => { offerUndo(gone); load(); });
+      };
+      row.append(num, iconFor(r.host), name, visits, forget);
+      list.appendChild(row);
+    }
+  }
+
+  function renderSearches(rows) {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+    document.getElementById("empty").hidden = rows.length > 0;
+    for (const r of rows) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const when = document.createElement("span");
+      when.className = "num";
+      when.textContent = new Date(r.t * 1000)
+        .toLocaleDateString(STR.lang || [], {day: "numeric", month: "numeric"});
+      const link = document.createElement("a");
+      link.className = "grow";
+      link.href = r.url;
+      link.textContent = r.q;
+      const host = document.createElement("span");
+      host.className = "host";
+      host.textContent = r.host;
+      row.append(when, link, host);
+      list.appendChild(row);
+    }
+  }
+
+  function renderStats(stats) {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+    document.getElementById("empty").hidden = true;
+    const total = document.createElement("div");
+    total.className = "day";
+    total.textContent = (STR.histPagesTotal || "%d pages")
+      .replace("%d", stats.pages);
+    list.appendChild(total);
+    const chart = document.createElement("div");
+    chart.className = "chart";
+    const most = Math.max(1, ...stats.days.map((d) => d.pages));
+    for (const d of stats.days) {
+      const bar = document.createElement("div");
+      bar.style.height = Math.round(d.pages / most * 100) + "%";
+      bar.title = d.pages;
+      chart.appendChild(bar);
+    }
+    const legend = document.createElement("div");
+    legend.className = "legend";
+    for (const d of stats.days) {
+      const label = document.createElement("span");
+      label.textContent = new Date(d.t * 1000)
+        .toLocaleDateString(STR.lang || [], {weekday: "short"});
+      legend.appendChild(label);
+    }
+    list.append(chart, legend);
+    for (const site of stats.sites) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const name = document.createElement("span");
+      name.className = "grow";
+      name.textContent = site.host;
+      const pages = document.createElement("span");
+      pages.className = "host";
+      pages.textContent = site.pages;
+      row.append(iconFor(site.host), name, pages);
+      list.appendChild(row);
+    }
+  }
+
+  function offerUndo(n) {
+    if (!n) return;
+    const box = document.getElementById("undo");
+    document.getElementById("undotext").textContent =
+      (STR.histDeleted || "%d deleted").replace("%d", n);
+    document.getElementById("undobtn").textContent = STR.histUndo || "Undo";
+    box.hidden = false;
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => { box.hidden = true; }, 8000);
+  }
+
+  function load() {
+    if (!bridge) { renderList(); return; }
+    document.getElementById("filters").hidden = view !== "list";
+    if (view === "list") {
+      bridge.historyRows(filterJson(), (json) => {
+        entries = JSON.parse(json); renderList();
+      });
+    } else if (view === "sites") {
+      bridge.mostVisited(30, (json) => renderSites(JSON.parse(json)));
+    } else if (view === "searches") {
+      bridge.searchQueries((json) => renderSearches(JSON.parse(json)));
+    } else {
+      bridge.browsingStats(7, (json) => renderStats(JSON.parse(json)));
+    }
+  }
+
+  function setView(which) {
+    view = which;
+    for (const name of ["list", "sites", "searches", "stats"]) {
+      document.getElementById("v_" + name)
+        .classList.toggle("on", name === which);
+    }
+    load();
   }
 
   // Esc closes the pane this page lives in. Going back through the
@@ -158,11 +495,71 @@
     else if (typeof qt === "undefined" && history.length > 1) history.back();
   });
 
-  document.getElementById("search").oninput = render;
+  document.getElementById("search").oninput = load;
+  document.getElementById("site").oninput = load;
+  document.getElementById("range").onchange = load;
+  document.getElementById("session").onchange = load;
+  document.getElementById("v_list").onclick = () => setView("list");
+  document.getElementById("v_sites").onclick = () => setView("sites");
+  document.getElementById("v_searches").onclick = () => setView("searches");
+  document.getElementById("v_stats").onclick = () => setView("stats");
+  document.getElementById("bygroup").onclick = (e) => {
+    byGroup = !byGroup;
+    e.target.classList.toggle("on", byGroup);
+    renderList();
+  };
+  document.getElementById("shownoise").onclick = (e) => {
+    showNoise = !showNoise;
+    e.target.classList.toggle("on", showNoise);
+    load();
+  };
+  document.getElementById("export").onclick = () => {
+    if (bridge) bridge.exportHistory("csv", () => {});
+  };
+  document.getElementById("delrange").onclick = () => {
+    if (!bridge) return;
+    const [since, until] = rangeOf();
+    bridge.deleteHistory(JSON.stringify({since: since, until: until}),
+      (n) => { offerUndo(n); load(); });
+  };
+  document.getElementById("popen").onclick = () => {
+    if (bridge) bridge.openHistoryUrls(
+      JSON.stringify({urls: pickedUrls()}), () => {});
+  };
+  document.getElementById("pgroup").onclick = () => {
+    if (bridge) bridge.openHistoryUrls(
+      JSON.stringify({urls: pickedUrls(), group: "History"}), () => {});
+  };
+  document.getElementById("pbookmark").onclick = () => {
+    if (bridge) bridge.bookmarkHistoryUrls(
+      JSON.stringify(pickedUrls()), () => {});
+  };
+  document.getElementById("pcopy").onclick = () => {
+    navigator.clipboard.writeText(pickedUrls().join("\n")).catch(() => {});
+  };
+  document.getElementById("pdelete").onclick = () => {
+    if (!bridge) return;
+    bridge.deleteHistory(JSON.stringify({urls: pickedUrls()}), (n) => {
+      picked = {}; syncPicked(); offerUndo(n); load();
+    });
+  };
+  document.getElementById("pnone").onclick = () => {
+    picked = {}; syncPicked(); load();
+  };
+  document.getElementById("undobtn").onclick = () => {
+    if (!bridge) return;
+    bridge.undoHistory(() => {
+      document.getElementById("undo").hidden = true;
+      load();
+    });
+  };
   document.getElementById("clear").onclick = () => {
-    if (bridge) bridge.clearHistory();
+    if (bridge) {
+      bridge.clearHistory();
+      offerUndo(entries.length);
+    }
     entries = [];
-    render();
+    renderList();
   };
 
   if (typeof qt !== "undefined") {
@@ -176,12 +573,47 @@
           document.getElementById("search").placeholder = STR.searchHistory;
           document.getElementById("clear").textContent = STR.clearAll;
           document.getElementById("empty").textContent = STR.noHistory;
+          document.getElementById("v_list").textContent = STR.histPages || "Pages";
+          document.getElementById("v_sites").textContent = STR.histMost || "Most visited";
+          document.getElementById("v_searches").textContent = STR.histSearches || "Searches";
+          document.getElementById("v_stats").textContent = STR.histStats || "Statistics";
+          document.getElementById("bygroup").textContent = STR.histBySite || "Group by site";
+          document.getElementById("shownoise").textContent = STR.histHops || "Show hops";
+          document.getElementById("export").textContent = STR.histExport || "Export";
+          document.getElementById("delrange").textContent = STR.histDelRange || "Delete this range";
+          document.getElementById("popen").textContent = STR.histOpen || "Open";
+          document.getElementById("pgroup").textContent = STR.histOpenGroup || "Open as a group";
+          document.getElementById("pbookmark").textContent = STR.histBookmark || "Bookmark";
+          document.getElementById("pcopy").textContent = STR.histCopy || "Copy";
+          document.getElementById("pdelete").textContent = STR.histDelete || "Delete";
+          document.getElementById("pnone").textContent = STR.histNone || "Clear";
+          document.getElementById("site").placeholder = STR.histSite || "site";
+          const opts = {0: STR.histAll, 3600: STR.histHour,
+                        604800: STR.histWeek, 2592000: STR.histMonth};
+          const sel = document.getElementById("range");
+          for (const opt of sel.options) {
+            if (opt.value === "today" && STR.today) opt.textContent = STR.today;
+            else if (opt.value === "yesterday" && STR.yesterday) opt.textContent = STR.yesterday;
+            else if (opts[opt.value]) opt.textContent = opts[opt.value];
+          }
         } catch (e) {}
-        bridge.getHistory((json) => { entries = JSON.parse(json); render(); });
+        bridge.historySessions((json) => {
+          try {
+            const sel = document.getElementById("session");
+            for (const s of JSON.parse(json)) {
+              const opt = document.createElement("option");
+              opt.value = s.sid;
+              opt.textContent = s.name;
+              sel.appendChild(opt);
+            }
+            sel.options[0].textContent = STR.histEveryBrowser || "Every browser";
+          } catch (e) {}
+          load();
+        });
       });
     });
   } else {
-    render();
+    renderList();
   }
 </script>
 </body>

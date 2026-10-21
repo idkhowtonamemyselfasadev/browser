@@ -16,6 +16,7 @@
     justify-content: center;
     gap: 28px;
   }
+  :root { --quickscale: 1; }
   #clock {
     font-size: 64px;
     font-weight: 600;
@@ -63,8 +64,11 @@
     border-radius: 4px;
     color: #a6adc8;
     text-decoration: none;
-    padding: 9px 18px;
-    font-size: 13px;
+    /* the quick links grow and shrink with --quickscale, which is what
+       "quick-link size" in Settings sets; 1 is the size they always
+       were */
+    padding: calc(9px * var(--quickscale)) calc(18px * var(--quickscale));
+    font-size: calc(13px * var(--quickscale));
     transition: all .15s;
   }
   .links a:hover {
@@ -96,6 +100,25 @@
   :root[data-look="taskbar"] .links, :root[data-look="macos"] .links,
   :root[data-look="taskbar"] #addform, :root[data-look="macos"] #addform,
   :root[data-look="circle"] .links { display: none; }
+  /* the two optional rows under the quick links: what you were in the
+     middle of, and the bookmarks you added last. Quieter than a quick
+     link on purpose -- they are an offer, not the furniture. */
+  .extras {
+    display: flex; flex-direction: column; gap: 6px;
+    align-items: center; max-width: 86vw;
+  }
+  .extras .row { display: flex; gap: 10px; flex-wrap: wrap;
+                 justify-content: center; align-items: center; }
+  .extras .what { color: #6c7086; font-size: 11px; letter-spacing: 1px;
+                  text-transform: uppercase; }
+  .extras a {
+    color: #cdd6f4; font-size: 12px; text-decoration: none;
+    border-bottom: 1px solid rgba(137, 180, 250, 0.25);
+    max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .extras a:hover { border-bottom-color: #89b4fa; }
+  :root[data-look="circle"] .extras { display: none; }
 
   /* The circle look turns the start page into a big rimmed DISC that
      fills the background, with the quick-link pins arranged around its
@@ -915,6 +938,7 @@
   <div id="ringhint"></div>
   <div id="bpgame" aria-hidden="true"><canvas id="bpcanvas"></canvas></div>
   <div class="links" id="links"></div>
+  <div class="extras" id="extras"></div>
   <form id="addform" autocomplete="off">
     <input id="addurl" placeholder="wikipedia.org" list="sites">
     <input id="addname" placeholder="Name (e.g. Wikipedia)" maxlength="20">
@@ -2490,6 +2514,82 @@
         maybeStartSetup();
       });
       syncSettings();
+      loadExtras();
+    });
+  }
+
+  // The two rows under the quick links. Asked for once per load; an
+  // empty answer leaves the row out altogether rather than showing an
+  // empty heading.
+  function loadExtras() {
+    if (!bridge || !bridge.startExtras) return;
+    bridge.startExtras((json) => {
+      let data = {};
+      try { data = JSON.parse(json || "{}"); } catch (e) { return; }
+      const box = document.getElementById("extras");
+      if (!box) return;
+      box.innerHTML = "";
+      const S = window.STR || {};
+      for (const [key, label] of [["continue", S.startCarryOn || "Carry on"],
+                                  ["recent", S.startRecent || "Just added"]]) {
+        const rows = data[key] || [];
+        if (!rows.length) continue;
+        const row = document.createElement("div");
+        row.className = "row";
+        const what = document.createElement("span");
+        what.className = "what";
+        what.textContent = label;
+        row.appendChild(what);
+        for (const item of rows) {
+          const a = document.createElement("a");
+          a.href = item.url;
+          a.textContent = item.title || item.url;
+          a.title = item.url;
+          row.appendChild(a);
+        }
+        box.appendChild(row);
+      }
+      // how he has asked this page to look, and the pictures it may
+      // rotate through. Both arrive with the extras because both are
+      // read out of the config, which only the browser can see.
+      applyLayout(data.layout || {});
+      applyWallpapers(data.wallpaper || {});
+      // today, out of the calendar file he pointed at. The browser
+      // read and parsed it; this only draws the rows.
+      const agenda = data.agenda || [];
+      if (agenda.length) {
+        const row = document.createElement("div");
+        row.className = "row";
+        const what = document.createElement("span");
+        what.className = "what";
+        what.textContent = S.agendaName || "Today";
+        row.appendChild(what);
+        for (const item of agenda) {
+          const span = document.createElement("span");
+          span.id = "agendarow";
+          span.textContent = (item.at ? item.at + " \u00b7 " : "")
+            + item.name;
+          row.appendChild(span);
+        }
+        box.appendChild(row);
+      }
+      // the countdowns: a name and how long is left, counted in the
+      // browser out of the dates in Settings
+      const counts = data.countdowns || [];
+      if (counts.length) {
+        const row = document.createElement("div");
+        row.className = "row";
+        const what = document.createElement("span");
+        what.className = "what";
+        what.textContent = S.startCountdowns || "Counting down";
+        row.appendChild(what);
+        for (const item of counts) {
+          const span = document.createElement("span");
+          span.textContent = item.name + " \u00b7 " + item.left;
+          row.appendChild(span);
+        }
+        box.appendChild(row);
+      }
     });
   }
   function syncSettings() {
@@ -2544,12 +2644,77 @@
     else location.href = "downloads.html";
   };
 
+  // What he has asked this page to be: the clock and the date, the
+  // seconds, twelve or twenty-four hours, where the search box sits and
+  // how big the quick links are. Defaults are the page as it was, so a
+  // browser nobody has fiddled with looks exactly as it did.
+  let LAYOUT = { clock: true, seconds: false, date: true, hour24: true,
+                 search: "middle", quick: 1.0 };
+
+  function applyLayout(rows) {
+    LAYOUT = Object.assign(LAYOUT, rows || {});
+    const clock = document.getElementById("clock");
+    const date = document.getElementById("date");
+    if (clock) clock.style.display = LAYOUT.clock ? "" : "none";
+    if (date) date.style.display = LAYOUT.date ? "" : "none";
+    const form = document.querySelector("form.search");
+    if (form) {
+      form.dataset.where = LAYOUT.search;
+      form.style.marginTop = LAYOUT.search === "top" ? "0"
+        : (LAYOUT.search === "bottom" ? "auto" : "");
+    }
+    document.documentElement.style.setProperty(
+      "--quickscale", String(LAYOUT.quick || 1));
+    tick();
+  }
+
+  // The slideshow: the browser hands over the list of pictures in the
+  // folder he picked, as file:// addresses. Nothing is fetched and
+  // nothing is copied; "every 0 minutes" means a new one on each new
+  // tab, which is what a new tab is.
+  function applyWallpapers(rows) {
+    const shots = (rows && rows.shots) || [];
+    if (!shots.length) return;
+    const every = Math.max(0, Number(rows.every) || 0);
+    const pick = () => {
+      let at = 0;
+      try {
+        at = Number(localStorage.getItem("wallat") || "0") || 0;
+      } catch (e) {}
+      at = (at + 1) % shots.length;
+      try { localStorage.setItem("wallat", String(at)); } catch (e) {}
+      document.body.style.backgroundImage = 'url("' + shots[at] + '")';
+      document.body.classList.add("hasbg");
+    };
+    if (every === 0) {
+      pick();
+      return;
+    }
+    let last = 0;
+    try { last = Number(localStorage.getItem("wallwhen") || "0") || 0; } catch (e) {}
+    const now = Date.now();
+    if (now - last >= every * 60000) {
+      try { localStorage.setItem("wallwhen", String(now)); } catch (e) {}
+      pick();
+    } else {
+      let at = 0;
+      try { at = Number(localStorage.getItem("wallat") || "0") || 0; } catch (e) {}
+      document.body.style.backgroundImage = 'url("' + shots[at % shots.length] + '")';
+      document.body.classList.add("hasbg");
+    }
+    setInterval(pick, Math.max(60, every * 60) * 1000);
+  }
+
   function tick() {
     const now = new Date();
     const loc = STR.lang || [];
-    document.getElementById("clock").textContent =
-      now.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
-    document.getElementById("date").textContent =
+    const clock = document.getElementById("clock");
+    const date = document.getElementById("date");
+    const shape = { hour: "2-digit", minute: "2-digit",
+                    hour12: !LAYOUT.hour24 };
+    if (LAYOUT.seconds) shape.second = "2-digit";
+    if (clock) clock.textContent = now.toLocaleTimeString(loc, shape);
+    if (date) date.textContent =
       now.toLocaleDateString(loc, { weekday: "long", day: "numeric", month: "long" });
   }
   tick();

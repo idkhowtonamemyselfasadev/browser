@@ -1,0 +1,82 @@
+# Words for passphrases. Short, concrete, easy to read off a screen and
+# type on a phone: no plurals, no homophones, nothing longer than seven
+# letters. The count is what sets the strength, so the browser says it
+# out loud rather than implying it (see passphrase_bits).
+anchor apple april arrow attic autumn bacon badge bakery balcony
+ballot bamboo banana bandage banjo barley barrel basket battery
+beacon beagle bean beard beaver bedrock beetle bell belt bench berry
+bicycle birch biscuit bishop bison blanket blossom board boiler bolt
+bonnet bottle boulder bowl box bracket branch brass bread brick bridge
+broom brush bucket buckle buffalo bugle bulb bundle bunker burrow
+button cabin cable cactus cage cake camel camera candle canoe canvas
+canyon captain caramel cargo carpet carrot cart castle cattle cave
+cedar cellar cement census chain chair chalk channel chapel charcoal
+cheese cherry chest chimney chisel cider cinema circle clamp clay cliff
+clock closet cloud clover coal coast cobweb coconut coffee coin collar
+column comet compass copper coral cork corn cotton couch cougar
+counter cover cowboy crab cradle crane crate crayon cream cricket
+crown crystal cube cuckoo cupboard curtain cushion cymbal dagger daisy
+dandelion dawn deck deer desert desk diamond diary dinner dock dolphin
+domino donkey door dragon drawer dresser drill drum duck dune dusk eagle
+earth easel echo eclipse eel egg elbow elder elk elm ember emerald
+engine envelope eraser escape fabric falcon fang farm fawn feather fence
+fern ferry fiddle field fig filter finch fire fishing flag flame flask
+flint floor flour flower flute foam fog folder forest fork fossil
+fountain fox frame freckle frog frost fruit funnel furnace galaxy
+gallery garage garden garlic gate gauge gazelle gear gecko ginger
+giraffe glacier glass glider globe glove glue goat goggles gold goose
+gorilla grain granite grape grass gravel grease green grill grotto
+guitar gull gutter hammer hamster handle harbour harp harvest hatch
+hazel heater hedge helmet herb heron hickory hill hinge hockey honey
+hood hook hoop hornet horse hose hotel house hull hunter hurdle hut
+iceberg icicle igloo index ink iris iron island ivory jacket jade jam
+jar jasmine jelly jersey jewel jigsaw journal jug jungle juniper kayak
+kennel kettle key keyboard kidney kiln kitchen kite kitten knapsack
+knife knot koala ladder lagoon lake lamb lamp lantern lark lattice
+laundry lava lawn leaf leather ledge lemon lentil leopard letter
+lettuce library lichen lid lighter lilac lily lime linen lion lizard
+llama lobby lobster locket log lotus lumber lunch lynx magnet magpie
+mailbox mammoth mango manor maple marble margin market marsh mask mast
+mattress meadow medal melon mesa metal meteor microbe mill mineral mint
+mirror mitten moat model mole monkey monsoon moon moose moss motor
+mountain mouse muffin mug mulberry mule mushroom music mussel mustard
+nail napkin navy nectar needle nest nettle nickel night noodle north
+nose notebook nozzle nutmeg oak oasis oat ocean octopus office olive
+onion opal orange orbit orchard organ otter oven owl oxygen oyster
+paddle pajamas palace palm pancake panda panel pantry paper parcel
+parsley parsnip pasta pastry path patio pattern peach peanut pear pearl
+pebble pecan pedal pelican pencil penguin pepper perch petal pewter
+piano pickle picnic pier pigeon pillar pillow pilot pine pipe piston
+pistol pitcher pixel plank planet plaster plate platform plum plumber
+pocket pollen pond pony poppy porch port possum pot potato pottery
+pouch powder prairie press pretzel prism puddle pulley pump pumpkin
+puppy purse puzzle pyramid quail quarry quartz quay queen quilt quiver
+rabbit raccoon radar radish raft rail rain rake ramp ranch raspberry
+raven razor recipe reed reef relish ribbon rice ridge rifle rim ring
+river road robin rocket rod roof room rooster root rope rose router
+rubber rudder rug ruler runner rust saddle safari sage sail salad salmon
+salt sand sapphire sardine satchel sauce sausage saw scale scarf school
+scissors scooter screen screw scroll seagull seal season seaweed seed
+server shade shadow shark shawl shed sheep shelf shell shelter sherbet
+shield shingle ship shirt shoe shovel shrimp shutter sidewalk silk
+silver sink siren skate sketch ski skillet skirt skull sky slate sled
+sleeve slide slipper smoke snail snake snow soap socket sofa soil solar
+soup south spade sparrow spatula speaker spice spider spinach spire
+sponge spool spoon spring sprout spruce square squash squid squirrel
+stable stadium stairs stamp stapler star station statue steam steel
+stem step stick stone stool stork storm stove strap straw stream street
+string studio stump sugar suitcase summer sunset surf swallow swamp swan
+sweater swing switch sword syrup table tadpole tailor tangerine tank
+tape tapestry target teacup teapot telescope temple tennis tent terrace
+thermos thicket thimble thistle thorn thread throne thumb thunder ticket
+tide tiger tile timber tinder tissue toast toaster toffee tomato tongs
+tool tooth topaz torch tortoise tower town tractor trail train tram
+trapeze tray treasure tree trellis tribe tricycle trolley trophy trout
+truck trumpet trunk tub tuba tulip tuna tundra tunnel turkey turnip
+turtle tusk twig twine typhoon umbrella unicorn uniform urn valley
+valve vanilla vase vault velvet vessel vest village vine vinegar violet
+violin volcano vulture waffle wagon walnut walrus wardrobe warehouse
+washer wasp watch water waterfall wave weasel weather weaver wedge well
+whale wharf wheat wheel whistle willow window wing winter wire wolf
+wombat wood woodpecker wool workshop worm wrench wrist yacht yard yarn
+yeast yellow yogurt zebra zinc zipper zucchini

@@ -246,12 +246,24 @@ def drag(item, onto, where, off_the_end=False):
                 seen["mark"] = tree._drop[0] if tree._drop else None
                 seen["open"] = panel.isVisible()
 
-    was = QTreeWidget.startDrag
+    # QTreeWidget.startDrag is an unbound built-in method of the
+    # type, not the descriptor -- that lives on QAbstractItemView. So
+    # putting it back by assignment writes the unbound method into
+    # QTreeWidget's own dict, where it shadows the real descriptor for
+    # the rest of the process, and the next super().startDrag(actions)
+    # is called with the actions as its self. That is what aborted
+    # this test at the very last check for six waves. It was never
+    # there to begin with, so the way to put it back is to remove it.
+    had = "startDrag" in QTreeWidget.__dict__
+    was = QTreeWidget.__dict__.get("startDrag")
     QTreeWidget.startDrag = loop
     try:
         tree.startDrag(Qt.DropAction.MoveAction)
     finally:
-        QTreeWidget.startDrag = was
+        if had:
+            QTreeWidget.startDrag = was
+        else:
+            del QTreeWidget.startDrag
     app.processEvents()
     return seen
 
