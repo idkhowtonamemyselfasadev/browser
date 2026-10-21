@@ -203,8 +203,11 @@ def engine_works(browser):
 # ------------------------------------------------- 1. the trust boundary
 @check("internal pages are recognised, and only those")
 def internal_pages(browser):
-    own = ["start.html", "settings.html", "history.html", "downloads.html",
-           "bookmarks.html"]
+    # every page the browser serves out of its own folder: a page of
+    # ours that falls off this list loses its bridge and breaks, which
+    # is what happened to notes.html, player.html and mictest.html
+    # between waves 19 and 25
+    own = list(B.OWN_PAGES)
     for name in own:
         url = QUrl.fromLocalFile(str(B.APP_DIR / name))
         assert B.is_internal_page(url), "%s should be internal" % name
@@ -760,6 +763,59 @@ def connect_through(port, target):
 
 # ---------------------------------------------------------------- main
 ENGINE = True
+
+
+@check("nothing in browser.py is defined twice")
+def check_no_duplicate_definitions(browser):
+    """A second definition of the same name silently replaces the
+    first, and Python says nothing at all.
+
+    This has gone wrong four times while the waves were being built:
+    two resizeEvent methods (the popovers stopped following the
+    window), two dev_tool methods and two DEV_TOOLS tables (every
+    developer tool written before the developer wave answered
+    nothing), two storage_menu methods, two page_links with different
+    answer shapes, and two certificate menus. None of it raised; the
+    older half of each pair simply stopped being reachable. So: no
+    class may define a method twice, and no module-level name may be
+    assigned or defined twice.
+    """
+    import ast as _ast
+    import collections as _collections
+    tree = _ast.parse((REPO / "browser.py").read_text())
+    trouble = []
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.ClassDef):
+            continue
+        where = _collections.defaultdict(list)
+        for item in node.body:
+            if isinstance(item, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                where[item.name].append(item.lineno)
+        for name, lines in where.items():
+            if len(lines) > 1:
+                trouble.append("%s.%s at lines %s"
+                               % (node.name, name,
+                                  ", ".join(str(n) for n in lines)))
+    top = _collections.defaultdict(list)
+    for item in tree.body:
+        if isinstance(item, (_ast.FunctionDef, _ast.AsyncFunctionDef,
+                             _ast.ClassDef)):
+            top[item.name].append(item.lineno)
+        elif isinstance(item, _ast.Assign):
+            for target in item.targets:
+                if isinstance(target, _ast.Name):
+                    top[target.id].append(item.lineno)
+    for name, lines in top.items():
+        if len(lines) > 1:
+            trouble.append("module %s at lines %s"
+                           % (name, ", ".join(str(n) for n in lines)))
+    assert not trouble, "defined twice: " + "; ".join(sorted(trouble))
+    methods = sum(
+        1 for node in _ast.walk(tree)
+        if isinstance(node, _ast.ClassDef)
+        for item in node.body
+        if isinstance(item, (_ast.FunctionDef, _ast.AsyncFunctionDef)))
+    return "%d methods, each defined once" % methods
 
 
 def main():

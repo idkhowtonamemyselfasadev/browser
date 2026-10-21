@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Searches</title>
+<style>
+  /* The same shelf as the history and downloads pages: one look for
+     the browser's own pages, so this one does not arrive as a
+     stranger. Colours come from the page itself rather than from the
+     theme bridge, exactly as history.html does. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000000;
+    color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    padding: 40px 0 60px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+  header { display: flex; align-items: center; gap: 14px;
+           margin-bottom: 22px; }
+  h1 { font-size: 22px; font-weight: 600; flex: 1; }
+  input, select, button {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 12px;
+    color: #cdd6f4;
+    font: inherit;
+    font-size: 13px;
+    padding: 9px 14px;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: #89b4fa; }
+  #find { width: 220px; }
+  #clear { border-color: rgba(243, 139, 168, 0.35); color: #f38ba8;
+           cursor: pointer; }
+  #clear:hover { background: rgba(243, 139, 168, 0.12); }
+  .row {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 10px 12px; border-radius: 10px;
+    border: 1px solid transparent;
+  }
+  .row:hover { background: rgba(137, 180, 250, 0.08);
+               border-color: rgba(137, 180, 250, 0.2); }
+  .q { flex: 1; cursor: pointer; }
+  .engine { color: #89b4fa; font-size: 12px; }
+  .when { color: #6c7086; font-size: 12px; white-space: nowrap; }
+  .day { margin: 22px 0 6px; color: #a6adc8; font-size: 12px;
+         text-transform: uppercase; letter-spacing: .08em; }
+  #empty { color: #6c7086; padding: 30px 12px; }
+  #count { color: #6c7086; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="t_title">Searches</h1>
+    <input id="find" placeholder="Search">
+    <select id="engine"><option value="">All engines</option></select>
+    <button id="clear">Clear the list</button>
+  </header>
+  <div id="count"></div>
+  <div id="list"></div>
+  <div id="empty" hidden>Nothing searched yet.</div>
+</div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  // The page asks the browser for the rows and draws them. Nothing is
+  // fetched from anywhere: the list is the browser's own record of
+  // what was typed into its address bar.
+  let bridge = null;
+  let STR = {};
+  let rows = [];
+
+  function pretty(when) {
+    const d = new Date((when || 0) * 1000);
+    return d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  }
+
+  function dayOf(when) {
+    const d = new Date((when || 0) * 1000);
+    return d.toLocaleDateString();
+  }
+
+  function render() {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+    let day = "";
+    rows.forEach((row) => {
+      const mine = dayOf(row.t);
+      if (mine !== day) {
+        day = mine;
+        const head = document.createElement("div");
+        head.className = "day";
+        head.textContent = mine;
+        list.appendChild(head);
+      }
+      const line = document.createElement("div");
+      line.className = "row";
+      const what = document.createElement("span");
+      what.className = "q";
+      what.textContent = row.q || "";
+      what.onclick = () => bridge && bridge.searchAgain(row.q || "");
+      const engine = document.createElement("span");
+      engine.className = "engine";
+      engine.textContent = row.engine || "";
+      const when = document.createElement("span");
+      when.className = "when";
+      when.textContent = pretty(row.t);
+      line.append(what, engine, when);
+      list.appendChild(line);
+    });
+    document.getElementById("empty").hidden = rows.length > 0;
+    document.getElementById("count").textContent =
+      rows.length ? rows.length + "" : "";
+  }
+
+  function load() {
+    if (!bridge) return;
+    const want = {q: document.getElementById("find").value,
+                  engine: document.getElementById("engine").value};
+    bridge.searchRows(JSON.stringify(want), (j) => {
+      try { rows = JSON.parse(j) || []; } catch (e) { rows = []; }
+      render();
+    });
+  }
+
+  if (typeof qt !== "undefined") {
+    new QWebChannel(qt.webChannelTransport, (ch) => {
+      bridge = ch.objects.bridge;
+      bridge.uiStrings((j) => {
+        try {
+          Object.assign(STR, JSON.parse(j));
+          document.title = STR.searchesTitle || "Searches";
+          document.getElementById("t_title").textContent =
+            STR.searchesTitle || "Searches";
+          document.getElementById("find").placeholder =
+            STR.searchHistory || "Search";
+          document.getElementById("clear").textContent =
+            STR.searchesClear || "Clear the list";
+          document.getElementById("empty").textContent =
+            STR.searchesNone || "Nothing searched yet.";
+        } catch (e) {}
+      });
+      bridge.searchEngines((j) => {
+        let engines = [];
+        try { engines = JSON.parse(j) || []; } catch (e) { engines = []; }
+        const picker = document.getElementById("engine");
+        engines.forEach((row) => {
+          const option = document.createElement("option");
+          option.value = row.id;
+          option.textContent = row.name;
+          picker.appendChild(option);
+        });
+      });
+      load();
+    });
+  }
+
+  document.getElementById("find").oninput = load;
+  document.getElementById("engine").onchange = load;
+  document.getElementById("clear").onclick = () => {
+    if (!bridge) return;
+    bridge.clearSearches();
+    rows = [];
+    render();
+  };
+</script>
+</body>
+</html>

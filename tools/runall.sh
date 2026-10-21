@@ -40,7 +40,17 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_libs.py test_looks.py test_navguard.py test_external.py \
          test_lifecycle.py test_deadtab.py test_libguard.py test_clicks.py \
          test_bpgame.py test_permreload.py test_callguard.py test_agent.py \
-         test_saveimage.py test_screenshare.py; do
+         test_saveimage.py test_screenshare.py test_sitetheme_render.py \
+         test_tabwork.py test_tabwork2.py test_bookmarks2.py \
+         test_addressbar.py \
+         test_pagetools.py test_media.py \
+         test_capture.py test_privacy.py test_pageguard.py \
+         test_privacy2.py test_desk.py test_reading2.py \
+         test_media2.py test_games.py test_forms.py test_downloads.py \
+         test_bar.py test_dev.py test_look2.py test_a11y.py test_nav2.py test_perf2.py test_capture2.py test_keys2.py test_agent2.py test_read3.py test_privacy3.py test_marks3.py test_tools3.py test_block3.py test_gaps3.py \
+         test_devtools.py test_keyboard.py \
+         test_agentops.py test_reading.py test_gaming.py test_files.py \
+         test_perf.py test_sitelook.py; do
   [ -f "$t" ] || continue
   run "$t" "$t"
 done

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Notes</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000000;
+    color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    font-size: 13px;
+    padding: 12px 12px 24px;
+  }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tabs button {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: #6c7086; font: inherit; padding: 5px 8px; cursor: pointer;
+  }
+  .tabs button.on { color: #cdd6f4; border-bottom-color: #89b4fa; }
+  input[type=text], textarea, select {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 9px; color: #cdd6f4; font: inherit;
+    padding: 7px 10px; outline: none; width: 100%;
+  }
+  textarea { min-height: 180px; resize: vertical;
+             font-family: "JetBrainsMono Nerd Font", monospace; }
+  input:focus, textarea:focus { border-color: #89b4fa; }
+  button.act {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 9px; color: #cdd6f4; font: inherit;
+    padding: 6px 10px; cursor: pointer;
+  }
+  button.act:hover { border-color: #89b4fa; }
+  button.warn { border-color: rgba(243, 139, 168, 0.35); color: #f38ba8; }
+  .row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .row.wrap { flex-wrap: wrap; }
+  .item {
+    display: flex; gap: 8px; align-items: flex-start;
+    background: rgba(13, 13, 18, 0.6); border: 1px solid transparent;
+    border-radius: 9px; padding: 7px 9px; margin-bottom: 4px;
+  }
+  .item:hover { border-color: rgba(137, 180, 250, 0.3); }
+  .item .grow { flex: 1; overflow: hidden; }
+  .item .when { color: #6c7086; font-size: 11px; white-space: nowrap; }
+  .item.done .grow { color: #6c7086; text-decoration: line-through; }
+  .item a { color: #89b4fa; text-decoration: none; }
+  .sub { color: #6c7086; font-size: 11px; }
+  .pre { white-space: pre-wrap; word-break: break-word; }
+  h2 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  .empty { color: #6c7086; text-align: center; padding: 20px 0; }
+  .preview { border-top: 1px solid rgba(137, 180, 250, 0.15);
+             margin-top: 10px; padding-top: 10px; }
+  .preview h1, .preview h2, .preview h3 { font-size: 14px; margin: 8px 0 4px; }
+  .preview code { background: rgba(137, 180, 250, 0.12);
+                  border-radius: 4px; padding: 0 3px; }
+  .preview ul { margin-left: 18px; }
+  input[type=checkbox] { accent-color: #89b4fa; margin-top: 2px; }
+  ::selection { background: #cdd6f4; color: #000000; }
+  :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <div class="tabs">
+    <button id="v_notes" class="on">Notes</button>
+    <button id="v_todo">To-do</button>
+    <button id="v_clips">Clips</button>
+    <button id="v_coll">Collections</button>
+    <button id="v_snip">Snippets</button>
+  </div>
+  <div class="row">
+    <input type="text" id="q" placeholder="Search" autocomplete="off">
+    <button class="act" id="newnote">+</button>
+  </div>
+  <div id="where" class="sub"></div>
+  <div id="body"></div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  let bridge = null, view = "notes", open = null;
+  let STR = {};
+
+  // One door for everything in the drawer: desk(verb, payload) answers
+  // JSON. Kept as one slot rather than fifteen because every one of
+  // them is the same shape -- a verb, some JSON in, some JSON back.
+  function desk(verb, payload, then) {
+    if (!bridge) { if (then) then(null); return; }
+    bridge.desk(verb, JSON.stringify(payload || {}), (raw) => {
+      let out = null;
+      try { out = JSON.parse(raw || "null"); } catch (e) {}
+      if (then) then(out);
+    });
+  }
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function when(t) {
+    if (!t) return "";
+    const d = new Date(t * 1000);
+    return d.toLocaleDateString(STR.lang || [],
+      { day: "numeric", month: "numeric" }) + " " +
+      d.toLocaleTimeString(STR.lang || [],
+      { hour: "2-digit", minute: "2-digit" });
+  }
+
+  // A small Markdown renderer: headings, lists, checkboxes, code,
+  // bold, italic and links. Everything goes in as text and is never
+  // assembled as HTML -- a note is his own writing, but a clipped
+  // selection is a website's, and that must not become markup here.
+  function preview(text) {
+    const box = el("div", "preview");
+    for (const raw of String(text || "").split("\n")) {
+      const line = raw.replace(/\s+$/, "");
+      if (!line) { box.appendChild(el("div", "", " ")); continue; }
+      const head = line.match(/^(#{1,3})\s+(.*)$/);
+      if (head) {
+        box.appendChild(el("h" + head[1].length, "", head[2]));
+        continue;
+      }
+      const tick = line.match(/^\s*[-*]\s*\[( |x|X)\]\s*(.*)$/);
+      if (tick) {
+        const row = el("div", "item" + (tick[1] === " " ? "" : " done"));
+        const mark = el("input");
+        mark.type = "checkbox";
+        mark.checked = tick[1] !== " ";
+        mark.disabled = true;
+        row.append(mark, el("span", "grow", tick[2]));
+        box.appendChild(row);
+        continue;
+      }
+      const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+      if (bullet) {
+        const row = el("div", "item");
+        row.append(el("span", "grow", "• " + bullet[1]));
+        box.appendChild(row);
+        continue;
+      }
+      box.appendChild(el("div", "pre", line));
+    }
+    return box;
+  }
+
+  function render() {
+    const body = document.getElementById("body");
+    body.innerHTML = "";
+    const q = document.getElementById("q").value;
+    if (view === "notes") return renderNotes(body, q);
+    if (view === "todo") return renderTodo(body, q);
+    if (view === "clips") return renderClips(body, q);
+    if (view === "coll") return renderCollections(body);
+    return renderSnippets(body);
+  }
+
+  function renderNotes(body, q) {
+    if (open !== null) return renderOneNote(body);
+    desk("notes", {q: q}, (rows) => {
+      body.innerHTML = "";
+      if (!rows || !rows.length) {
+        body.appendChild(el("div", "empty", STR.notesNone || "No notes yet."));
+        return;
+      }
+      for (const note of rows) {
+        const row = el("div", "item");
+        const grow = el("div", "grow");
+        const title = el("div", "", note.title);
+        const sub = el("div", "sub",
+          (note.tags || []).join(", ") || (note.body || "").slice(0, 60));
+        grow.append(title, sub);
+        const edit = el("button", "act", "✎");
+        edit.onclick = () => { open = note.id; render(); };
+        const drop = el("button", "act warn", "✕");
+        drop.onclick = () => desk("deleteNote", {id: note.id},
+                                  () => render());
+        row.append(grow, el("span", "when", when(note.edited || note.t)),
+                   edit, drop);
+        body.appendChild(row);
+      }
+    });
+  }
+
+  function renderOneNote(body) {
+    desk("note", {id: open}, (note) => {
+      body.innerHTML = "";
+      note = note || {id: "", title: "", body: "", tags: [], link: ""};
+      const title = el("input");
+      title.type = "text";
+      title.value = note.title || "";
+      title.placeholder = STR.noteTitle || "Title";
+      const text = el("textarea");
+      text.value = note.body || "";
+      const tags = el("input");
+      tags.type = "text";
+      tags.value = (note.tags || []).join(", ");
+      tags.placeholder = STR.noteTags || "Tags";
+      const bar = el("div", "row wrap");
+      const save = el("button", "act", STR.noteSave || "Save");
+      save.onclick = () => {
+        desk("saveNote", {id: note.id, title: title.value,
+                          body: text.value, tags: tags.value.split(",")},
+             (saved) => { open = saved ? saved.id : null; render(); });
+      };
+      const back = el("button", "act", STR.noteBack || "Back");
+      back.onclick = () => { open = null; render(); };
+      const clip = el("button", "act", STR.noteClipPage || "This page");
+      clip.onclick = () => desk("pageLink", {}, (info) => {
+        if (!info) return;
+        text.value += (text.value ? "\n\n" : "") +
+          "[" + (info.title || info.url) + "](" + info.url + ")";
+      });
+      bar.append(save, back, clip);
+      body.append(title, el("div", "row"), text, el("div", "row"), tags,
+                  bar, preview(text.value));
+      if (note.link) {
+        const link = el("a", "", note.link);
+        link.href = note.link;
+        body.appendChild(link);
+      }
+      text.oninput = () => {
+        const old = body.querySelector(".preview");
+        if (old) old.replaceWith(preview(text.value));
+      };
+    });
+  }
+
+  function renderTodo(body, q) {
+    desk("todos", {}, (rows) => {
+      body.innerHTML = "";
+      const add = el("div", "row");
+      const box = el("input");
+      box.type = "text";
+      box.placeholder = STR.todoNew || "Something to do";
+      const go = el("button", "act", "+");
+      const send = () => {
+        if (!box.value.trim()) return;
+        desk("addTodo", {text: box.value}, () => { box.value = ""; render(); });
+      };
+      go.onclick = send;
+      box.onkeydown = (e) => { if (e.key === "Enter") send(); };
+      const tab = el("button", "act", STR.todoFromTab || "This tab");
+      tab.onclick = () => desk("todoFromTab", {}, () => render());
+      add.append(box, go, tab);
+      body.appendChild(add);
+      const open = (rows || []).filter((r) => !r.done);
+      const done = (rows || []).filter((r) => r.done);
+      for (const group of [open, done]) {
+        if (group === done && done.length) {
+          const head = el("h2", "", STR.todoDone || "Done");
+          const clear = el("button", "act warn", STR.todoClear || "Clear");
+          clear.onclick = () => desk("clearDone", {}, () => render());
+          const line = el("div", "row");
+          line.append(head, clear);
+          body.appendChild(line);
+        }
+        for (const row of group) {
+          if (q && (row.text + " " + row.link).toLowerCase()
+                   .indexOf(q.toLowerCase()) < 0) continue;
+          const item = el("div", "item" + (row.done ? " done" : ""));
+          const tick = el("input");
+          tick.type = "checkbox";
+          tick.checked = row.done;
+          tick.onchange = () => desk("toggleTodo", {id: row.id},
+                                     () => render());
+          const grow = el("div", "grow");
+          grow.appendChild(el("div", "", row.text));
+          if (row.link) {
+            const link = el("a", "sub", row.link);
+            link.href = row.link;
+            grow.appendChild(link);
+          }
+          if (row.due) grow.appendChild(el("div", "sub",
+            (STR.todoDue || "due %s").replace("%s", when(row.due))));
+          const up = el("button", "act", "↑");
+          up.onclick = () => desk("moveTodo", {id: row.id, delta: -1},
+                                  () => render());
+          const drop = el("button", "act warn", "✕");
+          drop.onclick = () => desk("deleteTodo", {id: row.id},
+                                    () => render());
+          item.append(tick, grow, up, drop);
+          body.appendChild(item);
+        }
+      }
+    });
+  }
+
+  function renderClips(body, q) {
+    desk("clips", {}, (rows) => {
+      body.innerHTML = "";
+      if (!rows) {
+        body.appendChild(el("div", "empty", STR.clipsOff
+          || "The clipboard history is off."));
+        return;
+      }
+      if (!rows.length) {
+        body.appendChild(el("div", "empty", STR.clipsNone
+          || "Nothing copied yet."));
+      }
+      const clear = el("button", "act warn", STR.clipsClear || "Clear");
+      clear.onclick = () => desk("clearClips", {}, () => render());
+      if (rows.length) {
+        const line = el("div", "row");
+        line.append(clear);
+        body.appendChild(line);
+      }
+      rows.forEach((clip, i) => {
+        if (q && clip.text.toLowerCase().indexOf(q.toLowerCase()) < 0) return;
+        const item = el("div", "item");
+        const grow = el("div", "grow pre", clip.text.slice(0, 300));
+        const copy = el("button", "act", STR.clipCopy || "Copy");
+        copy.onclick = () => desk("copyClip", {index: i});
+        const pin = el("button", "act", clip.pinned ? "★" : "☆");
+        pin.onclick = () => desk("pinClip", {index: i}, () => render());
+        const drop = el("button", "act warn", "✕");
+        drop.onclick = () => desk("dropClip", {index: i}, () => render());
+        item.append(grow, el("span", "when", when(clip.t)), copy, pin, drop);
+        body.appendChild(item);
+      });
+    });
+  }
+
+  function renderCollections(body) {
+    desk("collections", {}, (rows) => {
+      body.innerHTML = "";
+      if (!rows || !rows.length) {
+        body.appendChild(el("div", "empty", STR.collNone
+          || "No collections yet."));
+      }
+      for (const name of rows || []) {
+        const item = el("div", "item");
+        const grow = el("div", "grow", name);
+        const show = el("button", "act", STR.collOpen || "Show");
+        show.onclick = () => desk("collection", {name: name}, (text) => {
+          body.innerHTML = "";
+          const back = el("button", "act", STR.noteBack || "Back");
+          back.onclick = () => render();
+          body.append(el("h2", "", name), back, preview(text || ""));
+        });
+        const drop = el("button", "act warn", "✕");
+        drop.onclick = () => desk("deleteCollection", {name: name},
+                                  () => render());
+        item.append(grow, show, drop);
+        body.appendChild(item);
+      }
+      const add = el("div", "row");
+      const box = el("input");
+      box.type = "text";
+      box.placeholder = STR.collNew || "Add this page to…";
+      const go = el("button", "act", "+");
+      go.onclick = () => {
+        if (!box.value.trim()) return;
+        desk("collectPage", {name: box.value}, () => {
+          box.value = ""; render();
+        });
+      };
+      add.append(box, go);
+      body.appendChild(add);
+    });
+  }
+
+  function renderSnippets(body) {
+    desk("snippets", {}, (table) => {
+      body.innerHTML = "";
+      body.appendChild(el("div", "sub", STR.snipHint
+        || "Type the key in any text field to insert the text."));
+      const rows = Object.keys(table || {}).sort();
+      for (const key of rows) {
+        const item = el("div", "item");
+        const grow = el("div", "grow");
+        grow.append(el("div", "", key),
+                    el("div", "sub pre", (table[key] || "").slice(0, 120)));
+        const drop = el("button", "act warn", "✕");
+        drop.onclick = () => desk("setSnippet", {key: key, text: ""},
+                                  () => render());
+        item.append(grow, drop);
+        body.appendChild(item);
+      }
+      if (!rows.length) {
+        body.appendChild(el("div", "empty", STR.snipNone
+          || "No snippets yet."));
+      }
+      const add = el("div", "row");
+      const key = el("input");
+      key.type = "text";
+      key.placeholder = STR.snipKey || ";ip";
+      key.style.maxWidth = "110px";
+      const text = el("input");
+      text.type = "text";
+      text.placeholder = STR.snipText || "what it inserts";
+      const go = el("button", "act", "+");
+      go.onclick = () => {
+        if (!key.value.trim()) return;
+        desk("setSnippet", {key: key.value, text: text.value}, () => {
+          key.value = ""; text.value = ""; render();
+        });
+      };
+      add.append(key, text, go);
+      body.appendChild(add);
+    });
+  }
+
+  function setView(which) {
+    view = which;
+    open = null;
+    for (const name of ["notes", "todo", "clips", "coll", "snip"]) {
+      document.getElementById("v_" + name)
+        .classList.toggle("on", name === which);
+    }
+    render();
+  }
+
+  document.getElementById("q").oninput = render;
+  document.getElementById("newnote").onclick = () => {
+    if (view === "notes") {
+      desk("daily", {}, (note) => { open = note ? note.id : null; render(); });
+    } else {
+      render();
+    }
+  };
+  for (const name of ["notes", "todo", "clips", "coll", "snip"]) {
+    document.getElementById("v_" + name).onclick = () => setView(name);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && bridge && bridge.closePane) bridge.closePane();
+  });
+
+  if (typeof qt !== "undefined") {
+    new QWebChannel(qt.webChannelTransport, (ch) => {
+      bridge = ch.objects.bridge;
+      bridge.uiStrings((j) => {
+        try {
+          Object.assign(STR, JSON.parse(j));
+          document.title = STR.notesTitle || "Notes";
+          document.getElementById("q").placeholder = STR.notesSearch
+            || "Search";
+          document.getElementById("v_notes").textContent = STR.notesTab
+            || "Notes";
+          document.getElementById("v_todo").textContent = STR.todoTab
+            || "To-do";
+          document.getElementById("v_clips").textContent = STR.clipsTab
+            || "Clips";
+          document.getElementById("v_coll").textContent = STR.collTab
+            || "Collections";
+          document.getElementById("v_snip").textContent = STR.snipTab
+            || "Snippets";
+        } catch (e) {}
+        desk("where", {}, (info) => {
+          if (info && info.folder) {
+            document.getElementById("where").textContent = info.folder;
+          }
+          render();
+        });
+      });
+    });
+  } else {
+    render();
+  }
+</script>
+</body>
+</html>
