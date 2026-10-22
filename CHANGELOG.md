@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-10-22 — the Windows branches of this file, checked at last
+
+The Windows edition is generated from this one, so the branches only
+Windows takes live here — and ran nowhere. Nobody on this machine
+found out when one stopped making sense, and one had: **`_write_atomic`
+has been asking `_restrict_to_owner` to lock a swapped vault down since
+the bug sweep came back from Windows, and that name was never in this
+file at all.** The call sat inside `if sys.platform == "win32":`, so
+Linux never took it and nothing failed; the other edition happened to
+carry its own copy, and nothing checked that it still did.
+
+Four of those branches now live here, where the suite can reach them:
+
+- **`_restrict_to_owner`**, the icacls call that makes a password file
+  owner-only where there is no `chmod` to do it, and the branch in
+  `_write_private` that uses it. Best effort by design: no icacls, or a
+  FAT32 drive with no ACLs, must never be a crash while saving a
+  password.
+- **The folder everything of his lives in.** `BROWSER_HOME` falls back
+  to `%LOCALAPPDATA%\browser` on Windows, to the home folder if even
+  that is unset, and to `~/.local/share/browser` here — one statement,
+  so the suite can run that very code with a `sys` and an `os` of its
+  own. The same file's own Windows branches already assumed such a
+  folder existed.
+- **Glass does not ask Windows for an alpha window.** DWM does not blur
+  what is behind one, so the frost is a hole straight through to the
+  desktop; the look sits on the theme's solid base there, which is what
+  `look_style` already did on that half of the decision.
+- **The taskbar identity and the `.ico`**, which is what keeps the
+  window from being grouped under python.exe with python's icon.
+
+`test_winbranch.py`: **40 checks**, and the only way Linux allows — the
+home-folder statements run with a fake `sys` and `os`, the ACL helper is
+called for real with what it shells out to gone, `_write_private` is
+driven down both sides of its branch, and the two things `main()` only
+does there are read out of its source, because `main()` cannot be run
+twice in one process. It fails on the shipped file, at the missing name.
+
 ## 2026-10-22 — the crash log nobody could find was never written
 
 Found while porting this edition to Windows, in code that came the
