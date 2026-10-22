@@ -592,6 +592,239 @@
   }
   :root[data-look="macos"] .panel { border-radius: 16px; }
   :root[data-look="macos"] .wrow { border-radius: 11px; }
+
+  /* ---- the full-page revamp ----
+     The page used to be a single 880px column down the middle of a
+     window twice that wide: on his screen two thirds of Settings was
+     empty black, and a section like Browsing was a mile of scrolling
+     through a one-card-wide stack.
+
+     So the cards of a section are laid out as a grid that fills
+     whatever width the window has -- one column on a phone, two on a
+     laptop, three or four on his monitor -- and the cards that need
+     room (a row of pickers, a text box, the theme shelf) take the
+     whole width of the grid instead of being squeezed into a column.
+     The rail is narrower, the title block is one line instead of
+     three, and the rows are tighter, so what is on the screen is
+     settings rather than space. */
+  body { grid-template-columns: 236px minmax(0, 1fr); }
+  .content { padding: 22px clamp(18px, 2.4vw, 34px) 40px; }
+  .inner { max-width: none; }
+
+  /* The cards of a section flow into as many columns as the window
+     has room for -- one on a phone, two on a laptop, three or four on
+     his monitor -- and each card keeps a readable width, so a switch
+     still sits beside its own label instead of a foot away across an
+     empty card. Columns rather than a grid: cards are different
+     heights, and a grid would leave a hole under every short one.
+
+     The exceptions span the lot: a shelf of pickers (themes, search
+     engines, anything with four or more choices) is worth the whole
+     width, and gets it. */
+  section.active {
+    display: block;
+    columns: 25rem auto;
+    column-gap: 16px;
+    margin-top: 18px;
+  }
+  section.active > .panel {
+    break-inside: avoid;
+    margin: 0 0 16px;
+    width: 100%;
+  }
+  section.active > .panel:has(#themelist),
+  section.active > .panel:has(#enginecards),
+  section.active > .panel:has(.cards .card:nth-child(4)) {
+    column-span: all;
+    margin-top: 2px;
+  }
+  /* inside a card that spans, the pickers and the rows use the room */
+  .panel > .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+    gap: 10px;
+  }
+  section.active > .panel:has(.cards .card:nth-child(4)) > .group {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr));
+  }
+
+  /* the title block: one line, not a column of three */
+  #pagehead {
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: 6px 16px; padding-bottom: 16px;
+  }
+  #curgroup { order: 1; min-height: 0; }
+  #curcat { order: 2; margin: 0; font-size: clamp(21px, 2vw, 27px); }
+  #curdesc { order: 3; flex: 1 1 22rem; max-width: 70ch; }
+
+  /* the rail: a pill where you are, and room for one more word */
+  #rail { padding-top: 22px; }
+  #brand { padding: 0 18px 16px; }
+  .navlabel { padding: 16px 18px 6px; }
+  #sidebar button {
+    padding: 8px 14px; margin: 1px 8px; gap: 10px;
+    border-left: none; border-radius: 8px;
+  }
+  #sidebar button .mark { flex: 0 0 14px; width: 14px; height: 14px; }
+  #sidebar button.active {
+    border-left-color: transparent;
+    background: rgba(205, 214, 244, .1);
+  }
+  #railfoot { padding: 18px 18px 0; }
+
+  /* tighter rows, and a card that answers the mouse */
+  .panel .wrow, .panel .row { padding: 13px 18px; }
+  h2.sub { padding: 14px 18px 12px; }
+  .panel > .cards { padding: 2px 18px 16px; }
+  .panel > .wsub, .panel > .hint { padding-left: 18px; padding-right: 18px; }
+  .panel { transition: border-color .15s ease; }
+  .panel:hover { border-color: rgba(108, 112, 134, .5); }
+
+  @media (max-width: 760px) {
+    body { grid-template-columns: 184px minmax(0, 1fr); }
+    .content { padding: 16px max(14px, env(safe-area-inset-right, 0px))
+                        32px max(14px, env(safe-area-inset-left, 0px)); }
+  }
+  /* on a phone the rail would eat half the window, so it goes to the
+     top as a strip you scroll sideways and the settings get the rest */
+  @media (max-width: 560px) {
+    body {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+    }
+    #rail {
+      grid-column: 1 / -1; grid-row: 1;
+      width: 100%; min-width: 0; justify-self: stretch;
+      flex-direction: row; align-items: center; gap: 4px;
+      overflow-x: auto; overflow-y: hidden;
+      border-right: none;
+      border-bottom: 1px solid rgba(108, 112, 134, .35);
+      padding: 8px 10px;
+    }
+    #brand, #railfoot, .navlabel { display: none; }
+    #sidebar { display: flex; gap: 4px; }
+    #sidebar button { width: auto; white-space: nowrap; margin: 0; }
+    /* everything else is pinned to column 2 further up, which on one
+       column makes a second one out of thin air and leaves the rail a
+       20px sliver */
+    #topbar { grid-column: 1; grid-row: 2; }
+    .content { grid-column: 1; grid-row: 3; }
+    #foot { grid-column: 1; grid-row: 4; }
+    section.active { columns: 1; }
+  }
+
+  /* ---- the way around: a strip across the top, and a page of tiles ----
+     The 24-name list down the side was something to scroll and read
+     before you could pick. Now every section is a chip on one strip at
+     the top -- all of them visible at once, no scrolling -- and
+     Settings opens on a page of tiles, each saying what is in it and
+     how many settings that is. Clicking a tile or a chip opens the
+     section; "All settings", the browser's name in the corner, and
+     Escape come back here. */
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+  #rail {
+    grid-column: 1; grid-row: 1;
+    flex-direction: row; align-items: center; flex-wrap: wrap;
+    gap: 2px 10px;
+    overflow: visible;
+    border-right: none;
+    border-bottom: 1px solid rgba(108, 112, 134, .3);
+    padding: 10px clamp(18px, 2.4vw, 34px) 9px;
+  }
+  #brand {
+    padding: 0 14px 0 0; cursor: pointer; border: none; background: none;
+    font-family: inherit;
+  }
+  #brand:hover { color: #ffffff; }
+  #sidebar {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    min-width: 0; flex: 1 1 auto;
+  }
+  .navlabel {
+    padding: 5px 8px 5px 4px; font-size: 10px; letter-spacing: .16em;
+    align-self: center; color: #6c7086;
+  }
+  #sidebar button {
+    width: auto; margin: 0; padding: 5px 11px; gap: 7px;
+    border: 1px solid transparent; border-radius: 999px;
+    font-size: 12.5px; white-space: nowrap;
+  }
+  #sidebar button .mark { display: none; }
+  #sidebar button.active {
+    background: rgba(205, 214, 244, .13);
+    border-color: rgba(205, 214, 244, .3);
+    color: #ffffff;
+  }
+  #railfoot { display: none; }
+  #topbar { grid-column: 1; grid-row: 2; padding: 11px clamp(18px, 2.4vw, 34px); }
+  .content { grid-column: 1; grid-row: 3; }
+  #foot { grid-column: 1; grid-row: 4; }
+
+  /* the tiles */
+  #home { display: none; }
+  #home.on {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+    gap: 12px;
+    margin-top: 18px;
+  }
+  .homegroup {
+    grid-column: 1 / -1;
+    font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase;
+    color: #a6adc8; font-weight: 600;
+    padding: 6px 2px 0;
+  }
+  .tile {
+    display: flex; flex-direction: column; align-items: flex-start;
+    gap: 5px; text-align: left; cursor: pointer;
+    font: inherit; color: #cdd6f4;
+    background: rgba(13, 13, 18, .58);
+    backdrop-filter: blur(16px) saturate(125%);
+    -webkit-backdrop-filter: blur(16px) saturate(125%);
+    border: 1px solid rgba(108, 112, 134, .3);
+    border-radius: 12px;
+    padding: 15px 16px 14px;
+    transition: border-color .15s ease, background .15s ease,
+                transform .15s ease;
+  }
+  .tile:hover {
+    border-color: rgba(205, 214, 244, .45);
+    background: rgba(22, 22, 29, .7);
+    transform: translateY(-1px);
+  }
+  .tile:focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+  .tname { font-size: 15px; font-weight: 600; color: #ffffff; }
+  .tsays { font-size: 12.5px; line-height: 1.55; color: #a6adc8; }
+  .tcount {
+    margin-top: 2px; font-size: 11px; letter-spacing: .06em;
+    color: #6c7086;
+  }
+
+  /* the way back, beside the title of a section */
+  #backhome {
+    display: none; order: 0; flex-basis: 100%;
+    width: max-content; margin: 0 auto 4px 0;
+    background: none; border: none; cursor: pointer;
+    font: inherit; font-size: 12px; color: #a6adc8; padding: 0;
+  }
+  #backhome.on { display: block; }
+  #backhome::before { content: "\2190  "; }
+  #backhome:hover { color: #cdd6f4; }
+
+  @media (max-width: 560px) {
+    #rail { padding: 8px 14px; }
+    #home.on { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* on the tiles there is nothing to be beside, so the strip is only
+     the name; inside a section it carries that section's neighbours */
+  #rail:not(.inside) #sidebar, #rail:not(.inside) .navlabel { display: none; }
+  #sidebar button.elsewhere, #sidebar .navlabel.elsewhere { display: none; }
+  #navfilter { font-size: 14px; padding: 10px 14px; }
 </style>
 </head>
 <body>
@@ -615,13 +848,20 @@
   <main class="content" id="content">
     <div class="inner">
       <div id="pagehead">
+        <button id="backhome" type="button" data-str="setBack">All settings</button>
         <div id="curgroup"></div>
         <h1 id="curcat">Settings</h1>
         <p id="curdesc"></p>
       </div>
 
-    <section data-group="gen" data-desc="descSearch">
-      <h2 id="t_search">Search</h2>
+      <!-- Where Settings opens: every section as a tile, with the line
+           that says what is in it. A list of 24 names down the side of
+           the window was something to scroll and read; this is
+           something to look at and point at. -->
+      <div id="home"></div>
+
+    <section data-group="gen" data-desc="descSearchBar">
+      <h2 id="t_searchBar">Search and the address bar</h2>
       <div class="panel">
         <h2 class="sub" id="t_searchEngine">Search engine</h2>
         <div class="cards" id="enginecards"></div>
@@ -635,10 +875,7 @@
           <input type="checkbox" id="suggestions"><span class="wsw"></span>
         </label>
       </div>
-    </section>
 
-    <section data-group="gen" data-desc="descBar">
-      <h2 id="t_barMenu2">The address bar</h2>
       <div class="panel">
         <h2 class="sub" id="t_barMenu">The address bar</h2>
         <label class="wrow">
@@ -781,8 +1018,8 @@
       </div>
     </section>
 
-    <section data-group="gen" data-desc="descAppearance">
-      <h2 id="t_appearance">Appearance</h2>
+    <section data-group="gen" data-desc="descLooks">
+      <h2 id="t_looksMenu">Looks</h2>
       <div class="panel">
         <h2 class="sub" data-str="cardRendering">How pages are drawn</h2>
         <div class="group">
@@ -1150,6 +1387,112 @@
         </div>
         </div>
       </div>
+
+      <p class="hint" id="t_themeHint">A theme paints the browser and its own pages. Websites keep the colours their makers gave them.</p>
+      <div class="panel">
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="themecurname">Catppuccin Mocha</span>
+            <span class="wsub" id="themecurnote"></span>
+          </span>
+          <input type="text" id="themefilter" placeholder="Search themes&hellip;" style="width:180px">
+        </div>
+      </div>
+      <div id="themerestart">
+        <span id="themerestartmsg"></span>
+        <button id="themerestartbtn" class="primary">Restart now</button>
+      </div>
+      <div id="themenomatch">No theme by that name.</div>
+      <div id="themelist"></div>
+      <div class="panel">
+        <h2 class="sub" id="t_themeEditor">Edit this theme</h2>
+        <div class="wsub" id="t_themeEditorSub"></div>
+        <div class="group" id="themeeditrows"></div>
+        <div class="wrow">
+          <input type="text" id="themenewname" placeholder="A name for it" style="min-width:200px">
+          <button id="themesave" class="primary" data-str="themeSave">Save as my theme</button>
+          <button id="themeexport" data-str="themeExport">Save this theme as a file</button>
+          <button id="themeimport" data-str="themeImport">Read a theme from a file</button>
+        </div>
+        <div class="wsub" id="themefaint"></div>
+      </div>
+      <div class="panel">
+        <h2 class="sub" id="t_themeStarName">Favourite themes</h2>
+        <div class="wsub" id="t_themeStarHint"></div>
+        <div class="group">
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="themestars"></span></span>
+          <button id="themestarbtn" data-str="themeStar">Star this theme</button>
+          <button id="themecyclebtn" data-str="themeCycle">Next favourite theme</button>
+        </div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="sub" id="t_followSchemeName">Follow the desktop's light or dark setting</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_followSchemeName2">Follow the desktop</span>
+            <span class="wsub" id="t_followSchemeHint"></span>
+          </span>
+          <input type="checkbox" id="followscheme"><span class="wsw"></span>
+        </label>
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="t_schemeDarkName">The dark theme to use</span></span>
+          <input type="text" id="schemedark" placeholder="mocha" style="width:160px">
+          <span class="wname" id="t_schemeLightName">The light theme to use</span>
+          <input type="text" id="schemelight" placeholder="latte" style="width:160px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_colourFileName">Follow a colour file</span>
+            <span class="wsub" id="t_colourFileHint"></span>
+          </span>
+          <input type="text" id="colourfile" style="min-width:220px">
+        </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_appearanceResetName">Put appearance back as it came</span>
+            <span class="wsub" id="t_appearanceResetHint"></span>
+          </span>
+          <button id="appearancereset">Reset</button>
+          <button id="appearanceundo" data-str="appearanceUndo">Undo that reset</button>
+        </div>
+      </div>
+
+      <p class="hint" data-str="tbHint">A right-click on the toolbar itself opens the same list.</p>
+
+      <div class="panel">
+        <h2 class="sub" data-str="tbShown">On the toolbar</h2>
+        <div class="group" id="tbbar"></div>
+      </div>
+
+      <div class="panel" id="tbhidpanel">
+        <h2 class="sub" id="tbhidhead" data-str="tbHidden">Not shown</h2>
+        <div class="group" id="tbhid"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" data-str="tbElsewhere">Elsewhere in the chrome</h2>
+        <div class="wsub" data-str="tbElsewhereHint">These sit where they sit &mdash; you can take one away, but not move it.</div>
+        <div class="group" id="tbelse"></div>
+      </div>
+
+      <p class="hint" data-str="tbShortcutHint">Taking a button away never touches its keyboard shortcut &mdash; Ctrl+P still prints.</p>
+      <div class="panel">
+        <div class="wrow">
+          <span class="wlabel"><span class="wsub" data-str="tbFixedHint">Back, forward, reload and the address bar stay. A browser with no way back is a broken browser.</span></span>
+          <button id="tbreset" data-str="tbReset">Back to the usual set</button>
+        </div>
+      </div>
+
+      <p class="hint" data-str="lookHint">A look moves the furniture &mdash; where things sit and what shape they are. Every look works with every theme.</p>
+      <div class="panel">
+        <div class="cards" id="lookcards"></div>
+      </div>
     </section>
 
     <section data-group="gen" data-desc="descKeys">
@@ -1269,103 +1612,6 @@
         </div>
         <div id="keyseditor" class="group"></div>
         <div class="wrow"><button id="keysreset" data-str="tbReset">Back to the usual set</button></div>
-      </div>
-
-    </section>
-
-    <section data-group="gen" data-desc="descRecord">
-      <h2 id="t_recMenu">Recording and captures</h2>
-      <div class="panel">
-        <div class="group">
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_recFpsName">Frames a second</span></span>
-          <input type="number" id="recfps" min="1" max="30" style="width:80px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_recFormatName">Recordings are saved as</span></span>
-          <select id="recformat">
-            <option value="webm">WebM</option>
-            <option value="mp4">MP4</option>
-            <option value="gif">GIF</option>
-          </select>
-        </div>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_recQualityName">Recording quality</span></span>
-          <select id="recquality">
-            <option value="best" id="t_recQuality_best">Best</option>
-            <option value="good" id="t_recQuality_good">Good</option>
-            <option value="small" id="t_recQuality_small">Small</option>
-          </select>
-        </div>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_recBufferName">How many seconds the replay buffer keeps</span></span>
-          <input type="number" id="recbufferseconds" min="5" max="600" style="width:90px">
-        </div>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_recClicksName">Draw clicks and keys into a recording</span>
-            <span class="wsub" id="t_recClicksHint"></span>
-          </span>
-          <input type="checkbox" id="recclicks"><span class="wsw"></span>
-        </label>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_shotTimelapse">Capture this page every few minutes</span></span>
-          <input type="number" id="lapseminutes" min="1" max="1440" style="width:90px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotUploadName">Where a capture is uploaded</span>
-            <span class="wsub" id="t_shotUploadHint"></span>
-          </span>
-          <input type="text" id="shotupload" placeholder="https://… or user@host:/path" style="min-width:230px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_ocrPathName">The OCR program</span></span>
-          <input type="text" id="ocrpath" placeholder="tesseract" style="min-width:180px">
-          <span class="wsub" id="ocrfound"></span>
-        </div>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_ffmpegPathName">The ffmpeg program</span></span>
-          <input type="text" id="ffmpegpath" placeholder="ffmpeg" style="min-width:180px">
-          <span class="wsub" id="ffmpegfound"></span>
-        </div>
-        </div>
-      </div>
-      <div class="panel">
-        <h2 class="sub" id="t_shotMenu">Screenshot</h2>
-        <div class="group">
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotDirName">Where screenshots go</span>
-            <span class="wsub" id="t_shotDirHint">Empty = a Screenshots folder beside your downloads.</span>
-          </span>
-          <input type="text" id="shotdir" placeholder="~/Pictures" style="min-width:220px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotNameName">Screenshot file name</span>
-            <span class="wsub" id="t_shotNameHint">strftime marks, {title} and {site}.</span>
-          </span>
-          <input type="text" id="shotname" placeholder="shot-%Y%m%d-%H%M%S" style="min-width:220px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotFormatName">Screenshot format</span>
-          </span>
-          <select id="shotformat">
-            <option value="png">PNG</option>
-            <option value="jpeg">JPEG</option>
-            <option value="webp">WebP</option>
-          </select>
-        </div>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotRedactName">Blur password fields in captures</span>
-            <span class="wsub" id="t_shotRedactHint">What is typed in a password field is blurred before the picture is taken.</span>
-          </span>
-          <input type="checkbox" id="shotredact"><span class="wsw"></span>
-        </label>
-        </div>
       </div>
 
     </section>
@@ -1526,54 +1772,8 @@
       </div>
     </section>
 
-    <section data-group="gen" data-desc="descNav">
-      <h2 id="t_navMenu">Getting around</h2>
-      <p class="hint" id="t_navHint">The switches here can be set for one site alone from the getting-around popup (Ctrl+Alt+Shift+G).</p>
-      <div class="panel">
-        <div class="group" id="navswitches"></div>
-      </div>
-      <div class="panel">
-        <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_linkPreviewName">Shift and hover shows the linked page</span>
-            <span class="wsub" id="t_linkPreviewHint"></span>
-          </span>
-          <input type="checkbox" id="linkpreview"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_navRetryName">Try a failed load again when the network is back</span>
-            <span class="wsub" id="t_navRetryHint"></span>
-          </span>
-          <input type="checkbox" id="autoretry"><span class="wsw"></span>
-        </label>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_navRewriteName">Addresses to rewrite before loading</span>
-            <span class="wsub" id="t_navRewriteHint"></span>
-          </span>
-          <textarea id="urlrewrites" rows="3" style="min-width:260px"></textarea>
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_navPlayerName">The external player</span>
-            <span class="wsub" id="t_navPlayerHint"></span>
-          </span>
-          <input type="text" id="externalplayer" placeholder="mpv" style="min-width:200px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_navAppName">Which program should open this?</span>
-            <span class="wsub" id="schemeapps"></span>
-          </span>
-        </div>
-        </div>
-      </div>
-    </section>
-
-    <section data-group="gen" data-desc="descA11y">
-      <h2 id="t_a11yName">Reading a page</h2>
+    <section data-group="gen" data-desc="descReadMedia">
+      <h2 id="t_readMedia">Reading and media</h2>
       <p class="hint" id="t_a11yPanelHint">Every one of these can be set for one site alone from the reading-help popup (Ctrl+Alt+Shift+A).</p>
       <div class="panel">
         <h2 class="sub" id="t_a11yPanel2">What is done to a page</h2>
@@ -1775,255 +1975,180 @@
         <div id="readsavemsg" class="urlmsg"></div>
       </div>
 
-    </section>
-
-    <section data-group="gen" data-desc="descToolbar">
-      <h2 data-str="toolbar">Toolbar</h2>
-      <p class="hint" data-str="tbHint">A right-click on the toolbar itself opens the same list.</p>
 
       <div class="panel">
-        <h2 class="sub" data-str="tbShown">On the toolbar</h2>
-        <div class="group" id="tbbar"></div>
-      </div>
-
-      <div class="panel" id="tbhidpanel">
-        <h2 class="sub" id="tbhidhead" data-str="tbHidden">Not shown</h2>
-        <div class="group" id="tbhid"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" data-str="tbElsewhere">Elsewhere in the chrome</h2>
-        <div class="wsub" data-str="tbElsewhereHint">These sit where they sit &mdash; you can take one away, but not move it.</div>
-        <div class="group" id="tbelse"></div>
-      </div>
-
-      <p class="hint" data-str="tbShortcutHint">Taking a button away never touches its keyboard shortcut &mdash; Ctrl+P still prints.</p>
-      <div class="panel">
-        <div class="wrow">
-          <span class="wlabel"><span class="wsub" data-str="tbFixedHint">Back, forward, reload and the address bar stay. A browser with no way back is a broken browser.</span></span>
-          <button id="tbreset" data-str="tbReset">Back to the usual set</button>
-        </div>
-      </div>
-    </section>
-
-    <section data-group="gen" data-desc="descTheme">
-      <h2 id="t_theme">Theme</h2>
-      <p class="hint" id="t_themeHint">A theme paints the browser and its own pages. Websites keep the colours their makers gave them.</p>
-      <div class="panel">
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="themecurname">Catppuccin Mocha</span>
-            <span class="wsub" id="themecurnote"></span>
-          </span>
-          <input type="text" id="themefilter" placeholder="Search themes&hellip;" style="width:180px">
-        </div>
-      </div>
-      <div id="themerestart">
-        <span id="themerestartmsg"></span>
-        <button id="themerestartbtn" class="primary">Restart now</button>
-      </div>
-      <div id="themenomatch">No theme by that name.</div>
-      <div id="themelist"></div>
-      <div class="panel">
-        <h2 class="sub" id="t_themeEditor">Edit this theme</h2>
-        <div class="wsub" id="t_themeEditorSub"></div>
-        <div class="group" id="themeeditrows"></div>
-        <div class="wrow">
-          <input type="text" id="themenewname" placeholder="A name for it" style="min-width:200px">
-          <button id="themesave" class="primary" data-str="themeSave">Save as my theme</button>
-          <button id="themeexport" data-str="themeExport">Save this theme as a file</button>
-          <button id="themeimport" data-str="themeImport">Read a theme from a file</button>
-        </div>
-        <div class="wsub" id="themefaint"></div>
-      </div>
-      <div class="panel">
-        <h2 class="sub" id="t_themeStarName">Favourite themes</h2>
-        <div class="wsub" id="t_themeStarHint"></div>
-        <div class="group">
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="themestars"></span></span>
-          <button id="themestarbtn" data-str="themeStar">Star this theme</button>
-          <button id="themecyclebtn" data-str="themeCycle">Next favourite theme</button>
-        </div>
-        </div>
-      </div>
-      <div class="panel">
-        <h2 class="sub" id="t_followSchemeName">Follow the desktop's light or dark setting</h2>
+        <h2 class="sub" id="t_mediaMenu2">Video and sound</h2>
         <div class="group">
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_followSchemeName2">Follow the desktop</span>
-            <span class="wsub" id="t_followSchemeHint"></span>
+            <span class="wname" id="t_mediaResumeName">Resume where I left a video</span>
+            <span class="wsub" id="t_mediaResumeHint">Per video, on this computer.</span>
           </span>
-          <input type="checkbox" id="followscheme"><span class="wsw"></span>
+          <input type="checkbox" id="mediaresume"><span class="wsw"></span>
         </label>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_schemeDarkName">The dark theme to use</span></span>
-          <input type="text" id="schemedark" placeholder="mocha" style="width:160px">
-          <span class="wname" id="t_schemeLightName">The light theme to use</span>
-          <input type="text" id="schemelight" placeholder="latte" style="width:160px">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_capOnName">Start videos with captions on</span>
+            <span class="wsub" id="t_capOnHint">Where the video has them.</span>
+          </span>
+          <input type="checkbox" id="capon"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_hideCursorName">Hide the mouse over a playing video</span>
+            <span class="wsub" id="t_hideCursorHint">After two seconds of not moving.</span>
+          </span>
+          <input type="checkbox" id="hidecursor"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pauseHiddenName">Pause a video when its tab is hidden</span>
+            <span class="wsub" id="t_pauseHiddenHint">And start it again when you come back.</span>
+          </span>
+          <input type="checkbox" id="pausehidden"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_holdFastName">Hold . to run at double speed</span>
+            <span class="wsub" id="t_holdFastHint">On any video, as long as the key is down.</span>
+          </span>
+          <input type="checkbox" id="holdfast"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_heldEmbedsName">Embedded players load on a click</span>
+            <span class="wsub" id="t_heldEmbedsHint">A YouTube or Twitch embed stays a placeholder until pressed.</span>
+          </span>
+          <input type="checkbox" id="heldembeds"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_spoilerName">Hide video lengths and progress</span>
+            <span class="wsub" id="t_spoilerHint">No duration badges, no watched bars, no previews.</span>
+          </span>
+          <input type="checkbox" id="spoilershield"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shortsPlayerName">Open Shorts in the normal player</span>
+            <span class="wsub" id="t_shortsPlayerHint">With a seek bar and the speed control.</span>
+          </span>
+          <input type="checkbox" id="shortsplayer"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_trackNoticeName">Say when the track changes</span>
+            <span class="wsub" id="t_trackNoticeHint">A desktop notification with title and artist.</span>
+          </span>
+          <input type="checkbox" id="tracknotice"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pauseCallsName">Pause the music during a call</span>
+            <span class="wsub" id="t_pauseCallsHint">When a tab starts using the microphone.</span>
+          </span>
+          <input type="checkbox" id="pausecalls"><span class="wsw"></span>
+        </label>
         </div>
         <div class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_colourFileName">Follow a colour file</span>
-            <span class="wsub" id="t_colourFileHint"></span>
+            <span class="wname" id="t_duckName">Quieten the other tabs</span>
+            <span class="wsub" id="t_duckHint">0 = off, 100 = unchanged.</span>
           </span>
-          <input type="text" id="colourfile" style="min-width:220px">
-        </div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_appearanceResetName">Put appearance back as it came</span>
-            <span class="wsub" id="t_appearanceResetHint"></span>
-          </span>
-          <button id="appearancereset">Reset</button>
-          <button id="appearanceundo" data-str="appearanceUndo">Undo that reset</button>
-        </div>
-      </div>
-    </section>
-
-    <section data-group="gen" data-desc="descLook">
-      <h2 data-str="look">Look</h2>
-      <p class="hint" data-str="lookHint">A look moves the furniture &mdash; where things sit and what shape they are. Every look works with every theme.</p>
-      <div class="panel">
-        <div class="cards" id="lookcards"></div>
-      </div>
-    </section>
-
-    <section data-group="gen" data-desc="descBrowsing">
-      <h2 id="t_browsing">Browsing</h2>
-      <div class="panel">
-      <div class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_agendaName">Calendar file for today's agenda</span>
-          <span class="wsub" id="t_agendaHint">A local or LAN .ics file. Repeating events (RRULE) are not worked out — they are left out rather than shown on the wrong day.</span>
-        </span>
-        <input type="text" id="agendafile" placeholder="~/calendar.ics" style="width:220px">
-      </div>
-      <label class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_logNoteName">Keep the daily summary as a note</span>
-        </span>
-        <input type="checkbox" id="logtonote"><span class="wsw"></span>
-      </label>
-      <label class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_offlineName">Keep a copy of the page when I bookmark it</span>
-          <span class="wsub" id="t_offlineHint">One MHTML file per bookmark, here on the disk, so the page can still be read after it goes away.</span>
-        </span>
-        <input type="checkbox" id="bmoffline"><span class="wsw"></span>
-      </label>
-      <label class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_favDockName">Keep Favourites open beside the page</span>
-          <span class="wsub" id="t_favDockHint">The same panel, in the window rather than over it.</span>
-        </span>
-        <input type="checkbox" id="favdock"><span class="wsw"></span>
-      </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_reopenTabs">Reopen tabs from last time</span>
-            <span class="wsub" id="t_tabsHint">Start again where you left off.</span>
-          </span>
-          <input type="checkbox" id="restoretabs"><span class="wsw"></span>
-        </label>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_startUrl">When the browser starts</h2>
-        <div class="wsub" id="t_startUrlHint">The first tab at launch. Tabs reopened from last time come back instead of it.</div>
-        <div class="cards" id="startpage"></div>
-        <div class="wrow" id="starturlrow">
-          <input type="text" id="starturl" placeholder="example.com" style="flex:1;min-width:200px">
-          <button id="starturlsave" data-str="pwSaveBtn">Save</button>
-        </div>
-        <div id="starturlmsg" class="urlmsg"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_histPages">Pages</h2>
-        <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_startRecentName">Show the bookmarks you added last</span>
-            <span class="wsub" id="t_startRecentHint">A row on the start page with the newest bookmarks.</span>
-          </span>
-          <input type="checkbox" id="startrecent"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_cleanTitlesName">Tidy up page titles</span>
-            <span class="wsub" id="t_cleanTitlesHint">Takes the counts and site names off what is written down.</span>
-          </span>
-          <input type="checkbox" id="cleantitles"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_bmScrollName">Bookmarks remember where you had read to</span>
-            <span class="wsub" id="t_bmScrollHint">Reopening one goes back to that place.</span>
-          </span>
-          <input type="checkbox" id="bmscroll"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_bmBackupName">A dated copy of the bookmarks every day</span>
-            <span class="wsub" id="t_bmBackupHint">Kept beside the bookmarks file; the last fourteen.</span>
-          </span>
-          <input type="checkbox" id="bmbackup"><span class="wsw"></span>
-        </label>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_histDaysName">Keep history for</span>
-            <span class="wsub" id="t_histDaysHint">Days. 0 = for ever.</span>
-          </span>
-          <input type="number" id="histdays" min="0" max="3650"
+          <input type="number" id="ducklevel" min="0" max="100"
                  style="width:90px">
         </div>
-        </div>
-        <div class="wrow" style="align-items:flex-start">
+        <div class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_bmMirrorName">Keep a copy of the bookmarks in</span>
-            <span class="wsub" id="t_bmMirrorHint">A folder of yours. No account and no cloud.</span>
+            <span class="wname" id="t_capLangName">Caption language</span>
+            <span class="wsub" id="t_capLangHint">A code like de or en.</span>
           </span>
-          <input type="text" id="bmmirror" style="flex:1;min-width:200px"
-                 placeholder="/mnt/share/browser">
+          <input type="text" id="caplang" style="width:110px"
+                 placeholder="de">
         </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_capSizeName">Caption size</span>
+            <span class="wsub" id="t_capSizeHint">Per cent. 0 = as the site has it.</span>
+          </span>
+          <input type="number" id="capsize" min="0" max="300"
+                 style="width:90px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_capBottomName">Lift the captions</span>
+            <span class="wsub" id="t_capBottomHint">Pixels from the bottom.</span>
+          </span>
+          <input type="number" id="capbottom" min="0" max="400"
+                 style="width:90px">
+        </div>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_mprisName">Answer the keyboard’s media keys</span>
+            <span class="wsub" id="t_mprisHint">The desktop may ask what is playing and pause it (MPRIS over D-Bus). Nothing leaves the machine.</span>
+          </span>
+          <input type="checkbox" id="mprison"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_awakeName">Keep the screen awake while a video plays</span>
+            <span class="wsub" id="t_awakeHint">Only while something is actually playing, and only through systemd-inhibit.</span>
+          </span>
+          <input type="checkbox" id="screenawake"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pauseLockName">Pause what is playing when the browser locks</span>
+            <span class="wsub" id="t_pauseLockHint">Also when you have been away for the idle time.</span>
+          </span>
+          <input type="checkbox" id="pauseonlock"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_sponsorName">Skip the sponsor in a video</span>
+            <span class="wsub" id="t_sponsorHint">Asks SponsorBlock about this video. Only the first four characters of its hashed id are sent, and only when this is on.</span>
+          </span>
+          <input type="checkbox" id="sponsorskip"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_lyricsName">Fetch lyrics</span>
+            <span class="wsub" id="t_lyricsHint">Asks lrclib using title, artist and length. Off = nothing is asked.</span>
+          </span>
+          <input type="checkbox" id="lyricson"><span class="wsw"></span>
+        </label>
         <div class="wrow" style="justify-content:flex-end">
-          <button id="bmmirrorsave" data-str="pwSaveBtn">Save</button>
+          <button id="mediasave" data-str="pwSaveBtn">Save</button>
         </div>
-        <div id="bmmirrormsg" class="urlmsg"></div>
+        <div id="mediasavemsg" class="urlmsg"></div>
       </div>
 
       <div class="panel">
-        <h2 class="sub" id="t_externalTitle">Open some sites in another browser</h2>
-        <div class="wsub" id="t_externalHint">Some sites refuse to work in this browser — Gmail and Google sign-in among them. Rather than a wall, they open in your other browser.</div>
+        <h2 class="sub" id="t_media">Media</h2>
         <div class="group">
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_externalHandoff">Hand these sites to another browser</span>
-            <span class="wsub" id="t_externalHandoffSub">Off = they load here like any other page.</span>
+            <span class="wname" id="t_blockAutoplay">Block videos from playing on their own</span>
+            <span class="wsub" id="t_blockAutoplayHint">A page has to be clicked before it may play sound or video.</span>
+            <span class="wnote" id="t_autoNote">Applies to pages you open from now on.</span>
           </span>
-          <input type="checkbox" id="externalhandoff"><span class="wsw"></span>
+          <input type="checkbox" id="blockautoplay"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pdfViewer">Open PDFs in the browser</span>
+            <span class="wsub" id="t_pdfViewerHint">Off = a PDF is downloaded instead of shown.</span>
+            <span class="wnote" id="t_pdfNote">Applies to pages you open from now on.</span>
+          </span>
+          <input type="checkbox" id="pdfviewer"><span class="wsw"></span>
         </label>
         </div>
-        <div class="wrow" id="externalsitesrow" style="align-items:flex-start">
-          <span class="wlabel">
-            <span class="wname" id="t_externalSites">Sites to open elsewhere</span>
-            <span class="wsub" id="t_externalSitesSub">One domain a line. A domain covers its sub-domains too.</span>
-          </span>
-          <textarea id="externalsites" rows="3" style="flex:1;min-width:200px" placeholder="mail.google.com"></textarea>
-        </div>
-        <div class="wrow" style="justify-content:flex-end">
-          <button id="externalsitessave" data-str="pwSaveBtn">Save</button>
-        </div>
-        <div id="externalsitesmsg" class="urlmsg"></div>
       </div>
+
     </section>
 
-    <section data-group="gen" data-desc="descTabs">
-      <h2 id="t_tabsMenu">Tabs</h2>
+    <section data-group="gen" data-desc="descTabsWindows">
+      <h2 id="t_tabsWindows">Tabs and windows</h2>
       <div class="panel">
         <h2 class="sub" id="t_newTabPage">What a new tab shows</h2>
         <div class="cards" id="newtabpage"></div>
@@ -2217,183 +2342,180 @@
         </div>
       </div>
 
-    </section>
 
-    <section data-group="gen" data-desc="descVideo">
-      <h2 id="t_videoMenu">Video and sound</h2>
       <div class="panel">
-        <h2 class="sub" id="t_mediaMenu2">Video and sound</h2>
+      <div class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_agendaName">Calendar file for today's agenda</span>
+          <span class="wsub" id="t_agendaHint">A local or LAN .ics file. Repeating events (RRULE) are not worked out — they are left out rather than shown on the wrong day.</span>
+        </span>
+        <input type="text" id="agendafile" placeholder="~/calendar.ics" style="width:220px">
+      </div>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_logNoteName">Keep the daily summary as a note</span>
+        </span>
+        <input type="checkbox" id="logtonote"><span class="wsw"></span>
+      </label>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_offlineName">Keep a copy of the page when I bookmark it</span>
+          <span class="wsub" id="t_offlineHint">One MHTML file per bookmark, here on the disk, so the page can still be read after it goes away.</span>
+        </span>
+        <input type="checkbox" id="bmoffline"><span class="wsw"></span>
+      </label>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_favDockName">Keep Favourites open beside the page</span>
+          <span class="wsub" id="t_favDockHint">The same panel, in the window rather than over it.</span>
+        </span>
+        <input type="checkbox" id="favdock"><span class="wsw"></span>
+      </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_reopenTabs">Reopen tabs from last time</span>
+            <span class="wsub" id="t_tabsHint">Start again where you left off.</span>
+          </span>
+          <input type="checkbox" id="restoretabs"><span class="wsw"></span>
+        </label>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_startUrl">When the browser starts</h2>
+        <div class="wsub" id="t_startUrlHint">The first tab at launch. Tabs reopened from last time come back instead of it.</div>
+        <div class="cards" id="startpage"></div>
+        <div class="wrow" id="starturlrow">
+          <input type="text" id="starturl" placeholder="example.com" style="flex:1;min-width:200px">
+          <button id="starturlsave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="starturlmsg" class="urlmsg"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_histPages">Pages</h2>
         <div class="group">
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_mediaResumeName">Resume where I left a video</span>
-            <span class="wsub" id="t_mediaResumeHint">Per video, on this computer.</span>
+            <span class="wname" id="t_startRecentName">Show the bookmarks you added last</span>
+            <span class="wsub" id="t_startRecentHint">A row on the start page with the newest bookmarks.</span>
           </span>
-          <input type="checkbox" id="mediaresume"><span class="wsw"></span>
+          <input type="checkbox" id="startrecent"><span class="wsw"></span>
         </label>
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_capOnName">Start videos with captions on</span>
-            <span class="wsub" id="t_capOnHint">Where the video has them.</span>
+            <span class="wname" id="t_cleanTitlesName">Tidy up page titles</span>
+            <span class="wsub" id="t_cleanTitlesHint">Takes the counts and site names off what is written down.</span>
           </span>
-          <input type="checkbox" id="capon"><span class="wsw"></span>
+          <input type="checkbox" id="cleantitles"><span class="wsw"></span>
         </label>
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_hideCursorName">Hide the mouse over a playing video</span>
-            <span class="wsub" id="t_hideCursorHint">After two seconds of not moving.</span>
+            <span class="wname" id="t_bmScrollName">Bookmarks remember where you had read to</span>
+            <span class="wsub" id="t_bmScrollHint">Reopening one goes back to that place.</span>
           </span>
-          <input type="checkbox" id="hidecursor"><span class="wsw"></span>
+          <input type="checkbox" id="bmscroll"><span class="wsw"></span>
         </label>
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_pauseHiddenName">Pause a video when its tab is hidden</span>
-            <span class="wsub" id="t_pauseHiddenHint">And start it again when you come back.</span>
+            <span class="wname" id="t_bmBackupName">A dated copy of the bookmarks every day</span>
+            <span class="wsub" id="t_bmBackupHint">Kept beside the bookmarks file; the last fourteen.</span>
           </span>
-          <input type="checkbox" id="pausehidden"><span class="wsw"></span>
+          <input type="checkbox" id="bmbackup"><span class="wsw"></span>
         </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_holdFastName">Hold . to run at double speed</span>
-            <span class="wsub" id="t_holdFastHint">On any video, as long as the key is down.</span>
-          </span>
-          <input type="checkbox" id="holdfast"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_heldEmbedsName">Embedded players load on a click</span>
-            <span class="wsub" id="t_heldEmbedsHint">A YouTube or Twitch embed stays a placeholder until pressed.</span>
-          </span>
-          <input type="checkbox" id="heldembeds"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_spoilerName">Hide video lengths and progress</span>
-            <span class="wsub" id="t_spoilerHint">No duration badges, no watched bars, no previews.</span>
-          </span>
-          <input type="checkbox" id="spoilershield"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shortsPlayerName">Open Shorts in the normal player</span>
-            <span class="wsub" id="t_shortsPlayerHint">With a seek bar and the speed control.</span>
-          </span>
-          <input type="checkbox" id="shortsplayer"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_trackNoticeName">Say when the track changes</span>
-            <span class="wsub" id="t_trackNoticeHint">A desktop notification with title and artist.</span>
-          </span>
-          <input type="checkbox" id="tracknotice"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_pauseCallsName">Pause the music during a call</span>
-            <span class="wsub" id="t_pauseCallsHint">When a tab starts using the microphone.</span>
-          </span>
-          <input type="checkbox" id="pausecalls"><span class="wsw"></span>
-        </label>
-        </div>
         <div class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_duckName">Quieten the other tabs</span>
-            <span class="wsub" id="t_duckHint">0 = off, 100 = unchanged.</span>
+            <span class="wname" id="t_histDaysName">Keep history for</span>
+            <span class="wsub" id="t_histDaysHint">Days. 0 = for ever.</span>
           </span>
-          <input type="number" id="ducklevel" min="0" max="100"
+          <input type="number" id="histdays" min="0" max="3650"
                  style="width:90px">
         </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_capLangName">Caption language</span>
-            <span class="wsub" id="t_capLangHint">A code like de or en.</span>
-          </span>
-          <input type="text" id="caplang" style="width:110px"
-                 placeholder="de">
         </div>
-        <div class="wrow">
+        <div class="wrow" style="align-items:flex-start">
           <span class="wlabel">
-            <span class="wname" id="t_capSizeName">Caption size</span>
-            <span class="wsub" id="t_capSizeHint">Per cent. 0 = as the site has it.</span>
+            <span class="wname" id="t_bmMirrorName">Keep a copy of the bookmarks in</span>
+            <span class="wsub" id="t_bmMirrorHint">A folder of yours. No account and no cloud.</span>
           </span>
-          <input type="number" id="capsize" min="0" max="300"
-                 style="width:90px">
+          <input type="text" id="bmmirror" style="flex:1;min-width:200px"
+                 placeholder="/mnt/share/browser">
         </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_capBottomName">Lift the captions</span>
-            <span class="wsub" id="t_capBottomHint">Pixels from the bottom.</span>
-          </span>
-          <input type="number" id="capbottom" min="0" max="400"
-                 style="width:90px">
-        </div>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_mprisName">Answer the keyboard’s media keys</span>
-            <span class="wsub" id="t_mprisHint">The desktop may ask what is playing and pause it (MPRIS over D-Bus). Nothing leaves the machine.</span>
-          </span>
-          <input type="checkbox" id="mprison"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_awakeName">Keep the screen awake while a video plays</span>
-            <span class="wsub" id="t_awakeHint">Only while something is actually playing, and only through systemd-inhibit.</span>
-          </span>
-          <input type="checkbox" id="screenawake"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_pauseLockName">Pause what is playing when the browser locks</span>
-            <span class="wsub" id="t_pauseLockHint">Also when you have been away for the idle time.</span>
-          </span>
-          <input type="checkbox" id="pauseonlock"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_sponsorName">Skip the sponsor in a video</span>
-            <span class="wsub" id="t_sponsorHint">Asks SponsorBlock about this video. Only the first four characters of its hashed id are sent, and only when this is on.</span>
-          </span>
-          <input type="checkbox" id="sponsorskip"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_lyricsName">Fetch lyrics</span>
-            <span class="wsub" id="t_lyricsHint">Asks lrclib using title, artist and length. Off = nothing is asked.</span>
-          </span>
-          <input type="checkbox" id="lyricson"><span class="wsw"></span>
-        </label>
         <div class="wrow" style="justify-content:flex-end">
-          <button id="mediasave" data-str="pwSaveBtn">Save</button>
+          <button id="bmmirrorsave" data-str="pwSaveBtn">Save</button>
         </div>
-        <div id="mediasavemsg" class="urlmsg"></div>
+        <div id="bmmirrormsg" class="urlmsg"></div>
       </div>
 
       <div class="panel">
-        <h2 class="sub" id="t_media">Media</h2>
+        <h2 class="sub" id="t_externalTitle">Open some sites in another browser</h2>
+        <div class="wsub" id="t_externalHint">Some sites refuse to work in this browser — Gmail and Google sign-in among them. Rather than a wall, they open in your other browser.</div>
         <div class="group">
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_blockAutoplay">Block videos from playing on their own</span>
-            <span class="wsub" id="t_blockAutoplayHint">A page has to be clicked before it may play sound or video.</span>
-            <span class="wnote" id="t_autoNote">Applies to pages you open from now on.</span>
+            <span class="wname" id="t_externalHandoff">Hand these sites to another browser</span>
+            <span class="wsub" id="t_externalHandoffSub">Off = they load here like any other page.</span>
           </span>
-          <input type="checkbox" id="blockautoplay"><span class="wsw"></span>
+          <input type="checkbox" id="externalhandoff"><span class="wsw"></span>
+        </label>
+        </div>
+        <div class="wrow" id="externalsitesrow" style="align-items:flex-start">
+          <span class="wlabel">
+            <span class="wname" id="t_externalSites">Sites to open elsewhere</span>
+            <span class="wsub" id="t_externalSitesSub">One domain a line. A domain covers its sub-domains too.</span>
+          </span>
+          <textarea id="externalsites" rows="3" style="flex:1;min-width:200px" placeholder="mail.google.com"></textarea>
+        </div>
+        <div class="wrow" style="justify-content:flex-end">
+          <button id="externalsitessave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="externalsitesmsg" class="urlmsg"></div>
+      </div>
+
+      <p class="hint" id="t_navHint">The switches here can be set for one site alone from the getting-around popup (Ctrl+Alt+Shift+G).</p>
+      <div class="panel">
+        <div class="group" id="navswitches"></div>
+      </div>
+      <div class="panel">
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_linkPreviewName">Shift and hover shows the linked page</span>
+            <span class="wsub" id="t_linkPreviewHint"></span>
+          </span>
+          <input type="checkbox" id="linkpreview"><span class="wsw"></span>
         </label>
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_pdfViewer">Open PDFs in the browser</span>
-            <span class="wsub" id="t_pdfViewerHint">Off = a PDF is downloaded instead of shown.</span>
-            <span class="wnote" id="t_pdfNote">Applies to pages you open from now on.</span>
+            <span class="wname" id="t_navRetryName">Try a failed load again when the network is back</span>
+            <span class="wsub" id="t_navRetryHint"></span>
           </span>
-          <input type="checkbox" id="pdfviewer"><span class="wsw"></span>
+          <input type="checkbox" id="autoretry"><span class="wsw"></span>
         </label>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_navRewriteName">Addresses to rewrite before loading</span>
+            <span class="wsub" id="t_navRewriteHint"></span>
+          </span>
+          <textarea id="urlrewrites" rows="3" style="min-width:260px"></textarea>
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_navPlayerName">The external player</span>
+            <span class="wsub" id="t_navPlayerHint"></span>
+          </span>
+          <input type="text" id="externalplayer" placeholder="mpv" style="min-width:200px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_navAppName">Which program should open this?</span>
+            <span class="wsub" id="schemeapps"></span>
+          </span>
+        </div>
         </div>
       </div>
-
     </section>
 
-    <section data-group="gen" data-desc="descDesk">
-      <h2 id="t_deskMenu2">Notes and tools</h2>
+    <section data-group="gen" data-desc="descTools">
+      <h2 id="t_toolsMenu">Notes, capture and games</h2>
       <div class="panel">
         <h2 class="sub" id="t_deskMenu">Notes and tools</h2>
         <div class="group">
@@ -2449,10 +2571,101 @@
         <div id="desksavemsg" class="urlmsg"></div>
       </div>
 
-    </section>
 
-    <section data-group="gen" data-desc="descGames">
-      <h2 id="t_games">Games and streaming</h2>
+      <div class="panel">
+        <div class="group">
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="t_recFpsName">Frames a second</span></span>
+          <input type="number" id="recfps" min="1" max="30" style="width:80px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="t_recFormatName">Recordings are saved as</span></span>
+          <select id="recformat">
+            <option value="webm">WebM</option>
+            <option value="mp4">MP4</option>
+            <option value="gif">GIF</option>
+          </select>
+        </div>
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="t_recQualityName">Recording quality</span></span>
+          <select id="recquality">
+            <option value="best" id="t_recQuality_best">Best</option>
+            <option value="good" id="t_recQuality_good">Good</option>
+            <option value="small" id="t_recQuality_small">Small</option>
+          </select>
+        </div>
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="t_recBufferName">How many seconds the replay buffer keeps</span></span>
+          <input type="number" id="recbufferseconds" min="5" max="600" style="width:90px">
+        </div>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_recClicksName">Draw clicks and keys into a recording</span>
+            <span class="wsub" id="t_recClicksHint"></span>
+          </span>
+          <input type="checkbox" id="recclicks"><span class="wsw"></span>
+        </label>
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="t_shotTimelapse">Capture this page every few minutes</span></span>
+          <input type="number" id="lapseminutes" min="1" max="1440" style="width:90px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotUploadName">Where a capture is uploaded</span>
+            <span class="wsub" id="t_shotUploadHint"></span>
+          </span>
+          <input type="text" id="shotupload" placeholder="https://… or user@host:/path" style="min-width:230px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="t_ocrPathName">The OCR program</span></span>
+          <input type="text" id="ocrpath" placeholder="tesseract" style="min-width:180px">
+          <span class="wsub" id="ocrfound"></span>
+        </div>
+        <div class="wrow">
+          <span class="wlabel"><span class="wname" id="t_ffmpegPathName">The ffmpeg program</span></span>
+          <input type="text" id="ffmpegpath" placeholder="ffmpeg" style="min-width:180px">
+          <span class="wsub" id="ffmpegfound"></span>
+        </div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="sub" id="t_shotMenu">Screenshot</h2>
+        <div class="group">
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotDirName">Where screenshots go</span>
+            <span class="wsub" id="t_shotDirHint">Empty = a Screenshots folder beside your downloads.</span>
+          </span>
+          <input type="text" id="shotdir" placeholder="~/Pictures" style="min-width:220px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotNameName">Screenshot file name</span>
+            <span class="wsub" id="t_shotNameHint">strftime marks, {title} and {site}.</span>
+          </span>
+          <input type="text" id="shotname" placeholder="shot-%Y%m%d-%H%M%S" style="min-width:220px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotFormatName">Screenshot format</span>
+          </span>
+          <select id="shotformat">
+            <option value="png">PNG</option>
+            <option value="jpeg">JPEG</option>
+            <option value="webp">WebP</option>
+          </select>
+        </div>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotRedactName">Blur password fields in captures</span>
+            <span class="wsub" id="t_shotRedactHint">What is typed in a password field is blurred before the picture is taken.</span>
+          </span>
+          <input type="checkbox" id="shotredact"><span class="wsw"></span>
+        </label>
+        </div>
+      </div>
+
+
       <div class="panel">
         <h2 class="sub" id="t_streamGroup">While you are streaming</h2>
         <label class="wrow">
@@ -2825,65 +3038,7 @@
       </div>
     </section>
 
-        <section data-group="gen" data-desc="descLanguage">
-      <h2 id="t_translation">Language</h2>
-      <div class="panel">
-      <div class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_translateInto">Browser and translate language</span>
-          <span class="wsub" id="t_translateHint">Used by the translate button next to the address bar.</span>
-        </span>
-        <input type="text" id="langfilter" placeholder="Search&hellip;" style="width:140px">
-        <select id="translatelang"></select>
-      </div>
-      <label class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_spellCheck">Check spelling as I type</span>
-          <span class="wsub" id="t_spellHint">Needs the matching dictionary installed on this computer.</span>
-        </span>
-        <input type="checkbox" id="spellcheck"><span class="wsw"></span>
-      </label>
-      <div class="wrow">
-        <span class="wlabel"><span class="wname" id="t_spellLang">Spell-check language</span></span>
-        <select id="spelllang"></select>
-      </div>
-      <label class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_spellBothName">Check spelling in both languages</span>
-          <span class="wsub" id="t_spellBothHint">German and English at once, where the dictionaries are installed.</span>
-        </span>
-        <input type="checkbox" id="spellboth"><span class="wsw"></span>
-      </label>
-      <div class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_webmailName">Open mailto: links in</span>
-          <span class="wsub" id="t_webmailHint">A compose page of your webmail instead of a desktop mail program. None = leave it to the desktop.</span>
-        </span>
-        <select id="webmail">
-          <option value="">—</option>
-          <option value="gmx">GMX</option>
-          <option value="gmail">Gmail</option>
-          <option value="outlook">Outlook</option>
-          <option value="posteo">Posteo</option>
-        </select>
-      </div>
-      <label class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_pdfPlaceName">Remember where I was in a PDF</span>
-        </span>
-        <input type="checkbox" id="pdfplace"><span class="wsw"></span>
-      </label>
-      <label class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_cleanPasteName">Strip tracking from an address I paste into a page</span>
-          <span class="wsub" id="t_cleanPasteHint">The same cleaning the address bar does, where it is pasted.</span>
-        </span>
-        <input type="checkbox" id="cleanpaste"><span class="wsw"></span>
-      </label>
-      </div>
-    </section>
-
-    <section data-group="priv" data-desc="descPrivacy">
+        <section data-group="priv" data-desc="descPrivacy">
       <h2 id="t_privacy">Privacy</h2>
       <div class="panel">
       <label class="wrow">
@@ -3426,43 +3581,8 @@
       </div>
     </section>
 
-    <section data-group="adv" data-desc="descPlugins">
-      <h2 id="t_plugins">Plugins</h2>
-      <div class="panel">
-        <h2 class="sub" data-str="cardInstalled">Installed</h2>
-        <div id="pluginlist"></div>
-        <div class="wrow">
-          <span class="wlabel"><span class="wsub" id="t_pluginsHint">Userscripts (.user.js) in this folder run on matching pages.</span>
-            <span class="wnote" id="pluginfolder"></span></span>
-          <button id="reloadplugins">Reload plugins</button>
-        </div>
-      </div>
-
-      <div class="panel">
-      <h2 class="sub" id="t_builtIn">Built-in features</h2>
-      <label class="wrow">
-        <span class="wlabel">
-          <span class="wname" id="t_vaultPw">Vault Password</span>
-          <span class="wsub" id="t_vaultPwHint">Saves and fills your logins &mdash; plus secure notes, cards, 2FA codes and a generator. Off until you switch it on.</span>
-          <span class="wnote" id="t_vaultKept"></span>
-        </span>
-        <input type="checkbox" id="vaultpw"><span class="wsw"></span>
-      </label>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_quickInstall">Quick install</h2>
-        <div id="starterlist"></div>
-        <div class="wrow">
-          <span class="wlabel"></span>
-          <button id="fromfile">From file&hellip;</button>
-          <button id="getmore">Browse Greasy Fork</button>
-        </div>
-      </div>
-    </section>
-
-    <section data-group="adv" data-desc="descDev">
-      <h2 id="t_devTools2">Developer tools</h2>
+    <section data-group="adv" data-desc="descDevs">
+      <h2 id="t_devsMenu">For developers</h2>
       <div class="panel">
         <h2 class="sub" id="t_devTools">Developer tools</h2>
         <label class="wrow">
@@ -3532,10 +3652,39 @@
         </div>
         <div id="devsavemsg" class="urlmsg"></div>
       </div>
-    </section>
 
-    <section data-group="adv" data-desc="descNetwork">
-      <h2 id="t_network">Network (proxy)</h2>
+      <div class="panel">
+        <h2 class="sub" data-str="cardInstalled">Installed</h2>
+        <div id="pluginlist"></div>
+        <div class="wrow">
+          <span class="wlabel"><span class="wsub" id="t_pluginsHint">Userscripts (.user.js) in this folder run on matching pages.</span>
+            <span class="wnote" id="pluginfolder"></span></span>
+          <button id="reloadplugins">Reload plugins</button>
+        </div>
+      </div>
+
+      <div class="panel">
+      <h2 class="sub" id="t_builtIn">Built-in features</h2>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_vaultPw">Vault Password</span>
+          <span class="wsub" id="t_vaultPwHint">Saves and fills your logins &mdash; plus secure notes, cards, 2FA codes and a generator. Off until you switch it on.</span>
+          <span class="wnote" id="t_vaultKept"></span>
+        </span>
+        <input type="checkbox" id="vaultpw"><span class="wsw"></span>
+      </label>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_quickInstall">Quick install</h2>
+        <div id="starterlist"></div>
+        <div class="wrow">
+          <span class="wlabel"></span>
+          <button id="fromfile">From file&hellip;</button>
+          <button id="getmore">Browse Greasy Fork</button>
+        </div>
+      </div>
+
       <div class="panel">
         <div id="proxyprofiles"></div>
         <div class="hint" id="t_proxyHint">Pick a profile here or from the toolbar proxy button.</div>
@@ -3571,8 +3720,8 @@
       <div class="hint" id="t_inspectorHint">Press F12 on any page to open the inspector (DevTools).</div>
     </section>
 
-    <section data-group="sys" data-desc="descUpdates">
-      <h2 id="t_updates">Updates</h2>
+    <section data-group="sys" data-desc="descBrowserSelf">
+      <h2 id="t_browserMenu">The browser itself</h2>
       <div class="panel">
         <div class="wrow">
           <span id="updmsg"></span>
@@ -3587,15 +3736,67 @@
           <span id="libdaysval"></span>
         </div>
       </div>
-    </section>
 
-    <section data-group="sys" data-desc="descSetup">
-      <h2 id="t_setup">Setup</h2>
       <div class="panel">
         <div class="wrow">
           <span class="wlabel"><span class="wsub" id="t_setupHint">Language, search, wallpaper, privacy and quick links</span></span>
           <button id="rerunsetup" class="primary">Run setup again</button>
         </div>
+      </div>
+
+      <div class="panel">
+      <div class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_translateInto">Browser and translate language</span>
+          <span class="wsub" id="t_translateHint">Used by the translate button next to the address bar.</span>
+        </span>
+        <input type="text" id="langfilter" placeholder="Search&hellip;" style="width:140px">
+        <select id="translatelang"></select>
+      </div>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_spellCheck">Check spelling as I type</span>
+          <span class="wsub" id="t_spellHint">Needs the matching dictionary installed on this computer.</span>
+        </span>
+        <input type="checkbox" id="spellcheck"><span class="wsw"></span>
+      </label>
+      <div class="wrow">
+        <span class="wlabel"><span class="wname" id="t_spellLang">Spell-check language</span></span>
+        <select id="spelllang"></select>
+      </div>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_spellBothName">Check spelling in both languages</span>
+          <span class="wsub" id="t_spellBothHint">German and English at once, where the dictionaries are installed.</span>
+        </span>
+        <input type="checkbox" id="spellboth"><span class="wsw"></span>
+      </label>
+      <div class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_webmailName">Open mailto: links in</span>
+          <span class="wsub" id="t_webmailHint">A compose page of your webmail instead of a desktop mail program. None = leave it to the desktop.</span>
+        </span>
+        <select id="webmail">
+          <option value="">—</option>
+          <option value="gmx">GMX</option>
+          <option value="gmail">Gmail</option>
+          <option value="outlook">Outlook</option>
+          <option value="posteo">Posteo</option>
+        </select>
+      </div>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_pdfPlaceName">Remember where I was in a PDF</span>
+        </span>
+        <input type="checkbox" id="pdfplace"><span class="wsw"></span>
+      </label>
+      <label class="wrow">
+        <span class="wlabel">
+          <span class="wname" id="t_cleanPasteName">Strip tracking from an address I paste into a page</span>
+          <span class="wsub" id="t_cleanPasteHint">The same cleaning the address bar does, where it is pasted.</span>
+        </span>
+        <input type="checkbox" id="cleanpaste"><span class="wsw"></span>
+      </label>
       </div>
     </section>
 
@@ -5589,7 +5790,13 @@
             t_dictionarySiteName:"dictionarySiteName", t_dictionarySiteHint:"dictionarySiteHint",
             t_externalEditorName:"externalEditorName", t_externalEditorHint:"externalEditorHint",
             t_deskMenu:"deskMenu", t_deskMenu2:"deskMenu",
-            t_tabsMenu:"tabsMenu", t_videoMenu:"videoMenu",
+            t_searchBar:"searchBar",
+            t_tabsWindows:"tabsWindows",
+            t_looksMenu:"looksMenu",
+            t_readMedia:"readMedia",
+            t_toolsMenu:"toolsMenu",
+            t_devsMenu:"devsMenu",
+            t_browserMenu:"browserMenu",
             t_snippetsName:"snippetsName", t_snippetsHint:"snippetsHint",
             t_clipHistoryName:"clipHistoryName",
             t_clipHistoryHint:"clipHistoryHint",
@@ -6491,8 +6698,9 @@
       try { buildNav(); } catch (e) { drawFailed("rail", e); }
     }
     const secs = visibleSections();
-    if (secs.length && !secs.some((s) => s.classList.contains("active")))
-      showCat(0);
+    if (secs.length && !secs.some((s) => s.classList.contains("active"))
+        && !document.getElementById("home").classList.contains("on"))
+      showHome();
   }
 
   // The sections that exist right now. A section can be hidden — Vault
@@ -6505,6 +6713,91 @@
       .filter((s) => !s.hidden);
   }
 
+
+  // ------------------------------------------------------------------
+  // Where Settings opens: a tile per section, with the line that says
+  // what is in it and how many settings are in there. The rail down
+  // the side was 24 names to scroll and read; this is a page to look
+  // at. Both are built from the same list of sections, so neither can
+  // drift from the other.
+  // ------------------------------------------------------------------
+  function sec_group(btns, i) {
+    for (const b of btns)
+      if (Number(b.dataset.index) === i) return b.dataset.group || "";
+    return "";
+  }
+
+  function buildHome() {
+    const box = document.getElementById("home");
+    if (!box) return;
+    const S = window.STR || {};
+    box.innerHTML = "";
+    const secs = visibleSections();
+    // the same four groups the strip is in, in the same order, so the
+    // tiles and the chips say the same thing about where a section is
+    const order = [];
+    for (const [key, str, fallback] of CATS) {
+      const items = secs.map((sec, i) => [sec, i])
+                        .filter(([sec]) => sec.dataset.group === key);
+      if (items.length) order.push([S[str] || fallback, items]);
+    }
+    const placed = new Set(order.flatMap(([, items]) => items.map(x => x[1])));
+    const rest = secs.map((sec, i) => [sec, i]).filter(([, i]) => !placed.has(i));
+    if (rest.length) order.push(["", rest]);
+    for (const [group, items] of order) {
+      if (group) {
+        const lab = document.createElement("div");
+        lab.className = "homegroup";
+        lab.textContent = group;
+        box.appendChild(lab);
+      }
+      for (const [sec, i] of items) tile(sec, i);
+    }
+
+    function tile(sec, i) {
+      const head = sec.querySelector("h2");
+      const one = document.createElement("button");
+      one.type = "button";
+      one.className = "tile";
+      one.dataset.index = i;
+      const name = document.createElement("span");
+      name.className = "tname";
+      name.textContent = head ? head.textContent : ("Section " + (i + 1));
+      const says = document.createElement("span");
+      says.className = "tsays";
+      says.textContent = S[sec.dataset.desc] || "";
+      const count = document.createElement("span");
+      count.className = "tcount";
+      const rows = sec.querySelectorAll(".wrow").length;
+      count.textContent = !rows ? ""
+        : rows === 1 ? (S.setTileOne || "1 setting")
+        : (S.setTileCount || "{} settings").replace("{}", rows);
+      one.append(name, says, count);
+      one.onclick = () => showCat(i);
+      box.appendChild(one);
+    }
+  }
+
+  // No section chosen: the tiles, and a title block that says so.
+  function showHome() {
+    window._cat = null;
+    document.getElementById("rail").classList.remove("inside");
+    for (const sec of document.querySelectorAll(".content section"))
+      sec.classList.remove("active");
+    for (const btn of document.querySelectorAll("#sidebar button"))
+      btn.classList.remove("active");
+    const S = window.STR || {};
+    document.getElementById("curgroup").textContent = "";
+    document.getElementById("curcat").textContent = S.settings || "Settings";
+    document.getElementById("curdesc").textContent =
+      S.setPick || "Pick a section, or search for the setting by name.";
+    document.getElementById("home").classList.add("on");
+    document.getElementById("backhome").classList.remove("on");
+    buildHome();
+    const content = document.getElementById("content");
+    if (content) content.scrollTop = 0;
+  }
+
   function showCat(i) {
     // an index that points at nothing - a section hidden after the
     // rail was built with it in the list - would leave every section
@@ -6512,6 +6805,9 @@
     const secs = visibleSections();
     if (!secs.length) return;
     if (!(i >= 0 && i < secs.length)) i = 0;
+    document.getElementById("home").classList.remove("on");
+    document.getElementById("backhome").classList.add("on");
+    document.getElementById("rail").classList.add("inside");
     window._cat = i;
     const btns = document.querySelectorAll("#sidebar button");
     secs.forEach((s, k) => s.classList.toggle("active", k === i));
@@ -6521,6 +6817,15 @@
       b.classList.toggle("active", on);
       if (on) group = b.dataset.group || "";
     });
+    // only the sections of the group he is in stay on the strip: all
+    // of them at once was a wall to read, and the ones worth one click
+    // from here are its neighbours
+    const here = sec_group(btns, i);
+    for (const b of btns)
+      b.classList.toggle("elsewhere",
+                         !!here && (b.dataset.group || "") !== here);
+    for (const lab of document.querySelectorAll("#sidebar .navlabel"))
+      lab.classList.toggle("elsewhere", !!here && lab.dataset.group !== here);
     const sec = secs[i];
     const head = sec && sec.querySelector("h2");
     const title = head ? head.textContent : "";
@@ -6580,7 +6885,8 @@
     // a section with an unknown group still gets a way in
     secs.forEach((sec, i) => { if (!seen.has(i)) addBtn(sec, i, ""); });
     refreshHay();
-    showCat(window._cat || 0);
+    if (window._cat === null || window._cat === undefined) showHome();
+    else showCat(window._cat);
   }
 
   // What a rail button matches on. Read off the section itself, so
@@ -6721,6 +7027,9 @@
     if (shown === 0) return;
     const vis = [...bar.querySelectorAll("button")]
                   .filter((b) => b.style.display !== "none");
+    // an empty box is not a search: it must not drag him out of the
+    // tiles and into whichever section happens to be first
+    if (!needle) return;
     if (!vis.some((b) => Number(b.dataset.index) === window._cat))
       showCat(Number(vis[0].dataset.index));
     else revealHit();
@@ -6740,6 +7049,8 @@
       filterNav("");
     }
   };
+  document.getElementById("backhome").onclick = () => showHome();
+  document.getElementById("brand").onclick = () => showHome();
   document.getElementById("showall").onclick = () => {
     const box = document.getElementById("navfilter");
     box.value = "";
@@ -6748,10 +7059,20 @@
   };
 
   buildNav();
+  // the fastest way to a setting is its name, so the box has the
+  // keyboard from the first frame: typing goes straight into it
+  try { document.getElementById("navfilter").focus(); } catch (e) {}
   // Esc, asked for by the pane before it closes: a search with
   // something in it takes it and empties the box instead.
   window.__paneEsc = () => {
+    // inside a section, Escape steps back to the tiles rather than
+    // closing Settings outright
     const box = document.getElementById("navfilter");
+    if (!box.value.trim()
+        && !document.getElementById("home").classList.contains("on")) {
+      showHome();
+      return true;
+    }
     if (box && box.value) {
       box.value = "";
       filterNav("");

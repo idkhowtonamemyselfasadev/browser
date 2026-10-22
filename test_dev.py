@@ -730,7 +730,7 @@ check("...including the workbench",
           for t in tops), tops)
 page_text = (HERE / "settings.html").read_text()
 check("there is a section for the tools",
-      'data-desc="descDev"' in page_text)
+      'data-desc="descDevs"' in page_text)
 for ident in ("linkcheck", "debugport", "localhostcerts",
               "chromiumflags", "hostoverrides", "snippetstext",
               "urlrules", "headerrules"):

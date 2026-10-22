@@ -336,7 +336,15 @@ check("Esc: the box is empty",
       js(page, 'return document.getElementById("navfilter").value;') == "",
       js(page, 'return document.getElementById("navfilter").value;'))
 press_esc()
-check("and the next Esc closes settings", not win.pane_open())
+spin(400)
+# Settings opens on its tiles, so Escape steps back to them before it
+# closes the pane: search -> section -> tiles -> gone
+check("the next Esc steps back to the tiles rather than closing",
+      win.pane_open("settings")
+      and js(page, 'return document.getElementById("home")'
+                   '.classList.contains("on");') is True)
+press_esc()
+check("and the one after that closes settings", not win.pane_open())
 
 # -- the bookmark being renamed
 win.bookmarks = [{"id": 1, "type": "link", "title": "Example",
