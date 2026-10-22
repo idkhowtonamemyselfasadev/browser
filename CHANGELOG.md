@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-22 (night) — the decoder goes with the card
+
+Reported straight after the chooser landed: YouTube **live** streams
+come out black while ordinary videos play. The browser's own start-up
+code sets `LIBVA_DRIVER_NAME=nvidia` whenever an NVIDIA driver is
+installed — right while NVIDIA is also drawing, and wrong the moment
+another card is chosen: the frames are then decoded on one card and
+composited on another, which is a black rectangle with the sound still
+playing, and it shows on a hardware-decoded live stream long before it
+shows on a short clip.
+
+The chosen card now carries its decoder with it (`nvidia`, `iHD`,
+`radeonsi`), and "let the system decide" puts that back in the
+machine's hands as well.
+
 ## 2026-10-22 (night) — which graphics card draws the pages
 
 A machine with two cards hands the browser whichever one the system
