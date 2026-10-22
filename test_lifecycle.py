@@ -272,6 +272,53 @@ check("the music tab lives on the existing window, not a new instance",
       win2.tabs.widget(win2.tabs.indexOf(music)) is music
       and music.window() is win2)
 
+# ---------------------------------------------------------------------
+print("\n(10) a crash nothing caught lands in crash.log beside the config")
+# _log_uncaught is the hook PyQt needs so that a raise inside a slot does
+# not end the whole process without a word -- under pythonw there is no
+# console either, so the window simply vanishes. It wrote its traceback to
+# DATA_DIR, a name only the Windows edition ever defined: here the lookup
+# raised NameError, the same `except Exception` that keeps a crash from
+# becoming two swallowed it, and the log nobody could find had never been
+# written at all. Now it goes where the config goes.
+import io  # noqa: E402
+
+home = SCRATCH / "crashhome"
+B.BROWSER_HOME = home
+log = home / "crash.log"
+keep, sys.stderr = sys.stderr, io.StringIO()
+try:
+    try:
+        raise ValueError("a pretend bug")
+    except ValueError:
+        B._log_uncaught(*sys.exc_info())
+    said = sys.stderr.getvalue()
+finally:
+    sys.stderr = keep
+check("crash.log is written", log.exists(), log)
+text = log.read_text() if log.exists() else ""
+check("it holds what was raised", "a pretend bug" in text, text[-200:])
+check("and the line that raised it", "raise ValueError" in text, text[-200:])
+check("and the time, so two crashes are two entries",
+      text.lstrip().startswith("--- 20"), text[:40])
+check("the traceback still reaches stderr as well",
+      "a pretend bug" in said, said[-200:])
+
+# a log that grows forever is a log nobody keeps: past half a megabyte the
+# old one goes and the newest crash starts a fresh file
+log.write_text("x" * (600 * 1024))
+keep, sys.stderr = sys.stderr, io.StringIO()
+try:
+    try:
+        raise ValueError("the second pretend bug")
+    except ValueError:
+        B._log_uncaught(*sys.exc_info())
+finally:
+    sys.stderr = keep
+text = log.read_text()
+check("an oversized crash.log is started over, not appended to",
+      len(text) < 100 * 1024 and "the second pretend bug" in text, len(text))
+
 print("\n%d checks failed" % len(fails))
 if fails:
     for f in fails:

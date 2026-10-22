@@ -62365,7 +62365,7 @@ if sys.platform == "win32":
     # held the name, the second could neither reach it nor take it, and
     # its browser quietly never opened. One name per profile folder.
     SINGLE_INSTANCE_SOCKET += "-" + hashlib.sha1(
-        str(DATA_DIR).lower().encode("utf-8")).hexdigest()[:12]
+        str(BROWSER_HOME).lower().encode("utf-8")).hexdigest()[:12]
 
 
 def _launch_url(text):
@@ -65761,8 +65761,8 @@ def _log_uncaught(kind, value, tb):
     except Exception:
         pass
     try:
-        log = DATA_DIR / "crash.log"
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        log = BROWSER_HOME / "crash.log"
+        BROWSER_HOME.mkdir(parents=True, exist_ok=True)
         if log.exists() and log.stat().st_size > 512 * 1024:
             log.unlink()    # keep the newest, never let it grow forever
         with open(log, "a", encoding="utf-8") as f:
