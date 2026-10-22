@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-10-22 — reading a page aloud works on Windows
+
+The reader went through `spd-say`, a speech-dispatcher client, which is
+what a Linux desktop has and Windows has not — so **"No speech program
+installed"** was the answer there, on a machine whose own .NET has had a
+speech synthesiser in it for twenty years.
+
+PowerShell drives that one now. Three things worth knowing about how:
+
+- **The text goes in through stdin, base64-encoded**, not inside the
+  command. An umlaut in a German article is exactly what breaks a
+  one-line `-Command`, between the console code page and two layers of
+  quoting, and the language is stripped to letters before it is pasted
+  into the script at all.
+- **It is a `Popen`, not a `QProcess`**, because an embedder cannot ask
+  QProcess for `CREATE_NO_WINDOW` — and `powershell` is a console
+  program, so every paragraph read aloud would flash a black window
+  over the page. `kill()` is the same call either way, which is all
+  stop_aloud needs.
+- **A voice for the language is asked for and a miss is allowed**: no
+  German voice installed means the default voice reads it, which is
+  better than nothing being read.
+
+Stopping it kills the synthesiser and no longer asks a speech daemon
+that is not there to clear a queue it does not have.
+`test_winbranch.py` is at **90 checks**, including the umlaut going in
+and coming back out as itself, and `test_games.py` no longer reaches for
+`mpris.py` at the end of a run in an edition that does not ship it.
+
 ## 2026-10-22 — what the tabs are costing, on Windows too
 
 `process_cost` and `renderer_cpu` read `/proc`, and said so in their own
