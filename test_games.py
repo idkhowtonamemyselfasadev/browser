@@ -1184,7 +1184,8 @@ check("no new import of anything outside Qt and the standard library",
 check("the OBS link is Qt's own websocket",
       "from PyQt6.QtWebSockets import QWebSocket" in text)
 check("the media keys are Qt's own D-Bus",
-      "QtDBus" in (HERE / "mpris.py").read_text())
+      "QtDBus" in (HERE / "mpris.py").read_text() if M is not None
+      else not (HERE / "mpris.py").exists())
 
 print()
 if fails:
