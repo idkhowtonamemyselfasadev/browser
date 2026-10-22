@@ -109,8 +109,11 @@ def click(granted):
     card = win._perm_widget
     if card is None:
         return False
+    # by name, not by "not the allow one": the card has three answers
+    # now (allow, deny, and this time) and two of them are not allow
+    want = "permallow" if granted else "permdeny"
     for button in card.findChildren(QToolButton):
-        if (button.objectName() == "permallow") == granted:
+        if button.objectName() == want:
             button.click()
             app.processEvents()
             return True

@@ -1,0 +1,67 @@
+# Woerter fuer Wortfolgen. Kurz, konkret, gut vom Schirm abzulesen und
+# auf einem Handy zu tippen: keine Umlaute und kein Eszett, damit eine
+# Tastatur ohne sie nicht im Weg steht. Die Anzahl macht die Staerke,
+# und die sagt der Browser dazu (siehe passphrase_bits).
+abend acker adler affe akkord alpen ameise amsel anker apfel april
+arbeit arena arm asche aster atlas auge august auto bach backofen
+bahn balken ball bank banner bart basis baum beere beil berg besen
+beton bett biber biene bier bild binde birke birne blatt blei blick
+blume boden bogen bohne boot bord brett brief brille brot brunnen
+buch buche buero buerste bund burg butter dach damm dampf daumen
+decke degen delfin diele diskus distel docht dorf dorn dose drache
+draht drossel druck duene dunst durst eber ecke egel eiche eichel
+eimer eis eisen elch elster engel ente erbse erde erle ernte esel
+espe essig etage eule fabrik faden fahne fakt falke falle farbe
+fassade feder feld fels fenster ferien fessel feuer fichte fieber
+figur film filter finger firma fisch flasche fleck flieder floete
+floss fluss folie forelle form forst foto frosch frucht fuchs funke
+gabel galerie gans garten gasse gast gebirge geige geist gemuese
+gerste gestein gipfel gitter glas glocke gold granit gras grat
+graben grille gruppe gummi gurke gurt haar hafen hafer hahn haken
+halle hals hammer hamster hand hase hauch haus hecke heft heide
+helm hemd henne herd heringe hirsch hobel hoehle hof holz honig
+hopfen horn hose huegel huhn hund hut igel insel jacke jagd januar
+kabel kaefer kaffee kalk kamel kamin kamm kanal kante kanu karte
+kartoffel kaese kasten katze kaugummi kegel keks keller kerbe kerze
+kessel kette kiefer kiel kiesel kind kino kirsche kissen kiste
+klammer klavier klee kleid klinge klippe knopf koch koffer kohle
+kolben komet kompass korb korn kork kraft kragen kran kraut kreide
+kreis kreuz krone krug kueche kuh kunst kupfer kuppel kurbel kurve
+lachs laden lampe land lanze lappen lasche laub lauch laune leder
+lehm leine leiter lenker lerche licht liebe lilie linde linie
+linse lippe liste loeffel lohn lorbeer luchs luft lupe mais mandel
+mann mantel markt marmor maske mast matte mauer maus meer mehl
+meise messer metall meter miete milch mond moos morgen motor
+muehle munde muschel muster mutter nabel nacht nadel nagel nahrung
+narbe nase nebel nelke nest netz nickel niere norden note nudel
+nuss oase obst ochse ofen ohr oliva onkel orange orchidee orden
+ort osten otter palme panzer papier paprika park pass pause pech
+pelz perle pfad pfanne pfeffer pfeil pferd pflanze pflaume pforte
+pilz pinsel pirat pistole platte platz polster portal post pracht
+prisma probe pult pumpe punkt puppe quadrat qualle quarz quelle
+rabe rad radieschen rahmen rakete rampe rand rasen raspel ratte
+raupe rebe rechen regal regen reif reis reise riegel riemen riese
+rinde ring rippe ritter robbe roggen rohr rolle rose rost rotor
+ruder ruecken ruine saal sache sack saft sahne salat salz samen
+sand satz saule schacht schaf schale schalter schatten schaufel
+scheibe schere scheune schiff schild schirm schlange schleife
+schloss schlucht schmied schnecke schnee schnitt schnur schorf
+schrank schraube schuh schule schulter schuppe schwamm schwan
+schwein segel seife seil sekunde senf sessel sichel sieb silber
+sitz skizze socke sofa sohle sommer sonne spalte spange spargel
+spatz speck spiegel spiel spinne spitze sporn spule staat stab
+stachel stadt stahl stall stamm stand stange stapel staub stecker
+steg stein stern stiel stier stirn stock stoff storch strand
+strasse strauch strich strom stube stuhl stunde sturm sueden
+suppe tafel tag taille taler tanne tante tanz tasche tasse taube
+teich teig teller tempel teppich teufel text theke thron tiefe
+tier tinte tisch titel tochter tomate ton topf tor torte traube
+traum treppe tresor tribune trichter trommel tropfen truhe tuch
+tuer tulpe tunnel turm ufer uhr ulme umhang unke urlaub vase
+vater veilchen ventil verband verkehr viertel violine vogel
+vorhang waage wabe wagen wald wand wange wanne ware warte wasser
+watte wecker weg weide wein welle werft werk wert wespe weste
+westen wetter wicht wiege wiese wild wind winkel winter wipfel
+wirbel wolf wolke wolle wort wucht wurm wurzel zange zapfen zaun
+zebra zehe zeichen zeile zelt ziegel ziege zimmer zinn zirkel
+zitrone zoll zopf zucker zug zunge zwerg zweig zwiebel

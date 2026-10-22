@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Microphone and camera</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000000; color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    font-size: 13px; padding: 24px; max-width: 700px; margin: 0 auto;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color: #6c7086; margin-bottom: 18px; }
+  .panel { border: 1px solid rgba(137, 180, 250, 0.2); border-radius: 12px;
+           padding: 14px; margin-bottom: 14px; }
+  h2 { font-size: 14px; margin-bottom: 8px; }
+  button, select {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 9px; color: #cdd6f4; font: inherit;
+    padding: 7px 11px; cursor: pointer; margin-right: 6px;
+  }
+  button:hover { border-color: #89b4fa; }
+  #meter { height: 16px; background: #11111b; border-radius: 8px;
+           overflow: hidden; margin: 10px 0; }
+  #level { height: 100%; width: 0; background: #a6e3a1;
+           transition: width .05s linear; }
+  #peak { color: #6c7086; font-size: 11px; }
+  video { width: 100%; max-height: 40vh; background: #05050a;
+          border-radius: 8px; }
+  .note { color: #6c7086; font-size: 11px; margin-top: 8px; }
+  .bad { color: #f38ba8; }
+  ::selection { background: #cdd6f4; color: #000000; }
+  :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <h1 id="t_title">Microphone and camera</h1>
+  <p class="sub" id="t_sub">All of this stays on this computer: nothing is
+    sent anywhere, and the recording is thrown away when you leave the
+    page.</p>
+
+  <div class="panel">
+    <h2 id="t_mic">Microphone</h2>
+    <select id="mics"></select>
+    <button id="micstart">Start</button>
+    <button id="micstop">Stop</button>
+    <div id="meter"><div id="level"></div></div>
+    <div id="peak"></div>
+    <div style="margin-top:10px">
+      <button id="rec">Record five seconds</button>
+      <button id="playback" disabled>Play it back</button>
+    </div>
+    <div class="note" id="t_micnote">The level should move when you speak.
+      If it does not, the wrong input is chosen or the system has it
+      muted.</div>
+  </div>
+
+  <div class="panel">
+    <h2 id="t_cam">Camera</h2>
+    <select id="cams"></select>
+    <button id="camstart">Start</button>
+    <button id="camstop">Stop</button>
+    <video id="preview" autoplay muted playsinline></video>
+    <div class="note" id="t_camnote"></div>
+  </div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  let bridge = null, micStream = null, camStream = null;
+  let ctx = null, analyser = null, raf = null, peak = 0;
+  let recorder = null, chunks = [], recorded = null;
+  let STR = {};
+
+  function say(id, text, bad) {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.textContent = text;
+    node.className = "note" + (bad ? " bad" : "");
+  }
+
+  async function devices() {
+    try {
+      const rows = await navigator.mediaDevices.enumerateDevices();
+      for (const [kind, box] of [["audioinput", "mics"],
+                                 ["videoinput", "cams"]]) {
+        const select = document.getElementById(box);
+        select.innerHTML = "";
+        const any = document.createElement("option");
+        any.value = "";
+        any.textContent = STR.devDefault || "Whatever the system uses";
+        select.appendChild(any);
+        for (const row of rows) {
+          if (row.kind !== kind) continue;
+          const opt = document.createElement("option");
+          opt.value = row.deviceId;
+          opt.textContent = row.label || row.deviceId.slice(0, 12);
+          select.appendChild(opt);
+        }
+      }
+    } catch (e) {}
+  }
+
+  function meter() {
+    if (!analyser) return;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    const level = Math.min(100, Math.round(sum / data.length * 2.2));
+    peak = Math.max(peak, level);
+    document.getElementById("level").style.width = level + "%";
+    document.getElementById("peak").textContent =
+      (STR.micLevel || "now %d%%, loudest %d%%")
+        .replace("%d", level).replace("%d", peak);
+    raf = requestAnimationFrame(meter);
+  }
+
+  document.getElementById("micstart").onclick = async () => {
+    try {
+      const id = document.getElementById("mics").value;
+      micStream = await navigator.mediaDevices.getUserMedia(
+        {audio: id ? {deviceId: {exact: id}} : true});
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(micStream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      peak = 0;
+      meter();
+      await devices();
+      say("t_micnote", STR.micOn || "Listening. The level should move when "
+          + "you speak.");
+    } catch (e) {
+      say("t_micnote", (STR.micFailed || "The microphone was refused: %s")
+          .replace("%s", String(e.name || e)), true);
+    }
+  };
+
+  document.getElementById("micstop").onclick = () => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    analyser = null;
+    if (micStream) micStream.getTracks().forEach((t) => t.stop());
+    micStream = null;
+    document.getElementById("level").style.width = "0";
+    say("t_micnote", STR.micOff || "Stopped.");
+  };
+
+  document.getElementById("rec").onclick = async () => {
+    if (!micStream) { document.getElementById("micstart").click();
+                      await new Promise((r) => setTimeout(r, 400)); }
+    if (!micStream || !window.MediaRecorder) {
+      say("t_micnote", STR.recNone || "This build cannot record.", true);
+      return;
+    }
+    chunks = [];
+    recorder = new MediaRecorder(micStream);
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onstop = () => {
+      recorded = URL.createObjectURL(new Blob(chunks, {type: "audio/webm"}));
+      document.getElementById("playback").disabled = false;
+      say("t_micnote", STR.recDone || "Five seconds recorded. Play it back.");
+    };
+    recorder.start();
+    say("t_micnote", STR.recNow || "Recording… say something.");
+    setTimeout(() => { try { recorder.stop(); } catch (e) {} }, 5000);
+  };
+
+  document.getElementById("playback").onclick = () => {
+    if (!recorded) return;
+    const audio = new Audio(recorded);
+    audio.play().catch(() => {});
+  };
+
+  document.getElementById("camstart").onclick = async () => {
+    try {
+      const id = document.getElementById("cams").value;
+      camStream = await navigator.mediaDevices.getUserMedia(
+        {video: id ? {deviceId: {exact: id}} : true});
+      document.getElementById("preview").srcObject = camStream;
+      await devices();
+      const track = camStream.getVideoTracks()[0];
+      const got = track ? track.getSettings() : {};
+      say("t_camnote", (STR.camOn || "%s, %d×%d")
+          .replace("%s", (track && track.label) || "camera")
+          .replace("%d", got.width || 0).replace("%d", got.height || 0));
+    } catch (e) {
+      say("t_camnote", (STR.camFailed || "The camera was refused: %s")
+          .replace("%s", String(e.name || e)), true);
+    }
+  };
+
+  document.getElementById("camstop").onclick = () => {
+    if (camStream) camStream.getTracks().forEach((t) => t.stop());
+    camStream = null;
+    document.getElementById("preview").srcObject = null;
+    say("t_camnote", STR.camOff || "Stopped.");
+  };
+
+  window.addEventListener("pagehide", () => {
+    document.getElementById("micstop").click();
+    document.getElementById("camstop").click();
+  });
+
+  if (typeof qt !== "undefined") {
+    new QWebChannel(qt.webChannelTransport, (ch) => {
+      bridge = ch.objects.bridge;
+      bridge.uiStrings((j) => {
+        try { Object.assign(STR, JSON.parse(j)); } catch (e) {}
+        document.getElementById("t_title").textContent =
+          STR.micTestTitle || "Microphone and camera";
+        document.getElementById("t_sub").textContent =
+          STR.micTestSub || document.getElementById("t_sub").textContent;
+        document.getElementById("t_mic").textContent = STR.micWord
+          || "Microphone";
+        document.getElementById("t_cam").textContent = STR.camWord
+          || "Camera";
+        devices();
+      });
+    });
+  } else {
+    devices();
+  }
+</script>
+</body>
+</html>

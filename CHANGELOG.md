@@ -1,5 +1,1792 @@
 # Changelog
 
+## 2026-10-18 — catching up to live, and six tests that were owed
+
+- **Catching up to a live stream** instead of jumping to its edge: a
+  stream he is behind on plays at 1.1x until he is level, then goes
+  back to normal. Driven by the page's own `timeupdate`, so there is no
+  timer of the browser's in front of a stream. (The jump to the edge
+  was already there; this was the other half of that feature, and it
+  had been missed.)
+- Six features that were built but had no test naming them now have
+  one: mute every tab, the wheel over a video, finding the tab that is
+  making a noise, no autoplay-next, "show in folder" when a download
+  finishes, and a capture a few seconds from now.
+- Fixed: the QR dialog's copy button read "barCopyAddress" — a string
+  key used in the code and never defined, so it printed its own name.
+  Both of the two such keys are defined now, in both languages, and
+  the whole table was checked: 3124 keys, nothing used that is not
+  there, nothing in one language missing from the other.
+
+## 2026-10-18 — the ones that were written off too early
+
+Seven features in this browser's backlog were skipped earlier in this job
+because a Python object handed to the engine was measured taking the
+process down at exit. Those measurements were re-run, one at a time, with
+and without: **none of the three mechanisms crashes**, and all three are
+really consulted. So the features they blocked are built, and the one
+real condition the old measurement had half-found is handled.
+
+- **An ad and tracker blocker** (new `adblock.py`): EasyList-format
+  lists, read from a folder of his own. `||host^`, `$third-party`,
+  `$domain=`, type options, `@@` exceptions, `##` hiding and `#@#`
+  unhiding; rules are indexed by host, so a request asks for its own
+  host and its parents rather than walking a hundred thousand rules.
+  Per-site off switch. **What these lists ask for that this does not do
+  — regular-expression rules, `$redirect`, `$csp`, extended selectors —
+  is counted and shown**, because a blocker that silently ignores a
+  third of a list is worse than one that says so. Fetching lists is
+  opt-in, on request, and shows up in the browser's own connection log.
+- **Cookies from other sites can be refused**, with per-site exceptions
+  for the sign-ins that go through somewhere else. One thing measured
+  the hard way: `setCookieFilter(None)` does *not* take a filter off —
+  the engine calls the None back and the process dies — so "off" is a
+  pass-through function.
+- **Mouse gestures, the rocker and buttons 4 to 9.** Right-drag:
+  left is back, right forward, up reload, down a new tab, down-right
+  closes one, up-down brings one back, all of it re-mappable. Right
+  held + left click is back, left held + right click is forward, right
+  held + the wheel walks the tabs. The trail is drawn in the page,
+  because a widget over the view would take the mouse. The one real
+  condition: an event filter left on the engine's widget **does**
+  segfault at interpreter exit, so it is taken off in
+  `_release_engine_hooks`, which atexit calls however the process ends.
+- **Alt+click on a link saves it** — which needed none of that: the
+  modifier is still held when the navigation arrives, so the navigation
+  request is the honest place to ask. The old skip measured the wrong
+  mechanism.
+- **A key in the address bar** on a site he has a login for: fill it,
+  copy the password (the clipboard is cleared a minute later) or open
+  the entry. The old note said there was nowhere in this chrome for it;
+  there is — it rides inside the bar exactly as the star and the copy,
+  clear and QR buttons do.
+- Fixed: a group's header in front made every keyboard shortcut raise
+  `AttributeError` in `key_allowed_here` — a header is a tab with no
+  `url()` — and an exception inside a Qt slot ends the process.
+  `test_navguard.py` had been aborting on it.
+- Fixed: the most-recently-used tab order kept Python wrappers round
+  closed tabs and asked the strip about them, which raises — and an
+  exception inside a Qt slot ends the process. `test_tabwork2.py` had
+  been aborting on it. Dead rows are dropped now.
+
+One more line was listed as something to build and skipped as "the
+engine already does it" — **the scroll kept across a reload**. It is
+marked done now, with a check that measures it instead of assuming it:
+1500 px kept, even on a page whose own `onload` scrolls back to the top.
+
+The blocker also had to be made fast enough to stand in front of every
+request a page makes. Walking every rule costs **17 ms per request** on
+a 50,000-rule pair of lists; rules are indexed by the longest word they
+must contain and an address is looked up by the words in it, which
+brings that to **0.014 ms** with the same answers.
+
+Twelve features are still skipped, each with the measurement that says
+why: picture-in-picture is switched off in this engine build (re-measured
+today), a user agent belongs to a cookie jar rather than a tab, Argos
+Translate and LanguageTool would be new dependencies, the engine offers
+no codec preference and no byte ranges on its own downloads, there is no
+`clearHttpAuthenticationCache` on this build, the screen-share picker
+never sees tabs, and the desktop portal has no GlobalShortcuts here.
+
+## 2026-10-18 — the last of the list
+
+- **What the browser itself sends**, written down: suggestions as he
+  types, the update check, a favicon, a list refresh. One manager
+  handles every connection the browser makes for itself and a page's
+  own traffic never goes through it, so this is a complete answer to a
+  question no browser answers. A switch, and the reason each
+  connection was made.
+- **Which userscripts ran on this page**, and what each one is really
+  allowed to do — read out of its own header and matched with the same
+  pattern function that decides whether it runs, so the audit cannot
+  disagree with the browser.
+- **A window through Tor**, if Tor is listening: its own process, its
+  own data, its own door, everything in it through the SOCKS port.
+  Honestly a window and not a tab, because Chromium reads its proxy
+  from the flags it was launched with.
+- **A page that takes the whole screen** can be asked about per site.
+  The engine's request cannot wait for an answer, so the screen is
+  given and a bar offers to take it back and remember that for the
+  site; a site he said never to is refused outright. **The pointer**
+  is a permission too now. And the permission card speaks German at
+  last.
+- **A copy of the page kept beside the bookmark** (MHTML), so a site
+  that goes away can still be read.
+- **How he got to a page**: every visit writes down the page the tab
+  was on when it started, which gives both the chain that led here and
+  **history as a tree** of what opened what.
+- **A day of history in pictures**, off by default: a small local PNG
+  per address, never for a private tab.
+- **History out of Chrome or Firefox**, read with sqlite3 from a copy
+  of the file, Chrome's 1601 epoch and all.
+- **A bookmark whose page has moved** offers to update itself —
+  measured from what the engine actually reports, which is not a
+  status code: the tab was opened from that bookmark, he has not
+  navigated it himself since, and it settled somewhere else.
+- **The archive's copy** of a dead page, when he asks for it: the one
+  thing here that sends an address off this machine, and it shows up
+  in the browser's own connection log like everything else.
+- **Bookmark reminders**, **Favourites docked beside the page**, and
+  **the sites' own icons kept here** — written when he visits a site,
+  never fetched for a list.
+- **A history only his key opens**, under a key derived from the
+  vault's rather than the vault's own. The file says what it is in its
+  first bytes; with the vault locked it reads as empty and is never
+  written over.
+- **What the printer is doing**: state, file, per cent, time left,
+  nozzle and bed, from Moonraker on his own network.
+- **Both dictionaries at once**, where they are installed, and
+  **the selection typed straight into the side panel**.
+- **The recommendations he did not ask for**, hidden: the YouTube home
+  grid, the Shorts shelves, Twitch's recommended channels — as a
+  marked line in that site's own stylesheet, so switching it off takes
+  out exactly that.
+- **mailto: in his webmail** instead of a desktop mail program.
+- **A price in a sentence, in euros** — selected, converted, shown
+  where he selected it — and the units and time zones with it.
+- **A piece of a page pinned on top** in a small always-on-top window.
+- **Modes**: a whole setup in one click, and only the settings a mode
+  is about.
+- **From a terminal**: `browser --later <url>`, `--note "..."`,
+  `--todo "..."` — handed to the running browser, answered, no window
+  in his face.
+- **This tab on his phone** over KDE Connect, **the words out of a
+  picture** with tesseract, **a video's transcript as a note**, **a
+  calendar file from a selected date**, **today's agenda** from a
+  local .ics on the start page, and **a daily log** of what the day
+  came to.
+- **Captions for a video that has none**: ffmpeg pulls the sound out
+  and the transcriber he named writes the WebVTT, which goes on the
+  video as a real subtitle track. A player fed through Media Source
+  has a blob: address nothing outside the page can open, and it says
+  so.
+- Fixed, and this one mattered: **`not reply.error()` is always false
+  on PyQt6.** A Qt enum member is truthy whatever its value, `NoError`
+  included — so every answer tested that way was thrown away. The
+  http-to-https bookmark upgrade had been quietly upgrading nothing.
+  All three places compare against `NoError` by name now.
+- `BROWSER_HOME` moves everything of his at once, which is what a
+  second browser on its own data needs.
+
+## 2026-10-18 — two pages at once, and reading them
+
+- **Two tabs side by side** in one window, with the divider he already
+  has: the other tab's view is taken out of the strip and put in the
+  other half of the splitter, and goes back where it was when the
+  split closes. **Scrolled together** if he wants — read one half,
+  write the other, four times a second, because there is no "the page
+  scrolled" signal an embedder can hear.
+- **The tab strip somewhere else**: down the left or the right (with a
+  width he drags) or below the page. Qt's own tab positions, so it is
+  the real strip with its own drag-and-drop in another place — and
+  **more than one row** instead of scrolling, up to four.
+- **The tabs of one site folded into one**, which is the group
+  machinery doing what it is for: they go into a group named after the
+  site and the group is collapsed.
+- **Workspaces**: named sets of tabs in one window. The set he is
+  leaving is saved before the new one opens, so switching back and
+  forth keeps both sides as he left them.
+- **A link from another program** can land in the virtual browser that
+  site belongs to — his rules first, then the question if he asked for
+  it — and **each virtual browser's window comes back** where it was,
+  the size it was, with its own tabs.
+- **A page in a language he does not read** says so in a plain bar:
+  translate it once, always this language, never, or not now. Asked
+  once per language per tab; his own language and English are never
+  asked about.
+- **Translated on this machine**, block by block, through the
+  translator he named — the page's text never leaves the box, and
+  `data-was` on every block means **undo** gives the page's own words
+  back. Google Translate only when he has no translator of his own,
+  and the entry says so plainly because it means the page is sent
+  there. **Side by side** reuses the split.
+- **PDFs**: the page he was on is remembered per file (the viewer puts
+  it in the address, which is the one handle an embedder gets), and the
+  keys it listens for are sent to it — next, previous, fit width,
+  rotate.
+- **The article printed without the furniture**: reader mode, then the
+  PDF.
+- **One word's worth of right-click**: spelling suggestions at the top
+  (the engine checks and hands them over; Qt's standard menu does not
+  carry them), "add to my words", **synonyms** from `dict` when a
+  thesaurus is installed, and **what the word means in the other
+  language** as a tooltip where he is reading.
+- **A pasted address arrives clean**: the same 48 tracking parameters
+  the address bar strips, stripped where he pastes, if he switches it
+  on. Only a whole http(s) address is touched.
+- **A book in the reader**: `.epub` opened with its chapters down the
+  side in the reader's own type. zipfile and nothing installed.
+- Fixed: a tab restored lazily kept its address as a `QUrl`, and the
+  session save threw `TypeError: Object of type QUrl is not JSON
+  serializable` the first time a workspace was opened. Addresses are
+  text from the start now.
+- Fixed: translating a page twice used to make the second pass's
+  uppercase text the "original" that undo restored; a block that is
+  already translated is left alone.
+- Fixed: the translator call drew a caption overlay for every block of
+  a page it translated. The program call is its own method now, and
+  captions are one caller of it.
+
+## 2026-10-18 — the agent bridge, part two
+
+- **The page as a numbered list.** `tree` returns what can be aimed at
+  — role, name, position — with a number on every row, and `click` and
+  `type` take the number. An agent that has to invent CSS selectors
+  gets them wrong; a numbered list it can.
+- **Selectors reach into frames and shadow roots**: `#host >>> #button`
+  steps through a shadow root or an iframe, in every op that takes a
+  selector. A closed shadow root is honestly out of reach.
+- **What a tab fetched**: address, kind, size and duration out of
+  Navigation Timing — and the answer says plainly that there are no
+  status codes, because the engine never hands one to an embedder.
+- **A file through the browser's own session**: the page fetches it
+  with its own cookies, so something behind a login really comes down,
+  and the reply carries the size and the sha256.
+- **An event stream.** The connection is the subscription: loads, title
+  changes, tab switches and watches firing arrive as JSON lines. **And
+  your own command can be run** when one happens — the event's name as
+  an argument, the event as JSON on standard input.
+- **Watching a page or an element**: a check on a schedule, with the
+  old text and the new in the event. **And a tab can reload itself** on
+  a timer — never while you are typing in it.
+- **Macros**: what the page saw (the selector of what was clicked, what
+  was typed) recorded and played back through the bridge's own click
+  and type, so a macro is a list of ops you can read and edit. A
+  password field is never recorded.
+- **Auto-click rules**: a selector per site, clicked once when it
+  appears — "Still watching?", "Continue", a wall that wants an answer.
+- **The tabs the agent opened are its own**: marked, listable, closable
+  in one go and swept after an idle time — never a tab you opened.
+- **Permission levels**: off, read-only or full, plus an allow list of
+  ops and of sites. Asking about the level is never refused, because a
+  client that could not set it back would lock you out of your own
+  browser. **Your history stays off** even at full permission until you
+  say otherwise.
+- **An audit log**: every op with the time and what it was aimed at,
+  clearable — an answer to "what has been driving this browser" that
+  does not depend on trusting whatever was driving it.
+- **More ops**: open in a chosen virtual browser or a private tab, set
+  a tab's viewport (or a phone's), list and move tab groups, search and
+  get the results as a list, ask an assistant that is open in a tab,
+  set the files for a page's file chooser, and real pointer input
+  (hover, right-click, drag) as trusted events.
+- **agent.py is a module too**: one function per op, a batch runner
+  (`agent.py run steps.json`, stopping at the first failure) and
+  `agent.stream()` yielding events as they arrive.
+- **A local http mirror**, off by default: loopback only, a token
+  required, and every op goes through the same socket every other
+  client uses — so nothing touches a page from the http thread.
+- **A browser with no window**: `browser.py --agent` starts the same
+  browser — same jars, same scripts, same bridge — on its own sockets,
+  for tests and background jobs.
+
+## 2026-10-18 — the keys and the mouse
+
+- **A site can keep its own keys**: Ctrl+K belongs to Discord's search
+  and Ctrl+S to an editor in a tab, so those keys are stopped in the
+  page before the browser's own shortcut can fire. **And one browser
+  shortcut can be switched off on one site.**
+- **Keys you never mean to press** (F1, Insert) can be ignored — not
+  bound at all, which is the only way to be sure they do nothing.
+- **Shortcuts follow the key, not the letter.** On a German keyboard
+  Ctrl+Z sits where Ctrl+Y is and Ctrl+/ is Ctrl+Shift+7: both are
+  bound, so whichever the layout produced works.
+- **Two-step keys**: a leader key and then a letter, for the commands
+  worth a key but not a key of their own — and the browser forgets
+  after two seconds instead of waiting for ever. **"Do that again"**
+  repeats whatever ran last.
+- **Ctrl+Q asks twice.** It is next to Ctrl+W and it closes everything.
+- **The address bar has a terminal's keys**: Ctrl+W kills the word
+  behind, Ctrl+U the line, Ctrl+K to the end, Ctrl+A and Ctrl+E the
+  ends, Alt+B and Alt+F a word at a time.
+- **A text box can be edited in your own editor** (kitty + nvim by
+  default): the text goes into a file, the editor opens on it, and what
+  it wrote comes back into the box. **And text the page lost** when it
+  reloaded can be brought back — kept in the page's own session
+  storage, which dies with the tab and never touches the disk.
+- **Vim keys on a page**, optional: j/k scroll, gg/G jump, H/L are
+  history, gt/gT are tabs, / finds and gi goes to the first box — and a
+  key typed in a text box is left alone.
+- **Ctrl+Tab can go in most-recently-used order**, with the order kept
+  as tabs rather than indices. **A virtual browser by number**, **the
+  tabs of one group on their own**, and **hold a key to peek** at the
+  tab you were on.
+- **The mouse, as you want it**: drag a link to open it and drag text
+  to search it, drag a box over links to open them all, two fingers
+  sideways to go back and forward, middle-click-and-move to scroll (off
+  by default, because middle-click pastes here), and hovering a tab
+  while dragging switches to it so the drop lands where you meant.
+- **What a click does is yours**: seven answers each for a double-click
+  on a tab, a middle-click on a tab and a double-click on the empty
+  strip — and a middle-click on the new-tab button opens the clipboard
+  (an address) or searches it (words).
+- **Wheel and arrow-key steps** can be set; 0 leaves the engine's own
+  behaviour untouched.
+- **Hold the right button for the gesture help** — what the mouse can
+  do here, where the pointer is.
+- **The window manager's keys**: eleven named commands over the
+  single-instance socket (raise, new tab, play/pause, record, clip,
+  shot, …) with the bind lines printed for your hyprland.conf rather
+  than written into it.
+- **A key can run one of your own scripts** — a file in the plugins
+  folder or a javascript: bookmark.
+- **Every context-menu thing has a key**: open the link under the
+  pointer, copy it, save or copy or open the picture, search the
+  selection. What is under the pointer is asked of the page, because
+  that is the only thing that knows.
+- **Fixed**: a server redirect on the way into a new tab (a 301 from
+  the page you set as your new-tab page) could make the browser treat
+  the tab as one you had navigated yourself, so an empty tab was saved
+  into the session. A redirect hop while the load is still in flight is
+  part of the arrival now; a hash router moving the address with no
+  load at all still means the tab is yours.
+
+## 2026-10-18 — recording and captures
+
+- **A tab can be recorded** — frame by frame, because the engine hands
+  an embedder pixels and not a stream. Part of a tab, with the
+  microphone for a voice-over, or with the machine's own sound through
+  the recorder you name (the engine taps no tab's audio either).
+- **A replay buffer**: the last thirty to a hundred and twenty seconds
+  kept in memory, savable with one action without stopping the
+  recording — possible at all because a recording here is a list of
+  frames and nothing cleverer. **The ends can be cut off** before it is
+  written, for the same reason.
+- **A GIF is written by the browser itself**, with its own LZW coder:
+  Qt cannot write one and ffmpeg may not be installed. **WebM and MP4**
+  go through ffmpeg when it is there, each frame handed over on its
+  standard input. Without ffmpeg a recording is saved as a GIF rather
+  than not at all.
+- **Clicks and keys can be drawn into a recording** for a tutorial — on
+  the frames the browser grabbed, never into the page, so none of it
+  ends up in the page's own DOM, screenshots or printouts.
+- **A clear mark while anything is recording**, on the tab and on the
+  address bar.
+- **An editor after the shutter**: crop, arrows, boxes, numbered
+  markers, text and blur, with undo — and any picture on a page or on
+  disk can be opened in it.
+- **The captures you have taken**, as a list: open one, copy it as a
+  picture, mark it up, delete it. **Drag one out** into Discord or a
+  file manager (the file and the picture both go on the drag).
+  **Copy one with the page's address** as Markdown or HTML, which is
+  what a bug report wants.
+- **A crisp capture at twice or three times the size**, rendered in a
+  view of its own: Qt takes the device pixel ratio from the screen and
+  an embedder cannot raise it.
+- **The whole content of an inner scrolling area** — a chat log, a
+  sidebar — stitched by scrolling the element itself; the tallest
+  scroller is found for you.
+- **The page at phone width**, **one-click PDF** straight into the
+  downloads folder, and **the whole page as one tall PDF page** with no
+  breaks through a paragraph.
+- **A background tab can be captured without going to it**, **every tab
+  at once** into one folder, and **a contact sheet** of all of them.
+- **The selection as a picture** (the page's own typography, captured
+  from the view) or **as Markdown with its source link**.
+- **A timelapse**: this page captured every few minutes into a folder,
+  for a printer webcam or a stats page. **A visual diff** against the
+  last capture, pixel by pixel with a tolerance, because a page
+  re-rendered is never identical.
+- **Text out of a picture** with tesseract if it is installed, and it
+  says plainly when it is not. **A QR code in a capture or a selected
+  area** read here, by the decoder the wave before built.
+- **A capture can be uploaded to a server of your own** — an https
+  address it is PUT to, or user@host:/path handed to scp — opt-in, with
+  the link coming back on the clipboard. **The address and the date**
+  can be stamped under a capture, which is what turns a picture into a
+  record.
+
+## 2026-10-18 — what the browser is costing
+
+- **"Free memory now"**: every background tab asleep except the ones
+  that must keep running — playing sound, in a call, a game, pinned, or
+  on a **keep-awake list** of your own (Amazon Music stops when its tab
+  is discarded; Discord drops the call).
+- **Freezing**, as the lighter step: a frozen tab keeps its page and its
+  JavaScript and runs no timers, where a sleeping one gives the whole
+  renderer back. Idle background tabs can be frozen after a set time.
+- **A background tab that keeps the processor busy says so**, measured
+  from /proc over a real interval — and only for tabs you are not
+  looking at. Background renderers can be given **a lower claim on the
+  processor**: only ever downwards, so nothing can be starved, and a
+  process the front tab shares is left alone.
+- **A page that has stopped answering** can have its renderer stopped
+  and the tab reloaded, without restarting the browser. **A tab whose
+  renderer crashed** comes back once, where you were reading, with the
+  reason in a line.
+- **Memory pressure, from the kernel itself**: /proc/pressure/memory,
+  because "how much is free" means nothing on Linux and "how long
+  something waited for memory" means exactly what it says. Above a
+  **memory budget** the tabs you have not touched longest go to sleep.
+- **A tab whose memory keeps climbing** is noticed — six readings, each
+  higher than the last, which is a climb rather than a page that got
+  busy.
+- **What a page pulled down**: the bytes, the requests and where the
+  bytes went, out of Navigation Timing — which knows every resource's
+  transfer size, where the request interceptor is never told a size.
+  Per tab as well, heaviest first, and as **a one-line badge** for the
+  page in front.
+- **Savings that live in the page**: off-screen pictures told to wait,
+  animations paused in tabs nobody is looking at, silent video stopped
+  in a tab you cannot see (sound is the exception — a podcast in a
+  background tab is the point of a background tab), and **a floor under
+  a site's timers** for a dashboard that polls too often.
+- **A cap on video quality**: YouTube through its own player, Twitch
+  through the setting it reads.
+- **A soft reload** that gives the memory back and keeps your place:
+  the scroll position and what you have typed into the page's fields
+  come back; what the page kept in JavaScript is the memory this is
+  here to give back.
+- **What the graphics card is actually doing**, read off chrome://gpu —
+  and the switch for hardware video decoding, with the three launch
+  flags set for you. **Ten Chromium flags worth having**, each with
+  what it does. **The cache size** per virtual browser, or memory-only.
+- **Where the start-up time went**, broken down by step, with everything
+  before the first step reported honestly as "python+qt". **What each
+  userscript cost**, timed in the page.
+- **A link the mouse rests on can be fetched early** — never from a
+  private tab, because a prefetch is a visit as far as the server is
+  concerned. **Connections opened early** to the sites your own history
+  says you use most, opt-in and said plainly.
+- **Tidying up while you are not using it**: history past its keep-days
+  trimmed and the cache told to clear, only while the browser is idle.
+- **Tabs you have not looked at for days** can be bookmarked and
+  closed, and a big session can come back **in stages** or not load
+  anything at all until each tab is opened.
+- **A site that cost a lot of memory last time** gets a word before it
+  does it again, and a small **log of start-up time and memory by day**
+  makes a regression visible.
+
+## 2026-10-18 — getting around a page
+
+- **One popup for getting around** (Ctrl+Alt+Shift+G), with the
+  switches settable for a single site: middle-click-and-move to scroll,
+  Alt-drag a box over links, plain-text addresses made clickable, the
+  site's scroll hijacking stopped, the site's key grabbing stopped, and
+  the site's own timed refresh disarmed — with "allow it this once",
+  because the tag is disarmed rather than deleted.
+- **What a page is made of**, in one list: its links, its pictures,
+  its meta data and its frames. **The picture gallery** has every image
+  with its real size and alt text, each one openable, copyable and
+  savable. **A frame the site refused to draw** is still a page, and it
+  can be opened in a tab of its own; a frame can also be reloaded on
+  its own.
+- **The shape of the page** as a clickable outline of its landmarks,
+  headings and forms, to jump through it from the keyboard.
+- **The selection is useful**: every link in it listed, all of them
+  opened at once as background tabs, and "go to the address I
+  selected" for text that is not a link.
+- **Find, with the extras**: whole-word and regular-expression modes,
+  every match marked on a rail beside the scrollbar, a quick find that
+  only looks at link text and follows what it finds, and **find in
+  every open tab** — each tab answering for itself, so one slow page
+  does not hold up the list.
+- **Addresses rewritten before they load**: a rule like
+  `reddit.com -> old.reddit.com`, applied in the navigation hook, so
+  the page you did not want is never fetched at all.
+- **A note stuck to a page** that comes back whenever you visit it,
+  kept against the address without its query.
+- **The mobile version in one switch**: the viewport a phone has and
+  the user agent a phone sends, together, then a reload — because a
+  site decides which version to send from the agent it is given.
+- **A page that did not load says what failed** (DNS, refused,
+  timeout, certificate, or plainly that the engine said nothing), with
+  the archived copy offered as a link and a note when a proxy is on.
+  **It can try again by itself** once the network answers.
+- **The archived copy** of a dead page, with the address built here and
+  never fetched: going there asks first and says plainly that it tells
+  archive.org you looked.
+- **Read the QR code in a picture**, decoded on this machine — `qr.py`
+  gained a reader to go with its writer, the same tables run backwards,
+  with the Reed-Solomon parity checked rather than guessed.
+- **Shift and hover shows the linked page** in a small window, in a jar
+  that writes nothing down, promotable to a tab. **A link can be opened
+  in the side pane.** **A video can be handed to mpv.** **This page can
+  be opened in the other browser.** **Only the selection can be
+  printed.**
+- **An address another program owns** (`discord://`, `steam://`,
+  `mailto:`, `ts3server://`, …) asks once which program should open it
+  and then remembers, per scheme and per site. What could open it is
+  measured on this machine, and an unknown scheme goes to the desktop's
+  own opener.
+- **This site's cache and service workers** can be dropped and the page
+  reloaded, without touching its cookies or logins.
+- **A page that finished in a tab you are not looking at** gets a tick,
+  cleared when you go there. **Back and Forward in a sleeping tab** use
+  its saved history without loading everything in between.
+
+## 2026-10-18 — accessibility
+
+- **One popup with every reading help in it** (Ctrl+Alt+Shift+A), and
+  every one of them can be set for a single site instead of everywhere.
+- **What is done to a page**: always underline links, bigger things to
+  click, darken text that is too faint (measured against the colour
+  really behind it, and only where it fails), alt text on hover with
+  pictures that have none marked, bold the start of each word, bigger
+  scrollbars, hyphenate long words, wrap text to the window instead of
+  scrolling sideways, unstick headers and footers, stop a page
+  reloading itself on a timer, open up the line, word and letter
+  spacing, zoom the text without the pictures, and a reading font —
+  offered only when the machine really has one.
+- **Colour-blindness filters**: two corrections (red-green,
+  blue-yellow) and three simulations for checking a design, each one
+  matrix applied to the page's own root, so the browser's chrome is
+  untouched.
+- **The keys that move through a page**: the next and previous heading,
+  the landmarks, the form fields, skip to the content, into the first
+  text field, and the arrow keys between links and buttons. **Caret
+  browsing on F7** — a text cursor the arrows move and Shift extends.
+  **Esc closes a dialog the site will not.** Tooltips on keyboard
+  focus, the focused thing kept in the middle, and Alt-drag to select a
+  link's words instead of dragging it.
+- **Find my cursor**: Ctrl on its own flashes a ring round the pointer
+  — and only when nothing else is pressed with it. **A magnifying lens**
+  that follows the pointer, drawn from the window's own pixels.
+- **The keyboard reaches the furniture**: the tab strip with its arrow
+  keys and that tab's own menu, and Shift+F10 opens the page menu at
+  whatever has the focus.
+- **A page's own faults, listed**: fields with no label, pictures with
+  no alt text, text that fails contrast, and headings that skip a
+  level.
+- **The browser's own buttons, fields and panels are named** for an
+  AT-SPI screen reader, read from the words they already carry.
+- **Live captions for what a tab is playing** — honestly what it is:
+  the engine gives the embedder no tap on a tab's audio, so the browser
+  records the machine's own output a few seconds at a time with the
+  recorder you name and hands each chunk to the transcriber you name
+  (parec and whisper-cli, say). Opt-in, nothing bundled, nothing
+  downloaded, and no sound leaves the machine. **A video's own captions
+  can be translated** line by line by a translator on this machine.
+- **Mono and balance** for a page's sound, through Web Audio, because
+  the engine has no mixer an embedder can reach.
+- **Short sound cues** when a page or a download finishes — two tones
+  the browser writes itself as .wav files beside the config.
+
+## 2026-10-18 — appearance and themes
+
+- **Themes of your own.** A theme is eight colours; the other fifteen
+  are derived from them, the same way the hundred and fourteen that
+  came with the browser are. Save one under a name, star the ones you
+  keep coming back to and step through them, replace a theme's accent
+  without leaving the theme, write one out as a small JSON file and
+  read one back.
+- **A kitty.conf, a base16 YAML or a VS Code theme becomes a browser
+  theme**, read by one reader, because all three are names and hex
+  strings. And the browser can **follow a colour file**: point it at
+  the rice switcher's current theme and it re-themes when that file is
+  saved. Nothing is fetched; it is a file on your own disk.
+- **It can follow the desktop.** The XDG portal's light/dark setting,
+  through Qt's own signal, switching between the two themes you pick.
+- **The theme editor says what cannot be read**: measured contrast, not
+  a judgement — text on background wants 4.5:1 and an accent 3:1.
+- **A sixth look, Flat mono**: square corners, no shadows, no cards,
+  lettered like a terminal.
+- **The chrome is yours to size**: compact, normal or big; its own font
+  and font size (monospace families first); how round the corners are,
+  from square upwards, in any look; how see-through Glass is; the
+  widest a tab may get; how tall the toolbar is; plain menus with
+  bigger rows; words on the toolbar instead of glyphs; how loudly
+  keyboard focus is drawn; and no animation in the browser's own pages.
+- **The tabs and the toolbar can hide** until the mouse reaches the top
+  edge — or Ctrl+L, which is asking for the address bar. The same in
+  F11 fullscreen.
+- **Which account is in use is never a guess**: a colour per virtual
+  browser on the strip and the address bar, a colour of their own for
+  private tabs, and — if you want it — the site's own theme-color on
+  the toolbar, with the virtual browser's colour winning over it.
+- **Favicons in one colour**, for a calm strip: the shapes are kept and
+  the brand colours thrown away. Bookmarks keep theirs.
+- **The hovered link** can be said bottom left, over the address bar or
+  nowhere, at a size you choose — and never over an address you are
+  typing. **The window title** can be the page, the site, or with the
+  virtual browser in it, for Hyprland rules and the task switcher.
+- **How websites are shown**: dim them in the evening between two times
+  you set (the page only — the browser keeps its brightness), warmer
+  colours in the same hours, grey everywhere or per site, thin or
+  themed or hidden scrollbars with sites excused, the selection in your
+  accent colour, a background for pages that bring none, and a text
+  size for one site without touching its zoom.
+- **The fonts websites fall back to** — standard, serif, sans and
+  monospace — and **the colour emoji family**, which is Chromium's
+  pictograph font: the one it reaches for when a page asks for an emoji.
+- **Plain files on your background**: a .txt, a .json or an image
+  opened on its own, with a checkerboard behind a transparent PNG.
+  **Dark PDF pages**, by inverting the plugin and turning the hue back.
+  **DevTools** opens in the browser's colours.
+- **Sites to leave alone**, editable in Settings instead of living in
+  the source, and "leave this site alone" from the appearance menu.
+- **A page that did not load** can be shown in the browser's own plain
+  style, in your palette, with Enter to try again. Off by default, and
+  never shown for the trust channel's own re-issued navigation.
+- **The start page** can show or hide the clock, the seconds and the
+  date, run on a twelve- or twenty-four-hour clock, put the search box
+  where you want it and size the quick links — and **rotate through a
+  folder of wallpapers**, on every new tab or every N minutes. Nothing
+  is copied and nothing is fetched.
+- **"Put appearance back as it came"**, with one backup kept — your own
+  themes included — and an undo.
+
+## 2026-10-18 — the developer tools
+
+- **A ruler, element outlines, hidden form fields and a no-CSS view**,
+  each a switch that remembers whether it is on. The ruler measures in
+  pixels, the hidden fields come out with a note saying where the form
+  posts, and the no-CSS view is the page's own structure with nothing
+  on top of it.
+- **What a page is made of, read out of the page**: the fonts it
+  renders in, the colours it uses with the heaviest first, a picture's
+  real size against the size it is drawn at, and the Open Graph tags
+  as a link preview would see them.
+- **A performance overlay** with frames a second, long tasks and the
+  layout shift, and **a mockup laid over the page** at any strength —
+  the picture is read here and handed over as data, so nothing you are
+  comparing against leaves the machine.
+- **Local and session storage** read, written and emptied; IndexedDB
+  listed by name. **The cookies of a site** listed, added, deleted and
+  written out as a Netscape cookies.txt, with a line at the top saying
+  plainly what that file is.
+- **A tab can pretend**: a phone or tablet width, dark or light, print
+  media, another place, another time zone, another language, and a
+  slow connection — which is honestly a measured hold before each
+  navigation, because the engine offers no rate control.
+- **A tab can pretend to be another browser**: a user agent per site,
+  sub-domains included, sent as the real request header and matched by
+  what the page's own JavaScript reads.
+- **The requests a page makes**, written down with the address, the
+  host, the method, the kind and whether it is first-party, filterable
+  by word and exportable as a HAR file. Off until you ask for it.
+- **Addresses can be blocked or sent somewhere else** — a rule like
+  `/ads.js → block`, or one pointing at a file of your own, to try a
+  fix on a live site. **Headers of your own** can be added per site or
+  everywhere.
+- **"Do not sell or share" is now the real header.** Sec-GPC goes out
+  with every request, with the same per-site excuse the page guards
+  have, measured leaving the browser rather than assumed.
+- **The server's answer**: the response headers of the page, with the
+  security headers it does not send called out. **A request of your
+  own**: method, address, headers, body and what came back, with how
+  long it took. **The clock**: time to first byte, the DOM, the load,
+  and what the page weighed.
+- **The workbench**: a regular-expression tester, a text diff, a patch
+  viewer, Markdown, MiniMessage and Minecraft JSON components drawn as
+  they appear in chat, and JavaScript snippets you can save and run on
+  the page.
+- **The page looked over**: a small honest audit (no score out of a
+  hundred), a link checker that is opt-in because it goes online, the
+  JavaScript errors of a page counted for a badge, the service workers
+  listed and unregisterable, and the certificate in words.
+- **A folder can be watched** and the tab reloads when a file in it
+  changes — a userscript saved in the plugins folder is re-read and
+  reaches the tabs it runs on.
+- **The engine's own switches**: the chrome:// pages that work, the
+  Chromium flags, a domain pointed at an IP for this browser only, the
+  remote debugging port (off by default, localhost only) and accepting
+  a self-signed certificate on localhost and the home network alone.
+- **Fixed, found by the tests**: six things in the browser were defined
+  twice, and in Python the second one silently wins. Two `resizeEvent`
+  methods, so the toasts and popovers had stopped following the window;
+  two tables of developer tools, so every tool written before this wave
+  answered nothing at all; two `storage_menu`, two `page_links` with
+  different answer shapes, two certificate menus and two `hard_reload`.
+  All merged or renamed, and an invariant check now fails if anything
+  in browser.py is ever defined twice again.
+
+## 2026-10-18 — the address bar
+
+- **The domain is bright and the rest of the address is dim**, so
+  `paypal.com.evil.ru/login` reads as what it is. Only while you are not
+  editing, and it can be switched off.
+- **A name dressed up as another one is called out**: a Cyrillic *а* in
+  apple.com, a capital I standing in for an l in paypal.com, two scripts
+  in one label.
+- **A plain http page says "Not secure"**, and the lock opens a panel
+  with the connection, the cookie rule for the site, what it is allowed
+  to do, and what it is using the camera or microphone for. The
+  certificate is one press away — it is fetched when you ask, not to
+  fill a panel.
+- **Addresses are shown as readable text** (%20, umlauts, punycode) and
+  `https://` and `www.` can be left off — while copying still gives the
+  real address.
+- **The loading progress runs along the bottom of the bar.**
+- **What you type is understood better**: `YOUTUBE.COM`, `you tube.com`,
+  a link with the chat's punctuation stuck to it, `~/Downloads`, and
+  `localhost:8080` all go where you meant. A sentence with a site in it
+  is still a search.
+- **"Did you mean youtube.com?"** when a domain is one letter off a site
+  you actually visit — from your own history, never a list somebody else
+  wrote.
+- **Nothing that is not a search is sent to the search engine**: an
+  address, a path, an e-mail address, a token or a card-shaped number
+  never leaves the machine as a suggestion query.
+- **Typing a domain completes it** from the sites you really visit, with
+  the rest selected — and a site can be told never to be suggested
+  again.
+- **@tabs, @bookmarks, @history, @settings, @downloads, @notes** limit
+  the drop-down to one source; **Settings entries** turn up in it
+  ("dark mode", "proxy"); **tabs in your other windows** are offered and
+  the window is raised.
+- **Tab searches the site in the bar** — its own search, from its
+  OpenSearch offer where it has one — and a site that offers one can be
+  added with a press.
+- **More answers in the bar**: `0x1f`, `1010b`, `255 in hex`,
+  `ip 192.168.1.0/24`, and `20 usd in eur` from a rate table you switch
+  on (the European Central Bank's daily file, once a day). Enter on any
+  answer copies it and says so.
+- **Shift+Enter** opens the result in a background tab, **middle-click**
+  pastes the selection and goes, **Ctrl+L twice** selects just the path,
+  **Up and Down** step through what you typed in that tab, and
+  **Alt+click** on a link saves it.
+- **Buttons in the bar**: copy, clear, and a QR code of the page for your
+  phone — each one switchable.
+- **The whole toolbar can go under the page**, and the bar's text can be
+  made bigger on its own.
+- **Your own search engines** (name, address, keyword), a **different
+  engine for private tabs**, and **German searches to one engine,
+  English to another** — decided by the letters, not by asking anybody.
+- **Bookmark keywords**: `k` and Enter opens it, the way Firefox does.
+- **A page listing every search you made from the bar**, searchable and
+  clearable, never written from a private tab.
+
+Fixed along the way:
+
+- **notes.html, player.html and mictest.html were never on the list of
+  the browser's own pages**, so each was handed the password channel
+  instead of the settings bridge — the notes drawer, the local player
+  and the microphone test have been calling a bridge that was not there
+  since the waves that added them. There is one list now (`OWN_PAGES`),
+  the invariant check reads it rather than repeating it, and the test
+  asks the page itself whether its bridge arrived.
+- The test harness left its scratch directory behind on every run. A few
+  hundred runs filled /tmp, and what that looks like is not "no space
+  left" but the last few tests of a suite segfaulting and timing out.
+
+## 2026-10-18 — downloads and files
+
+- **The downloads list is a list you can use**: search it by name,
+  address or site, filter by kind or by how long ago, export it as CSV,
+  copy a download's address, fetch one again whose file is gone, and
+  drop finished rows after a number of days you choose — the files are
+  never touched by that.
+- **Each download remembers the page it came from**, not only the file's
+  own address, with a button to open that page again.
+- **A checksum for any download** (or for every one, if you switch that
+  on), and a warning when a file with the same name — or the same
+  bytes — is already in your downloads.
+- **Delete a download's file**, not just its row, with a question first.
+- **Files can be named the way you want them**: `{name} {ext} {site}
+  {title} {date} {time} {n}`.
+- **Ask where to save only the kinds you say**, refuse kinds you never
+  want arriving on their own, and ask before anything bigger than a size
+  you set — or bigger than the free space left.
+- **Private tabs can download into a folder of their own**, emptied when
+  the last one closes if you ask. Each virtual browser can have its own
+  folder too.
+- **Where a file came from can be written into the file** (the
+  `xdg.origin.url` attribute every file manager reads).
+- **A queue**: how many downloads run at once, with the rest waiting and
+  reorderable — and a **speed cap**, which the hint explains honestly as
+  a cap on average, because the engine offers no rate limit.
+- **A download at a time you choose.**
+- **Archives**: look inside one before unpacking it, unpack it into a
+  folder of its own name, pull one file out of it — and an archive that
+  tries to write outside its folder is refused outright.
+- **A downloaded mod says what it is**: Fabric, Forge or NeoForge, its
+  version and which Minecraft it wants, read out of the jar — and it can
+  go straight into an instance's `mods` folder.
+- **Pictures**: save the ones on a page with a size filter, fetch the
+  full-size version where the site's own addresses say how, convert a
+  WebP or AVIF to PNG or JPEG, and take the camera and GPS data out of a
+  picture before uploading it.
+- **Paste a picture from the clipboard into an upload box**, or pick one
+  of your recent downloads for it — the page never reads your clipboard;
+  the browser hands over the bytes.
+- **Save a page as one file** (MHTML, or a single HTML with its styles
+  and pictures inside) **or as Markdown**, through the same converter the
+  agent bridge uses.
+- **A quick look at a download** — a picture, a text file, a PDF or an
+  archive listing — without opening another program.
+- **A list of addresses downloaded in one go**, and **Alt+click on a
+  link saves it** instead of going there.
+- **Handoffs to the programs you have**: magnet links and `.torrent`
+  files to the torrent client, a video to yt-dlp, a finished file to
+  ClamAV, a `.gcode` to the 3D printer over Moonraker. Each one says
+  which program it wanted when that program is not installed — "no
+  scanner" and "clean" are never shown as the same thing.
+- **A finished download can be dragged out of the bar** into Discord, a
+  file manager or an upload box.
+- **A word when a download finishes** while you are in another window.
+
+## 2026-10-18 — passwords and forms
+
+- **Addresses and cards fill themselves** into sign-up forms and
+  checkouts, by what each box is actually called rather than by
+  guesswork. The card's security number is asked for every time — it is
+  the number that is supposed to prove somebody is holding the card —
+  and a checkout inside the payment company's own frame says so instead
+  of looking broken.
+- **A password made here**, filled into both boxes of a sign-up form and
+  saved in the same breath, obeying the site's own length limit and
+  `passwordrules`. Or **a passphrase of words**, from two word lists
+  beside the browser, which tells you how many bits that is.
+- **Two-factor codes** go into the code box (or the clipboard when there
+  is no box), and the **setup secret can be taken off the page** — the
+  `otpauth://` link or the printed secret beside the QR code.
+- **Copied passwords leave the clipboard again** after half a minute,
+  unless you have copied something else since.
+- **One key fills the login** (Ctrl+Shift+Q), with **sites that are one
+  account** — amazon.de and amazon.com, and your own groups — treated as
+  one. Per site, you can have the form **sent off after filling** or
+  **filled as the page loads**, and a login can be **tied to one virtual
+  browser**.
+- **An eye in every password box**, **pasting unblocked** where a site
+  refuses it, **"do not save this" ignored** where you say so, and **any
+  text box opened in a big window** to write in peace.
+- **What you type in forms is kept** and put back after a crash or a
+  misclick — never a password, never a private tab — and **what you type
+  in boxes can be remembered** per site and offered again.
+- **It says something about the form in front of you**: a password box
+  on an unencrypted page, and a sign-up form on a site you already have
+  a login for. And when a saved password is typed into a site it does
+  not belong to, it says that too.
+- **Logins sent by scripts are offered for saving.** Sites that sign in
+  without submitting a form — most of them now — were never offered at
+  all before.
+- **An http login box at last.** The engine's own signal had nothing
+  connected to it, so a server panel or a router asking for a password
+  simply failed to load. A saved login fills it once; after that you are
+  asked, rather than the same refused password going back for ever.
+- **Security keys and passkeys** get the dialogs the engine waits for.
+  That signal was unconnected too, so every passkey login quietly did
+  nothing.
+- **The leak check** (opt-in): the first five characters of each
+  password's SHA-1 go out, the comparison happens here, and the service
+  never learns which password was asked about.
+- **The vault learned more shapes**: API keys with an expiry, recovery
+  codes with the used ones struck off, extra fields of your own (a PIN, a
+  customer number), earlier passwords kept when one changes, and a
+  username saved without a password.
+- **Lists worth acting on**: logins saved twice (and folded together),
+  not used for a year, sites that could have two-factor and have not,
+  keys and cards running out, and a log of what was revealed, copied or
+  filled.
+- **The vault as one encrypted file**, with **dated backups** into a
+  folder of your choosing, and **imports** from Bitwarden, Chrome and
+  Firefox.
+- **A QR code of a password**, to point a phone at — and the QR code is
+  now drawn by the browser itself (new `qr.py`, standard library only).
+  The older "show as QR" needed `qrencode` and was dead on any machine
+  without it.
+- Searching the vault from one small box, locking it on the spot, and
+  opening a site's own change-password page (including "open the weak
+  ones, one tab each").
+
+Fixed along the way:
+
+- The form helpers were plain function declarations in the injected
+  snippet, which made them globals in the page's own world. They live
+  inside their wrapper now; `test_acctpick` is what caught it.
+
+## 2026-10-18 — games, streaming, and the rest of video and sound
+
+- **The desktop's media keys reach the browser.** It registers as an
+  MPRIS player over D-Bus (`mpris.py`), so the play key on the keyboard,
+  waybar and `playerctl` all talk to whichever tab is playing. Nothing
+  is sent anywhere; on a machine with no session bus it says so and
+  stays out of the way.
+- **A video can fill the window** instead of the whole screen, for a
+  wide monitor where a full-screen video is too much — and full screen
+  can be told **which monitor** to use.
+- **The screen stays awake while something is playing**, through
+  systemd-inhibit, only while it really is playing, and only if you
+  switch it on.
+- **A player for files on disk** (`player.html`): a playlist, the speed
+  and loop controls, and the subtitle file beside the video picked up
+  without being asked for. Nothing is converted and nothing is uploaded.
+- **A microphone and camera test page** (`mictest.html`) with a live
+  level meter, for the minute before a call.
+- **Watch later**: a queue of videos from any site, played in order.
+- **Moments**: mark a place in a video with a word about why, and jump
+  back to it later.
+- **Pause when you lock the browser** or have been away.
+- **Skip the sponsor** (SponsorBlock, off unless you ask: only the first
+  four characters of the video's hashed id are ever sent) and **fetch
+  lyrics** (lrclib, off unless you ask).
+- **Stream-safe mode**: addresses, IPs and words of your choosing
+  blurred on the page, notifications held back, no suggestions out of
+  your history — and everything put back the way you had it when you
+  switch it off.
+- **A key overlay and a frame counter**, for recording and for cloud
+  gaming.
+- **OBS**, driven over its own websocket on this machine: start and stop
+  recording, start and stop streaming, switch scene. Off unless you give
+  it an address; the password is answered as a challenge, never sent.
+- **Mods**: one search box for Modrinth, and a download written straight
+  into an instance's `mods` folder — that folder and no other.
+- **Minecraft server addresses** read off a page and copied with their
+  port, the server's own page in the side panel, **NameMC** and the
+  **wiki** in the panel.
+- **Twitch**: several streams in one grid, channel points claimed as
+  they appear, ads muted and dimmed until they are over, chat filters
+  (hide a word, hide a chatter, light up your own name), theater mode by
+  default, go-live alerts that only ask while they are switched on, and
+  the live chat in the side panel.
+- **A stream delay timer**, **clip markers** with a timestamp, and
+  **clean clip links** with the sharing parameters taken off.
+- **Discord** links open in the Discord tab you already have, and its
+  own unread count appears on that tab.
+- **`ts3server://` links** are handed to TeamSpeak, and say so plainly
+  when it is not installed.
+- **A game tab can be protected**: never discarded, never slept, asks
+  before it closes — and it **holds Esc and the browser's own shortcuts**
+  while it has the screen (the Keyboard Lock API, which this engine does
+  have).
+- **One switch for cloud gaming** per site, **a gamepad** that scrolls,
+  changes tab and works the player, a **stream preview** in a small
+  window, a **pre-stream checklist**, and **game mode by itself** when
+  the window manager says a game is in front.
+
+Fixed along the way:
+
+- Two different timers shared one name (`self._media_timer`): the
+  two-second "what is playing" poll was dropped on the floor, and
+  leaving the macOS look stopped the microphone-and-camera watch and the
+  lock timer it feeds.
+- A tool run from a timer took the whole browser down if its tab had
+  closed in the meantime (an exception in a Qt slot aborts the process).
+  All three tool runners and the per-page settle hooks now answer "no"
+  instead.
+
+## 2026-10-17 — video and sound, part two
+
+- **The picture**: brightness, contrast and colour for a dark or washed
+  out video; a quarter turn for one shot sideways, and a mirror; zoom,
+  pan and crop the black bars away so it fills its box; and the mouse
+  pointer out of the way after two seconds over a playing video.
+- **What the video actually is**: size, speed, dropped frames and how
+  much is buffered, read off the element rather than guessed — and
+  **when it will end**, at the speed it is playing.
+- **Videos resume where you left them**, per video, on this computer,
+  with a list of what you have watched and how far you got.
+- **Captions**: on or off on any video, a language to start in, your own
+  size, colour, background and height, **subtitles from a .srt or .vtt
+  file** (turned into WebVTT on the way in, with an offset), the
+  **transcript** as a list you can click to seek, copy, or **save as an
+  .srt**.
+- **Chapters** out of the timestamps in a video's own description.
+- **The sound**: a limiter that evens out quiet and loud videos, a
+  ten-band equaliser with six presets, balance, a mono downmix,
+  crossfeed for headphones, and **running through the quiet parts** of a
+  lecture, measured in the page.
+- **Which output a tab plays through**, and **which microphone a site
+  gets** — the device and your own answers about automatic gain, noise
+  suppression and echo cancellation are put into the request before it
+  is made, because the engine offers no way to say it afterwards.
+- **Per site**: autoplay (play, play muted, or not at all), always
+  muted, and a quality cap where the site has a control worth touching.
+- **The other tabs quieten** when the front one starts playing, and
+  **the music pauses during a call** — when a tab starts using the
+  microphone — and plays again afterwards.
+- **Embedded players load on a click** instead of on sight, and an embed
+  can be opened on its own site.
+- **Sound only**, hiding the video and asking the site for its lowest
+  quality; **Shorts in the normal player**; **the videos and sounds
+  linked on a page** as a list; **play it in mpv** where mpv is
+  installed.
+- **A line when the track changes**, with title and artist, off by
+  default.
+- **Video lengths and progress hidden** on the sites where that gives
+  the ending away.
+
+## 2026-10-17 — reading and text, part two
+
+- **The reader has switches**: pictures off, proper hyphenation with
+  justified text, a sans font instead of the serif one, and three
+  widths. **Save the article** as Markdown or put it straight **into a
+  note**. **Reader mode for a selection** when the page is too odd to
+  parse, and **add the next page** so a split article reads as one.
+- **Long pages open where you stopped** (the last fifty, on this
+  machine), with **a thin progress line** at the top.
+- **A comfortable column** per site for pages that run the whole screen,
+  without full reader mode.
+- **What a page hides** — fades, clamped boxes, closed details — opened
+  in one go. **Footnotes shown where the mark is.** **The words a page
+  explains** get a dotted underline and a tooltip.
+- **Plain code blocks coloured** in the theme's own colours, and
+  **copying code drops the line numbers** that logs and pastebins put
+  in the text.
+- **A selection can become**: its metric value (`5 in` → 127 mm,
+  `350 F` → 176 °C), a time in your own zone (`8 PM EST` → 02:00 here),
+  a list of its code points (for the invisible and the lookalike
+  characters), or a diff against the clipboard.
+- **Translate the selection** and **look a word up** — the two that
+  leave the machine, and both say so in their own names: the
+  translation goes to Google Translate in the side panel, and the
+  dictionary uses `dict` when it is installed and the site you chose
+  when it is not.
+- **Text fields**: find and replace, a big mono font while you write,
+  words and reading time, **your own editor** (kate, gedit, nvim — the
+  text goes out to a file and comes back when you save), **drafts kept
+  and put back** after a reload or a crash, and **Ctrl+Shift+V** pasting
+  without formatting.
+- **A small bar over selected text** with copy, search, translate,
+  define and highlight.
+- **Files that are only text, shown properly**: a `.md` rendered, a
+  `.log` with line numbers, an RSS or Atom file as a list of entries,
+  and the raw text one click away.
+- **Everything you have highlighted** in one list, with an export to
+  Markdown.
+- **Spell check in two languages at once**, so a German post with
+  English mod names in it is not underlined from end to end.
+- **Per site**: which language it is asked for, and which text encoding
+  its pages are read as — for the old ones that show Ã¼ where they mean
+  ü.
+
+## 2026-10-17 — the desk drawer
+
+- **A notes panel** beside the page: Markdown notes with a preview, a
+  search, checklists, tags and a note for today. They are **plain .md
+  files in a folder you pick**, so any editor, any grep and your backup
+  can read them — and the to-do list is a `todo.md` of `- [ ]` lines.
+- **A to-do list** with checkboxes, reordering, a done section, due
+  times with a notification, "make a to-do of this tab", and "turn a
+  list on this page into to-dos".
+- **Clip the selection into today's note** with the page it came from
+  under it, **make a note of this page**, and **a quick note** over any
+  tab with one key.
+- **Collections**: links gathered under a name, which are Markdown
+  files and therefore already the export.
+- **A clipboard history** — in memory only, off by default, never fed by
+  a private tab — with pinning and search.
+- **Text snippets**: type `;ip` in any field and it becomes what you
+  said it should.
+- **Focus mode**: chosen sites blocked for a while, with a plain page
+  saying how long is left. **A daily limit per site**, counted only
+  while the site is actually in front, warning before it runs out.
+- **Timers and a pomodoro**, with a desktop notification when they are
+  up, and a **break reminder** counted off actual use.
+- **The web's notifications now arrive at all** — the browser had no
+  presenter, so they went nowhere. They are written down, held while
+  **Do not disturb** is on, and said afterwards.
+- **Snooze a tab** until this evening or tomorrow morning, and **open a
+  page at a time every day**.
+- **Zen mode** (Ctrl+Shift+Z): the page and nothing else.
+- **Search everything** (Ctrl+Shift+H): open tabs, bookmarks, history,
+  notes, to-dos and clips in one list, all of it from this machine.
+- **Copy things properly**: the selection as Markdown, the page as clean
+  text, a link that highlights the selection, any table as Markdown, CSV
+  or tab-separated, and every link and email address on the page.
+- **Text tools** in any field: upper, lower, Title Case, sort the lines,
+  drop the duplicates, trim the spaces, join with commas — plus a
+  character picker with umlauts, signs, arrows and Minecraft's § colour
+  codes, a live character counter (with Discord's 2000 marked), smart
+  paste that turns a pasted link over selected text into a Markdown
+  link, and **a big editor** for any text box.
+- **Add up the numbers in a selection**, reading 1.234,50 and 1,234.50
+  alike.
+- **Open with**: the page or a link in mpv, an editor or the file
+  manager — only what is actually installed is offered.
+- **As a QR code** for the phone, drawn by qrencode when it is there and
+  saying so plainly when it is not.
+- **Countdowns on the start page**, counted here and shown here.
+
+## 2026-10-17 — what is kept, and what the connection is
+
+- **Cookies per site**: keep them, keep them until the browser closes,
+  or do not keep them at all. Blocking is what this engine allows it to
+  be — the cookie is deleted in the moment it arrives, and the count of
+  refused ones is in the address bar if you want it.
+- **What sites may do**: every permission ever allowed in one list, with
+  when it was last used, a way to take any of them back, a dated log of
+  when the microphone, camera, location or screen was actually used, and
+  an expiry for the ones you never use.
+- **"This time"** beside Allow and Deny: granted once, written down
+  nowhere, asked again next time.
+- **A mark when a device is on**: which tab is using the microphone, the
+  camera or the screen, with a stop button per tab. Read from the pages
+  themselves, because the engine only reports the asking.
+- **A throwaway virtual browser** — a fresh session with nowhere to
+  write, gone when it closes — and **a clean room** for chosen sites: a
+  bank opens in a browser of its own every time.
+- **The certificate**: what the site is actually serving, who issued it,
+  how long it is good for, the TLS version, the address it resolved to
+  and its fingerprint. A warning when a site you watch changes its
+  certificate, and a "trust this one" for your own printer or server
+  that stores the exact certificate and asks again if it changes.
+- **Insecure parts on a secure page**, listed.
+- **What each site has stored**, with a delete button each; **the sites
+  that keep you logged in**, with a sign-out; **service workers**,
+  listed and unregisterable; **the sites you only ever passed through**,
+  cleared in one go; and **clear only the cache**.
+- **Sites that want to handle mailto: links** are refused unless you say
+  yes, and listed either way.
+- **The window locks** — by hotkey or after a while idle — behind a word
+  kept as a hash, with nothing readable until it is typed.
+- **Every privacy rule as one file**, exported and imported, and nothing
+  else of the settings with it.
+- **What each virtual browser wipes when the browser closes**: cookies,
+  cache, history or the downloads list, per browser.
+
+## 2026-10-17 — what a page may do in its own window
+
+- **The page guards** (page menu → Privacy → "What this page may do"),
+  each off until you switch it on and each switchable off for one site:
+  blur what a site can tell about this computer (canvas, WebGL, audio,
+  cores, memory), never let a page read the clipboard, copy only what is
+  selected, ignore "Leave site?" boxes, tell sites not to sell or share,
+  block frames from other sites, use local fonts instead of the site's,
+  note the live connections a page opens, switch WebRTC off, answer
+  cookie banners with "reject", and write down the windows a page tried
+  to open.
+- **Hide an element for good**: right-click the thing you want gone and
+  pick "Hide this element". Kept as a selector of yours, per site, and
+  applied to the page you are on at once.
+- **What a site may not use**, per site: 3D graphics, WebAssembly, USB,
+  Bluetooth, serial, HID, MIDI, motion sensors, idle detection, NFC, the
+  battery and speech recognition.
+- **A place of your choosing** for a site, instead of the real one. Two
+  numbers you type in — nothing is looked up anywhere.
+- **Blocked windows**, with "open this one" and "always allow here".
+- **Only load sites over https**, with the question asked before
+  anything falls back to http, and a permanent exception per site.
+- **Stop pages redirecting a tab you are not on.**
+- **Work offline**: nothing new is loaded. Said plainly — a page that is
+  already open keeps what it has, and a restart makes it total.
+- **A download from a different site than the page says so.**
+- **Tabs of chosen sites are never saved** for the next start.
+- **Private tabs** are not captured by the screenshot tools and never
+  appear in the media list (both switchable).
+- **Alt over a link** says where it really goes, with the redirect
+  wrappers unwrapped; short links can be resolved on hover (opt-in,
+  because it tells the shortener you saw the link).
+- **Only one language** in Accept-Language, when you want it.
+- **What the engine can only be told at launch**, with a restart notice:
+  no link pings, no referrer at all, no connections before you click,
+  every site in its own process, WebRTC kept off the home network,
+  encrypted DNS with your own provider, session recorders blocked by
+  name, your own phishing list (`phishing-hosts.txt`, nothing is
+  downloaded), and your own list of domains to refuse.
+- **A line at startup** when a privacy setting changed since the last
+  one, or when a list you asked for would not load.
+
+## 2026-10-17 — bookmarks and history, part two
+
+- **The history page rebuilt**: pages, most visited, your searches and a
+  week of statistics; a date range, a site box and a virtual-browser
+  filter; group by site; show or hide the login bounces and link
+  wrappers; pick rows to open, bookmark, copy or delete; delete a whole
+  range; and an Undo for a few seconds after any of it.
+- **Keep history for N days** (0 = for ever), **forget one site**, and
+  **pause history for one tab** without making it private.
+- **Never record a site** in this virtual browser.
+- **Visit counts, first and last visit** on a bookmark, and **how many
+  days in a row** you have been to a site.
+- **Carry on where you left off** and **the bookmarks you added last**,
+  as optional rows on the start page.
+- **Export the history** as CSV or JSON; **open a day of browsing
+  again** as tabs or a group.
+- **Tidy up page titles** (off by default): the "(3)" and the
+  "- YouTube" come off what is written down.
+- **Bookmarks**: tags, a note of your own, a nickname that opens one
+  from the address bar, a ranked Favourites search (tag:, site:, and
+  the ones you actually open first), smart folders that are saved
+  searches, duplicates found and merged, the ones you never open listed
+  for cleanup, folder colours, folder locks, separator lines, sorting a
+  folder by name, date, last opened or how often, opening a whole folder
+  as tabs or as a group, bookmarking a link without opening it, and
+  where you had read to on the page.
+- **Bookmarklets**, kept as a script and never as an address, run in the
+  page's own world on a click of yours and never on a page of the
+  browser's own.
+- **Import** from Chrome, Firefox or an exported HTML file, keeping the
+  folders and never replacing what is there; **export** as HTML, JSON or
+  a Markdown list.
+- **A dated copy every day**, with any of the last fourteen restorable,
+  and **a copy in a folder of yours** (a share, a stick) that can be
+  merged back — no account and no cloud.
+- **Two jobs that go online, and only when asked**: check every bookmark
+  for dead links and permanent redirects, and move the old http://
+  bookmarks to https where the site actually answers.
+- **Copy bookmarks between virtual browsers.**
+
+## 2026-10-17 — tabs, part two
+
+- **Several tabs at once**: ctrl-click and shift-click to pick them,
+  then close, mute, reload, pin, bookmark, set aside or group them in
+  one step.
+- **Several windows**: Ctrl+N, a window list, "move this tab to a new
+  window", "move this group to a new window", "gather every window
+  here", a private window, and the window title says which virtual
+  browser it is. A second window shares the first one's cookies,
+  bookmarks, passwords and settings — one browser, two views of it.
+- **A tab as a small window** for a chat beside a game, and **a site as
+  an app**: its own window with no strip and no address bar, with a
+  desktop entry so it starts from the application menu.
+- **What the strip says**: the unread count a page puts in its own title,
+  a dot on a background tab whose title or icon changed, a thin loading
+  line, a dim mark on a sleeping tab, each site's own faint colour, and
+  the close cross where you want it.
+- **The strip itself**: fixed, shrinking or favicon-only tabs with a
+  floor you set, hide it when only one tab is open, fold the other
+  groups away, and your own answers for double-click and middle-click.
+- **Saved sets of tabs** under a name, **tabs set aside**, **snapshots
+  every few minutes**, **export and import the open tabs**, and a
+  **crash list** with a box beside each tab rather than all of them or
+  none.
+- **A reopened tab keeps its Back button**: the trail is walked back,
+  which is the only way this engine allows.
+- **A tab opened from a link** lands beside the tab that opened it, and
+  Back on one with nowhere to go closes it and returns you there.
+- **All tabs as pictures** (Ctrl+Shift+X), a list of every tab including
+  the folded ones, and **the tab search finds what you closed** too.
+- **Close tabs you have not looked at for N days**, keep a group instead
+  of losing it, ask before closing a window with many tabs, and a rule
+  that always opens a site in a chosen virtual browser.
+
+## 2026-10-14 — what the tabs cost, and a look of your own
+
+- **What the tabs are costing** (Ctrl+Shift+Esc): one row per tab with
+  the memory and processor time of its renderer, heaviest first, each
+  row able to jump to the tab, put it to sleep or close it. Tabs that
+  share a process say so instead of being counted twice. The numbers
+  come from `/proc` on this machine; nothing is estimated.
+- **The hover card over a tab** now says the address, the virtual
+  browser, what the tab is using, and whether it is asleep.
+- **Put a tab to sleep after N minutes** without looking at it (off by
+  default; never the tab in front, never one making a sound, never a
+  pinned one).
+- **Lite mode**: no images, nothing playing by itself — for a tethered
+  phone or a hotel's wifi.
+- **Clear the cache** in every virtual browser, and **how long the
+  browser took to start** in Settings.
+- **Your own CSS for a site** (Ctrl+Alt+U): put on the page last, so it
+  wins over the site and over the theme, and kept per host.
+- **The zoom is remembered per site**: a site opens at the level you
+  last read it at (on by default, switchable).
+- **A theme that follows the clock**: a day theme and a night theme with
+  the times between them.
+
+## 2026-10-14 — downloads, history and a read-later list
+
+- **Sort downloads into folders** (off by default): Pictures, Video,
+  Music, Documents, Archives, Programs and Mods, beside the downloads
+  folder. A `.jar` or an `.mrpack` lands in Mods.
+- **Open the folder when a download finishes**, as a setting.
+- **Download from this page** in the page menu: every picture (including
+  the ones that are only a CSS background), every video and sound, or
+  every linked file — fetched through the browser's own session, so a
+  site that only serves its pictures to someone logged in still hands
+  them over. More than five asks first.
+- **What a file really is**: the SHA-256 of a finished download, and a
+  warning before opening the kinds that run when you open them (.exe,
+  .jar, .sh, .AppImage …).
+- **Search the history by what was on the page** (off by default): a few
+  hundred words of each page you visit, kept on this computer, so a page
+  can be found by its contents when its title says nothing. Never from a
+  private tab, and never for a site on the never-remember list.
+- **Read later** (Ctrl+Alt+D) puts the page on a list and
+  **Ctrl+Alt+Shift+D** opens it; choosing one opens it and takes it off.
+
+## 2026-10-14 — a panel beside the page, and game mode
+
+- **A side panel** (Ctrl+Shift+Y) that holds any site next to the page —
+  Discord, Amazon Music, Claude, ChatGPT, Modrinth, this page, or
+  anything you type. It is a real web view on the same cookie jar, not
+  an iframe, so the sites that refuse to be framed are exactly the ones
+  it works with, and they are already logged in. The divider is yours
+  and the width is remembered; one button sends what is in the panel to
+  a tab of its own.
+- **Twitch chat** (Ctrl+Alt+W) opens the chat of the stream you are
+  watching in that panel, beside the stream.
+- **Game mode** (Ctrl+Alt+G): every other tab asleep (its renderer
+  handed back, its place kept), everything muted, notification requests
+  refused without a card, and the browser itself stepped back a little.
+  Pressing it again wakes exactly the tabs it put to sleep.
+- **Put the other tabs to sleep** (Ctrl+Alt+Z) on its own, without game
+  mode. A tab that is playing something, or that is pinned, is left
+  alone.
+- **Minecraft servers** (Ctrl+Alt+J): your servers from
+  `config["mcServers"]` ("Practice=host:port"), each asked the same
+  question the game's own server list asks — online, players, version,
+  MOTD and latency. Opt-in watching says so in the corner when one stops
+  answering or comes back. It is thirty bytes of the Minecraft protocol
+  and no library, and it runs only for servers you listed.
+- **Discord: mute** (Ctrl+Alt+Q) and **deafen** (Ctrl+Alt+Y) press the
+  buttons in the Discord tab from anywhere in the browser, with the
+  Discord tab in the background.
+
+## 2026-10-14 — reading
+
+- **Reader mode** (Ctrl+Alt+R): everything that is not the article is
+  taken off the page — the menus, the sidebar, the footer — and what is
+  left is set in one column in the theme's own colours. It keeps the
+  page's own DOM, so the images, the code blocks and the links all still
+  work, and one more press puts the page back exactly as it was.
+- **Headings** (Ctrl+Alt+O) lists the page's headings and jumps to them;
+  **Word count** says how many words there are and how long they will
+  take, for the page or just the selection.
+- **Link hints** (Ctrl+Alt+K): a letter on every link and button, type it
+  to follow it — Vimium's `f`, without taking a key from any site until
+  you ask for it.
+- **Read aloud** (Ctrl+Alt+V) reads the selection, or the article, with
+  the machine's own voice through speech-dispatcher. Nothing is sent
+  anywhere, and it says so plainly when there is no speech program.
+- **Highlight the selection** (Ctrl+Alt+B) marks it, keeps it for that
+  address, and puts it back on the next visit.
+- **The reading switches**, per page: high contrast, a readable font,
+  wider text spacing, stop animations, stop animated images, a big
+  cursor, and a focus ring that is always visible — plus a smallest text
+  size for one site.
+
+## 2026-10-14 — the agent bridge learns fourteen things
+
+New ops (and the same names in `agent.py`), all of them working on tabs
+that are not in front and without raising the window:
+
+- **markdown** — the readable part of a page as Markdown, links kept and
+  the furniture dropped. What a model should be handed instead of two
+  megabytes of HTML.
+- **box** — where an element is, whether it can actually be seen, and
+  what it looks like; **find** — elements by the words on them, each with
+  a selector that works. Together they are "click the Save button"
+  without guessing a selector.
+- **fill** — a whole form from one selector-to-value map, with the input
+  and change events a page listens for.
+- **idle** — waits until the page has gone quiet for a while, which on a
+  modern site is the only honest "it has finished loading".
+- **links**, **tables** — every link (filterable) and every table as rows.
+- **console** — what the page logged and what it threw. Errors now reach
+  the log at all: the page is asked to turn `window.onerror` and an
+  unhandled rejection into a console line, because the engine keeps
+  uncaught exceptions to itself.
+- **dialog** — what the page's next `alert`, `confirm` or `prompt` gets
+  told, and what the last ones asked. Without it a script driving a page
+  stops dead at the first `confirm()`.
+- **pdf** — the page printed to a file.
+- **cookies** — the names, domains and expiry dates of a site's cookies,
+  never their values.
+- **bookmarks** — search them, or add a page; **downloads** — what has
+  been downloaded; **notify** — a line in the corner of the browser, for
+  a script to say it has finished without stealing the screen.
+
+## 2026-10-14 — one list of actions, and the mouse
+
+- **A command palette** (Ctrl+Shift+K): every action the browser has, by
+  name, filtered as you type, with its key beside it. (Not Ctrl+Shift+P
+  — that has opened the password manager here for years.)
+- **A cheat sheet** (Ctrl+/): every key there is, on one page.
+- **Every shortcut can be changed** in Settings > Keyboard shortcuts,
+  with a check that two actions never want the same key, and one button
+  back to the usual set.
+- Behind all three: the keys are now built from one list of actions
+  rather than two dictionaries, so an action added once turns up in the
+  keys, the palette, the cheat sheet and Settings together.
+- Mouse gestures were built and taken out again: they need a Python
+  event filter on the widget the engine draws into, and that crashes
+  this PyQt build when the interpreter shuts down (two crashes in six
+  runs with it, none in eight without). The same filter is the only way
+  to see Alt+click on a link, so that went with it. What is written down
+  in FEATURES.md is what was measured.
+- **Ctrl+Alt+C** copies "title — address", **Ctrl+Alt+Shift+C** a
+  Markdown link, **Ctrl+Alt+F** searches for the selected words, and
+  **F6** moves the focus between the address bar, the page and the tabs.
+
+## 2026-10-14 — the small developer tools
+
+- **JSON as a tree** — a JSON response folds, instead of being one long
+  line of text; click to open and close.
+- **Show as a table** — a CSV or TSV file becomes a real table, quoted
+  commas and all.
+- **Format this file** — a minified `.js` or `.css` gets its line breaks
+  back, and gives them up again on a second press.
+- **Page source** in a tab of its own, with numbered lines, taken from
+  the document the renderer actually has.
+- **Copy this element as** a CSS selector, an XPath or its HTML, for
+  whatever is under the cursor; **Pick the colour here** reads the pixel
+  under the cursor and copies it as hex, with rgb and hsl alongside.
+- **Copy buttons on code blocks**, on any site.
+- **Copy as curl** — the page's address with its user agent and language.
+- **Servers on this machine** — what is listening on the ports a
+  developer uses (3000, 5173, 8000, 8080, 8123 …), each one a click away.
+  It connects and disconnects; nothing is requested and nothing leaves.
+- **The address bar converts things**: `b64 hello`, `b64d aGVsbG8=`,
+  `url Hallo Welt`, `urld …`, `hex AB`, `html <b>`, `ts 1700000000` and
+  `jwt <token>` (the header and the payload, not a verification).
+
+## 2026-10-14 — privacy, per site
+
+- **Websites cannot reach the home network.** A page on the internet
+  that navigates — itself or one of its frames — to `192.168.x.x`,
+  `localhost` or a `.local` name is refused: the router, the printer,
+  Home Assistant and the Minecraft servers are not part of the web. On
+  by default; one local page may still reach another.
+- **Strip tracking from addresses** (off by default): `utm_*`, `fbclid`,
+  `gclid` and the rest come off the address before the page is asked
+  for. It works on what the browser navigates to, not on every request a
+  page makes: blocking at that level needs the engine's request
+  interceptor, and a Python interceptor crashes this PyQt build when the
+  interpreter shuts down (measured, five times in six). Blocking tracker
+  hosts and third-party cookies wait for the same reason.
+- **Per site, from the page menu:** no JavaScript, no images, no
+  blocking, always open privately, never remember it (nothing in the
+  history and nothing in the address bar), clear what it has stored, or
+  forget it entirely — cookies, cache, storage, history, permissions and
+  its place in the address bar's memory.
+- **A privacy report** on the page menu: how many requests were turned
+  away and which hosts kept asking.
+- **Ctrl+Alt+P — panic.** Everything muted, every tab on a blank page,
+  every panel shut, the vault locked.
+- **Ctrl+Alt+H — streamer mode**: the address bar's text is hidden while
+  you are sharing the screen.
+- The work is in `privacy.py`, loaded the safe way: without the file the
+  browser starts exactly as before.
+
+## 2026-10-14 — screenshots
+
+- **Ctrl+Shift+S** captures what is on screen, **Ctrl+Alt+Shift+S** the
+  whole scrolling page — taken a screen at a time and stitched, with
+  everything fixed to the window pinned into the page first so a header
+  is not repeated down the picture.
+- **This element** captures exactly the thing under the cursor, and an
+  area capture takes a rectangle.
+- **Password fields are blurred** before the shutter, so a screenshot of
+  a login page is safe to paste (Settings > Browsing).
+- **Small enough for Discord**: the same picture fitted under the upload
+  limit, quality first and size only if it has to.
+- **Keep it on top** puts a capture in a small window above everything;
+  double-click or Ctrl+C copies it.
+- **In a moment** waits 3 or 10 seconds, for a menu or a hover state that
+  a click would close.
+- Folder, file-name pattern (strftime, `{title}`, `{site}`) and format
+  (PNG, JPEG, WebP) are in Settings. The work lives in `capture.py`,
+  loaded the safe way: without the file the browser starts as before and
+  simply has no capture entries.
+
+## 2026-10-14 — page tools, and the video on it
+
+**On any page** (right-click > Page tools): allow copying and right-click
+on a site that blocks them, unpin fixed bars so the window shows the
+page, stop everything that moves, expand every "show more" and
+`<details>`, make the page editable, mark visited links, a scroll-to-top
+button, show a password field as text, freeze the page, and the feeds
+the page offers.
+
+- **Links:** open where a redirect wrapper really goes (`google.com/url?q=`,
+  YouTube's, Discord's), open a link in a private tab or in another
+  virtual browser, copy the link clean, copy its text, or copy both as a
+  Markdown link. **Alt+click saves a link** instead of opening it.
+- **Copy a link to the selected words** — a text fragment, so opening it
+  scrolls there and marks them.
+- **Right-click Back or Forward** for the tab's own history several steps
+  at a time; **middle-click** does that step in a new tab. Reload's menu
+  has "reload without the cache" (also **Ctrl+Shift+R**) and "back to this
+  site's first page".
+- **Alt+Up** goes one level up the address; **Alt+Shift+Left/Right** follow
+  the page's own previous/next link (or count the number in the address);
+  **Alt+[** and **Alt+]** jump between headings.
+- **The link under the mouse** is shown at the bottom left, with redirect
+  wrappers unwrapped, so you see where it really goes (Settings > Browsing).
+
+**Video and sound** (right-click > Video and sound, and the keys):
+
+- **Ctrl+Alt+Space** play/pause, **Ctrl+Alt+Left/Right** seek ten seconds,
+  **Ctrl+Alt+Up/Down** change the speed from 0.25x to 16x with the pitch
+  kept, on any site's player.
+- **Volume above 100%** — up to 400% through a gain node, per tab.
+- **Loop a section** (Ctrl+Alt+L: A, then B, then off), **frame by frame**,
+  **copy this frame** as a PNG (Ctrl+Alt+S), **copy the link at this
+  moment** (Ctrl+Alt+T, YouTube and Twitch style), **jump to live**, and
+  **do not start the next video**.
+- **Speed and volume are remembered per site**, so a podcast stays at 1.5x
+  and one loud site stays turned down.
+- **Ctrl+Shift+Space** pauses everything playing anywhere and puts exactly
+  those back; **Ctrl+Alt+M** jumps to the tab making the noise;
+  **Ctrl+Alt+A** opens a list of every tab that is playing, with
+  play/pause, mute and volume for each. **A sleep timer** stops everything
+  after 15 to 90 minutes.
+- An option for **the mouse wheel over a video to set the volume**.
+
+## 2026-10-14 — the address bar answers back
+
+- **Search keywords.** `yt cats`, `mr sodium`, `gh qtwebengine`, `amz ssd`,
+  `w dampfmaschine`, `so segfault`, `cf create`, `mc anvil`, `tw`, `map`,
+  `dict`, `aur` — fourteen to start with, and your own in
+  `searchKeywords` (any URL with a `%s` in it) over the top of them.
+- **The bar works things out itself**, offline, and never sends what you
+  typed anywhere to do it: `12*64+3`, `2^10`, `5 in to mm`, `200 c to f`,
+  `4 gib to mb`, `time in tokyo`, `kw`, `days until 24.12.`,
+  `today + 30 days`, `#ff8800` and `rgb(255,136,0)`. Enter on the answer
+  copies it.
+- **Suggestions from your own browser first**: a tab that is already open
+  on what you typed (Enter switches to it instead of loading it twice),
+  your bookmarks, and your history matched on words in any order, not
+  only on the beginning of an address.
+- **An empty address bar** offers a link you have just copied, then the
+  last things you searched for. **Shift+Delete** takes a suggestion out
+  of the history for good.
+- **`?` or Ctrl+K** makes a search of what follows even when it looks like
+  an address. **Alt+Enter** opens it in a new tab. **Ctrl+Enter** finishes
+  a bare name with `www.` and `.com`, **Ctrl+Shift+Enter** with `.de`.
+- **Paste and go** and **Copy clean address** in the address bar's own
+  right-click menu, with **Copy page as** → Markdown link, HTML link, or
+  "Title — address". A clean address has `utm_*`, `fbclid`, `gclid`, `si`,
+  `ref_src` and thirty other tracking parameters taken off, and keeps the
+  ones the page itself needs.
+- **On a page:** "Search for …" on the selection, with a submenu for every
+  keyword; "Search this site" (`site:` on your engine); and "Search for
+  this image", which asks first, because it is the one search that sends
+  something you did not type.
+- **A results page shows what you searched for** in the bar instead of the
+  engine's long address, ready to edit (Settings > Browsing).
+- **The zoom level** appears in the address bar when a tab is not at the
+  level Settings holds; a click puts it back.
+
+## 2026-10-14 — what you can do to a tab
+
+- **Pin a tab.** It shrinks to its icon, moves to the front of the strip,
+  is not closed by Ctrl+W, comes back at the next start, and (as a
+  setting) keeps links to other sites out: they open in a new tab
+  instead of taking the pinned tab away.
+- **Mute a tab** from its own menu or with Ctrl+M, with a mark on the
+  tab while it is silent, and **"Play sound only here"**, which mutes
+  every other tab.
+- **Lock a tab** so it asks before it closes — for a long form or a
+  stream you do not want to lose to a stray Ctrl+W.
+- **Rename a tab.** The name you give it stays whatever the page calls
+  itself afterwards, and across restarts.
+- **Duplicate tab** (Ctrl+Shift+D), **close other tabs**, **close tabs
+  to the right / to the left**, **close duplicate tabs**, **close every
+  tab of this site**, and **group every tab of this site** in one step.
+- **Sort the tabs** by site or by title; **copy the addresses** of this
+  tab or of every tab, as plain text or as Markdown; **open every
+  address in the clipboard** as tabs; **bookmark every tab** into one
+  new folder; **reload every tab**, or every tab in a group.
+- **Open this page in another virtual browser**, or in a private tab,
+  straight from the tab menu — the quick way to see a site logged in and
+  logged out side by side.
+- **Recently closed**: a list of the last 25 closed tabs in the tab
+  menu, not only the last one Ctrl+Shift+T brings back.
+- **Ctrl+1 … Ctrl+8** jump to a tab, **Ctrl+9** to the last one, and
+  **Ctrl+Shift+PgUp / PgDn** move the current tab along the strip.
+- **After closing a tab, go to** (Settings > Browsing): the tab to the
+  right, to the left, or the one you were on before.
+- **A count of open tabs** after the + , and a setting for what the
+  **mouse wheel over the tab strip** does: nothing, scroll a strip that
+  is too long, or switch tabs.
+
+## 2026-10-14 — websites look like websites again
+
+- **Pictures keep their own colours.** Every dark theme put a
+  `brightness(.94)` filter on every `<img>` and `<video>` on the web;
+  that is gone. Sepia and Newspaper still tint and grey their photos —
+  that is what those two are — but mildly, and no other theme touches a
+  picture at all.
+- **Text is checked before it is recoloured.** The site theming used to
+  decide a colour from a selector ("every heading gold") or from
+  brightness alone, which is how gold headlines ended up on the blue
+  tagesschau panel and how Amazon's own light text ended up on a white
+  one. Now every colour it writes is measured against what is really
+  behind the text: under 4.5:1 it tries another, and text sitting on a
+  photo or a gradient it leaves exactly as the site drew it.
+- **Coloured buttons keep their colour.** "Add to cart" orange, a red
+  error strip, a brand header: a fill with real colour in it is the
+  site saying something and is no longer repainted in the palette.
+  Cards, panels, table stripes and form fields — the greys and whites —
+  still take the theme.
+- **Icon fonts are left alone.** The theme's own face is now forced
+  only on running text (body, paragraphs, headings, quotes). It used to
+  be forced on links, buttons, list items, table cells and form fields
+  as well, which took the icon font off anything wearing one — Material
+  Icons and Font Awesome glyphs came out as the word "delete" or as an
+  empty box — and changed text widths inside boxes that were measured
+  for another face, so nav bars and buttons overflowed.
+- **A page that paints itself late is noticed.** The pass used to look
+  at an element once and keep that first look for ever, so a stylesheet
+  that arrived after it (Wikipedia's table of contents), a single-page
+  app re-rendering a row or a class landing on scroll stayed in the
+  site's own colours — dark text on the dark page. It now tells its own
+  work from the site's and reads an element again when the site has
+  moved it.
+- **Big pages are themed to the end.** It gave up after 8000 elements;
+  the GNU bash manual has 19431 and the bottom half of it was raw.
+- **The theme's texture stays under the page.** Scanlines, the Game Boy
+  bezel, the steampunk brass grid and the vignettes were drawn above
+  everything a site can position, dialogs and menus included. They now
+  sit above the page and below anything the site puts on top, and the
+  vignettes are about half as heavy, so photos near the edge of a page
+  are not darkened.
+- **No theme changes a site's layout.** Letter-spacing on the whole
+  page (C64), padding on headlines (Newspaper) and a button that moved
+  under the cursor (Game Boy) are gone; a check in the test suite now
+  fails if any theme sets position, z-index, display, overflow, margin,
+  padding, transform, line-height or a size on a site element.
+- **Auto-darkening is decided in one place.** `page_darkening()` answers
+  "nothing, the theme, or Chromium's inversion" for a page, and exactly
+  one of the three is ever on, so a page can never be darkened twice.
+- Google in light colours no longer turns pictures loaded as CSS
+  backgrounds into negatives.
+- The theming pass is faster where it matters: an element is queued
+  once however often the page mentions it, the page is only re-read in
+  full a few times, and it comes back for the next slice through a
+  MessageChannel instead of a timer — a tab he has not looked at yet
+  used to be themed at 600 elements a second, because Chromium throttles
+  timers in a background tab to one a second.
+
+
+## 2026-10-04 — websites in your theme
+
+- **Websites take on the browser's theme.** Every site is recoloured in
+  the palette of the theme you picked, and the character themes bring
+  their own face (Terminal glows, Newspaper prints in serif). It is on
+  by default and switched in Settings > Appearance > "Theme websites".
+- **Right-click a page > "Don't theme this site"** for a site it gets
+  wrong; "Theme this site" brings it back. Sites that are dark by design
+  and Google (which has its own switch) are left alone.
+- On a themed site auto-darken steps aside, so pages are not darkened
+  twice; on everything else it works as before.
+- Switching it off takes the theme off open tabs at once, without a
+  reload. Pages no longer fade in from white as they load.
+- Works on sites with a strict security policy, keeps cookie-banner
+  backdrops see-through, and keeps up with pages that restyle themselves.
+- The engine pane (Ctrl+Shift+E) says so instead of crashing on a page
+  nested deeper than it can draw, and is no longer squashed to a strip
+  on themed pages.
+- The "page stopped responding" message is readable again.
+
+## 2026-10-04 — Update never throws work away
+
+- **Update no longer wipes uncommitted changes in a git copy.** When a
+  pull could not fast-forward, it ran `git reset --hard origin/HEAD`:
+  uncommitted edits were gone, unpushed commits dropped out of sight, and
+  a feature branch was moved onto main - and it said "Updated!". Now it
+  stops and says why when there are uncommitted changes, resets only onto
+  the branch's own upstream, and keeps the old version as a branch
+  `update-backup-<time>` first.
+- The agent bridge socket is owner-only (0700) whatever the umask, and
+  its `wait` answers no-such-tab instead of hanging when the tab closes.
+- Widevine: WIDEVINE_PATH and Chrome's own updated copies are used again
+  instead of being dropped when the proxy flags were installed.
+
+## 2026-10-04 — the bug sweep (from the Windows edition)
+
+- **Logins survive closing the browser.** It used to end itself before
+  Chromium had written its cookies to disk (it does that only every
+  thirty seconds or so), so whatever you had just signed in to was
+  forgotten at the next start. The cookie jars are now closed properly
+  first.
+- **No more see-through window.** Every look made the window
+  translucent, and Windows does not blur what is behind one: the
+  desktop showed straight through, with a strip under the tabs that
+  filled with leftover junk. The window is solid on Windows now, Liquid
+  Glass included — it keeps its shapes on the theme's own base.
+- **Themes are readable again.** Most of the "unreadable" was text
+  drawn over the desktop through that hole. The browser also uses one
+  style of its own on Windows now, instead of Windows 11's, which mixed
+  light system colours into dark themes.
+- **Search suggestions no longer run into each other.** The highlighted
+  row stands out, the scroll bar is dark, and the last row is no longer
+  cut off.
+- **Update works.** A fresh install did not know which version it was,
+  so it always said "Update available" and "Updated!" changed nothing;
+  it now checks its own files. The check no longer uses GitHub's API,
+  which stopped answering after sixty checks an hour from one network.
+  An update is written beside the old files and swapped in, so an
+  interrupted one cannot leave a broken browser behind.
+- **Saved passwords are no longer destroyed on Windows.** Windows
+  quietly turned every line-feed byte in the password files into two
+  bytes, so after a restart the vault read as empty or the master
+  password was refused. Fixed — and a vault damaged that way is
+  repaired the next time it is opened, so passwords that "vanished"
+  come back, as long as no password was saved since.
+- **A lost password key no longer costs the vault.** The vault it
+  belonged to is put aside as passwords.json.unreadable-… instead of
+  being written over, so restoring the key from a backup still opens it.
+- **No more crash when a site joins a call** (Meet, Discord): a
+  Linux-only option ended the browser on the spot.
+- **A website can no longer install a plugin without asking.** A
+  download named *.user.js went straight into the plugins folder and ran
+  on every site from then on. You are asked first now, and No saves it
+  as an ordinary download.
+- **Your data files are written safely.** Settings, history, bookmarks,
+  downloads and known sites are written beside the old file and swapped
+  in, so a crash or power cut mid-save leaves the old file rather than
+  half of one; a file that cannot be read is put aside
+  (name.corrupt-…), not silently replaced with nothing.
+- **Open tabs survive a crash.** They are saved every thirty seconds,
+  not only when the browser closes normally.
+- **An unexpected error no longer makes the window vanish.** The
+  browser keeps going and writes what happened to crash.log in its data
+  folder.
+- 1Password: names and passwords with umlauts are no longer garbled, and
+  no console window flashes up on every call.
+- A second Windows user on the same PC can open the browser while the
+  first has it open.
+- Downloads go to your real Downloads folder, even when it was moved to
+  another drive.
+- install.bat makes the shortcut start the same Python it installed
+  into; with two Pythons on the PC the shortcut used to do nothing.
+- "Open in player" finds VLC where Windows installs it.
+- Crash detection works on Windows.
+- **Esc leaves video fullscreen.** It reached the video and the window
+  stayed fullscreen; closing or leaving that tab stranded the window
+  with no tabs and no address bar.
+- **Shift+Tab moves back through a form again.** It was taken for
+  switching virtual browsers, which also closed Settings mid-form. That
+  is Ctrl+Alt+PgDown / Ctrl+Alt+PgUp now.
+- **Pop-ups need a click.** Any page could open tabs on its own.
+- The address bar understands localhost:3000, 127.0.0.1:8000, router
+  addresses, http://… and file:///… typed out, and a Windows path
+  pasted from Explorer — instead of searching Google for them.
+- Opening a new tab and closing it at once no longer crashes the
+  browser.
+- A link opened from a tab in another virtual browser lands in that
+  browser instead of as an empty tab.
+- Renaming a group keeps it in its own virtual browser; "Add tab to
+  group" only offers the tab's own browser's groups.
+- Closing the last private tab no longer kills its downloads, and
+  closing a virtual browser with private tabs forgets their cookies.
+- A permission question goes away with the tab that asked it.
+- Picking a suggestion with Enter loads the page once, not twice.
+- **A proxy profile with a bad port can no longer stop the browser
+  starting**, and picking a proxy profile in Settings selects it
+  instead of deleting it.
+- Frutiger Aero: the bottom of the Settings sidebar and footer are
+  readable again.
+- One broken address in the history no longer hides every older entry;
+  the time column no longer wraps in 12-hour locales.
+
+## 2026-09-18 — Save any image
+
+- **Right-click → *Save image* on anything drawn under the cursor.** The
+  engine's own entry only appears on a bare `<img>`; this one looks at the
+  whole stack under the pointer (`IMAGE_AT_POINT_JS`) and takes the first
+  picture in it: an image under a transparent overlay, a `<picture>`, a
+  video poster, a CSS background, an inline SVG, a canvas. Things with an
+  address download through the engine as usual; a canvas or inline SVG has
+  none and is written straight into the download folder, listed like a
+  printed PDF. A spot with no picture says so in a tooltip.
+- **`Shift` + right-click always opens the browser's menu**, even on sites
+  that swallow the gesture to keep their pictures (`FORCE_MENU_JS`, capture
+  phase on the window, every frame). A plain right-click is still the
+  site's.
+- `test_saveimage.py` covers all of it and is in `tools/runall.sh`.
+
+## 2026-09-11 — An agent bridge: scripts can drive the tabs
+
+- **A second local socket, `browser-agent`, lets a script on this
+  machine drive the browser** (`agent_bridge.py`, client `agent.py`).
+  One JSON request per line; open/close/select/nav a tab, run JS, read
+  text or HTML, wait for a selector, click, type (native-setter inputs
+  and contenteditable editors both react), press a key, scroll,
+  screenshot, or ask for the browser's own restart. Everything works on
+  background tabs and never raises the window: the point is that an
+  assistant can use the web without taking the screen away from whoever
+  is at the PC. `agent.py chatgpt "..."` is the one composite command —
+  it keeps a hidden chatgpt.com tab and returns the finished answer.
+- Off switch: `"agentBridge": false` in the config, or `BROWSER_NO_AGENT=1`.
+  The socket is user-owned; it is not reachable from the network.
+- `test_agent.py` (offscreen, scratch data, its own socket name) covers
+  the whole protocol and is part of `tools/runall.sh`.
+
 ## 2026-08-14 — The browser says when a tab is on a call
 
 - **A call in a tab is now announced to the rest of the machine.** While
