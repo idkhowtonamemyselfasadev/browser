@@ -36,8 +36,17 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 # once, which is what a second browser needs: the Tor window is its
 # own process with its own jars and its own history, and two processes
 # sharing one profile breaks Chromium's storage (see main()).
-BROWSER_HOME = Path(os.environ.get("BROWSER_HOME")
-                    or Path.home() / ".local/share/browser")
+# On Windows that default is %LOCALAPPDATA%\browser, which is this
+# user's own per-machine folder and where a Windows program is expected
+# to keep what it writes; with no LOCALAPPDATA set at all (a service
+# account, a stripped environment) the home folder is still better than
+# a POSIX path that means nothing there. One statement, so the suite can
+# run this very code with a sys and an os of its own (test_winbranch).
+BROWSER_HOME = Path(
+    os.environ.get("BROWSER_HOME")
+    or (Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "browser"
+        if sys.platform == "win32"
+        else Path.home() / ".local/share/browser"))
 CONFIG_FILE = BROWSER_HOME / "config.json"
 
 def _startup_flags():
@@ -9414,6 +9423,41 @@ def _card_expiry_seconds(text):
     return int(start_of_next) - 1
 
 
+def _restrict_to_owner(path):
+    """Windows has no 0600. os.chmod there sets one thing only — the
+    read-only attribute — and 0o600 has the owner write bit set, so the
+    call does nothing at all and the file keeps whatever the parent
+    folder's ACL says. That was never world-readable, because
+    %LOCALAPPDATA% is per-user, but it was not what the code claimed
+    either, and a vault copied out of that folder carries no protection
+    with it.
+
+    So ask Windows properly: drop inherited entries and grant this user
+    full control, nobody else. Best effort by design — if icacls is
+    missing, or the drive is FAT32 and has no ACLs to set, the file
+    still has the folder's protection, which is what it has always had.
+    A password that cannot be written is worse than one written under
+    an inherited ACL, so this must never raise.
+
+    Lives here rather than in the Windows edition because _write_atomic
+    below already calls it: the call came back from that port and the
+    definition did not, so every vault swap on Windows depended on a
+    name this file does not have. The branch costs Linux nothing - it
+    is never taken - and the next port stops being the thing that holds
+    the two halves together."""
+    user = os.environ.get("USERNAME", "").strip()
+    if not user:
+        return
+    try:
+        subprocess.run(
+            ["icacls", str(path), "/inheritance:r",
+             "/grant:r", "%s:F" % user],
+            check=False, capture_output=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def _write_private(path, data):
     """Write bytes with owner-only permissions (0600), creating the
     directory as needed; an existing file is clamped to 0600 too."""
@@ -9422,7 +9466,10 @@ def _write_private(path, data):
                  0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
-    os.chmod(path, 0o600)
+    if sys.platform == "win32":
+        _restrict_to_owner(path)
+    else:
+        os.chmod(path, 0o600)
 
 
 def _keystream_xor(key, nonce, data):
@@ -20222,7 +20269,12 @@ class Browser(QMainWindow):
         # when it is turned on, and only while the window has yet to
         # be created, so a look switched later settles at the next
         # start rather than this instant.
-        if active_look() == "glass":
+        # Windows is the exception: DWM does not blur what is behind an
+        # alpha window, so every one of those translucent pixels shows
+        # the desktop raw, and any strip no widget repaints keeps
+        # whatever was in it - the see-through, glitching window. Glass
+        # sits on the theme's solid base there instead (look_style).
+        if active_look() == "glass" and sys.platform != "win32":
             self.setAttribute(
                 Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._rebuild_furniture()
@@ -65849,13 +65901,24 @@ def main():
     elif _handoff_to_existing(background, url, app=app_url):
         return
 
+    if sys.platform == "win32":
+        # without this the taskbar groups the window under python.exe
+        # and shows its icon instead of ours
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "browser.app")
     QGuiApplication.setDesktopFileName("browser")
     _install_proxy_flags()
     _install_theme_flags()
     _install_privacy_flags()
     app = QApplication(sys.argv)
     app.setApplicationName("browser")
-    app.setWindowIcon(QIcon(str(APP_DIR / "icon.svg")))
+    # an .ico is what Windows wants for the taskbar and the title bar;
+    # Qt there renders an SVG window icon at one size and it comes out
+    # soft. The file is in the Windows edition, which is the only place
+    # this branch is taken.
+    icon = "icon.ico" if sys.platform == "win32" else "icon.svg"
+    app.setWindowIcon(QIcon(str(APP_DIR / icon)))
     if sys.platform == "win32":
         # Qt picks the native windows11 style there, which draws what the
         # sheet leaves out (scroll bars, popups' frames, check marks) in
