@@ -1072,7 +1072,8 @@ check("the two that are not are names, not oversights",
 
 print("\n(32) the switches are in Settings")
 page_text = (HERE / "settings.html").read_text()
-check("there is a section for it", 'data-desc="descGames"' in page_text)
+check("there is a section for it",
+      'data-desc="descTools"' in page_text)
 for ident in ("twitchpoints", "twitchads", "theatermode", "gamepadon",
               "discordroute", "discordbadge", "autogamemode", "mprison",
               "screenawake", "pauseonlock", "sponsorskip", "lyricson",

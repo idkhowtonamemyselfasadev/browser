@@ -1,6 +1,41 @@
 # Changelog
 
-## 2026-10-22 — Settings: nothing listed twice, and a page you can see through
+## 2026-10-22 — Settings: the whole page, nothing listed twice, see-through
+
+**Twenty-four sections became twelve.** The navigation was never really
+the problem: the count was. "Browsing", "Tabs", "Getting around",
+"Reading a page", "Appearance", "Theme", "Look" and "Toolbar" were not
+obviously different places to someone looking for one switch. They are
+**Search and the address bar**, **Tabs and windows**, **Looks**,
+**Reading and media**, **Keys and the mouse**, **Notes, capture and
+games**, **Downloads**, **Privacy**, **Passwords**, **What this is
+costing**, **For developers** and **The browser itself**. Nothing was
+dropped; the cards moved. The count on each tile is the settings in it,
+not the settings plus every choice in a picker.
+
+**The search box has the keyboard from the first frame**, because typing
+the name of a setting is the fastest way to it, and it is bigger now.
+
+**A new way around it.** The sidebar is gone. Settings opens on a page
+of tiles -- one per section, each with the line that says what is in it
+and how many settings that is, under the four group headings -- and the
+strip along the top carries the sections of the group you are in — its
+neighbours, not a wall of all of them — and is out of the way
+altogether while the tiles are up. A tile or a chip opens a section;
+"All settings", the name in the corner and Escape come back to the
+tiles.
+
+**It uses the window now.** Settings was one 880px column down the middle
+of a window twice that wide: two thirds of the page was empty, and a
+section like Browsing was a mile of scrolling through a one-card-wide
+stack. The cards of a section now flow into as many columns as the
+window has room for — one on a phone, two on a laptop, three or four on
+a big monitor — each card keeping a readable width, so a switch still
+sits beside its own label. A shelf of pickers (the themes, the search
+engines, anything with four choices or more) spans the lot. The rail is
+narrower, the title block is one line instead of three, the rows are
+tighter, and on a phone the rail becomes a strip across the top so the
+settings get the whole width.
 
 He opened Settings and found two sections called "The address bar", one
 under the other. Pulling on that thread found the rest:

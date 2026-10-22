@@ -70,7 +70,7 @@ sections = re.findall(r'<section ([^>]*)>\s*<h2[^>]*>(.*?)</h2>', PAGE, re.S)
 names = [re.sub(r"<[^>]+>", "", title).strip() for _, title in sections]
 twice = sorted(k for k, n in Counter(names).items() if n > 1)
 check("no two sections carry the same name", not twice, twice)
-check("...across the whole rail", len(names) >= 20, len(names))
+check("...across the whole rail", len(names) >= 10, len(names))
 
 blocks = re.findall(r'<div class="panel">.*?(?=<div class="panel">|</section>)',
                     PAGE, re.S)
@@ -165,15 +165,15 @@ def section_of(panel_title):
     return ""
 
 
-check("the tab strip's own settings sit under Tabs",
-      section_of("How wide tabs are") == "Tabs",
+check("the tab strip's own settings sit under tabs",
+      section_of("How wide tabs are") == "Tabs and windows",
       section_of("How wide tabs are"))
 check("the click on a tab is offered once, with the other tab settings",
       PAGE.count('id="tabdouble"') == 1
-      and section_of("Double-click on a tab") == "Tabs",
+      and section_of("Double-click on a tab") == "Tabs and windows",
       section_of("Double-click on a tab"))
-check("video and sound have a section instead of a corner of Browsing",
-      section_of("Video and sound") == "Video and sound",
+check("video and sound sit with reading rather than in a corner of Browsing",
+      section_of("Video and sound") == "Reading and media",
       section_of("Video and sound"))
 check("the keyboard shortcuts sit with the keys",
       section_of("Keyboard shortcuts") == "Keys and the mouse",
@@ -181,11 +181,17 @@ check("the keyboard shortcuts sit with the keys",
 check("downloads are one section, not two",
       names.count("Downloads") == 1 and "More about downloads" not in names,
       [n for n in names if "ownload" in n])
-browsing = re.search(r'<section [^>]*data-desc="descBrowsing".*?</section>',
-                     PAGE, re.S).group(0)
-check("and Browsing is no longer where everything was tipped",
-      len(re.findall(r'<div class="panel">', browsing)) <= 6,
-      len(re.findall(r'<div class="panel">', browsing)))
+# twenty-four sections, several of them holding cards named after other
+# sections, is what made it a maze. A dozen, and no card wearing another
+# section's name.
+check("there are a dozen sections, not two dozen",
+      10 <= len(names) <= 14, len(names))
+worn = []
+for card in set(titles):
+    where = section_of(card)
+    if card in names and where and where != card:
+        worn.append("%s (a card in %s)" % (card, where))
+check("and no card is named after a different section", not worn, worn[:4])
 
 
 print("\n(6) you can see the window through it")
@@ -244,16 +250,118 @@ if view is not None:
       return JSON.stringify(out);
     })()""", B.MAIN_WORLD_ID)
     rows = json.loads(rail or "[]")
-    check("every section has a button", len(rows) >= 20, len(rows))
+    check("every section has a button", len(rows) >= 10, len(rows))
     again = sorted(k for k, n in Counter(rows).items() if n > 1)
     check("and no name is on it twice", not again, again)
-    check("...including the one he photographed",
-          rows.count("The address bar") == 1, rows)
+    check("...including the one he photographed, now folded in once",
+          rows.count("Search and the address bar") == 1, rows)
     check("and every name on it is in the language he chose",
           all(not re.search(r"^t_|^[a-z]+[A-Z]", row) for row in rows), rows)
 
 
-print("\n(9) carry on is gone, not hidden")
+print("\n(9) it uses the whole page")
+if view is not None:
+    win.resize(1500, 820)
+    H.spin(400)
+    # a section with a handful of ordinary cards in it, rather than
+    # whichever one happened to be open
+    H.js(view, """(function () {
+      var secs = visibleSections();
+      for (var i = 0; i < secs.length; i++) {
+        var h = secs[i].querySelector('h2');
+        if (h && h.textContent.trim() === 'Privacy') { showCat(i); return 1; }
+      }
+      return 0;
+    })()""", B.MAIN_WORLD_ID)
+    H.spin(500)
+    shape = json.loads(H.js(view, """(function () {
+      var inner = document.querySelector('.content .inner');
+      var sec = document.querySelector('section.active');
+      var rail = document.getElementById('rail').getBoundingClientRect();
+      var cs = getComputedStyle(sec);
+      var cards = sec.querySelectorAll(':scope > .panel');
+      var tops = {};
+      for (var i = 0; i < cards.length; i++) {
+        var t = Math.round(cards[i].getBoundingClientRect().top);
+        tops[t] = (tops[t] || 0) + 1;
+      }
+      var side = 0;
+      for (var k in tops) if (tops[k] > 1) side++;
+      return JSON.stringify({
+        innerMax: getComputedStyle(inner).maxWidth,
+        colWidth: cs.columnWidth,
+        rail: Math.round(rail.width),
+        cards: cards.length,
+        rowsWithTwo: side,
+        docW: document.documentElement.scrollWidth,
+        winW: window.innerWidth});
+    })()""", B.MAIN_WORLD_ID) or "{}")
+    check("the content column is not capped at a sliver down the middle",
+          shape.get("innerMax") == "none", shape.get("innerMax"))
+    check("the cards of a section flow into columns",
+          shape.get("colWidth") not in ("auto", None), shape.get("colWidth"))
+    check("...so at this width two cards stand side by side",
+          shape.get("rowsWithTwo", 0) >= 1, shape)
+    check("the way around is a strip across the top, not a column",
+          shape.get("rail", 0) > shape.get("winW", 1) * 0.8, shape.get("rail"))
+    check("and the page never scrolls sideways",
+          shape.get("docW") <= shape.get("winW", 0) + 1, shape)
+
+print("\n(10) the way around it")
+if view is not None:
+    nav = json.loads(H.js(view, """(function () {
+      showHome();
+      var tiles = [...document.querySelectorAll('#home .tile')];
+      var chips = [...document.querySelectorAll('#sidebar button')];
+      var out = {
+        tiles: tiles.length, chips: chips.length,
+        groups: document.querySelectorAll('#home .homegroup').length,
+        described: tiles.filter(function (t) {
+          return (t.querySelector('.tsays') || {}).textContent; }).length,
+        counted: tiles.filter(function (t) {
+          return (t.querySelector('.tcount') || {}).textContent; }).length,
+        homeOn: document.getElementById('home').classList.contains('on'),
+        active: document.querySelectorAll('section.active').length};
+      // and the tile really opens its own section
+      var want = tiles.find(function (t) {
+        return t.querySelector('.tname').textContent.trim()
+                 === 'Tabs and windows'; });
+      want.click();
+      var sec = document.querySelector('section.active h2');
+      out.opened = sec ? sec.textContent.trim() : '';
+      out.homeAfter = document.getElementById('home').classList.contains('on');
+      out.backShown = document.getElementById('backhome')
+                        .classList.contains('on');
+      out.chipsInside = [...document.querySelectorAll('#sidebar button')]
+        .filter(function (b) { return !b.classList.contains('elsewhere'); })
+        .length;
+      document.getElementById('backhome').click();
+      out.backHome = document.getElementById('home').classList.contains('on');
+      out.activeAfterBack = document.querySelectorAll('section.active').length;
+      return JSON.stringify(out);
+    })()""", B.MAIN_WORLD_ID) or "{}")
+    check("Settings opens on a page of tiles, one per section",
+          nav.get("homeOn") is True and nav.get("tiles", 0) >= 10
+          and nav.get("active") == 0, nav)
+    check("...each saying what is in it", nav.get("described") == nav.get("tiles"),
+          nav)
+    check("...and how many settings that is",
+          nav.get("counted", 0) >= nav.get("tiles", 1) - 1, nav)
+    check("...under the four group headings",
+          nav.get("groups", 0) >= 3, nav.get("groups"))
+    check("every section is also a chip on the strip",
+          nav.get("chips") == nav.get("tiles"), nav)
+    check("...and inside a section the strip carries its neighbours, "
+          "not all of them",
+          0 < nav.get("chipsInside", 0) < nav.get("chips", 99), nav)
+    check("a tile opens its own section",
+          nav.get("opened") == "Tabs and windows", nav)
+    check("...and the tiles step aside while it is open",
+          nav.get("homeAfter") is False and nav.get("backShown") is True, nav)
+    check("the way back comes back to them",
+          nav.get("backHome") is True and nav.get("activeAfterBack") == 0, nav)
+
+print("\n(11) carry on is gone, not hidden")
 check("the browser no longer works out where he left off",
       not hasattr(win, "continue_where"))
 extras = json.loads(win.bridge.startExtras())
@@ -268,8 +376,17 @@ check("...while the row beside it still works",
       "recent" in extras, sorted(extras))
 
 
+# the pane goes down before the process does: a Settings page left
+# open through interpreter teardown took the engine with it about one
+# run in three (every check having passed first)
+try:
+    win.close_pane()
+    H.spin(300)
+except Exception:
+    pass
 print("")
 if fails:
     print("FAILED (%d): %s" % (len(fails), "; ".join(fails[:8])))
-    sys.exit(1)
-print("all good")
+print("all good" if not fails else "")
+sys.stdout.flush()
+os._exit(1 if fails else 0)
