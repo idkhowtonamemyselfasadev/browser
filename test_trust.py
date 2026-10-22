@@ -12,6 +12,7 @@ Runs offscreen against scratch data; never touches your own vault.
 """
 import http.server
 import json
+import os
 import sys
 import threading
 import time
@@ -214,7 +215,11 @@ def finish():
     for f in fails:
         print("  - " + f)
     server.shutdown()
-    app.exit(1 if fails else 0)
+    # down here rather than through interpreter teardown: a live page
+    # torn down behind the engine can take the whole process with it
+    # (exit 139 with every check already printed) - see test_page.py
+    sys.stdout.flush()
+    os._exit(1 if fails else 0)
 
 
 def start():

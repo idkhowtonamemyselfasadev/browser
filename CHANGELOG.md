@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-22 — a suite that passes every check and then dumps core
+
+`test_page.py` segfaulted after printing its tally four times out of
+eight on a quiet machine — a coin flip, which is the worst kind of
+failing test: it is read as a real failure on the runs it loses and as
+a working suite on the runs it wins. Nothing in the browser is wrong.
+The test left the passwords pane open and ended with
+`sys.exit(app.exec())`, so a live QtWebEngine page was still there when
+the interpreter tore the engine down underneath it.
+
+A test knows its verdict the moment the last check is printed, and
+everything after that is housekeeping nobody is checking. So the three
+tests that still ended that way — `test_page.py`, `test_op_page.py`,
+`test_trust.py` — flush and `os._exit` with their own exit code, the
+way eleven other suites already did. Eight runs of `test_page.py`
+before: four segfaults. Eight after: none, with all 27 checks still
+printed and still passing.
+
 ## 2026-10-22 — a toast after the window has gone is not a crash
 
 Found twice today in the same hour: a suite printed every check as
