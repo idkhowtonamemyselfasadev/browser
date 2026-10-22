@@ -1382,6 +1382,7 @@
         <div class="cards" id="gpucards"></div>
         <div class="hint" id="gpunone" hidden>Only one graphics card here, so there is nothing to choose.</div>
         <div class="hint" id="gpuwindows" hidden>Windows decides which card a program draws with, in Settings &rarr; System &rarr; Display &rarr; Graphics. These are the cards it has to offer.</div>
+        <button id="gpuopenwin" hidden>Open Windows&rsquo; graphics settings</button>
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_gpuAskName">Ask at every start which card to use</span>
@@ -4098,6 +4099,12 @@
     if (note) {
       note.hidden = choose;
       note.textContent = S.gpuWindows || note.textContent;
+    }
+    const open = document.getElementById("gpuopenwin");
+    if (open) {
+      open.hidden = choose;
+      open.textContent = S.gpuOpenWindows || open.textContent;
+      open.onclick = () => { if (bridge) bridge.openWindowsGraphics(() => {}); };
     }
     const askrow = document.getElementById("gpuask");
     if (askrow && askrow.closest(".wrow")) {
