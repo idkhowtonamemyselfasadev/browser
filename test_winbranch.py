@@ -413,6 +413,77 @@ check("open_with_app really takes that branch on Windows",
 check("...and an http address is still never handed to anything",
       'in ("http", "https", "file", "about",' in SRC)
 
+# ---------------------------------------------------------------------
+print("\n(8) what the tabs are costing, where there is no /proc")
+# process_cost and renderer_cpu read /proc, and said so: on Windows they
+# answered nothing at all and every row of "what this is costing" was
+# blank -- which reads as a broken page rather than a platform the code
+# never asked about. Windows has the same two numbers in two calls.
+asked = []
+
+
+def probe(pid):
+    asked.append(pid)
+    # a working set of 300 MB, and 1.5 s kernel + 2.5 s user in Windows'
+    # own 100-nanosecond units
+    return (300 * 1024 * 1024, 15_000_000, 25_000_000)
+
+
+cost = B._win_process_cost(4242, probe)
+check("the pid asked about is the pid handed over", asked == [4242], asked)
+check("the working set comes back as bytes",
+      cost.get("bytes") == 300 * 1024 * 1024, cost)
+check("kernel and user time together, in seconds",
+      cost.get("seconds") == 4.0, cost)
+check("and the pid is in the answer, as on the other platform",
+      cost.get("pid") == 4242, cost)
+check("a process that cannot be asked is {}, not a crash",
+      B._win_process_cost(4242, lambda pid: None) == {})
+
+
+def explodes(pid):
+    raise OSError("gone")
+
+
+check("a probe that raises is {} too",
+      B._win_process_cost(4242, explodes) == {})
+check("the real probe is what it reaches for by default",
+      B._WIN_PROBE is B._win_process_probe)
+check("...and that one answers None here rather than raising",
+      B._win_process_cost(os.getpid()) == {})
+
+real_sys = B.sys
+try:
+    fake_sys = Fake()
+    fake_sys.platform = "win32"
+    B.sys = fake_sys
+    real_probe = B._WIN_PROBE
+    B._WIN_PROBE = probe
+    try:
+        asked.clear()
+        got = B.Browser.process_cost(99)
+        check("process_cost goes that way on Windows",
+              got.get("seconds") == 4.0 and asked == [99], (got, asked))
+        seconds = B.Browser.renderer_cpu(Fake(), 99)
+        check("...and so does renderer_cpu, in seconds",
+              seconds == 4.0, seconds)
+        check("a pid of nothing is still nothing",
+              B.Browser.process_cost(0) == {})
+        B._WIN_PROBE = lambda pid: None
+        check("a renderer that has gone is 0.0 seconds, not an error",
+              B.Browser.renderer_cpu(Fake(), 99) == 0.0)
+    finally:
+        B._WIN_PROBE = real_probe
+finally:
+    B.sys = real_sys
+
+check("the Linux reading still works, on this machine, right now",
+      B.Browser.process_cost(os.getpid()).get("bytes", 0) > 0,
+      B.Browser.process_cost(os.getpid()))
+check("memory pressure says nothing on Windows rather than a wrong number",
+      "no counter" in (B.Browser.memory_pressure.__doc__ or ""),
+      (B.Browser.memory_pressure.__doc__ or "")[:80])
+
 print("\n%d checks failed" % len(fails))
 if fails:
     for f in fails:

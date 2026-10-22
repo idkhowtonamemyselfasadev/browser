@@ -28185,12 +28185,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     @staticmethod
     def process_cost(pid):
-        """Memory and processor time of one renderer, from /proc.
-
-        Linux only, and deliberately so: this is his machine. On
-        anything else it answers nothing rather than guessing."""
+        """Memory and processor time of one renderer, from /proc -- or,
+        on Windows, from the two calls that platform has for the same
+        two numbers (_win_process_cost). On anything else it answers
+        nothing rather than guessing."""
         if not pid:
             return {}
+        if sys.platform == "win32":
+            return _win_process_cost(pid)
         try:
             with open("/proc/%d/statm" % int(pid)) as fh:
                 pages = int(fh.read().split()[1])
@@ -53808,8 +53810,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def renderer_cpu(self, pid):
         """How much processor time one renderer has had, in seconds.
 
-        Read from /proc, which is the only place that knows; a pid
-        that has gone answers 0 rather than raising."""
+        Read from /proc, which is the only place that knows it here, and
+        from GetProcessTimes on Windows; a pid that has gone answers 0
+        rather than raising, on either."""
+        if sys.platform == "win32":
+            return float(_win_process_cost(pid).get("seconds", 0.0))
         try:
             with open("/proc/%d/stat" % int(pid), "r") as handle:
                 parts = handle.read().split()
@@ -53948,6 +53953,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     # ---- the pressure the whole machine is under ----
     def memory_pressure(self):
         """What Linux says about memory pressure, out of PSI.
+
+        Nothing on Windows: it has no counter for "was anything stalled
+        waiting for memory", and the one it does have (how full memory
+        is) is a different question with a different answer. An empty
+        dict is what the page already handles, and inventing a number
+        would be worse than having none.
 
         /proc/pressure/memory is the kernel's own answer to "is this
         machine about to swap": the share of the last ten seconds in
@@ -65858,6 +65869,87 @@ def _proc_start_time(pid):
         return int(rest[19])          # starttime, field 22 overall
     except Exception:
         return None
+
+
+def _win_process_probe(pid):
+    """(working set in bytes, kernel ticks, user ticks) for one pid on
+    Windows, or None if it cannot be asked. Ticks are Windows' own
+    100-nanosecond units.
+
+    Kept apart from the arithmetic above it so the suite can hand
+    _win_process_cost numbers without a Windows to get them from: this
+    half cannot be tested anywhere else, so it is the smaller half."""
+    import ctypes
+    from ctypes import wintypes
+
+    class COUNTERS(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t)]
+
+    k32 = ctypes.windll.kernel32
+    psapi = ctypes.windll.psapi
+    k32.OpenProcess.restype = wintypes.HANDLE
+    # QUERY_LIMITED_INFORMATION | VM_READ, which is enough for these two
+    # numbers and no more. Every pid asked about here is a renderer of
+    # ours, so this never wants a privilege the browser does not have.
+    handle = k32.OpenProcess(0x1000 | 0x0010, False, int(pid))
+    if not handle:
+        return None
+    try:
+        counters = COUNTERS()
+        counters.cb = ctypes.sizeof(COUNTERS)
+        if not psapi.GetProcessMemoryInfo(
+                wintypes.HANDLE(handle), ctypes.byref(counters), counters.cb):
+            return None
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(
+                wintypes.HANDLE(handle),
+                *[ctypes.byref(one) for one in times]):
+            return None
+
+        def ticks(filetime):
+            return ((filetime.dwHighDateTime << 32)
+                    | filetime.dwLowDateTime)
+
+        return (int(counters.WorkingSetSize),
+                ticks(times[2]), ticks(times[3]))   # kernel, user
+    finally:
+        k32.CloseHandle(wintypes.HANDLE(handle))
+
+
+#: what _win_process_cost asks. Named so the suite can put a counter
+#: here instead of an operating system.
+_WIN_PROBE = _win_process_probe
+
+
+def _win_process_cost(pid, probe=None):
+    """Memory and processor time of one process, the Windows way.
+
+    The same two numbers /proc gives on Linux, from the two calls
+    Windows has for them: the working set is what that process has in
+    memory right now, and kernel plus user time is what it has spent
+    being run. Without this the whole "what this is costing" page was
+    blank over there -- every row said nothing, which reads as a broken
+    page rather than a platform the code never asked about."""
+    probe = probe if probe is not None else _WIN_PROBE
+    try:
+        got = probe(int(pid))
+    except Exception:
+        return {}
+    if not got:
+        return {}
+    memory, kernel, user = got
+    # 100 ns units: ten million of them to the second
+    return {"pid": int(pid), "bytes": int(memory),
+            "seconds": (int(kernel) + int(user)) / 1e7}
 
 
 def _run_was_crash(marker):
