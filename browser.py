@@ -223,6 +223,11 @@ REMOTE_DEBUG_PORT = _pick_debug_port()
 # Nothing here needs a GPU to be read: the cards are listed out of
 # /sys/class/drm, which is a directory of text files.
 
+#: which VA-API driver belongs to which card. The decoder has to be on
+#: the same card as the compositing, or a hardware-decoded video is a
+#: black rectangle with sound.
+_GPU_VAAPI = {"0x10de": "nvidia", "0x8086": "iHD", "0x1002": "radeonsi"}
+
 #: who made the card, by the PCI vendor id in sysfs
 _GPU_VENDORS = {
     "0x10de": "NVIDIA",
@@ -333,7 +338,10 @@ def gpu_env(choice, cards=None):
     picks" really does take the last answer off."""
     off = ["DRI_PRIME", "__NV_PRIME_RENDER_OFFLOAD",
            "__GLX_VENDOR_LIBRARY_NAME", "__VK_LAYER_NV_optimus",
-           "MESA_VK_DEVICE_SELECT"]
+           "MESA_VK_DEVICE_SELECT",
+           # the decoder goes back to being the machine's own business
+           # too: the line further up sets it again at the next start
+           "LIBVA_DRIVER_NAME"]
     if not choice or choice == "auto":
         return {}, off
     cards = cards if cards is not None else gpu_cards()
@@ -349,6 +357,15 @@ def gpu_env(choice, cards=None):
     elif card["device"]:
         on["MESA_VK_DEVICE_SELECT"] = "%s:%s" % (
             card["vendor"][2:], card["device"][2:])
+    # ...and the video decoder goes with it. Further up this file
+    # LIBVA_DRIVER_NAME is set to "nvidia" whenever an NVIDIA driver is
+    # installed, which is right when NVIDIA is also drawing -- and
+    # wrong the moment another card is chosen: the frames are then
+    # decoded on one card and composited on another, and a hardware-
+    # decoded stream comes out BLACK while its sound plays on.
+    on["LIBVA_DRIVER_NAME"] = _GPU_VAAPI.get(card["vendor"], "")
+    if not on["LIBVA_DRIVER_NAME"]:
+        on.pop("LIBVA_DRIVER_NAME")
     return on, [k for k in off if k not in on]
 
 
