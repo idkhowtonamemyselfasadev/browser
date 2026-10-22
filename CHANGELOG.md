@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-22 — a toast after the window has gone is not a crash
+
+Found twice today in the same hour: a suite printed every check as
+passed and then dumped core. The line in the corner is the last thing a
+late answer does — a download that lands after the window closed, a
+reader that falls over while the browser is quitting, a thread coming
+back on the way out — and by then the window can be gone. Giving a new
+child widget a deleted C++ parent raises `RuntimeError`, and an
+exception out of a Qt slot is not a line in a log: it is `abort()`.
+
+Nothing a toast has to say is worth that. A window that has gone simply
+has nobody to show the line to, and `flash()` answers False.
+`test_lifecycle.py` deletes a window outright (`sip.delete`) and asks
+for a toast afterwards: it raised before, it answers False now.
+
 ## 2026-10-22 — a button to where the graphics choice actually lives
 
 The cards are listed on Windows and the page says the choice belongs to
