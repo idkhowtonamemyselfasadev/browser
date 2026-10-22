@@ -24456,22 +24456,36 @@ class Browser(QMainWindow):
     def flash(self, text, ms=2600):
         """A line in the corner saying what just happened — twenty tabs
         closed, eight addresses copied. It wears the "toast" style the
-        update message uses, so it is in the theme like everything else."""
-        old = getattr(self, "_flash", None)
-        if old is not None:
-            try:
-                old.deleteLater()
-            except RuntimeError:
-                pass
-        note = QLabel(text, self, objectName="toast")
-        note.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        note.setMargin(10)
-        note.adjustSize()
-        note.move(max(8, self.width() - note.width() - 16), 54)
-        note.show()
-        note.raise_()
-        self._flash = note
-        QTimer.singleShot(ms, note.deleteLater)
+        update message uses, so it is in the theme like everything else.
+
+        A toast is the last thing a late answer does: a download that
+        finished after the window closed, a reader that fell over while
+        the browser was quitting, a check that came back from a thread
+        on the way out. By then the window can be gone — and giving a
+        new child widget a deleted C++ parent raises RuntimeError, which
+        out of a Qt slot is not a message in a log but abort(): a core
+        dump with every check already passed. Nothing a toast has to say
+        is worth that, so a window that has gone simply has nobody to
+        show the line to."""
+        try:
+            old = getattr(self, "_flash", None)
+            if old is not None:
+                try:
+                    old.deleteLater()
+                except RuntimeError:
+                    pass
+            note = QLabel(text, self, objectName="toast")
+            note.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            note.setMargin(10)
+            note.adjustSize()
+            note.move(max(8, self.width() - note.width() - 16), 54)
+            note.show()
+            note.raise_()
+            self._flash = note
+            QTimer.singleShot(ms, note.deleteLater)
+        except RuntimeError:
+            return False
+        return True
 
     def _tab_strip_wheel(self, event):
         """The wheel over the strip. Off by default: scrolling a long
