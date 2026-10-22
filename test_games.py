@@ -28,7 +28,15 @@ sys.path.insert(0, str(HERE / "tests"))
 
 import harness as H  # noqa: E402
 B = H.boot()
-import mpris as M  # noqa: E402
+# mpris.py is optional to the browser (HAVE_MPRIS), so it is optional
+# here too: the Windows edition does not ship it at all -- MPRIS is a
+# D-Bus protocol of the Linux desktop -- and a suite that cannot be
+# imported without it would take the games, the screen and the timers
+# down with it over a module the browser itself treats as a maybe.
+try:
+    import mpris as M  # noqa: E402
+except ImportError:  # pragma: no cover - the module is deliberately absent
+    M = None
 from PyQt6.QtCore import QUrl, QTimer  # noqa: E402
 from PyQt6.QtGui import QGuiApplication  # noqa: E402
 from PyQt6.QtWidgets import QMenu, QMessageBox  # noqa: E402
@@ -185,41 +193,49 @@ def ask(tool, view, arg=None, wait=5000):
 
 
 print("\n(1) the media keys, and a machine with no bus")
-check("mpris.py is beside the browser", B.HAVE_MPRIS is True)
-check("it only needs PyQt and json",
-      "import json" in (HERE / "mpris.py").read_text()
-      and "pip" not in (HERE / "mpris.py").read_text())
-check("there is no session bus on this box", M.available() is False)
-state = win.mpris_status()
-check("the status says the module is there", state["module"] is True, state)
-check("...and that there is no bus", state["bus"] is False, state)
-check("switching the media keys on answers False with no bus",
-      win.media_keys(True) is False)
-check("...but the wish is written down", win.media_keys_on() is True)
-check("nothing was registered", win.mpris_status()["registered"] is False)
-check("switching it off again answers False", win.media_keys(False) is False)
-check("...and the wish is gone", win.media_keys_on() is False)
-service = M.Service(win)
-check("the service starts out stopped", service.status == "Stopped")
-check("what is playing goes in",
-      service.update(playing=True, title="A song", artist="Someone")
-      == "Playing")
-check("...and comes out as the desktop's own names",
-      service.metadata.get("xesam:title") == "A song"
-      and service.metadata.get("xesam:artist") == ["Someone"],
-      service.metadata)
-check("a pause is a pause, not a stop",
-      service.update(playing=False, title="A song") == "Paused")
-check("nothing at all is Stopped", service.update(playing=None) == "Stopped")
-check("...and then it carries no metadata", service.metadata == {},
-      service.metadata)
-check("announcing on no bus answers False", service._announce() is False)
-check("starting on no bus answers False", service.start() is False)
-check("and Quit is refused on purpose",
-      "return" in M.Root.__dict__["Quit"].__doc__.lower()
-      or M.Root(service).Quit() is None)
-check("the push answers False with no service",
-      win._mpris_push() is False)
+if M is None:
+    print("  --   no mpris.py in this edition: the media keys are not here")
+    check("...and the browser says so rather than half-having them",
+          B.HAVE_MPRIS is False
+          and win.mpris_status()["module"] is False
+          and win.media_keys(True) is False,
+          win.mpris_status())
+else:
+    check("mpris.py is beside the browser", B.HAVE_MPRIS is True)
+    check("it only needs PyQt and json",
+          "import json" in (HERE / "mpris.py").read_text()
+          and "pip" not in (HERE / "mpris.py").read_text())
+    check("there is no session bus on this box", M.available() is False)
+    state = win.mpris_status()
+    check("the status says the module is there", state["module"] is True, state)
+    check("...and that there is no bus", state["bus"] is False, state)
+    check("switching the media keys on answers False with no bus",
+          win.media_keys(True) is False)
+    check("...but the wish is written down", win.media_keys_on() is True)
+    check("nothing was registered", win.mpris_status()["registered"] is False)
+    check("switching it off again answers False", win.media_keys(False) is False)
+    check("...and the wish is gone", win.media_keys_on() is False)
+    service = M.Service(win)
+    check("the service starts out stopped", service.status == "Stopped")
+    check("what is playing goes in",
+          service.update(playing=True, title="A song", artist="Someone")
+          == "Playing")
+    check("...and comes out as the desktop's own names",
+          service.metadata.get("xesam:title") == "A song"
+          and service.metadata.get("xesam:artist") == ["Someone"],
+          service.metadata)
+    check("a pause is a pause, not a stop",
+          service.update(playing=False, title="A song") == "Paused")
+    check("nothing at all is Stopped", service.update(playing=None) == "Stopped")
+    check("...and then it carries no metadata", service.metadata == {},
+          service.metadata)
+    check("announcing on no bus answers False", service._announce() is False)
+    check("starting on no bus answers False", service.start() is False)
+    check("and Quit is refused on purpose",
+          "return" in M.Root.__dict__["Quit"].__doc__.lower()
+          or M.Root(service).Quit() is None)
+    check("the push answers False with no service",
+          win._mpris_push() is False)
 
 print("\n(2) the two timers that used to share one name")
 check("the now-playing poll is its own timer",
@@ -253,8 +269,9 @@ check("and the video is a video again",
                ".classList.contains('__winfull')") is False)
 
 print("\n(4) keeping the screen awake")
-check("systemd-inhibit is on this box",
-      bool(shutil.which("systemd-inhibit")))
+check("the screen can be held at all on this machine",
+      (win._win_power() is not None) if sys.platform == "win32"
+      else bool(shutil.which("systemd-inhibit")))
 check("nothing is held to start with", win.awake_holding() is False)
 check("asking holds it", win.keep_awake(True) is True)
 check("...and it says so", win.awake_holding() is True)
