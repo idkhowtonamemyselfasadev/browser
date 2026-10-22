@@ -29,6 +29,7 @@ needs the network or a window.
 """
 import ast
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -483,6 +484,127 @@ check("the Linux reading still works, on this machine, right now",
 check("memory pressure says nothing on Windows rather than a wrong number",
       "no counter" in (B.Browser.memory_pressure.__doc__ or ""),
       (B.Browser.memory_pressure.__doc__ or "")[:80])
+
+# ---------------------------------------------------------------------
+print("\n(9) reading a page aloud, where there is no speech-dispatcher")
+# spd-say is a speech-dispatcher client and is what a Linux desktop has.
+# Windows has none, so the browser said "no speech program installed" --
+# on a machine whose own .NET has had a synthesiser in it for twenty
+# years. PowerShell drives that one.
+import base64  # noqa: E402
+
+
+class Reader(Teller):
+    _SAY_PS = B.Browser._SAY_PS
+    _say_windows = B.Browser._say_windows
+    _say_check = B.Browser._say_check
+    stop_aloud = B.Browser.stop_aloud
+    say_tool = B.Browser.say_tool
+
+
+class FakePopen:
+    made = []
+
+    def __init__(self, argv, **kw):
+        self.argv = argv
+        self.kw = kw
+        self.written = b""
+        self.killed = False
+        self.returncode = None
+        FakePopen.made.append(self)
+        parent = self
+
+        class Pipe:
+            def write(self, data):
+                parent.written += data
+
+            def close(self):
+                pass
+        self.stdin = Pipe()
+
+    def kill(self):
+        self.killed = True
+
+    def poll(self):
+        return self.returncode
+
+
+real_sys, real_popen = B.sys, B.subprocess.Popen
+try:
+    fake_sys = Fake()
+    fake_sys.platform = "win32"
+    B.sys = fake_sys
+    B.subprocess.Popen = FakePopen
+    FakePopen.made = []
+    reader = Reader()
+    proc = reader._say_windows("H\u00f6rst du mich?", "de", 40)
+    check("a reader is started", proc is not None and len(FakePopen.made) == 1)
+    argv = proc.argv if proc else []
+    check("...which is powershell, with no profile and no prompt",
+          argv[:4] == ["powershell", "-NoProfile", "-NonInteractive",
+                       "-Command"], argv[:4])
+    script = argv[4] if len(argv) > 4 else ""
+    check("it uses the synthesiser .NET already has",
+          "System.Speech" in script and "SpeechSynthesizer" in script)
+    check("the rate is carried over, on that platform's own scale",
+          "$s.Rate = 4;" in script, script[:140])
+    check("a voice for the language is asked for, and failing is allowed",
+          "GetCultureInfo('de')" in script and "catch {}" in script)
+    check("no console window flashes over the page",
+          "creationflags" in (proc.kw if proc else {}))
+    check("the text goes in through stdin, base64, so quoting cannot bite",
+          proc.written == base64.b64encode("H\u00f6rst du mich?".encode()),
+          proc.written)
+    check("...and comes back out as itself, umlaut included",
+          base64.b64decode(proc.written).decode("utf-8")
+          == "H\u00f6rst du mich?")
+    check("a language that is not one is not pasted into the script",
+          "';" not in (reader._say_windows("x", "de'; rm -rf /", 0).argv[4]),
+          reader._say_windows("x", "de'; rm -rf /", 0).argv[4][:120])
+
+    # what happens when the synthesiser falls over at once
+    reader._say = proc
+    proc.returncode = 1
+    check("a reader that fell over says so rather than claiming to read",
+          reader._say_check() is False
+          and reader.said[-1] == B.UI_STRINGS["en"]["sayFailed"],
+          reader.said)
+    proc.returncode = None
+    check("...and one that is still going says nothing",
+          reader._say_check() is True)
+
+    # and stopping it
+    started = []
+    real_detached = B.QProcess.startDetached
+    try:
+        B.QProcess.startDetached = staticmethod(
+            lambda *a, **k: started.append(a))
+        reader._say = proc
+        check("stopping it kills the reader", reader.stop_aloud() is True
+              and proc.killed is True)
+        check("...and nothing is asked of a speech daemon that is not there",
+              started == [], started)
+    finally:
+        B.QProcess.startDetached = real_detached
+    looked = []
+    real_which = B.shutil.which
+    try:
+        B.shutil.which = lambda name: (looked.append(name),
+                                       "C:/Windows/" + name)[1]
+        found = B.Browser.say_tool(reader)
+    finally:
+        B.shutil.which = real_which
+    check("say_tool looks for powershell there, not for spd-say",
+          looked == ["powershell"] and found.endswith("powershell"),
+          (looked, found))
+finally:
+    B.sys, B.subprocess.Popen = real_sys, real_popen
+
+check("on this machine it is still speech-dispatcher that is looked for",
+      B.Browser.say_tool(Reader()) == (shutil.which("spd-say") or ""))
+check("the reader's words exist in both languages",
+      all(B.UI_STRINGS["en"].get(k) and B.UI_STRINGS["de"].get(k)
+          for k in ("sayStarted", "sayFailed", "sayMissing", "sayNothing")))
 
 print("\n%d checks failed" % len(fails))
 if fails:

@@ -27538,14 +27538,66 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view.reload()
         return True
 
+    #: The reader on Windows: PowerShell driving System.Speech, which is
+    #: part of .NET on every Windows and needs nothing installed. The
+    #: text arrives base64-encoded over stdin rather than inside the
+    #: command, which settles quoting and the console code page at once
+    #: -- an umlaut in a German article used to be the thing that broke
+    #: a one-line -Command. A voice for the language is asked for and
+    #: the default is kept when there is none.
+    _SAY_PS = (
+        "Add-Type -AssemblyName System.Speech;"
+        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+        "$s.Rate = %(rate)d;"
+        "try { $c = [Globalization.CultureInfo]::GetCultureInfo('%(lang)s');"
+        " $s.SelectVoiceByHints(0, 0, 0, $c) } catch {};"
+        "$t = [Text.Encoding]::UTF8.GetString("
+        "[Convert]::FromBase64String([Console]::In.ReadToEnd()));"
+        "$s.Speak($t)")
+
+    def say_tool(self):
+        """What will do the speaking here, or "" if nothing will.
+
+        spd-say is a speech-dispatcher client and is what a Linux
+        desktop has. Windows has no such program, and the browser used
+        to answer "no voice on this machine" there — on a machine whose
+        own .NET has had a speech synthesiser in it for twenty years."""
+        return shutil.which("powershell" if sys.platform == "win32"
+                            else "spd-say") or ""
+
+    def _say_windows(self, text, lang, rate):
+        """Start the Windows reader. Returns the process, or None.
+
+        Not a QProcess: QProcess gives an embedder no way to ask for
+        CREATE_NO_WINDOW, and powershell is a console program — every
+        paragraph read aloud would flash a black window over the page.
+        Popen.kill() is the same call stop_aloud already makes."""
+        import base64
+        script = self._SAY_PS % {
+            "rate": max(-10, min(10, int(rate) // 10)),
+            "lang": re.sub(r"[^A-Za-z-]", "", lang or "en") or "en"}
+        try:
+            proc = subprocess.Popen(
+                ["powershell", "-NoProfile", "-NonInteractive",
+                 "-Command", script],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            proc.stdin.write(base64.b64encode(text.encode("utf-8")))
+            proc.stdin.close()
+        except (OSError, ValueError):
+            return None
+        return proc
+
     def read_aloud(self, view=None):
         """The selection (or the article) read out by the machine's own
         voice. speech-dispatcher is what every Linux desktop has, and
-        nothing is sent anywhere: spd-say speaks on this computer."""
+        System.Speech is what Windows has; nothing is sent anywhere in
+        either case, because both speak on this computer."""
         view = view or self.current()
         if view is None or not hasattr(view, "page"):
             return False
-        if not shutil.which("spd-say"):
+        if not self.say_tool():
             self.flash(self._ui_str("sayMissing"))
             return False
         lang = str(self.config.get("translateLang", "de")).split("-")[0]
@@ -27556,6 +27608,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.flash(self._ui_str("sayNothing"))
                 return
             self.stop_aloud()
+            rate = int(self.config.get("sayRate", 0) or 0)
+            if sys.platform == "win32":
+                self._say = self._say_windows(text[:5000], lang, rate)
+                if self._say is None:
+                    self.flash(self._ui_str("sayMissing"))
+                    return
+                # the same honesty as the finished signal below: a
+                # synthesiser that fell over does so at once, so look
+                # once rather than claim it is reading
+                watch = QTimer(self)
+                watch.setSingleShot(True)
+                watch.timeout.connect(lambda: self._say_check(watch))
+                watch.start(500)
+                self.flash(self._ui_str("sayStarted"))
+                return
             try:
                 self._say = QProcess(self)
                 # spd-say is a client: when the speech daemon is not
@@ -27566,8 +27633,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     lambda code, _st: code and self.flash(
                         self._ui_str("sayFailed")))
                 self._say.start("spd-say", ["-l", lang, "-r",
-                                            str(int(self.config.get(
-                                                "sayRate", 0) or 0)),
+                                            str(rate),
                                             "-w", text[:5000]])
                 self.flash(self._ui_str("sayStarted"))
             except (OSError, RuntimeError):
@@ -27578,15 +27644,32 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             ".innerText;})()", APP_WORLD_ID, done)
         return True
 
+    def _say_check(self, timer=None):
+        """Did the Windows reader fall over as it started? (Popen only:
+        it has no signal to connect, so it is looked at once.)"""
+        if timer is not None:
+            timer.deleteLater()
+        proc = getattr(self, "_say", None)
+        code = getattr(proc, "returncode", None) if proc is not None else None
+        if code is None and proc is not None and hasattr(proc, "poll"):
+            code = proc.poll()
+        if code:
+            self.flash(self._ui_str("sayFailed"))
+            return False
+        return True
+
     def stop_aloud(self):
         proc = getattr(self, "_say", None)
         if proc is not None:
             try:
                 proc.kill()
-            except RuntimeError:
+            except (RuntimeError, OSError, ValueError):
                 pass
             self._say = None
-        if shutil.which("spd-say"):
+        if sys.platform != "win32" and shutil.which("spd-say"):
+            # the daemon keeps a queue of its own, so the client is
+            # asked to cancel it; there is no such queue on Windows,
+            # where killing the synthesiser is the whole of it
             QProcess.startDetached("spd-say", ["-C"])
         return True
 
