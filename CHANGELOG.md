@@ -2,6 +2,15 @@
 
 ## 2026-10-22 (night) — the decoder goes with the card
 
+Second correction, found while telling him to use it: **"let the system
+decide" was taking hardware decoding away.** It cleared
+`LIBVA_DRIVER_NAME` along with the variables the chooser had set — but
+that one is not the chooser's to clear: the browser's own start-up line
+sets it when an NVIDIA driver is installed, and wiping it leaves a
+machine that had hardware decoding without it. Automatic now clears
+only the five it set itself, and only a chosen card replaces the
+decoder.
+
 Reported straight after the chooser landed: YouTube **live** streams
 come out black while ordinary videos play. The browser's own start-up
 code sets `LIBVA_DRIVER_NAME=nvidia` whenever an NVIDIA driver is

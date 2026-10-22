@@ -104,8 +104,14 @@ check("...and says the NVIDIA ones must come off",
       "__NV_PRIME_RENDER_OFFLOAD" in off, off)
 on, off = B.gpu_env("auto", cards)
 check("\"let the system decide\" sets nothing", on == {}, on)
-check("...and takes every one of them off, the decoder included",
-      len(off) == 6 and "LIBVA_DRIVER_NAME" in off, off)
+check("...and takes the five it set off again",
+      len(off) == 5 and "DRI_PRIME" in off, off)
+check("...but leaves the VA-API driver the machine chose alone",
+      "LIBVA_DRIVER_NAME" not in off, off)
+keep = {"LIBVA_DRIVER_NAME": "nvidia", "DRI_PRIME": "pci-0000_01_00_0"}
+B.gpu_apply("auto", cards, keep)
+check("...so hardware decoding is not taken from a machine that had it",
+      keep == {"LIBVA_DRIVER_NAME": "nvidia"}, keep)
 # the decoder and the card that composites must be the same one: his
 # own line further up browser.py forces LIBVA_DRIVER_NAME=nvidia
 # whenever an NVIDIA driver is installed, and decoding on one card
@@ -131,8 +137,8 @@ check("applying one card clears the other's leftovers",
       env.get("DRI_PRIME") == "pci-0000_00_02_0"
       and "__GLX_VENDOR_LIBRARY_NAME" not in env, env)
 B.gpu_apply("auto", cards, env)
-check("...and going back to automatic clears all of it",
-      env == {"PATH": "/x"}, env)
+check("...and going back to automatic clears what it set",
+      env == {"PATH": "/x", "LIBVA_DRIVER_NAME": "iHD"}, env)
 
 
 print("\n(3) the window that asks")
