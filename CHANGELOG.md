@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-22 (evening) — Settings: the rail back, with ten shelves on it
+
+He did not like what the page became. The tiles, the chip strip across
+the top, the twelve merged sections and the search box that took the
+keyboard are all out, and the page is the one he had before them: the
+rail down the side with all 25 sections under their own names.
+
+What the rail gained instead is **ten shelves rather than four**.
+"General" with seventeen sections under it said nothing; now the rail
+reads **Finding things** (search, the address bar, getting around),
+**Tabs and windows**, **Looks** (appearance, toolbar, theme, look),
+**Reading and media**, **Notes, capture and downloads**, **Games and
+streaming**, **Keys and the mouse**, **Privacy**, **Advanced** and
+**The browser**. Both names of each are in English and German, and
+test_setpage.py checks that the rail has more than the four it had,
+that each shelf is named in both languages, and that none of them is
+empty.
+
+Everything else from earlier today stays: no section listed twice, the
+switches that shared an id work, the see-through cards, and "carry on"
+and the search history gone.
+
 ## 2026-10-22 — Settings: the whole page, nothing listed twice, see-through
 
 **Twenty-four sections became twelve.** The navigation was never really
