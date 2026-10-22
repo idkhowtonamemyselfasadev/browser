@@ -67,16 +67,12 @@ check("a login bounce is a hop",
       B._is_noise("https://accounts.google.com/signin"))
 check("a link wrapper is a hop", B._is_noise("https://t.co/abcd"))
 check("a page he read is not", not B._is_noise("https://gnu.org/x"))
-check("a search page says what was searched for",
-      B._search_terms("https://www.google.com/search?q=minecraft+server")
-      == "minecraft server",
-      B._search_terms("https://www.google.com/search?q=minecraft+server"))
-check("...on any site that calls it a search",
-      B._search_terms("https://modrinth.com/mods?q=sodium") == "sodium",
-      B._search_terms("https://modrinth.com/mods?q=sodium"))
-check("an ordinary page is no search",
-      B._search_terms("https://gnu.org/software/?page=2") == "",
-      B._search_terms("https://gnu.org/software/?page=2"))
+# what was searched for is not read back out of the history any more:
+# he asked for the search history gone, and that included the view
+# that mined it out of the addresses already stored
+check("nothing reads the searches back out of an address",
+      not hasattr(B, "_search_terms")
+      and not hasattr(win, "search_queries"))
 
 print("\n(3) the history, filtered")
 now = int(time.time())
@@ -118,9 +114,6 @@ check("the most visited site is the one with three pages",
       top and top[0]["host"] == "gnu.org", top[:2])
 check("a hop is never counted as a site",
       not any(r["host"] == "accounts.google.com" for r in top), top)
-queries = win.search_queries()
-check("his searches are in the list",
-      any(q["q"] == "cats" for q in queries), queries)
 stats = win.browsing_stats(7)
 check("the statistics cover seven days", len(stats["days"]) == 7)
 check("and count the pages", stats["pages"] >= 4, stats["pages"])
@@ -219,11 +212,11 @@ for v in opened:
     win.close_tab(win.tabs.indexOf(v), ask=False)
 H.spin(200)
 
-print("\n(10) carry on where you left off")
-later = win.continue_where()
-check("it offers something to carry on with", later, later)
-check("with a reason for each", all(r["why"] in ("closed", "read")
-                                   for r in later))
+print("\n(10) carry on where you left off is gone, by request")
+check("the browser does not work it out any more",
+      not hasattr(win, "continue_where"))
+check("and the start page is not offered a row for it",
+      "continue" not in json.loads(win.bridge.startExtras()))
 
 print("\n(11) tags, notes and nicknames")
 one = win.bookmark_link(srv.url("/a"), "Alpha")
@@ -507,7 +500,7 @@ check("and the days", json.loads(bridge.historyDays()), bridge.historyDays())
 check("and the virtual browsers",
       isinstance(json.loads(bridge.historySessions()), list))
 check("the most visited", json.loads(bridge.mostVisited(5)))
-check("the searches", isinstance(json.loads(bridge.searchQueries()), list))
+check("and no door to the searches", not hasattr(bridge, "searchQueries"))
 check("the statistics", json.loads(bridge.browsingStats(7))["days"])
 check("one delete door takes a list of addresses",
       bridge.deleteHistory(json.dumps({"urls": ["https://gnu.org/a"]})) == 1)
@@ -521,20 +514,16 @@ check("nonsense from the page is refused, not acted on",
       bridge.deleteHistory("not json") == 0
       and bridge.openHistoryUrls("{}") == 0)
 
-print("\n(24) the start page's two extra rows")
-win.config["startContinue"] = True
+print("\n(24) the start page's extra row")
 win.config["startRecent"] = True
 win.bookmark_link(srv.url("/a"), "Alpha")
 extras = json.loads(bridge.startExtras())
-check("the start page is offered something to carry on with",
-      extras["continue"], extras)
-check("and the bookmarks just added", extras["recent"], extras)
+check("the bookmarks just added are offered", extras["recent"], extras)
+check("and nothing offers to carry on where he left off",
+      "continue" not in extras, sorted(extras))
 win.config["startRecent"] = False
 check("the bookmark row is off unless he asks for it",
       json.loads(bridge.startExtras())["recent"] == [])
-win.config["startContinue"] = False
-check("and so is the other one",
-      json.loads(bridge.startExtras())["continue"] == [])
 
 print("\n(25) the menus are built and say what they do")
 tools = win.bookmark_tools_menu()
