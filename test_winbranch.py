@@ -265,6 +265,154 @@ check("the window icon is the .ico there and the .svg here",
 check("and this edition still ships the .svg it names",
       (HERE / "icon.svg").exists())
 
+# ---------------------------------------------------------------------
+print("\n(6) the screen stays awake there too, by the call Windows has")
+# systemd-inhibit does not exist on Windows, so the feature was simply
+# off there: keep_awake found no tool and answered False for ever.
+# Windows has one call for this - SetThreadExecutionState - and it is a
+# standing request rather than a child process.
+
+
+class FakeK32:
+    def __init__(self, answer=1):
+        self.asked = []
+        self.answer = answer
+
+    def SetThreadExecutionState(self, flags):
+        self.asked.append(flags)
+        return self.answer
+
+
+class PowerStub:
+    """Enough of a Browser for the branch: the two flag constants come
+    from the real class, so a change to them is a change to this."""
+    _WIN_AWAKE_ON = B.Browser._WIN_AWAKE_ON
+    _WIN_AWAKE_OFF = B.Browser._WIN_AWAKE_OFF
+
+    def __init__(self, k32):
+        self._k32 = k32
+
+    def _win_power(self):
+        return self._k32
+
+    # the branch under test calls this on self; the real one is what we
+    # want run, so it is borrowed from the class rather than faked
+    _keep_awake_windows = B.Browser._keep_awake_windows
+
+
+k32 = FakeK32()
+stub = PowerStub(k32)
+check("asking holds it", B.Browser._keep_awake_windows(stub, True) is True)
+check("...with ES_CONTINUOUS, the screen and the machine",
+      k32.asked == [0x80000003], [hex(a) for a in k32.asked])
+check("...and it says it is holding", stub._awake_win is True)
+check("letting go answers False",
+      B.Browser._keep_awake_windows(stub, False) is False)
+check("...by asking for nothing, which is ES_CONTINUOUS alone",
+      k32.asked[-1] == 0x80000000, hex(k32.asked[-1]))
+check("the flags are the documented ones",
+      (B.Browser._WIN_AWAKE_ON, B.Browser._WIN_AWAKE_OFF)
+      == (0x80000003, 0x80000000),
+      (hex(B.Browser._WIN_AWAKE_ON), hex(B.Browser._WIN_AWAKE_OFF)))
+
+refused = PowerStub(FakeK32(answer=0))
+check("a refusal from Windows is not reported as a hold",
+      B.Browser._keep_awake_windows(refused, True) is False)
+check("and with no kernel32 under us it answers False, never raises",
+      B.Browser._keep_awake_windows(PowerStub(None), True) is False)
+check("_win_power answers None on this machine rather than raising",
+      B.Browser._win_power(PowerStub(None)) is None)
+
+real_sys = B.sys
+try:
+    fake_sys = Fake()
+    fake_sys.platform = "win32"
+    B.sys = fake_sys
+    held = PowerStub(FakeK32())
+    held._awake_win = True
+    check("awake_holding reads that standing request on Windows",
+          B.Browser.awake_holding(held) is True)
+    held._awake_win = False
+    check("...and nothing held is nothing held",
+          B.Browser.awake_holding(held) is False)
+    sent = PowerStub(FakeK32())
+    check("keep_awake goes down that branch instead of looking for a tool",
+          B.Browser.keep_awake(sent, True) is True)
+finally:
+    B.sys = real_sys
+
+# ---------------------------------------------------------------------
+print("\n(7) an address for another program, where the shell owns them")
+# The Linux half looks for a binary by name: thunderbird, discord,
+# steam. None of those is on the PATH under that name on Windows, where
+# the register of who owns a scheme belongs to the shell - so the
+# browser used to say "nothing on this machine can open a discord:
+# address" on a machine where Discord was installed and working.
+
+
+class Teller:
+    def __init__(self):
+        self.said = []
+        self.remembered = []
+
+    def flash(self, text):
+        self.said.append(text)
+
+    def _ui_str(self, key):
+        return B.UI_STRINGS["en"][key]
+
+    def set_scheme_app(self, scheme, program, host=""):
+        self.remembered.append((scheme, program, host))
+        return program
+
+
+opened = []
+had_startfile = hasattr(os, "startfile")
+os.startfile = lambda target: opened.append(target)
+try:
+    teller = Teller()
+    got = B.Browser._open_with_shell(
+        teller, "discord://invite/abc", "discord", "example.com", ask=False)
+    check("the address goes to the shell", opened == ["discord://invite/abc"],
+          opened)
+    check("...and that is reported as who opened it", got == "windows-shell",
+          got)
+    check("...in words naming the scheme, not a program it guessed",
+          teller.said == ["Handed to Windows (discord:)"], teller.said)
+    check("nothing is remembered when it was not asked",
+          teller.remembered == [], teller.remembered)
+
+    def no_handler(target):
+        raise OSError(1155, "no application is associated")
+
+    os.startfile = no_handler
+    teller2 = Teller()
+    check("a scheme with no program behind it answers False",
+          B.Browser._open_with_shell(teller2, "nope9://x", "nope9",
+                                     ask=False) is False)
+    check("...and says so in the browser's own words",
+          teller2.said == ["Nothing on this machine can open a nope9: "
+                           "address."], teller2.said)
+finally:
+    if had_startfile:                      # pragma: no cover - not Windows
+        pass
+    else:
+        del os.startfile
+
+check("every word it says exists in both languages",
+      all(key in B.UI_STRINGS["en"] and key in B.UI_STRINGS["de"]
+          for key in ("navShellName", "navShellAsk", "navShellGave")),
+      [k for k in ("navShellName", "navShellAsk", "navShellGave")
+       if k not in B.UI_STRINGS["de"]])
+check("the German ones are German, not the English left in place",
+      B.UI_STRINGS["de"]["navShellGave"]
+      != B.UI_STRINGS["en"]["navShellGave"])
+check("open_with_app really takes that branch on Windows",
+      'if sys.platform == "win32":\n            return self._open_with_shell('
+      in SRC)
+check("...and an http address is still never handed to anything",
+      'in ("http", "https", "file", "about",' in SRC)
+
 print("\n%d checks failed" % len(fails))
 if fails:
     for f in fails:

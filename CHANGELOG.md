@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-10-22 — three features that were dead on Windows
+
+Part of the port, and all three in this file rather than the other
+edition, because they are the same feature with a different call
+underneath — and because a branch that lives only over there is a
+branch nobody here finds out about when it rots.
+
+- **An address another program owns.** The browser looks for the
+  program by name: thunderbird, discord, steam, qbittorrent. None of
+  those is on the PATH under that name on Windows, where who owns a
+  `discord:` or a `magnet:` address is kept by the shell — so the
+  browser said "nothing on this machine can open a discord: address"
+  on a machine with Discord installed and working. It asks the shell
+  there now, once per scheme and site and then remembered, exactly
+  like the other half.
+- **Keeping the screen awake while a video plays.** That went through
+  `systemd-inhibit`, which Windows does not have, so the feature was
+  simply off: the tool was never found and the answer was always no.
+  Windows has one call for it — a standing request for the screen and
+  the machine, made on the thread the window lives on and dropped the
+  moment the video stops.
+- **The graphics cards.** There is no sysfs there, so the list was
+  empty and the page had nothing to show. It asks Windows for its
+  adapters now, by name and device id. **What it does not do is
+  choose:** Windows keeps "which card does this program use" in its
+  own Graphics settings, per executable — and the executable here is
+  `python.exe`, shared with every other Python program on the machine.
+  Writing that on his behalf is not the browser's business, so the
+  page lists the cards and says where the choice lives. No window asks
+  anything there.
+
+Checked the only way Linux allows: `test_winbranch.py` is at **62
+checks** (the screen request down to the flag bits, with a counter
+where kernel32 would be; the shell hand-off with `os.startfile`
+replaced, including the no-handler answer), and `test_gpu.py` at
+**71**, reading a real PowerShell answer out of a string and proving
+that a choice sets nothing in the environment there and that an
+environment handed to `gpu_apply` comes back untouched.
+
 ## 2026-10-22 — the Windows branches of this file, checked at last
 
 The Windows edition is generated from this one, so the branches only
