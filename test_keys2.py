@@ -340,7 +340,9 @@ win.watch_page_gestures(True)
 
 print("\n(11) the mouse")
 rows = win.mouse_config()
-check("the mouse has its answers", len(rows) >= 9, sorted(rows))
+# three of them (tabDouble, tabMiddle, barDouble) were read by
+# nothing and are gone; what is left is what the mouse really has
+check("the mouse has its answers", len(rows) >= 8, sorted(rows))
 check("middle-click autoscroll is off by default",
       rows["autoScroll"] is False)
 check("...because middle-click pastes on this desktop", True)
@@ -350,32 +352,43 @@ check("a switch can be set", win.set_mouse("superDrag", True) is True)
 check("...and it reaches the page",
       (H.load(view, srv.url("/p")), H.spin(800),
        js("(window.__navWant||{}).superDrag", APP))[2] is True)
-check("a click action can be chosen",
-      win.set_mouse("tabDouble", "duplicate") == "duplicate")
-check("...and one that is not offered is refused",
-      win.set_mouse("tabDouble", "explode") is False)
+# The tab-strip clicks had two settings each and two implementations:
+# mouse.tabDouble, read by tab_click_action, which the strip never
+# called -- and tabDoubleClick, read by the strip's own event filter.
+# The dead half is gone; this is the half that runs.
+win.config["tabDoubleClick"] = "duplicate"
 before = win.tabs.count()
-check("...and a double-click really does it",
-      win.tab_click_action("double", win.tabs.indexOf(second))
-      == "duplicate")
+check("a double-click on a tab does what he picked",
+      win._strip_mouse("tabDoubleClick", "nothing",
+                       win.tabs.indexOf(second)) is True)
 check("...which made a tab", win.tabs.count() == before + 1,
       (before, win.tabs.count()))
 win.close_tab(win.tabs.count() - 1)
-win.set_mouse("tabMiddle", "close")
+win.config["tabMiddleClick"] = "close"
 spare = win.new_tab(url=None)
 H.spin(300)
 before = win.tabs.count()
 check("a middle-click closes a tab",
-      win.tab_click_action("middle", win.tabs.indexOf(spare)) == "close")
+      win._strip_mouse("tabMiddleClick", "close",
+                       win.tabs.indexOf(spare)) is True)
 check("...and it is gone", win.tabs.count() == before - 1,
       (before, win.tabs.count()))
-check("the empty strip can be given an action",
-      win.set_mouse("barDouble", "newtab") == "newtab")
+win.config["stripDoubleClick"] = "newtab"
 before = win.tabs.count()
-check("...and it does it", win.bar_click_action() == "newtab"
+check("the empty strip opens a tab",
+      win._strip_mouse("stripDoubleClick", "newtab", -1) is True
       and win.tabs.count() == before + 1,
       (before, win.tabs.count()))
 win.close_tab(win.tabs.count() - 1)
+check("and the dead pair is really gone",
+      not hasattr(win, "tab_click_action")
+      and not hasattr(win, "bar_click_action")
+      and "tabDouble" not in win.mouse_config())
+cfg = {"mouse": {"tabDouble": "pin"}}
+B._migrate_tabclick_config(cfg)
+check("...with what he picked in it handed to the one that works",
+      cfg.get("tabDoubleClick") == "pin"
+      and "tabDouble" not in cfg["mouse"], cfg)
 check("a wheel step can be set", win.set_mouse("wheelStep", 120) == 120)
 check("...and the page is told",
       (H.load(view, srv.url("/p")), H.spin(800),
@@ -485,7 +498,7 @@ page_text = Path("settings.html").read_text()
 for ident in ("layoutkeys", "mrutabs", "vimkeys", "readlinekeys",
               "keepdrafts", "keyguard", "keysthrough", "keysequences",
               "externaleditor", "boundscript", "mouseswitches",
-              "tabdouble", "tabmiddle", "bardouble", "wheelstep",
+              "tabdouble", "tabmiddle", "wheelstep",
               "keystep", "globalbinds"):
     check("Settings has a row for " + ident,
           ('id="%s"' % ident) in page_text, ident)

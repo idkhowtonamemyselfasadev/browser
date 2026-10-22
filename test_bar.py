@@ -519,33 +519,25 @@ check("a keyword whose address takes words uses them",
       == "https://mods.test/?q=sodium",
       win._resolve_typed("mm sodium"))
 
-print("\n(20) the searches page")
-win.config["searchLogOn"] = True
-win.clear_search_log()
-win._remember_search("mods for 1.20")
-win._remember_search("sodium")
-rows = win.search_rows()
-check("a search is written down", len(rows) == 2, rows)
-check("...newest first", rows[0]["q"] == "sodium", rows[:2])
-check("...with the engine that took it", rows[0].get("engine"), rows[:1])
-check("a word filters the list",
-      len(win.search_rows(text="mods")) == 1,
-      win.search_rows(text="mods"))
-check("the page exists", (HERE / "searches.html").exists())
-check("it is one of the browser's own pages",
-      B.is_internal_page(QUrl.fromLocalFile(str(HERE / "searches.html")))
-      is True)
-check("clearing works", win.clear_search_log() is True
-      and win.search_rows() == [])
-win.config["searchLogOn"] = False
-win._remember_search("not logged")
-check("with the switch off nothing is written", win.search_rows() == [])
-win.config["searchLogOn"] = True
+print("\n(20) the searches page is gone, by request")
+check("the browser does not write searches down any more",
+      not any(hasattr(win, name) for name in
+              ("search_log", "note_search_row", "search_rows",
+               "clear_search_log", "open_searches")),
+      [n for n in ("search_log", "note_search_row", "search_rows",
+                   "clear_search_log", "open_searches") if hasattr(win, n)])
+check("...and the page itself is not there", not (HERE / "searches.html").exists())
+check("an empty bar offers the clipboard and nothing he searched for",
+      all("\u2b8c" in row for row in win.empty_bar_rows()),
+      win.empty_bar_rows())
+cfg = {"searchLog": [{"q": "old"}], "recentSearches": ["old"],
+       "searchLogOn": True, "recentSearchList": True}
+B._migrate_drop_searches(cfg)
+check("and a config that still holds them has them taken out", cfg == {}, cfg)
 
 print("\n(21) the browser's own pages all get their bridge")
-check("the list is one list now", len(B.OWN_PAGES) >= 10, B.OWN_PAGES)
-for name in ("notes.html", "player.html", "mictest.html",
-             "searches.html"):
+check("the list is one list now", len(B.OWN_PAGES) >= 9, B.OWN_PAGES)
+for name in ("notes.html", "player.html", "mictest.html"):
     check(name + " is on it",
           B.is_internal_page(QUrl.fromLocalFile(str(HERE / name)))
           is True)
@@ -713,7 +705,7 @@ check("there is a section for the bar",
       'data-desc="descBar"' in page_text)
 for ident in ("barprogress", "bardimpath", "bardecode", "barhidescheme",
               "barinline", "barlock", "barcopybtn", "barclearbtn",
-              "barqrbtn", "barbottom", "searchlogon", "moneyrates",
+              "barqrbtn", "barbottom", "moneyrates",
               "barrows", "bartextsize", "privateengine",
               "langenginestext", "barsourcestext", "enginestext"):
     check("Settings has a row for " + ident, ('id="%s"' % ident)
@@ -728,10 +720,10 @@ need = ["barMenu", "barNotSecure", "barLookalike", "barCertLook",
         "barCopyTip", "barClearTip", "barQrTip", "barAnswerCopied",
         "barDidYouMean", "barSearchSite", "barBackground",
         "barKeywordTitle", "barNeverSuggest", "barEngines",
-        "searchesTitle", "searchesClear", "barProgressName",
+        "barProgressName",
         "barDimPathName", "barDecodeName", "barInlineName",
         "barRowsName", "barTextSizeName", "barBottomName",
-        "searchLogName", "moneyRatesName", "enginesName", "descBar"]
+        "moneyRatesName", "enginesName", "descBar"]
 missing_en = [k for k in need if not B.UI_STRINGS["en"].get(k)]
 missing_de = [k for k in need if not B.UI_STRINGS["de"].get(k)]
 check("every new word has an English", missing_en == [], missing_en)
@@ -750,7 +742,7 @@ ids = [r["id"] for r in registry]
 check("no two actions share an id", len(ids) == len(set(ids)),
       [i for i in ids if ids.count(i) > 1])
 for wanted in ("barcopyurl", "barqrcode", "barsiteinfo", "barengines",
-               "barsearches", "barkeyword", "baropensearch", "barbottom"):
+               "barkeyword", "baropensearch", "barbottom"):
     check("there is an action for " + wanted, wanted in ids)
 
 print("\n(29) the test rig cleans up after itself")

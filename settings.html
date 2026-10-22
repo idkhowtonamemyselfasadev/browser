@@ -524,6 +524,74 @@
      couple of them a ring that cannot be seen at all. */
   ::selection { background: #cdd6f4; color: #000000; }
   :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+
+  /* ---- what shows through ----
+     The browser's window can be translucent (the glass look asks for an
+     alpha-capable window), and a Settings page painted as a solid slab
+     threw all of that away before it reached the screen. So the
+     furniture here is the palette's own colours at an alpha, over a
+     blur that keeps what sits on top of them readable: the rail, the
+     search strip and every card let a little of what is behind them
+     through, and under the glass look the page itself does, all the
+     way to the desktop.
+
+     Every colour below is still a literal from the palette. The script
+     that repaints one of our own pages swaps the rgb triple and keeps
+     the alpha exactly as written, so all 114 themes come through this
+     unchanged -- and test_contrast.py measures the pairs in each of
+     them. Pure black is the one exception the painter makes (it only
+     maps it at alpha .8 and over), which is why the see-through
+     surfaces are drawn in the palette's own dark greys instead. */
+  #rail {
+    background: rgba(13, 13, 18, .55);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+  }
+  #topbar {
+    background: rgba(10, 10, 13, .62);
+    backdrop-filter: blur(18px) saturate(130%);
+    -webkit-backdrop-filter: blur(18px) saturate(130%);
+  }
+  .panel {
+    background: rgba(13, 13, 18, .58);
+    backdrop-filter: blur(16px) saturate(125%);
+    -webkit-backdrop-filter: blur(16px) saturate(125%);
+    border-color: rgba(108, 112, 134, .34);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  /* a card is an object now, so it casts the shadow of one */
+  .panel { box-shadow: 0 10px 28px rgba(0, 0, 0, .35); }
+  .content > .inner > .panel + .panel { margin-top: 18px; }
+  /* the loose rows outside a card, and the controls in both */
+  .wrow { border-radius: 9px; }
+  .panel .wrow, .panel .row { border-radius: 0; }
+  #navfilter, #showall, .wrow input[type="text"], .wrow input[type="number"],
+  .wrow select, .wrow textarea, textarea, button {
+    border-radius: 8px;
+  }
+  .card { border-radius: 10px; }
+
+  /* the glass look: the window is see-through, so the page gets out of
+     the way as far as it can and still be read */
+  :root[data-look="glass"] body { background: rgba(10, 10, 13, .45); }
+  :root[data-look="glass"] #rail { background: rgba(13, 13, 18, .34); }
+  :root[data-look="glass"] #topbar { background: rgba(10, 10, 13, .38); }
+  :root[data-look="glass"] .panel { background: rgba(13, 13, 18, .46); }
+  /* flat says square and quiet, and means it */
+  :root[data-look="flat"] .panel,
+  :root[data-look="flat"] .wrow,
+  :root[data-look="flat"] .card,
+  :root[data-look="flat"] #navfilter,
+  :root[data-look="flat"] #showall,
+  :root[data-look="flat"] textarea,
+  :root[data-look="flat"] button { border-radius: 0; }
+  :root[data-look="flat"] .panel {
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+    box-shadow: none; background: #0d0d12;
+  }
+  :root[data-look="macos"] .panel { border-radius: 16px; }
+  :root[data-look="macos"] .wrow { border-radius: 11px; }
 </style>
 </head>
 <body>
@@ -649,164 +717,6 @@
             <span class="wsub" id="t_barBottomHint">The whole chrome, address bar included.</span>
           </span>
           <input type="checkbox" id="barbottom"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_searchLogName">Keep a list of my searches</span>
-            <span class="wsub" id="t_searchLogHint">On this machine, for the searches page. Never from a private tab.</span>
-          </span>
-          <input type="checkbox" id="searchlogon"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_moneyRatesName">Fetch exchange rates for “20 usd in eur”</span>
-            <span class="wsub" id="t_moneyRatesHint">Once a day at most, from the European Central Bank’s own daily file. Off = the answer says so rather than guessing.</span>
-          </span>
-          <input type="checkbox" id="moneyrates"><span class="wsw"></span>
-        </label>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barRowsName">Rows in the drop-down</span>
-            <span class="wsub" id="t_barRowsHint">How many suggestions to show.</span>
-          </span>
-          <input type="number" id="barrows" min="3" max="30"
-                 style="width:100px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barTextSizeName">Address bar text size</span>
-            <span class="wsub" id="t_barTextSizeHint">Per cent, apart from the rest of the chrome.</span>
-          </span>
-          <input type="number" id="bartextsize" min="70" max="200"
-                 style="width:100px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_privateEngineName">Private tabs search with</span>
-            <span class="wsub" id="t_privateEngineHint">The name of an engine, or empty for the usual one.</span>
-          </span>
-          <input type="text" id="privateengine" style="width:250px"
-                 placeholder="duckduckgo">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_langEnginesName">German searches go to</span>
-            <span class="wsub" id="t_langEnginesHint">An engine name for de and one for en, as de=name en=name. Empty = always the default.</span>
-          </span>
-          <input type="text" id="langenginestext" style="width:250px"
-                 placeholder="de=google en=duckduckgo">
-        </div>
-        <div class="wrow" style="align-items:flex-start">
-          <span class="wlabel">
-            <span class="wname" id="t_barSourcesName">What the drop-down may suggest</span>
-            <span class="wsub" id="t_barSourcesHint">history, bookmarks, tabs, answers, search, settings, windows — leave out the ones you do not want.</span>
-          </span>
-          <textarea id="barsourcestext" rows="3" spellcheck="false"
-                    style="width:260px"></textarea>
-        </div>
-        <div class="wrow" style="align-items:flex-start">
-          <span class="wlabel">
-            <span class="wname" id="t_enginesName">My own search engines</span>
-            <span class="wsub" id="t_enginesHint">One a line: name|https://example.com/?q=%s|keyword. The address has to say where the words go.</span>
-          </span>
-          <textarea id="enginestext" rows="3" spellcheck="false"
-                    style="width:260px"></textarea>
-        </div>
-        <div class="wrow"
-             style="justify-content:flex-end">
-          <button id="barsave" data-str="pwSaveBtn">Save</button>
-        </div>
-        <div id="barsavemsg" class="urlmsg"></div>
-      </div>
-    </section>
-
-    <section data-group="gen" data-desc="descBar">
-      <h2 id="t_barMenu2">The address bar</h2>
-      <div class="panel">
-        <h2 class="sub" id="t_barMenu">The address bar</h2>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barProgressName">Show the loading progress in the address bar</span>
-            <span class="wsub" id="t_barProgressHint">A thin line along the bottom of the bar.</span>
-          </span>
-          <input type="checkbox" id="barprogress"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barDimPathName">Show the domain bright and the rest dim</span>
-            <span class="wsub" id="t_barDimPathHint">So paypal.com.evil.ru reads as evil.ru. Only while you are not editing the address.</span>
-          </span>
-          <input type="checkbox" id="bardimpath"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barDecodeName">Show addresses as readable text</span>
-            <span class="wsub" id="t_barDecodeHint">%20 and %C3%BC and punycode shown as the letters they stand for. Copying still gives the real address.</span>
-          </span>
-          <input type="checkbox" id="bardecode"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barHideSchemeName">Leave out https:// and www.</span>
-            <span class="wsub" id="t_barHideSchemeHint">The address comes back in full the moment you start editing.</span>
-          </span>
-          <input type="checkbox" id="barhidescheme"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barInlineName">Complete a domain as I type</span>
-            <span class="wsub" id="t_barInlineHint">From the sites you actually visit, with the rest selected.</span>
-          </span>
-          <input type="checkbox" id="barinline"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barLockName">Show the lock in the address bar</span>
-            <span class="wsub" id="t_barLockHint">Click it for what the page is allowed to do.</span>
-          </span>
-          <input type="checkbox" id="barlock"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barCopyBtnName">A copy button in the address bar</span>
-            <span class="wsub" id="t_barCopyBtnHint">At the right-hand end.</span>
-          </span>
-          <input type="checkbox" id="barcopybtn"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barClearBtnName">A clear button while editing</span>
-            <span class="wsub" id="t_barClearBtnHint">An × at the right-hand end.</span>
-          </span>
-          <input type="checkbox" id="barclearbtn"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barKeyName">Show the key in the address bar</span>
-            <span class="wsub" id="t_barKeyTip">A login is saved for this site</span>
-          </span>
-          <input type="checkbox" id="barkeybtn2"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barQrBtnName">A QR button in the address bar</span>
-            <span class="wsub" id="t_barQrBtnHint">Shows the address as a QR code to point a phone at.</span>
-          </span>
-          <input type="checkbox" id="barqrbtn"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_barBottomName">Put the toolbar under the page</span>
-            <span class="wsub" id="t_barBottomHint">The whole chrome, address bar included.</span>
-          </span>
-          <input type="checkbox" id="barbottom"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_searchLogName">Keep a list of my searches</span>
-            <span class="wsub" id="t_searchLogHint">On this machine, for the searches page. Never from a private tab.</span>
-          </span>
-          <input type="checkbox" id="searchlogon"><span class="wsw"></span>
         </label>
         <label class="wrow">
           <span class="wlabel">
@@ -1330,18 +1240,6 @@
           <input type="checkbox" id="mousegestures"><span class="wsw"></span>
         </label>
         <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_mouseTabDouble">Double-click on a tab</span></span>
-          <select id="tabdouble"></select>
-        </div>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_mouseTabMiddle">Middle-click on a tab</span></span>
-          <select id="tabmiddle"></select>
-        </div>
-        <div class="wrow">
-          <span class="wlabel"><span class="wname" id="t_mouseBarDouble">Double-click on the empty strip</span></span>
-          <select id="bardouble"></select>
-        </div>
-        <div class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_mouseWheelStep">Wheel step</span>
             <span class="wsub" id="t_mouseStepHint"></span>
@@ -1359,6 +1257,20 @@
         <div class="wsub" id="t_keyGlobalHint"></div>
         <div class="wsub" id="globalbinds" style="white-space:pre-wrap;font-family:monospace"></div>
       </div>
+      <div class="panel">
+        <h2 class="sub" id="t_keysTitle">Keyboard shortcuts</h2>
+        <div class="group">
+                                <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_mouseButtonsName">Side mouse buttons go back and forward</span>
+          </span>
+          <input type="checkbox" id="mousebuttons"><span class="wsw"></span>
+        </label>
+        </div>
+        <div id="keyseditor" class="group"></div>
+        <div class="wrow"><button id="keysreset" data-str="tbReset">Back to the usual set</button></div>
+      </div>
+
     </section>
 
     <section data-group="gen" data-desc="descRecord">
@@ -1419,6 +1331,43 @@
         </div>
         </div>
       </div>
+      <div class="panel">
+        <h2 class="sub" id="t_shotMenu">Screenshot</h2>
+        <div class="group">
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotDirName">Where screenshots go</span>
+            <span class="wsub" id="t_shotDirHint">Empty = a Screenshots folder beside your downloads.</span>
+          </span>
+          <input type="text" id="shotdir" placeholder="~/Pictures" style="min-width:220px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotNameName">Screenshot file name</span>
+            <span class="wsub" id="t_shotNameHint">strftime marks, {title} and {site}.</span>
+          </span>
+          <input type="text" id="shotname" placeholder="shot-%Y%m%d-%H%M%S" style="min-width:220px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotFormatName">Screenshot format</span>
+          </span>
+          <select id="shotformat">
+            <option value="png">PNG</option>
+            <option value="jpeg">JPEG</option>
+            <option value="webp">WebP</option>
+          </select>
+        </div>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotRedactName">Blur password fields in captures</span>
+            <span class="wsub" id="t_shotRedactHint">What is typed in a password field is blurred before the picture is taken.</span>
+          </span>
+          <input type="checkbox" id="shotredact"><span class="wsw"></span>
+        </label>
+        </div>
+      </div>
+
     </section>
 
     <section data-group="adv" data-desc="descPerf">
@@ -1477,7 +1426,7 @@
           <span class="wlabel">
             <span class="wname" id="t_perfPauseHidden">Pause animations in tabs nobody is looking at</span>
           </span>
-          <input type="checkbox" id="pausehidden"><span class="wsw"></span>
+          <input type="checkbox" id="perfpausehidden"><span class="wsw"></span>
         </label>
         <label class="wrow">
           <span class="wlabel">
@@ -1722,6 +1671,110 @@
         </label>
         </div>
       </div>
+      <div class="panel">
+        <h2 class="sub" id="t_readMenu2">Reading and text</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readResumeName">Open long pages where I stopped</span>
+            <span class="wsub" id="t_readResumeHint">The place is kept for the last fifty pages.</span>
+          </span>
+          <input type="checkbox" id="readresume"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readProgressName">Show how far down the page you are</span>
+            <span class="wsub" id="t_readProgressHint">A thin line at the top.</span>
+          </span>
+          <input type="checkbox" id="readprogress"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readFootnotesName">Show footnotes where the mark is</span>
+            <span class="wsub" id="t_readFootnotesHint">Hovering a reference shows it instead of jumping.</span>
+          </span>
+          <input type="checkbox" id="readfootnotes"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readAbbrName">Mark the words a page explains</span>
+            <span class="wsub" id="t_readAbbrHint">A dotted underline and a tooltip.</span>
+          </span>
+          <input type="checkbox" id="readabbr"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readCodeName">Colour plain code blocks</span>
+            <span class="wsub" id="t_readCodeHint">Code the site left grey gets the theme’s colours.</span>
+          </span>
+          <input type="checkbox" id="readcode"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readNoLineNumbersName">Copy code without the line numbers</span>
+            <span class="wsub" id="t_readNoLineNumbersHint">Logs and pastebins put them in the text.</span>
+          </span>
+          <input type="checkbox" id="readnolinenumbers"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readSelBarName">A small bar over selected text</span>
+            <span class="wsub" id="t_readSelBarHint">Copy, search, translate, define and highlight.</span>
+          </span>
+          <input type="checkbox" id="readselbar"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readDraftsName">Keep what I type in page text boxes</span>
+            <span class="wsub" id="t_readDraftsHint">So a reload does not lose a long post.</span>
+          </span>
+          <input type="checkbox" id="readdrafts"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_readPlainPasteName">Ctrl+Shift+V pastes without formatting</span>
+            <span class="wsub" id="t_readPlainPasteHint">And the page may not dress it up again.</span>
+          </span>
+          <input type="checkbox" id="readplainpaste"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_renderFilesName">Show plain files properly</span>
+            <span class="wsub" id="t_renderFilesHint">A .md rendered, a .log with line numbers, a feed as a list.</span>
+          </span>
+          <input type="checkbox" id="renderfiles"><span class="wsw"></span>
+        </label>
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_spellLangsName">Spell check in</span>
+            <span class="wsub" id="t_spellLangsHint">Two at once is fine. Comma-separated, e.g. de-DE, en-GB.</span>
+          </span>
+          <input type="text" id="spelllangs" style="flex:1;min-width:180px"
+                 placeholder="de-DE, en-GB">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_dictionarySiteName">Dictionary site</span>
+            <span class="wsub" id="t_dictionarySiteHint">Used when no offline dictionary is installed. {} is the word.</span>
+          </span>
+          <input type="text" id="dictsite" style="flex:1;min-width:180px"
+                 placeholder="https://www.dict.cc/?s={}">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_externalEditorName">My text editor</span>
+            <span class="wsub" id="t_externalEditorHint">Empty = whichever of kate, gedit, nvim or vim is installed.</span>
+          </span>
+          <input type="text" id="exteditor" style="flex:1;min-width:180px"
+                 placeholder="kate">
+        </div>
+        <div class="wrow" style="justify-content:flex-end">
+          <button id="readsave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="readsavemsg" class="urlmsg"></div>
+      </div>
+
     </section>
 
     <section data-group="gen" data-desc="descToolbar">
@@ -1890,689 +1943,8 @@
       </div>
 
       <div class="panel">
-        <h2 class="sub" id="t_newTabPage">What a new tab shows</h2>
-        <div class="cards" id="newtabpage"></div>
-        <div class="wrow" id="newtaburlrow">
-          <input type="text" id="newtaburl" placeholder="example.com" style="flex:1;min-width:200px">
-          <button id="newtaburlsave" data-str="pwSaveBtn">Save</button>
-        </div>
-        <div id="newtaburlmsg" class="urlmsg"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_newTabPos">Where a new tab opens</h2>
-        <div class="cards" id="newtabpos"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_dlMenu">Downloads</h2>
-        <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_sortDownloadsName">Sort downloads into folders</span>
-            <span class="wsub" id="t_sortDownloadsHint">Pictures, Video, Music, Documents, Archives, Programs, Mods.</span>
-          </span>
-          <input type="checkbox" id="sortdownloads"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_openAfterName">Open the folder when a download finishes</span>
-          </span>
-          <input type="checkbox" id="openafter"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_indexPagesName">Search history by what was on the page</span>
-            <span class="wsub" id="t_indexPagesHint">Keeps a few hundred words of each page, on this computer. Never from a private tab.</span>
-          </span>
-          <input type="checkbox" id="indexpages"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_blockNotifName">Never ask about notifications</span>
-            <span class="wsub" id="t_blockNotifHint">Sites asking to send notifications are told no without a card.</span>
-          </span>
-          <input type="checkbox" id="blocknotif"><span class="wsw"></span>
-        </label>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_keysTitle">Keyboard shortcuts</h2>
-        <div class="group">
-                                <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_mouseButtonsName">Side mouse buttons go back and forward</span>
-          </span>
-          <input type="checkbox" id="mousebuttons"><span class="wsw"></span>
-        </label>
-        </div>
-        <div id="keyseditor" class="group"></div>
-        <div class="wrow"><button id="keysreset" data-str="tbReset">Back to the usual set</button></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_privMenu">Privacy</h2>
-        <div class="group">
-                <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_blockLocalName">Keep websites off the home network</span>
-            <span class="wsub" id="t_blockLocalHint">A page on the internet may not reach 192.168.x.x, localhost or a .local name.</span>
-          </span>
-          <input type="checkbox" id="blocklocal"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_stripTrackingName">Strip tracking from addresses</span>
-            <span class="wsub" id="t_stripTrackingHint">utm_*, fbclid and the rest are taken off before the request goes out.</span>
-          </span>
-          <input type="checkbox" id="striptracking"><span class="wsw"></span>
-        </label>
-                </div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_shotMenu">Screenshot</h2>
-        <div class="group">
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotDirName">Where screenshots go</span>
-            <span class="wsub" id="t_shotDirHint">Empty = a Screenshots folder beside your downloads.</span>
-          </span>
-          <input type="text" id="shotdir" placeholder="~/Pictures" style="min-width:220px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotNameName">Screenshot file name</span>
-            <span class="wsub" id="t_shotNameHint">strftime marks, {title} and {site}.</span>
-          </span>
-          <input type="text" id="shotname" placeholder="shot-%Y%m%d-%H%M%S" style="min-width:220px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotFormatName">Screenshot format</span>
-          </span>
-          <select id="shotformat">
-            <option value="png">PNG</option>
-            <option value="jpeg">JPEG</option>
-            <option value="webp">WebP</option>
-          </select>
-        </div>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotRedactName">Blur password fields in captures</span>
-            <span class="wsub" id="t_shotRedactHint">What is typed in a password field is blurred before the picture is taken.</span>
-          </span>
-          <input type="checkbox" id="shotredact"><span class="wsw"></span>
-        </label>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_closeFocusName">After closing a tab, go to</h2>
-        <div class="cards" id="closefocus"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_mediaMenu2">Video and sound</h2>
-        <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_mediaResumeName">Resume where I left a video</span>
-            <span class="wsub" id="t_mediaResumeHint">Per video, on this computer.</span>
-          </span>
-          <input type="checkbox" id="mediaresume"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_capOnName">Start videos with captions on</span>
-            <span class="wsub" id="t_capOnHint">Where the video has them.</span>
-          </span>
-          <input type="checkbox" id="capon"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_hideCursorName">Hide the mouse over a playing video</span>
-            <span class="wsub" id="t_hideCursorHint">After two seconds of not moving.</span>
-          </span>
-          <input type="checkbox" id="hidecursor"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_pauseHiddenName">Pause a video when its tab is hidden</span>
-            <span class="wsub" id="t_pauseHiddenHint">And start it again when you come back.</span>
-          </span>
-          <input type="checkbox" id="pausehidden"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_holdFastName">Hold . to run at double speed</span>
-            <span class="wsub" id="t_holdFastHint">On any video, as long as the key is down.</span>
-          </span>
-          <input type="checkbox" id="holdfast"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_heldEmbedsName">Embedded players load on a click</span>
-            <span class="wsub" id="t_heldEmbedsHint">A YouTube or Twitch embed stays a placeholder until pressed.</span>
-          </span>
-          <input type="checkbox" id="heldembeds"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_spoilerName">Hide video lengths and progress</span>
-            <span class="wsub" id="t_spoilerHint">No duration badges, no watched bars, no previews.</span>
-          </span>
-          <input type="checkbox" id="spoilershield"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shortsPlayerName">Open Shorts in the normal player</span>
-            <span class="wsub" id="t_shortsPlayerHint">With a seek bar and the speed control.</span>
-          </span>
-          <input type="checkbox" id="shortsplayer"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_trackNoticeName">Say when the track changes</span>
-            <span class="wsub" id="t_trackNoticeHint">A desktop notification with title and artist.</span>
-          </span>
-          <input type="checkbox" id="tracknotice"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_pauseCallsName">Pause the music during a call</span>
-            <span class="wsub" id="t_pauseCallsHint">When a tab starts using the microphone.</span>
-          </span>
-          <input type="checkbox" id="pausecalls"><span class="wsw"></span>
-        </label>
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_duckName">Quieten the other tabs</span>
-            <span class="wsub" id="t_duckHint">0 = off, 100 = unchanged.</span>
-          </span>
-          <input type="number" id="ducklevel" min="0" max="100"
-                 style="width:90px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_capLangName">Caption language</span>
-            <span class="wsub" id="t_capLangHint">A code like de or en.</span>
-          </span>
-          <input type="text" id="caplang" style="width:110px"
-                 placeholder="de">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_capSizeName">Caption size</span>
-            <span class="wsub" id="t_capSizeHint">Per cent. 0 = as the site has it.</span>
-          </span>
-          <input type="number" id="capsize" min="0" max="300"
-                 style="width:90px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_capBottomName">Lift the captions</span>
-            <span class="wsub" id="t_capBottomHint">Pixels from the bottom.</span>
-          </span>
-          <input type="number" id="capbottom" min="0" max="400"
-                 style="width:90px">
-        </div>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_mprisName">Answer the keyboard’s media keys</span>
-            <span class="wsub" id="t_mprisHint">The desktop may ask what is playing and pause it (MPRIS over D-Bus). Nothing leaves the machine.</span>
-          </span>
-          <input type="checkbox" id="mprison"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_awakeName">Keep the screen awake while a video plays</span>
-            <span class="wsub" id="t_awakeHint">Only while something is actually playing, and only through systemd-inhibit.</span>
-          </span>
-          <input type="checkbox" id="keepawake"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_pauseLockName">Pause what is playing when the browser locks</span>
-            <span class="wsub" id="t_pauseLockHint">Also when you have been away for the idle time.</span>
-          </span>
-          <input type="checkbox" id="pauseonlock"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_sponsorName">Skip the sponsor in a video</span>
-            <span class="wsub" id="t_sponsorHint">Asks SponsorBlock about this video. Only the first four characters of its hashed id are sent, and only when this is on.</span>
-          </span>
-          <input type="checkbox" id="sponsorskip"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_lyricsName">Fetch lyrics</span>
-            <span class="wsub" id="t_lyricsHint">Asks lrclib using title, artist and length. Off = nothing is asked.</span>
-          </span>
-          <input type="checkbox" id="lyricson"><span class="wsw"></span>
-        </label>
-        <div class="wrow" style="justify-content:flex-end">
-          <button id="mediasave" data-str="pwSaveBtn">Save</button>
-        </div>
-        <div id="mediasavemsg" class="urlmsg"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_readMenu2">Reading and text</h2>
-        <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readResumeName">Open long pages where I stopped</span>
-            <span class="wsub" id="t_readResumeHint">The place is kept for the last fifty pages.</span>
-          </span>
-          <input type="checkbox" id="readresume"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readProgressName">Show how far down the page you are</span>
-            <span class="wsub" id="t_readProgressHint">A thin line at the top.</span>
-          </span>
-          <input type="checkbox" id="readprogress"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readFootnotesName">Show footnotes where the mark is</span>
-            <span class="wsub" id="t_readFootnotesHint">Hovering a reference shows it instead of jumping.</span>
-          </span>
-          <input type="checkbox" id="readfootnotes"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readAbbrName">Mark the words a page explains</span>
-            <span class="wsub" id="t_readAbbrHint">A dotted underline and a tooltip.</span>
-          </span>
-          <input type="checkbox" id="readabbr"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readCodeName">Colour plain code blocks</span>
-            <span class="wsub" id="t_readCodeHint">Code the site left grey gets the theme’s colours.</span>
-          </span>
-          <input type="checkbox" id="readcode"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readNoLineNumbersName">Copy code without the line numbers</span>
-            <span class="wsub" id="t_readNoLineNumbersHint">Logs and pastebins put them in the text.</span>
-          </span>
-          <input type="checkbox" id="readnolinenumbers"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readSelBarName">A small bar over selected text</span>
-            <span class="wsub" id="t_readSelBarHint">Copy, search, translate, define and highlight.</span>
-          </span>
-          <input type="checkbox" id="readselbar"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readDraftsName">Keep what I type in page text boxes</span>
-            <span class="wsub" id="t_readDraftsHint">So a reload does not lose a long post.</span>
-          </span>
-          <input type="checkbox" id="readdrafts"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_readPlainPasteName">Ctrl+Shift+V pastes without formatting</span>
-            <span class="wsub" id="t_readPlainPasteHint">And the page may not dress it up again.</span>
-          </span>
-          <input type="checkbox" id="readplainpaste"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_renderFilesName">Show plain files properly</span>
-            <span class="wsub" id="t_renderFilesHint">A .md rendered, a .log with line numbers, a feed as a list.</span>
-          </span>
-          <input type="checkbox" id="renderfiles"><span class="wsw"></span>
-        </label>
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_spellLangsName">Spell check in</span>
-            <span class="wsub" id="t_spellLangsHint">Two at once is fine. Comma-separated, e.g. de-DE, en-GB.</span>
-          </span>
-          <input type="text" id="spelllangs" style="flex:1;min-width:180px"
-                 placeholder="de-DE, en-GB">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_dictionarySiteName">Dictionary site</span>
-            <span class="wsub" id="t_dictionarySiteHint">Used when no offline dictionary is installed. {} is the word.</span>
-          </span>
-          <input type="text" id="dictsite" style="flex:1;min-width:180px"
-                 placeholder="https://www.dict.cc/?s={}">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_externalEditorName">My text editor</span>
-            <span class="wsub" id="t_externalEditorHint">Empty = whichever of kate, gedit, nvim or vim is installed.</span>
-          </span>
-          <input type="text" id="exteditor" style="flex:1;min-width:180px"
-                 placeholder="kate">
-        </div>
-        <div class="wrow" style="justify-content:flex-end">
-          <button id="readsave" data-str="pwSaveBtn">Save</button>
-        </div>
-        <div id="readsavemsg" class="urlmsg"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_deskMenu">Notes and tools</h2>
-        <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_snippetsName">Text snippets</span>
-            <span class="wsub" id="t_snippetsHint">Short keys that become longer text while you type.</span>
-          </span>
-          <input type="checkbox" id="snippets"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_clipHistoryName">Remember what I copy</span>
-            <span class="wsub" id="t_clipHistoryHint">In memory only, never from a private tab. Off by default.</span>
-          </span>
-          <input type="checkbox" id="cliphistory"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_desktopNotifyName">Use desktop notifications</span>
-            <span class="wsub" id="t_desktopNotifyHint">Through notify-send when it is installed.</span>
-          </span>
-          <input type="checkbox" id="desktopnotify"><span class="wsw"></span>
-        </label>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_breakAfterName">Remind me to take a break after</span>
-            <span class="wsub" id="t_breakAfterHint">Minutes of actually using the browser. 0 = never.</span>
-          </span>
-          <input type="number" id="breakafter" min="0" max="600"
-                 style="width:90px">
-        </div>
-        </div>
-        <div class="wrow" style="align-items:flex-start">
-          <span class="wlabel">
-            <span class="wname" id="t_notesFolderName">Where the notes are kept</span>
-            <span class="wsub" id="t_notesFolderHint">A folder of plain .md files. Empty = beside the settings.</span>
-          </span>
-          <input type="text" id="notesfolder" style="flex:1;min-width:200px"
-                 placeholder="$HOME/Notes">
-        </div>
-        <div class="wrow" style="align-items:flex-start">
-          <span class="wlabel">
-            <span class="wname" id="t_countdownName">Countdowns on the start page</span>
-            <span class="wsub" id="t_countdownHint">One &ldquo;name = date&rdquo; a line.</span>
-          </span>
-          <textarea id="countdowns" rows="3" style="flex:1;min-width:200px"
-                    placeholder="Season start = 2026-12-01"></textarea>
-        </div>
-        <div class="wrow" style="justify-content:flex-end">
-          <button id="desksave" data-str="pwSaveBtn">Save</button>
-        </div>
-        <div id="desksavemsg" class="urlmsg"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_guardMenu">What a page may do</h2>
-        <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardFingerprint">Blur what sites can tell about this computer</span>
-          </span>
-          <input type="checkbox" id="guardfingerprint"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardClipboardRead">Never let a page read the clipboard</span>
-          </span>
-          <input type="checkbox" id="guardclipboardread"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardCopyGuard">Copy only what is selected</span>
-          </span>
-          <input type="checkbox" id="guardcopyguard"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardLeaveTrap">Ignore “Leave site?” boxes</span>
-          </span>
-          <input type="checkbox" id="guardleavetrap"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardGpc">Tell sites not to sell or share</span>
-          </span>
-          <input type="checkbox" id="guardgpc"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardNoFrames">Block frames from other sites</span>
-          </span>
-          <input type="checkbox" id="guardnoframes"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardLocalFonts">Use local fonts, not the site’s</span>
-          </span>
-          <input type="checkbox" id="guardlocalfonts"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardWsLog">Note the live connections a page opens</span>
-          </span>
-          <input type="checkbox" id="guardwslog"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardNoWebRTC">Switch WebRTC off</span>
-          </span>
-          <input type="checkbox" id="guardnowebrtc"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardBanners">Answer cookie banners with “reject”</span>
-          </span>
-          <input type="checkbox" id="guardbanners"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardPopups">Write down the windows a page tried to open</span>
-          </span>
-          <input type="checkbox" id="guardpopups"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_guardMediaLog">Say when a page is using the microphone, camera or screen</span>
-          </span>
-          <input type="checkbox" id="guardmedialog"><span class="wsw"></span>
-        </label>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_privMenu">Privacy</h2>
-        <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_httpsOnlyName">Only load sites over https</span>
-            <span class="wsub" id="t_httpsOnlyHint">An http address is tried over https first.</span>
-          </span>
-          <input type="checkbox" id="httpsonly"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_redirectGuardName">Stop pages redirecting a tab you are not on</span>
-            <span class="wsub" id="t_redirectGuardHint">No click, no redirect, in a background tab.</span>
-          </span>
-          <input type="checkbox" id="redirectguard"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_blockPingsName">Block link tracking pings</span>
-            <span class="wsub" id="t_blockPingsHint">Applies after a restart.</span>
-          </span>
-          <input type="checkbox" id="blockpings"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_noSpeculativeName">No connections before you click</span>
-            <span class="wsub" id="t_noSpeculativeHint">Applies after a restart.</span>
-          </span>
-          <input type="checkbox" id="nospeculative"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_siteIsolationName">Every site in its own process</span>
-            <span class="wsub" id="t_siteIsolationHint">Safer and slower. Applies after a restart.</span>
-          </span>
-          <input type="checkbox" id="siteisolation"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_webrtcGuardName">Keep WebRTC off the home network</span>
-            <span class="wsub" id="t_webrtcGuardHint">Applies after a restart.</span>
-          </span>
-          <input type="checkbox" id="webrtcguard"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_dohName">Encrypted DNS</span>
-            <span class="wsub" id="t_dohHint">Applies after a restart.</span>
-          </span>
-          <input type="checkbox" id="doh"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_blockReplayName">Block session recorders</span>
-            <span class="wsub" id="t_blockReplayHint">Hotjar, FullStory and the rest. Applies after a restart.</span>
-          </span>
-          <input type="checkbox" id="blockreplay"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_phishingListName">Use my phishing list</span>
-            <span class="wsub" id="t_phishingListHint">phishing-hosts.txt beside the config. Nothing is downloaded.</span>
-          </span>
-          <input type="checkbox" id="phishinglist"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_oneLanguageName">Send only one language</span>
-            <span class="wsub" id="t_oneLanguageHint">Accept-Language carries your language and nothing else.</span>
-          </span>
-          <input type="checkbox" id="onelanguage"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_expandShortName">Resolve short links on hover</span>
-            <span class="wsub" id="t_expandShortHint">Asks the shortener — which tells it you saw the link.</span>
-          </span>
-          <input type="checkbox" id="expandshort"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_shotPrivateName">Allow screenshots of private tabs</span>
-            <span class="wsub" id="t_shotPrivateHint">Off = the capture tools refuse a private tab.</span>
-          </span>
-          <input type="checkbox" id="shotprivate"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_privateNoMediaName">Private tabs never appear in the media list</span>
-            <span class="wsub" id="t_privateNoMediaHint">Nothing playing in one is announced anywhere.</span>
-          </span>
-          <input type="checkbox" id="privatenomedia"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_privacyCheckName">Say at startup when a privacy setting changed</span>
-            <span class="wsub" id="t_privacyCheckHint">One line, and only when something is different.</span>
-          </span>
-          <input type="checkbox" id="privacycheck"><span class="wsw"></span>
-        </label>
-        </div>
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_trackerBadgeName">Show the count of what was refused</span>
-            <span class="wsub" id="t_trackerBadgeHint">A small number in the address bar.</span>
-          </span>
-          <input type="checkbox" id="trackerbadge"><span class="wsw"></span>
-        </label>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_permDaysName">Forget an unused permission after</span>
-            <span class="wsub" id="t_permDaysHint">Days. 0 = never.</span>
-          </span>
-          <input type="number" id="permdays" min="0" max="3650"
-                 style="width:90px">
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_lockAfterName">Lock the window after</span>
-            <span class="wsub" id="t_lockAfterHint">Minutes with nobody touching it. 0 = never.</span>
-          </span>
-          <input type="number" id="lockafter" min="0" max="1440"
-                 style="width:90px">
-        </div>
-        <div class="wrow" style="justify-content:flex-end">
-          <button id="locksetbtn" data-str="lockSetT">Lock the window</button>
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_privExport">Export the privacy rules</span>
-          </span>
-          <span>
-            <button id="privexport" data-str="privExport">Export</button>
-            <button id="privimport" data-str="privImport">Import</button>
-          </span>
-        </div>
-        <div class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_dohUrlName">DNS provider</span>
-            <span class="wsub" id="t_dohUrlHint">An https:// template. Empty = off.</span>
-          </span>
-          <input type="text" id="dohurl" style="flex:1;min-width:200px"
-                 placeholder="https://dns.example/dns-query">
-        </div>
-        <div class="wrow" style="align-items:flex-start">
-          <span class="wlabel">
-            <span class="wname" id="t_blockHostsName">Domains to refuse</span>
-            <span class="wsub" id="t_blockHostsHint">One a line. Applies after a restart.</span>
-          </span>
-          <textarea id="blockhosts" rows="3" style="flex:1;min-width:200px"
-                    placeholder="ads.example.com"></textarea>
-        </div>
-        <div class="wrow" style="justify-content:flex-end">
-          <button id="privsave" data-str="pwSaveBtn">Save</button>
-        </div>
-        <div id="privsavemsg" class="urlmsg"></div>
-      </div>
-
-      <div class="panel">
-        <h2 class="sub" id="t_trimReferrerName">Tell sites where you came from</h2>
-        <div class="cards" id="trimreferrer"></div>
-        <h2 class="sub" id="t_popupModeName">An allowed window opens as</h2>
-        <div class="cards" id="popupmode"></div>
-      </div>
-
-      <div class="panel">
         <h2 class="sub" id="t_histPages">Pages</h2>
         <div class="group">
-        <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_startContinueName">Offer what you were in the middle of</span>
-            <span class="wsub" id="t_startContinueHint">A row on the start page with the pages you closed or half read.</span>
-          </span>
-          <input type="checkbox" id="startcontinue"><span class="wsw"></span>
-        </label>
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_startRecentName">Show the bookmarks you added last</span>
@@ -2622,6 +1994,54 @@
           <button id="bmmirrorsave" data-str="pwSaveBtn">Save</button>
         </div>
         <div id="bmmirrormsg" class="urlmsg"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_externalTitle">Open some sites in another browser</h2>
+        <div class="wsub" id="t_externalHint">Some sites refuse to work in this browser — Gmail and Google sign-in among them. Rather than a wall, they open in your other browser.</div>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_externalHandoff">Hand these sites to another browser</span>
+            <span class="wsub" id="t_externalHandoffSub">Off = they load here like any other page.</span>
+          </span>
+          <input type="checkbox" id="externalhandoff"><span class="wsw"></span>
+        </label>
+        </div>
+        <div class="wrow" id="externalsitesrow" style="align-items:flex-start">
+          <span class="wlabel">
+            <span class="wname" id="t_externalSites">Sites to open elsewhere</span>
+            <span class="wsub" id="t_externalSitesSub">One domain a line. A domain covers its sub-domains too.</span>
+          </span>
+          <textarea id="externalsites" rows="3" style="flex:1;min-width:200px" placeholder="mail.google.com"></textarea>
+        </div>
+        <div class="wrow" style="justify-content:flex-end">
+          <button id="externalsitessave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="externalsitesmsg" class="urlmsg"></div>
+      </div>
+    </section>
+
+    <section data-group="gen" data-desc="descTabs">
+      <h2 id="t_tabsMenu">Tabs</h2>
+      <div class="panel">
+        <h2 class="sub" id="t_newTabPage">What a new tab shows</h2>
+        <div class="cards" id="newtabpage"></div>
+        <div class="wrow" id="newtaburlrow">
+          <input type="text" id="newtaburl" placeholder="example.com" style="flex:1;min-width:200px">
+          <button id="newtaburlsave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="newtaburlmsg" class="urlmsg"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_newTabPos">Where a new tab opens</h2>
+        <div class="cards" id="newtabpos"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_closeFocusName">After closing a tab, go to</h2>
+        <div class="cards" id="closefocus"></div>
       </div>
 
       <div class="panel">
@@ -2789,19 +2209,163 @@
         </label>
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_recentSearchName">Remember recent searches</span>
-            <span class="wsub" id="t_recentSearchHint">An empty address bar offers the last things you searched for.</span>
-          </span>
-          <input type="checkbox" id="recentsearch"><span class="wsw"></span>
-        </label>
-        <label class="wrow">
-          <span class="wlabel">
             <span class="wname" id="t_pinnedSiteName">Pinned tabs stay on their site</span>
             <span class="wsub" id="t_pinnedSiteHint">A link to another site opens in a new tab.</span>
           </span>
           <input type="checkbox" id="pinnedsite"><span class="wsw"></span>
         </label>
         </div>
+      </div>
+
+    </section>
+
+    <section data-group="gen" data-desc="descVideo">
+      <h2 id="t_videoMenu">Video and sound</h2>
+      <div class="panel">
+        <h2 class="sub" id="t_mediaMenu2">Video and sound</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_mediaResumeName">Resume where I left a video</span>
+            <span class="wsub" id="t_mediaResumeHint">Per video, on this computer.</span>
+          </span>
+          <input type="checkbox" id="mediaresume"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_capOnName">Start videos with captions on</span>
+            <span class="wsub" id="t_capOnHint">Where the video has them.</span>
+          </span>
+          <input type="checkbox" id="capon"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_hideCursorName">Hide the mouse over a playing video</span>
+            <span class="wsub" id="t_hideCursorHint">After two seconds of not moving.</span>
+          </span>
+          <input type="checkbox" id="hidecursor"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pauseHiddenName">Pause a video when its tab is hidden</span>
+            <span class="wsub" id="t_pauseHiddenHint">And start it again when you come back.</span>
+          </span>
+          <input type="checkbox" id="pausehidden"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_holdFastName">Hold . to run at double speed</span>
+            <span class="wsub" id="t_holdFastHint">On any video, as long as the key is down.</span>
+          </span>
+          <input type="checkbox" id="holdfast"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_heldEmbedsName">Embedded players load on a click</span>
+            <span class="wsub" id="t_heldEmbedsHint">A YouTube or Twitch embed stays a placeholder until pressed.</span>
+          </span>
+          <input type="checkbox" id="heldembeds"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_spoilerName">Hide video lengths and progress</span>
+            <span class="wsub" id="t_spoilerHint">No duration badges, no watched bars, no previews.</span>
+          </span>
+          <input type="checkbox" id="spoilershield"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shortsPlayerName">Open Shorts in the normal player</span>
+            <span class="wsub" id="t_shortsPlayerHint">With a seek bar and the speed control.</span>
+          </span>
+          <input type="checkbox" id="shortsplayer"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_trackNoticeName">Say when the track changes</span>
+            <span class="wsub" id="t_trackNoticeHint">A desktop notification with title and artist.</span>
+          </span>
+          <input type="checkbox" id="tracknotice"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pauseCallsName">Pause the music during a call</span>
+            <span class="wsub" id="t_pauseCallsHint">When a tab starts using the microphone.</span>
+          </span>
+          <input type="checkbox" id="pausecalls"><span class="wsw"></span>
+        </label>
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_duckName">Quieten the other tabs</span>
+            <span class="wsub" id="t_duckHint">0 = off, 100 = unchanged.</span>
+          </span>
+          <input type="number" id="ducklevel" min="0" max="100"
+                 style="width:90px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_capLangName">Caption language</span>
+            <span class="wsub" id="t_capLangHint">A code like de or en.</span>
+          </span>
+          <input type="text" id="caplang" style="width:110px"
+                 placeholder="de">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_capSizeName">Caption size</span>
+            <span class="wsub" id="t_capSizeHint">Per cent. 0 = as the site has it.</span>
+          </span>
+          <input type="number" id="capsize" min="0" max="300"
+                 style="width:90px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_capBottomName">Lift the captions</span>
+            <span class="wsub" id="t_capBottomHint">Pixels from the bottom.</span>
+          </span>
+          <input type="number" id="capbottom" min="0" max="400"
+                 style="width:90px">
+        </div>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_mprisName">Answer the keyboard’s media keys</span>
+            <span class="wsub" id="t_mprisHint">The desktop may ask what is playing and pause it (MPRIS over D-Bus). Nothing leaves the machine.</span>
+          </span>
+          <input type="checkbox" id="mprison"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_awakeName">Keep the screen awake while a video plays</span>
+            <span class="wsub" id="t_awakeHint">Only while something is actually playing, and only through systemd-inhibit.</span>
+          </span>
+          <input type="checkbox" id="screenawake"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_pauseLockName">Pause what is playing when the browser locks</span>
+            <span class="wsub" id="t_pauseLockHint">Also when you have been away for the idle time.</span>
+          </span>
+          <input type="checkbox" id="pauseonlock"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_sponsorName">Skip the sponsor in a video</span>
+            <span class="wsub" id="t_sponsorHint">Asks SponsorBlock about this video. Only the first four characters of its hashed id are sent, and only when this is on.</span>
+          </span>
+          <input type="checkbox" id="sponsorskip"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_lyricsName">Fetch lyrics</span>
+            <span class="wsub" id="t_lyricsHint">Asks lrclib using title, artist and length. Off = nothing is asked.</span>
+          </span>
+          <input type="checkbox" id="lyricson"><span class="wsw"></span>
+        </label>
+        <div class="wrow" style="justify-content:flex-end">
+          <button id="mediasave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="mediasavemsg" class="urlmsg"></div>
       </div>
 
       <div class="panel">
@@ -2826,30 +2390,65 @@
         </div>
       </div>
 
+    </section>
+
+    <section data-group="gen" data-desc="descDesk">
+      <h2 id="t_deskMenu2">Notes and tools</h2>
       <div class="panel">
-        <h2 class="sub" id="t_externalTitle">Open some sites in another browser</h2>
-        <div class="wsub" id="t_externalHint">Some sites refuse to work in this browser — Gmail and Google sign-in among them. Rather than a wall, they open in your other browser.</div>
+        <h2 class="sub" id="t_deskMenu">Notes and tools</h2>
         <div class="group">
         <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_externalHandoff">Hand these sites to another browser</span>
-            <span class="wsub" id="t_externalHandoffSub">Off = they load here like any other page.</span>
+            <span class="wname" id="t_snippetsName">Text snippets</span>
+            <span class="wsub" id="t_snippetsHint">Short keys that become longer text while you type.</span>
           </span>
-          <input type="checkbox" id="externalhandoff"><span class="wsw"></span>
+          <input type="checkbox" id="snippets"><span class="wsw"></span>
         </label>
-        </div>
-        <div class="wrow" id="externalsitesrow" style="align-items:flex-start">
+        <label class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_externalSites">Sites to open elsewhere</span>
-            <span class="wsub" id="t_externalSitesSub">One domain a line. A domain covers its sub-domains too.</span>
+            <span class="wname" id="t_clipHistoryName">Remember what I copy</span>
+            <span class="wsub" id="t_clipHistoryHint">In memory only, never from a private tab. Off by default.</span>
           </span>
-          <textarea id="externalsites" rows="3" style="flex:1;min-width:200px" placeholder="mail.google.com"></textarea>
+          <input type="checkbox" id="cliphistory"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_desktopNotifyName">Use desktop notifications</span>
+            <span class="wsub" id="t_desktopNotifyHint">Through notify-send when it is installed.</span>
+          </span>
+          <input type="checkbox" id="desktopnotify"><span class="wsw"></span>
+        </label>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_breakAfterName">Remind me to take a break after</span>
+            <span class="wsub" id="t_breakAfterHint">Minutes of actually using the browser. 0 = never.</span>
+          </span>
+          <input type="number" id="breakafter" min="0" max="600"
+                 style="width:90px">
+        </div>
+        </div>
+        <div class="wrow" style="align-items:flex-start">
+          <span class="wlabel">
+            <span class="wname" id="t_notesFolderName">Where the notes are kept</span>
+            <span class="wsub" id="t_notesFolderHint">A folder of plain .md files. Empty = beside the settings.</span>
+          </span>
+          <input type="text" id="notesfolder" style="flex:1;min-width:200px"
+                 placeholder="$HOME/Notes">
+        </div>
+        <div class="wrow" style="align-items:flex-start">
+          <span class="wlabel">
+            <span class="wname" id="t_countdownName">Countdowns on the start page</span>
+            <span class="wsub" id="t_countdownHint">One &ldquo;name = date&rdquo; a line.</span>
+          </span>
+          <textarea id="countdowns" rows="3" style="flex:1;min-width:200px"
+                    placeholder="Season start = 2026-12-01"></textarea>
         </div>
         <div class="wrow" style="justify-content:flex-end">
-          <button id="externalsitessave" data-str="pwSaveBtn">Save</button>
+          <button id="desksave" data-str="pwSaveBtn">Save</button>
         </div>
-        <div id="externalsitesmsg" class="urlmsg"></div>
+        <div id="desksavemsg" class="urlmsg"></div>
       </div>
+
     </section>
 
     <section data-group="gen" data-desc="descGames">
@@ -3024,12 +2623,42 @@
       </div>
       <div id="dlpath"></div>
       </div>
-    </section>
-
-    <section data-group="gen" data-desc="descDownloadsMore">
-      <h2 id="t_dlMenu2">More about downloads</h2>
       <div class="panel">
-        <h2 class="sub" id="t_dlMenu">Downloads and files</h2>
+        <h2 class="sub" id="t_dlMenu">Downloads</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_sortDownloadsName">Sort downloads into folders</span>
+            <span class="wsub" id="t_sortDownloadsHint">Pictures, Video, Music, Documents, Archives, Programs, Mods.</span>
+          </span>
+          <input type="checkbox" id="sortdownloads"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_openAfterName">Open the folder when a download finishes</span>
+          </span>
+          <input type="checkbox" id="openafter"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_indexPagesName">Search history by what was on the page</span>
+            <span class="wsub" id="t_indexPagesHint">Keeps a few hundred words of each page, on this computer. Never from a private tab.</span>
+          </span>
+          <input type="checkbox" id="indexpages"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_blockNotifName">Never ask about notifications</span>
+            <span class="wsub" id="t_blockNotifHint">Sites asking to send notifications are told no without a card.</span>
+          </span>
+          <input type="checkbox" id="blocknotif"><span class="wsw"></span>
+        </label>
+        </div>
+      </div>
+
+
+      <div class="panel">
+        <h2 class="sub" id="t_dlFiles2">Downloads and files</h2>
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_dlOriginName">Write the source address into the file</span>
@@ -3196,7 +2825,7 @@
       </div>
     </section>
 
-    <section data-group="gen" data-desc="descLanguage">
+        <section data-group="gen" data-desc="descLanguage">
       <h2 id="t_translation">Language</h2>
       <div class="panel">
       <div class="wrow">
@@ -3352,6 +2981,270 @@
           <button id="clearcookies">Clear cookies</button>
         </div>
       </div>
+      <div class="panel">
+        <h2 class="sub" id="t_guardMenu">What a page may do</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardFingerprint">Blur what sites can tell about this computer</span>
+          </span>
+          <input type="checkbox" id="guardfingerprint"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardClipboardRead">Never let a page read the clipboard</span>
+          </span>
+          <input type="checkbox" id="guardclipboardread"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardCopyGuard">Copy only what is selected</span>
+          </span>
+          <input type="checkbox" id="guardcopyguard"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardLeaveTrap">Ignore “Leave site?” boxes</span>
+          </span>
+          <input type="checkbox" id="guardleavetrap"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardGpc">Tell sites not to sell or share</span>
+          </span>
+          <input type="checkbox" id="guardgpc"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardNoFrames">Block frames from other sites</span>
+          </span>
+          <input type="checkbox" id="guardnoframes"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardLocalFonts">Use local fonts, not the site’s</span>
+          </span>
+          <input type="checkbox" id="guardlocalfonts"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardWsLog">Note the live connections a page opens</span>
+          </span>
+          <input type="checkbox" id="guardwslog"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardNoWebRTC">Switch WebRTC off</span>
+          </span>
+          <input type="checkbox" id="guardnowebrtc"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardBanners">Answer cookie banners with “reject”</span>
+          </span>
+          <input type="checkbox" id="guardbanners"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardPopups">Write down the windows a page tried to open</span>
+          </span>
+          <input type="checkbox" id="guardpopups"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_guardMediaLog">Say when a page is using the microphone, camera or screen</span>
+          </span>
+          <input type="checkbox" id="guardmedialog"><span class="wsw"></span>
+        </label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_trimReferrerName">Tell sites where you came from</h2>
+        <div class="cards" id="trimreferrer"></div>
+        <h2 class="sub" id="t_popupModeName">An allowed window opens as</h2>
+        <div class="cards" id="popupmode"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_privTrackers">Trackers and the home network</h2>
+        <div class="group">
+                <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_blockLocalName">Keep websites off the home network</span>
+            <span class="wsub" id="t_blockLocalHint">A page on the internet may not reach 192.168.x.x, localhost or a .local name.</span>
+          </span>
+          <input type="checkbox" id="blocklocal"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_stripTrackingName">Strip tracking from addresses</span>
+            <span class="wsub" id="t_stripTrackingHint">utm_*, fbclid and the rest are taken off before the request goes out.</span>
+          </span>
+          <input type="checkbox" id="striptracking"><span class="wsw"></span>
+        </label>
+                </div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sub" id="t_privConnections">Connections</h2>
+        <div class="group">
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_httpsOnlyName">Only load sites over https</span>
+            <span class="wsub" id="t_httpsOnlyHint">An http address is tried over https first.</span>
+          </span>
+          <input type="checkbox" id="httpsonly"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_redirectGuardName">Stop pages redirecting a tab you are not on</span>
+            <span class="wsub" id="t_redirectGuardHint">No click, no redirect, in a background tab.</span>
+          </span>
+          <input type="checkbox" id="redirectguard"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_blockPingsName">Block link tracking pings</span>
+            <span class="wsub" id="t_blockPingsHint">Applies after a restart.</span>
+          </span>
+          <input type="checkbox" id="blockpings"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_noSpeculativeName">No connections before you click</span>
+            <span class="wsub" id="t_noSpeculativeHint">Applies after a restart.</span>
+          </span>
+          <input type="checkbox" id="nospeculative"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_siteIsolationName">Every site in its own process</span>
+            <span class="wsub" id="t_siteIsolationHint">Safer and slower. Applies after a restart.</span>
+          </span>
+          <input type="checkbox" id="siteisolation"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_webrtcGuardName">Keep WebRTC off the home network</span>
+            <span class="wsub" id="t_webrtcGuardHint">Applies after a restart.</span>
+          </span>
+          <input type="checkbox" id="webrtcguard"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_dohName">Encrypted DNS</span>
+            <span class="wsub" id="t_dohHint">Applies after a restart.</span>
+          </span>
+          <input type="checkbox" id="doh"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_blockReplayName">Block session recorders</span>
+            <span class="wsub" id="t_blockReplayHint">Hotjar, FullStory and the rest. Applies after a restart.</span>
+          </span>
+          <input type="checkbox" id="blockreplay"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_phishingListName">Use my phishing list</span>
+            <span class="wsub" id="t_phishingListHint">phishing-hosts.txt beside the config. Nothing is downloaded.</span>
+          </span>
+          <input type="checkbox" id="phishinglist"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_oneLanguageName">Send only one language</span>
+            <span class="wsub" id="t_oneLanguageHint">Accept-Language carries your language and nothing else.</span>
+          </span>
+          <input type="checkbox" id="onelanguage"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_expandShortName">Resolve short links on hover</span>
+            <span class="wsub" id="t_expandShortHint">Asks the shortener — which tells it you saw the link.</span>
+          </span>
+          <input type="checkbox" id="expandshort"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_shotPrivateName">Allow screenshots of private tabs</span>
+            <span class="wsub" id="t_shotPrivateHint">Off = the capture tools refuse a private tab.</span>
+          </span>
+          <input type="checkbox" id="shotprivate"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_privateNoMediaName">Private tabs never appear in the media list</span>
+            <span class="wsub" id="t_privateNoMediaHint">Nothing playing in one is announced anywhere.</span>
+          </span>
+          <input type="checkbox" id="privatenomedia"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_privacyCheckName">Say at startup when a privacy setting changed</span>
+            <span class="wsub" id="t_privacyCheckHint">One line, and only when something is different.</span>
+          </span>
+          <input type="checkbox" id="privacycheck"><span class="wsw"></span>
+        </label>
+        </div>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_trackerBadgeName">Show the count of what was refused</span>
+            <span class="wsub" id="t_trackerBadgeHint">A small number in the address bar.</span>
+          </span>
+          <input type="checkbox" id="trackerbadge"><span class="wsw"></span>
+        </label>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_permDaysName">Forget an unused permission after</span>
+            <span class="wsub" id="t_permDaysHint">Days. 0 = never.</span>
+          </span>
+          <input type="number" id="permdays" min="0" max="3650"
+                 style="width:90px">
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_lockAfterName">Lock the window after</span>
+            <span class="wsub" id="t_lockAfterHint">Minutes with nobody touching it. 0 = never.</span>
+          </span>
+          <input type="number" id="lockafter" min="0" max="1440"
+                 style="width:90px">
+        </div>
+        <div class="wrow" style="justify-content:flex-end">
+          <button id="locksetbtn" data-str="lockSetT">Lock the window</button>
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_privExport">Export the privacy rules</span>
+          </span>
+          <span>
+            <button id="privexport" data-str="privExport">Export</button>
+            <button id="privimport" data-str="privImport">Import</button>
+          </span>
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_dohUrlName">DNS provider</span>
+            <span class="wsub" id="t_dohUrlHint">An https:// template. Empty = off.</span>
+          </span>
+          <input type="text" id="dohurl" style="flex:1;min-width:200px"
+                 placeholder="https://dns.example/dns-query">
+        </div>
+        <div class="wrow" style="align-items:flex-start">
+          <span class="wlabel">
+            <span class="wname" id="t_blockHostsName">Domains to refuse</span>
+            <span class="wsub" id="t_blockHostsHint">One a line. Applies after a restart.</span>
+          </span>
+          <textarea id="blockhosts" rows="3" style="flex:1;min-width:200px"
+                    placeholder="ads.example.com"></textarea>
+        </div>
+        <div class="wrow" style="justify-content:flex-end">
+          <button id="privsave" data-str="pwSaveBtn">Save</button>
+        </div>
+        <div id="privsavemsg" class="urlmsg"></div>
+      </div>
+
     </section>
 
     <section data-group="priv" data-desc="descPasswords">
@@ -4010,9 +3903,6 @@
   // a line in the browser and nothing here.
   const MOUSE_SWITCHES = ["superDrag", "lasso", "swipeNav", "autoScroll",
                           "hoverSwitch", "newTabMiddle"];
-  const CLICK_ACTIONS = ["close", "duplicate", "newtab", "mute", "pin",
-                         "reload", "nothing"];
-
   function fillKeys(s) {
     const S = window.STR || {};
     setVal("layoutkeys", s.layoutKeys !== false);
@@ -4060,26 +3950,6 @@
         row.appendChild(sw);
         box.appendChild(row);
       }
-    }
-    for (const [id, key, fallback] of [["tabdouble", "tabDouble", "close"],
-                                       ["tabmiddle", "tabMiddle", "close"],
-                                       ["bardouble", "barDouble", "newtab"]]) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      el.innerHTML = "";
-      for (const what of CLICK_ACTIONS) {
-        const row = document.createElement("option");
-        row.value = what;
-        row.textContent = S["mouseAct_" + what] || what;
-        el.appendChild(row);
-      }
-      el.value = mouse[key] || fallback;
-      el.onchange = () => {
-        const was = Object.assign({},
-          (window._settings && window._settings.mouse) || {});
-        was[key] = el.value;
-        saveSetting("mouse", was);
-      };
     }
     for (const [id, key] of [["wheelstep", "wheelStep"],
                              ["keystep", "keyStep"]]) {
@@ -4187,7 +4057,7 @@
     ["freezeafter", "freezeAfter"], ["memorybudget", "memoryBudget"],
     ["closeunuseddays", "closeUnusedDays"], ["cachesize", "cacheSize"],
   ];
-  const PERF_PAGE = [["pausehidden", "pauseHidden"],
+  const PERF_PAGE = [["perfpausehidden", "pauseHidden"],
                      ["stophiddenvideo", "stopHiddenVideo"],
                      ["lazyimages", "lazyImages"]];
 
@@ -4681,35 +4551,8 @@
     document.getElementById("barcopybtn").checked = s.barCopyBtn === undefined ? true : !!s.barCopyBtn;
     document.getElementById("barclearbtn").checked = s.barClearBtn === undefined ? true : !!s.barClearBtn;
     document.getElementById("barqrbtn").checked = !!s.barQrBtn;
-    for (const id of ["barkeybtn", "barkeybtn2"]) {
-      const box = document.getElementById(id);
-      if (box) box.checked = s.barKeyBtn !== false;
-    }
     document.getElementById("barkeybtn").checked = s.barKeyBtn !== false;
     document.getElementById("barbottom").checked = !!s.barBottom;
-    document.getElementById("searchlogon").checked = s.searchLogOn === undefined ? true : !!s.searchLogOn;
-    document.getElementById("moneyrates").checked = !!s.moneyRates;
-    document.getElementById("barrows").value = s.barRows || 14;
-    document.getElementById("bartextsize").value = s.barTextSize || 100;
-    document.getElementById("privateengine").value = s.privateEngine || "";
-    document.getElementById("langenginestext").value = s.langEnginesText || "";
-    document.getElementById("barsourcestext").value = s.barSourcesText || "";
-    document.getElementById("enginestext").value = s.enginesText || "";
-    document.getElementById("barprogress").checked = s.barProgress === undefined ? true : !!s.barProgress;
-    document.getElementById("bardimpath").checked = s.barDimPath === undefined ? true : !!s.barDimPath;
-    document.getElementById("bardecode").checked = s.barDecode === undefined ? true : !!s.barDecode;
-    document.getElementById("barhidescheme").checked = !!s.barHideScheme;
-    document.getElementById("barinline").checked = s.barInline === undefined ? true : !!s.barInline;
-    document.getElementById("barlock").checked = s.barLock === undefined ? true : !!s.barLock;
-    document.getElementById("barcopybtn").checked = s.barCopyBtn === undefined ? true : !!s.barCopyBtn;
-    document.getElementById("barclearbtn").checked = s.barClearBtn === undefined ? true : !!s.barClearBtn;
-    document.getElementById("barqrbtn").checked = !!s.barQrBtn;
-    for (const id of ["barkeybtn", "barkeybtn2"]) {
-      const box = document.getElementById(id);
-      if (box) box.checked = s.barKeyBtn !== false;
-    }
-    document.getElementById("barbottom").checked = !!s.barBottom;
-    document.getElementById("searchlogon").checked = s.searchLogOn === undefined ? true : !!s.searchLogOn;
     document.getElementById("moneyrates").checked = !!s.moneyRates;
     document.getElementById("barrows").value = s.barRows || 14;
     document.getElementById("bartextsize").value = s.barTextSize || 100;
@@ -4781,7 +4624,7 @@
     document.getElementById("favdock").checked = !!s.favDocked;
     document.getElementById("ownlog").checked = s.ownRequestLog !== false;
     document.getElementById("cleanpaste").checked = !!s.cleanPaste;
-    document.getElementById("keepawake").checked = !!s.keepAwake;
+    document.getElementById("screenawake").checked = !!s.screenAwake;
     document.getElementById("pauseonlock").checked = !!s.pauseOnLock;
     document.getElementById("sponsorskip").checked = !!s.sponsorSkip;
     document.getElementById("lyricson").checked = !!s.lyricsOn;
@@ -4845,8 +4688,6 @@
     document.getElementById("blockhosts").value =
       (s.blockHosts || []).join("\n");
     document.getElementById("cleantitles").checked = !!s.cleanTitles;
-    document.getElementById("startcontinue").checked =
-      s.startContinue === undefined ? true : !!s.startContinue;
     document.getElementById("startrecent").checked = !!s.startRecent;
     document.getElementById("bmscroll").checked =
       s.bookmarkScroll === undefined ? true : !!s.bookmarkScroll;
@@ -4892,7 +4733,6 @@
     document.getElementById("shotdir").value = s.shotDir || "";
     document.getElementById("shotname").value = s.shotName || "";
     document.getElementById("shotformat").value = s.shotFormat || "png";
-    document.getElementById("recentsearch").checked = s.recentSearchList;
     renderCards("closefocus", [
       {value: "right", name: S.closeFocusRight || "The tab to the right",
        sub: ""},
@@ -5626,27 +5466,6 @@
             t_barKeyName:"barKeyName", t_barKeyTip:"barKeyTip",
             t_barQrBtnName:"barQrBtnName", t_barQrBtnHint:"barQrBtnHint",
             t_barBottomName:"barBottomName", t_barBottomHint:"barBottomHint",
-            t_searchLogName:"searchLogName", t_searchLogHint:"searchLogHint",
-            t_moneyRatesName:"moneyRatesName", t_moneyRatesHint:"moneyRatesHint",
-            t_barRowsName:"barRowsName", t_barRowsHint:"barRowsHint",
-            t_barTextSizeName:"barTextSizeName", t_barTextSizeHint:"barTextSizeHint",
-            t_privateEngineName:"privateEngineName", t_privateEngineHint:"privateEngineHint",
-            t_langEnginesName:"langEnginesName", t_langEnginesHint:"langEnginesHint",
-            t_barSourcesName:"barSourcesName", t_barSourcesHint:"barSourcesHint",
-            t_enginesName:"enginesName", t_enginesHint:"enginesHint",
-            t_barMenu:"barMenu", t_barMenu2:"barMenu",
-            t_barProgressName:"barProgressName", t_barProgressHint:"barProgressHint",
-            t_barDimPathName:"barDimPathName", t_barDimPathHint:"barDimPathHint",
-            t_barDecodeName:"barDecodeName", t_barDecodeHint:"barDecodeHint",
-            t_barHideSchemeName:"barHideSchemeName", t_barHideSchemeHint:"barHideSchemeHint",
-            t_barInlineName:"barInlineName", t_barInlineHint:"barInlineHint",
-            t_barLockName:"barLockName", t_barLockHint:"barLockHint",
-            t_barCopyBtnName:"barCopyBtnName", t_barCopyBtnHint:"barCopyBtnHint",
-            t_barClearBtnName:"barClearBtnName", t_barClearBtnHint:"barClearBtnHint",
-            t_barKeyName:"barKeyName", t_barKeyTip:"barKeyTip",
-            t_barQrBtnName:"barQrBtnName", t_barQrBtnHint:"barQrBtnHint",
-            t_barBottomName:"barBottomName", t_barBottomHint:"barBottomHint",
-            t_searchLogName:"searchLogName", t_searchLogHint:"searchLogHint",
             t_moneyRatesName:"moneyRatesName", t_moneyRatesHint:"moneyRatesHint",
             t_barRowsName:"barRowsName", t_barRowsHint:"barRowsHint",
             t_barTextSizeName:"barTextSizeName", t_barTextSizeHint:"barTextSizeHint",
@@ -5677,6 +5496,7 @@
             t_dlAskForName:"dlAskForName", t_dlAskForHint:"dlAskForHint",
             t_dlOpenWithName:"dlOpenWithName", t_dlOpenWithHint:"dlOpenWithHint",
             t_dlFiles:"dlFiles", t_dlMenu2:"dlFiles",
+            t_dlFiles2:"dlFiles",
             t_formDraftsOnName:"formDraftsOnName", t_formDraftsOnHint:"formDraftsOnHint",
             t_formHistoryOnName:"formHistoryOnName", t_formHistoryOnHint:"formHistoryOnHint",
             t_pwEyeName:"pwEyeName", t_pwEyeHint:"pwEyeHint",
@@ -5768,7 +5588,8 @@
             t_spellLangsName:"spellLangsName", t_spellLangsHint:"spellLangsHint",
             t_dictionarySiteName:"dictionarySiteName", t_dictionarySiteHint:"dictionarySiteHint",
             t_externalEditorName:"externalEditorName", t_externalEditorHint:"externalEditorHint",
-            t_deskMenu:"deskMenu",
+            t_deskMenu:"deskMenu", t_deskMenu2:"deskMenu",
+            t_tabsMenu:"tabsMenu", t_videoMenu:"videoMenu",
             t_snippetsName:"snippetsName", t_snippetsHint:"snippetsHint",
             t_clipHistoryName:"clipHistoryName",
             t_clipHistoryHint:"clipHistoryHint",
@@ -5790,8 +5611,6 @@
             t_guardMenu:"guardMenu", t_trimReferrerName:"trimReferrerName",
             t_popupModeName:"popupModeName",
             t_histPages:"histPages",
-            t_startContinueName:"startContinueName",
-            t_startContinueHint:"startContinueHint",
             t_startRecentName:"startRecentName",
             t_startRecentHint:"startRecentHint",
             t_cleanTitlesName:"cleanTitlesName",
@@ -5842,7 +5661,8 @@
             t_blockNotifName:"blockNotifName", t_blockNotifHint:"blockNotifHint",
             t_keysTitle:"actCheatSheet",
             t_mouseButtonsName:"mouseButtonsName",
-            t_privMenu:"privMenu",
+            t_privTrackers:"privTrackers",
+            t_privConnections:"privConnections",
             t_blockLocalName:"blockLocalName", t_blockLocalHint:"blockLocalHint",
             t_stripTrackingName:"stripTrackingName",
             t_stripTrackingHint:"stripTrackingHint",
@@ -5853,8 +5673,6 @@
             t_shotRedactName:"shotRedactName", t_shotRedactHint:"shotRedactHint",
             t_searchInBarName:"searchInBarName",
             t_searchInBarHint:"searchInBarHint",
-            t_recentSearchName:"recentSearchName",
-            t_recentSearchHint:"recentSearchHint",
             t_pinnedSiteName:"pinnedSiteName",
             t_pinnedSiteHint:"pinnedSiteHint",
             t_blockAutoplayHint:"blockAutoplayHint",
@@ -5874,7 +5692,21 @@
             t_spellCheck:"spellCheck", t_spellHint:"spellHint",
             t_spellLang:"spellLang", t_media:"media",
             t_newTabPos:"newTabPos", t_newTabPage:"newTabPage",
-            t_startUrl:"startUrl", t_startUrlHint:"startUrlHint"};
+            t_startUrl:"startUrl", t_startUrlHint:"startUrlHint",
+            // the headings the map had never been told about: in
+            // German the rail came out half in English, because
+            // this map is the only thing that translates them
+            t_a11yName:"a11yName", t_a11yCapName:"a11yCapName",
+            t_a11yPanel2:"a11yPanel", t_a11ySpacing:"a11ySpacing",
+            t_followSchemeName:"followSchemeName",
+            t_keyGlobalName:"keyGlobalName", t_keyMenu:"keyMenu",
+            t_mouseMenu:"mouseMenu", t_navMenu:"navMenu",
+            t_pageLookName:"pageLookName", t_perfFlags:"perfFlags",
+            t_perfMenu:"perfMenu", t_perfStartup:"perfStartup",
+            t_recMenu:"recMenu", t_startLayoutName:"startLayoutName",
+            t_themeEditor:"themeEditor",
+            t_themeStarName:"themeStarName",
+            t_uiSizeName:"uiSizeName"};
           for (const [id, key] of Object.entries(map)) {
             const el = document.getElementById(id);
             if (el && S[key]) el.textContent = S[key];
@@ -6015,7 +5847,6 @@
   bindSwitch("privatenomedia", "privateNoMedia");
   bindSwitch("privacycheck", "privacyCheck");
   bindSwitch("cleantitles", "cleanTitles");
-  bindSwitch("startcontinue", "startContinue");
   bindSwitch("startrecent", "startRecent");
   bindSwitch("bmscroll", "bookmarkScroll");
   bindSwitch("bmbackup", "bookmarkBackup");
@@ -6074,36 +5905,8 @@
   bindSwitch("barcopybtn", "barCopyBtn");
   bindSwitch("barclearbtn", "barClearBtn");
   bindSwitch("barqrbtn", "barQrBtn");
-  for (const id of ["barkeybtn", "barkeybtn2"]) {
-    if (document.getElementById(id)) bindSwitch(id, "barKeyBtn");
-  }
   bindSwitch("barkeybtn", "barKeyBtn");
   bindSwitch("barbottom", "barBottom");
-  bindSwitch("searchlogon", "searchLogOn");
-  bindSwitch("moneyrates", "moneyRates");
-  bindNumber("barrows", "barRows");
-  bindNumber("bartextsize", "barTextSize");
-  document.getElementById("barsave").onclick = () => {
-    saveSetting("privateEngine", document.getElementById("privateengine").value);
-    saveSetting("langEnginesText", document.getElementById("langenginestext").value);
-    saveSetting("barSourcesText", document.getElementById("barsourcestext").value);
-    saveSetting("enginesText", document.getElementById("enginestext").value);
-    flashMsg("barsavemsg");
-  };
-  bindSwitch("barprogress", "barProgress");
-  bindSwitch("bardimpath", "barDimPath");
-  bindSwitch("bardecode", "barDecode");
-  bindSwitch("barhidescheme", "barHideScheme");
-  bindSwitch("barinline", "barInline");
-  bindSwitch("barlock", "barLock");
-  bindSwitch("barcopybtn", "barCopyBtn");
-  bindSwitch("barclearbtn", "barClearBtn");
-  bindSwitch("barqrbtn", "barQrBtn");
-  for (const id of ["barkeybtn", "barkeybtn2"]) {
-    if (document.getElementById(id)) bindSwitch(id, "barKeyBtn");
-  }
-  bindSwitch("barbottom", "barBottom");
-  bindSwitch("searchlogon", "searchLogOn");
   bindSwitch("moneyrates", "moneyRates");
   bindNumber("barrows", "barRows");
   bindNumber("bartextsize", "barTextSize");
@@ -6192,7 +5995,7 @@
   bindSwitch("favdock", "favDocked");
   bindSwitch("ownlog", "ownRequestLog");
   bindSwitch("cleanpaste", "cleanPaste");
-  bindSwitch("keepawake", "keepAwake");
+  bindSwitch("screenawake", "screenAwake");
   bindSwitch("pauseonlock", "pauseOnLock");
   bindSwitch("sponsorskip", "sponsorSkip");
   bindSwitch("lyricson", "lyricsOn");
@@ -6356,7 +6159,6 @@
   }
   document.getElementById("shotformat").addEventListener("change", (e) =>
     saveSetting("shotFormat", e.target.value));
-  bindSwitch("recentsearch", "recentSearchList");
   bindSwitch("pdfviewer", "pdfViewer");
   bindSwitch("externalhandoff", "externalHandoff");
   // the domain list: one a line or comma-separated, tidied the same way
