@@ -31,13 +31,50 @@ account, no sync. Browsing data stays in `~/.local/share/browser/`.
 ### Browsing
 
 - **Tabs and tab groups** — Chrome-style group pills, collapsible, colour-coded
+- **A side panel** (`Ctrl+Shift+Y`) that holds any site beside the page —
+  Discord, Amazon Music, Claude, Twitch chat — as a real view on the same
+  cookie jar, so it is already logged in
+- **Game mode** (`Ctrl+Alt+G`) — every other tab asleep, everything muted,
+  notification requests refused; again to wake exactly those tabs
+- **Reader mode** (`Ctrl+Alt+R`), **link hints** (`Ctrl+Alt+K`), **read
+  aloud** (`Ctrl+Alt+V`) and highlights that come back on the next visit
+- **Screenshots** (`Ctrl+Shift+S`, whole page with `Ctrl+Alt+Shift+S`) with
+  password fields blurred before the shutter
+- **Minecraft server status** (`Ctrl+Alt+J`) — your servers, asked the same
+  question the game's own server list asks
+- **A command palette** (`Ctrl+Shift+K`) and a **cheat sheet** (`Ctrl+/`);
+  every shortcut can be changed in Settings
 - **Virtual browsers** — several independent sessions in one window, each with
   its own cookie jar and logins; sign in to the same site twice without
   signing out
+- **The address bar answers questions** — `12*64+3`, `5 in to mm`, `200 c to f`,
+  `4 gib to mb`, `time in tokyo`, `kw`, `days until 24.12.`, `#ff8800` — all
+  worked out on this computer, with nothing sent anywhere. Enter copies the answer
+- **Search keywords** — `yt cats`, `mr sodium`, `gh repo`, `amz ssd`, `w term`;
+  your own in Settings as any URL with a `%s` in it
+- **Suggestions from your own browser** — an open tab (Enter switches to it), a
+  bookmark, or a page from your history matched on words in any order; an empty
+  bar offers a link you just copied and your last searches
+- **Copy clean address** — the same link without `utm_*`, `fbclid` and the rest
+  of the tracking, also as a Markdown or HTML link, or "Title — address"
 - **Find in page** (`Ctrl+F`) — match count, next/previous, match case
+- **Save any image** — right-click → *Save image* works on whatever is drawn
+  under the cursor: a picture under an overlay, a CSS background, a canvas,
+  an inline SVG. `Shift` + right-click brings the menu up on sites that
+  block it
 - **Tab search** (`Ctrl+Shift+A`) — every open tab of every virtual browser in
   one filtered list
-- **Reopen closed tab** (`Ctrl+Shift+T`) — restores its position and its group
+- **Reopen closed tab** (`Ctrl+Shift+T`) — restores its position and its group,
+  and **Recently closed** in the tab menu lists the last 25, not only the last
+- **The tab's own menu** — pin (it shrinks to its icon, keeps its place across
+  restarts and can be held to its own site), mute (also `Ctrl+M`) or "play
+  sound only here", lock so it asks before closing, rename it so the page
+  cannot change the title, duplicate it (`Ctrl+Shift+D`), open it in another
+  virtual browser or in a private tab, copy the addresses of one tab or of all
+  of them (plain or Markdown), open every address in the clipboard, bookmark
+  every tab into one folder, sort the tabs by site or title, group or close
+  every tab of this site, close the others / to the right / to the left /
+  the duplicates
 - **Account chooser** (`Ctrl+Shift+M`, or the `@` in the address bar) — two
   accounts saved for a site means nothing is filled in until you say which
   one. The list of accounts is a panel of the browser's own; the page never
@@ -188,9 +225,36 @@ desktop or window manager with no system configuration.
 |-----|--------|
 | `Ctrl+T` | New tab |
 | `Ctrl+Shift+N` | New private tab |
-| `Ctrl+W` | Close tab |
+| `Ctrl+W` | Close tab (a pinned tab stays) |
 | `Ctrl+Shift+T` | Reopen closed tab |
+| `Ctrl+Shift+D` | Duplicate tab |
+| `Ctrl+Shift+K` | Command palette — every action by name |
+| `Ctrl+Shift+Y` | Side panel — any site beside the page |
+| `Ctrl+Shift+Esc` | What the tabs are costing |
+| `Ctrl+Alt+U` | Your own CSS for this site |
+| `Ctrl+Alt+G` | Game mode |
+| `Ctrl+Alt+J` | Minecraft server status |
+| `Ctrl+Alt+Q` / `Ctrl+Alt+Y` | Discord mute / deafen |
+| `Ctrl+Alt+R` | Reader mode |
+| `Ctrl+Alt+K` | Link hints — a letter on every link |
+| `Ctrl+Alt+V` | Read the selection aloud |
+| `Ctrl+/` | The keyboard shortcuts, on one page |
+| `Ctrl+Shift+S` | Screenshot of what is on screen |
+| `Ctrl+Alt+P` | Panic: mute everything, blank every tab, lock the vault |
+| `Ctrl+Alt+H` | Streamer mode: hide the address bar's text |
+| `Ctrl+Alt+Shift+S` | Screenshot of the whole page |
+| `Ctrl+Alt+Space` / `Ctrl+Alt+←→` | Play/pause / seek the page's video |
+| `Ctrl+Shift+Space` | Pause every playing tab (again: resume) |
+| Middle-click Back / Forward | That step, in a new tab |
+| Hold Back / Forward | That tab's history, several steps at once |
+| `Ctrl+M` | Mute / unmute this tab |
+| `Ctrl+1` … `Ctrl+8` / `Ctrl+9` | Go to that tab / the last tab |
+| `Ctrl+Shift+PgUp` / `PgDn` | Move this tab along the strip |
 | `Ctrl+L` | Focus address bar |
+| `Ctrl+K` | Address bar, ready for a search |
+| `Alt+Enter` (in the bar) | Open what you typed in a new tab |
+| `Ctrl+Enter` / `Ctrl+Shift+Enter` | Finish the name with `.com` / `.de` |
+| `Shift+Delete` (in the bar) | Forget that suggestion |
 | `Ctrl+F` | Find in page |
 | `Ctrl+P` | Print or save as PDF |
 | `Ctrl+Shift+A` | Search open tabs |
@@ -238,6 +302,30 @@ User data — history, settings, saved logins, downloads and cookies — is
 stored under `~/.local/share/browser/`. Saved passwords are obfuscated with a
 per-install key file; the security boundary is your operating system account,
 not a master password.
+
+## Driving the browser from a script (agent bridge)
+
+The browser is also an automation target: while it runs it listens on a
+second local socket, `$TMPDIR/browser-agent` (`/tmp/browser-agent`), and
+`agent.py` is the terminal client. A script can open a background tab,
+read a page, click, type, wait for a node and take a screenshot — all on
+tabs that are not the visible one, without the window ever coming to the
+front. It exists so an assistant on this machine (Claude Code) can look
+things up and ask other sites questions without borrowing the screen.
+
+```
+python3 agent.py tabs                      # what is open
+python3 agent.py open https://example.org  # background tab; prints its id
+python3 agent.py text --tab 7              # the page as text
+python3 agent.py click 'button.go' --tab 7
+python3 agent.py type '#q' hello --enter --tab 7
+python3 agent.py shot /tmp/page.png --tab 7
+python3 agent.py chatgpt 'three names for a frost sword'
+```
+
+The socket is a Unix socket owned by your user; nothing off the machine
+can reach it. Switch it off with `"agentBridge": false` in `config.json`
+or `BROWSER_NO_AGENT=1`. `test_agent.py` is its offscreen test.
 
 ## Security updates
 

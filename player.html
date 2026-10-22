@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Player</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000000; color: #cdd6f4;
+    font-family: "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    font-size: 13px; display: flex; flex-direction: column;
+    height: 100vh;
+  }
+  #stage { flex: 1; display: flex; align-items: center;
+           justify-content: center; background: #05050a; min-height: 0; }
+  video, audio { max-width: 100%; max-height: 100%; }
+  #art { color: #6c7086; text-align: center; padding: 2rem; }
+  .bar { display: flex; gap: 8px; align-items: center; padding: 10px 12px;
+         flex-wrap: wrap; border-top: 1px solid rgba(137,180,250,.18); }
+  button, select, input[type=file] {
+    background: rgba(13, 13, 18, 0.9);
+    border: 1px solid rgba(137, 180, 250, 0.25);
+    border-radius: 9px; color: #cdd6f4; font: inherit;
+    padding: 6px 10px; cursor: pointer;
+  }
+  button:hover { border-color: #89b4fa; }
+  #list { max-height: 34vh; overflow: auto;
+          border-top: 1px solid rgba(137,180,250,.18); }
+  .row { display: flex; gap: 10px; align-items: center; padding: 7px 12px;
+         cursor: pointer; }
+  .row:hover { background: rgba(137, 180, 250, 0.08); }
+  .row.on { color: #89b4fa; }
+  .row .grow { flex: 1; overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; }
+  .sub { color: #6c7086; font-size: 11px; }
+  #where { padding: 4px 12px; color: #6c7086; font-size: 11px; }
+  ::selection { background: #cdd6f4; color: #000000; }
+  :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <div id="stage"><div id="art">Nothing loaded yet.</div></div>
+  <div class="bar">
+    <button id="play">Play / pause</button>
+    <button id="back">&minus;10 s</button>
+    <button id="fwd">+10 s</button>
+    <select id="speed">
+      <option value="0.75">0.75&times;</option>
+      <option value="1" selected>1&times;</option>
+      <option value="1.25">1.25&times;</option>
+      <option value="1.5">1.5&times;</option>
+      <option value="2">2&times;</option>
+    </select>
+    <button id="loop">Loop: off</button>
+    <button id="subs">Subtitles&hellip;</button>
+    <button id="prev">Previous</button>
+    <button id="next">Next</button>
+    <span id="time" class="sub"></span>
+  </div>
+  <div id="where" class="sub"></div>
+  <div id="list"></div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  // The browser's own player for local files and for a playlist it was
+  // handed. Nothing here fetches anything: the queue comes from the
+  // browser (the media links it found, or the files he opened), and the
+  // element plays what it is given.
+  let bridge = null, queue = [], at = -1, media = null, looping = false;
+  let STR = {};
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function clock(secs) {
+    secs = Math.max(0, Math.floor(secs || 0));
+    const m = Math.floor(secs / 60), s = secs % 60;
+    return m + ":" + String(s).padStart(2, "0");
+  }
+
+  function isAudio(url) {
+    return /\.(mp3|m4a|ogg|opus|flac|wav|aac)(\?|$)/i.test(url || "");
+  }
+
+  function load(index) {
+    if (!queue.length) return;
+    at = (index + queue.length) % queue.length;
+    const item = queue[at];
+    const stage = document.getElementById("stage");
+    stage.innerHTML = "";
+    media = document.createElement(isAudio(item.url) ? "audio" : "video");
+    media.src = item.url;
+    media.controls = true;
+    media.autoplay = true;
+    media.playbackRate = Number(document.getElementById("speed").value);
+    media.loop = looping;
+    media.addEventListener("timeupdate", () => {
+      document.getElementById("time").textContent =
+        clock(media.currentTime) + " / " + clock(media.duration);
+    });
+    media.addEventListener("ended", () => {
+      if (!looping) load(at + 1);
+    });
+    stage.appendChild(media);
+    if (isAudio(item.url)) {
+      stage.appendChild(el("div", "art", item.title || ""));
+    }
+    document.title = item.title || "Player";
+    render();
+  }
+
+  function render() {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+    queue.forEach((item, i) => {
+      const row = el("div", "row" + (i === at ? " on" : ""));
+      row.append(el("span", "sub", String(i + 1)),
+                 el("span", "grow", item.title || item.url));
+      row.onclick = () => load(i);
+      list.appendChild(row);
+    });
+    document.getElementById("where").textContent =
+      queue.length ? (STR.playerQueue || "%d in the queue")
+        .replace("%d", queue.length) : "";
+  }
+
+  // How the browser hands this page a queue: a list of file paths or
+  // addresses. Kept to one name so the media tool has something to
+  // call whether or not the channel has finished connecting -- a
+  // playlist handed over a moment after the page loaded would
+  // otherwise arrive before the bridge did.
+  window.__playerLoad = function (files) {
+    queue = (files || []).map((item) => {
+      const url = String(item);
+      const full = url.indexOf("://") > 0 ? url
+        : "file://" + encodeURI(url).replace(/#/g, "%23");
+      const name = url.split("/").pop() || url;
+      return {url: full, title: name};
+    });
+    at = -1;
+    render();
+    if (queue.length) load(0);
+    return queue.length;
+  };
+
+  document.getElementById("play").onclick = () => {
+    if (!media) return;
+    if (media.paused) media.play().catch(() => {});
+    else media.pause();
+  };
+  document.getElementById("back").onclick = () => {
+    if (media) media.currentTime = Math.max(0, media.currentTime - 10);
+  };
+  document.getElementById("fwd").onclick = () => {
+    if (media) media.currentTime = media.currentTime + 10;
+  };
+  document.getElementById("speed").onchange = (e) => {
+    if (media) media.playbackRate = Number(e.target.value);
+  };
+  document.getElementById("loop").onclick = (e) => {
+    looping = !looping;
+    if (media) media.loop = looping;
+    e.target.textContent = (STR.playerLoop || "Loop: %s")
+      .replace("%s", looping ? (STR.on || "on") : (STR.off || "off"));
+  };
+  document.getElementById("prev").onclick = () => load(at - 1);
+  document.getElementById("next").onclick = () => load(at + 1);
+  document.getElementById("subs").onclick = () => {
+    if (bridge && bridge.playerSubtitles) {
+      bridge.playerSubtitles((data) => {
+        if (!data || !media) return;
+        const old = media.querySelector("track");
+        if (old) old.remove();
+        const track = document.createElement("track");
+        track.kind = "subtitles";
+        track.default = true;
+        track.src = data;
+        media.appendChild(track);
+        try { media.textTracks[0].mode = "showing"; } catch (e) {}
+      });
+    }
+  };
+  document.addEventListener("keydown", (e) => {
+    if (e.key === " ") { document.getElementById("play").click();
+                        e.preventDefault(); }
+    if (e.key === "ArrowRight") document.getElementById("fwd").click();
+    if (e.key === "ArrowLeft") document.getElementById("back").click();
+    if (e.key === "Escape" && bridge && bridge.closePane) bridge.closePane();
+  });
+
+  if (typeof qt !== "undefined") {
+    new QWebChannel(qt.webChannelTransport, (ch) => {
+      bridge = ch.objects.bridge;
+      bridge.uiStrings((j) => {
+        try { Object.assign(STR, JSON.parse(j)); } catch (e) {}
+        document.getElementById("play").textContent =
+          STR.mediaPlayPause || "Play / pause";
+        document.getElementById("subs").textContent =
+          (STR.subsOpen || "Subtitles") + "…";
+        bridge.playerQueue((json) => {
+          try { queue = JSON.parse(json || "[]"); } catch (e) { queue = []; }
+          if (queue.length) load(0);
+          else render();
+        });
+      });
+    });
+  }
+</script>
+</body>
+</html>

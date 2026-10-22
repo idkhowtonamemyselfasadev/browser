@@ -4,7 +4,8 @@ Never touches your real data: every file path the browser uses is
 redirected into a scratch directory and the app name is changed so the
 QtWebEngine profiles cannot collide with the running browser.
 """
-import os, sys, json, shutil, threading, functools, http.server, socketserver
+import atexit, os, sys, json, shutil, threading, functools, http.server, socketserver
+import time
 
 import tempfile
 
@@ -16,6 +17,47 @@ ROOT = os.path.dirname(HERE)                 # the browser itself
 # race rather than as anything to do with the code under test
 DATA = os.path.join(tempfile.gettempdir(),
                     "browser-pwtest-%d" % os.getpid())
+
+
+def _tidy_scratch():
+    """Take this run's scratch directory away when the process ends.
+
+    Why this is here at all: every run left its directory behind, and
+    a profile with a cache in it is 70-80 MB. After a few hundred runs
+    /tmp was full, and what that looks like is not "no space left" --
+    it is the last few tests of a suite segfaulting and timing out,
+    because a browser that cannot write its profile dies in a way that
+    looks like a bug in whatever it was doing.
+
+    Anything older than a day from a run that is no longer there goes
+    with it, so a suite that was killed does not leave its own behind.
+    """
+    shutil.rmtree(DATA, ignore_errors=True)
+    parent = tempfile.gettempdir()
+    now = time.time()
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith("browser-pwtest-"):
+            continue
+        path = os.path.join(parent, name)
+        try:
+            if now - os.path.getmtime(path) < 86400:
+                continue
+            pid = int(name.rsplit("-", 1)[-1])
+        except (OSError, ValueError):
+            continue
+        try:
+            os.kill(pid, 0)          # still running: leave it alone
+        except ProcessLookupError:
+            shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            continue
+
+
+atexit.register(_tidy_scratch)
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["XDG_DATA_HOME"] = os.path.join(DATA, "share")
@@ -73,9 +115,61 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        # exactly the auth paths, not every path that starts with
+        # those five letters: "/author/someone" is a page, and asking
+        # for a password on it hung a whole suite for fifteen minutes
+        if (path == "/auth" or path.startswith("/auth/")) \
+                and not self._auth_ok():
+            self.send_response(401)
+            self.send_header("WWW-Authenticate",
+                             'Basic realm="the test server"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path.startswith("/moved/"):
+            # a real 301, which is the only honest way to test what a
+            # browser does with one: the engine never hands an
+            # embedder a status code, so a test that wants a redirect
+            # has to make the server send one
+            where = "/" + path[len("/moved/"):]
+            self.send_response(301)
+            self.send_header("Location", where)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path == "/echo":
+            # what the server was actually sent, so a test can check a
+            # header the browser added rather than what JavaScript says
+            lines = ["%s: %s" % (k, v) for k, v in self.headers.items()]
+            raw = ("<title>echo</title><pre>" + "\n".join(lines)
+                   + "</pre>").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         body = self.pages.get(path)
         if body is None:
             self.send_error(404)
+            return
+        # a page given as bytes is served as itself, with a type from
+        # its ending: a test that needs a real picture (for its
+        # natural size, say) cannot get one out of text/html
+        if isinstance(body, bytes):
+            raw = body
+            kind = {"png": "image/png", "jpg": "image/jpeg",
+                    "jpeg": "image/jpeg", "gif": "image/gif",
+                    "webp": "image/webp", "pdf": "application/pdf",
+                    "zip": "application/zip",
+                    "jar": "application/java-archive"}.get(
+                        path.rsplit(".", 1)[-1].lower(),
+                        "application/octet-stream")
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
             return
         raw = body.encode()
         self.send_response(200)
@@ -84,11 +178,71 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    #: paths under this prefix ask for a basic-auth login, and only
+    #: this one is accepted. A browser has no way to test its own
+    #: http-auth dialog without a server that asks for one.
+    auth_user = "tim"
+    auth_password = "letmein"
+
+    def _auth_ok(self):
+        import base64
+        want = "Basic " + base64.b64encode(
+            ("%s:%s" % (self.auth_user, self.auth_password)).encode()
+        ).decode()
+        return self.headers.get("Authorization") == want
+
+    def do_HEAD(self):
+        """The same answer as GET without the body. SimpleHTTPRequest-
+        Handler's own do_HEAD serves the filesystem, which has none of
+        these pages in it and answered 404 to everything -- and a test
+        of "is this page still there?" needs a server that can say
+        yes."""
+        path = self.path.split("?")[0]
+        body = self.pages.get(path)
+        if body is None:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body.encode())))
+        self.end_headers()
+
+    #: what the last POST carried, for a test that wants to look
+    last_post = {}
+
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
-        self.rfile.read(n)
+        body = self.rfile.read(n)
+        path = self.path.split("?")[0]
+        Handler.last_post = {"path": path, "length": n,
+                             "type": self.headers.get("Content-Type", ""),
+                             "head": body[:400]}
+        # a Moonraker-shaped answer, so the 3D-printer upload can be
+        # tested against something that behaves like the printer does
+        if path.startswith("/server/files/upload"):
+            answer = b'{"item": {"path": "test.gcode"}}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(answer)))
+            self.end_headers()
+            self.wfile.write(answer)
+            return
         self.send_response(303)
         self.send_header("Location", self.headers.get("X-Next") or "/step2")
+        self.end_headers()
+
+    #: what the last PUT carried -- the capture upload uses PUT, and a
+    #: test that cannot see what arrived cannot prove it arrived
+    last_put = {}
+
+    def do_PUT(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n)
+        Handler.last_put = {"path": self.path.split("?")[0], "length": n,
+                            "type": self.headers.get("Content-Type", ""),
+                            "head": body[:64]}
+        self.send_response(201)
+        self.send_header("Content-Length", "0")
         self.end_headers()
 
     def log_message(self, *a):

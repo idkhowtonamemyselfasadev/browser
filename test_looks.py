@@ -66,10 +66,11 @@ def js(page, code):
 
 
 # ---------------------------------------------------------------- (1)
-print("\n(1) the five looks")
+print("\n(1) the looks")
 check("classic is the default", B.DEFAULT_LOOK == "classic")
-check("there are five of them, classic first",
-      B.look_names() == ["classic", "taskbar", "macos", "circle", "glass"],
+check("they are in order, classic first",
+      B.look_names() == ["classic", "taskbar", "macos", "circle", "glass",
+                         "flat"],
       ", ".join(B.look_names()))
 check("every look names itself and says what it does",
       all(B.UI_STRINGS["en"].get(entry["name"])
@@ -566,13 +567,15 @@ gsheet = B.look_style("glass")
 check("its sheet frosts the chrome with translucent surfaces",
       "rgba(" in gsheet and "transparent" in gsheet, gsheet[:40])
 check("and turns the window's own base transparent so the blur shows through",
-      "QMainWindow { background: transparent" in gsheet)
-check("the window carries an alpha channel for the compositor to blur",
-      win.testAttribute(_Qt.WidgetAttribute.WA_TranslucentBackground))
+      "QMainWindow, #root { background: transparent" in gsheet)
+check("a window built on an opaque look carries no alpha channel - one it "
+      "never blurs through still costs the compositor a blend of the whole "
+      "window every frame, and the fullscreen scanout a video wants",
+      not win.testAttribute(_Qt.WidgetAttribute.WA_TranslucentBackground))
 win.apply_look("glass")
 spin(200)
 check("choosing glass puts its frosted sheet on the window",
-      "QMainWindow { background: transparent" in app.styleSheet())
+      "QMainWindow, #root { background: transparent" in app.styleSheet())
 check("the page behind the glass stays fully opaque - only the chrome frosts",
       view.page().backgroundColor().alpha() == 255,
       view.page().backgroundColor().alpha())
@@ -704,6 +707,19 @@ check("and its sheet carries both the theme and the look",
       and app.styleSheet().startswith(B.theme_style("gruvbox")[:400]))
 second.close()
 second.deleteLater()
+spin(200)
+
+# ---------------------------------------------------------------- (12)
+print("\n(12) glass asks for its alpha channel at the moment it is built")
+B.CONFIG_FILE.write_text(json.dumps({"translateLang": "en", "look": "glass"}))
+B._install_theme_flags()
+third = B.Browser()
+third.show()
+spin(400)
+check("a browser started on glass carries the alpha channel its blur needs",
+      third.testAttribute(_Qt.WidgetAttribute.WA_TranslucentBackground))
+third.close()
+third.deleteLater()
 spin(200)
 
 
