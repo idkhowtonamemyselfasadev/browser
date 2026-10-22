@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-22 (night) — the graphics-card chooser is switched back off
+
+It went out, and within the hour his YouTube live streams were black
+and flickering while ordinary videos played. Two real bugs came out of
+that (the decoder not following the card; "let the system decide"
+clearing a decoder that was not its to clear), and the black stayed.
+
+This server cannot reproduce it: it renders in software — its
+`/dev/dri/renderD128` is ACL'd to the login greeter, not to this user —
+and under software rendering the variables the chooser sets change
+nothing at all. Measured, with a local clip rather than a site that has
+policies: **121 frames in four seconds clean, 119 with the mismatched
+decoder, 121 pointed at a card that is not there**, no dropped frames
+and no error in any of the three. Whatever goes black on his machine
+goes black in a compositing path this box does not have.
+
+So the chooser stops applying anything until there is something to test
+it with. On this update a card already chosen is kept under
+`gpuCardWas`, `gpuCard` goes back to "auto", the window stops asking,
+and the browser starts with exactly the environment it had before any
+of this existed. Settings → What this is costing turns it back on.
+
 ## 2026-10-22 (night) — the decoder goes with the card
 
 Second correction, found while telling him to use it: **"let the system
