@@ -702,7 +702,7 @@ check("what was fetched survives a restart",
 print("\n(28) Settings, the words and the keys")
 page_text = (HERE / "settings.html").read_text()
 check("there is a section for the bar",
-      'data-desc="descSearchBar"' in page_text)
+      'data-desc="descBar"' in page_text)
 for ident in ("barprogress", "bardimpath", "bardecode", "barhidescheme",
               "barinline", "barlock", "barcopybtn", "barclearbtn",
               "barqrbtn", "barbottom", "moneyrates",
