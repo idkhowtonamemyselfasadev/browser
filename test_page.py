@@ -264,8 +264,8 @@ def got_settings(raw):
     # so someone searching the rail for it should land on both.
     check("the rail can still find the section by what it says",
           "Passwords" in d["rail"], d["rail"])
-    check("and Plugins, where the feature is switched on",
-          "Plugins" in d["rail"], d["rail"])
+    check("and the section the feature is switched on in",
+          "For developers" in d["rail"], d["rail"])
     win.close_settings()
     QTimer.singleShot(400, step_denied)
 

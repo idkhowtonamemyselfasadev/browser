@@ -222,7 +222,7 @@ got = json.loads(js(page, """(function () {
                          back: document.querySelectorAll(".tcard").length});
 })()""") or "{}")
 check("the rail's own search finds the section by a theme's name",
-      got.get("rail") == ["Theme"], str(got.get("rail")))
+      got.get("rail") == ["Looks"], str(got.get("rail")))
 check("the box in the section narrows it to one family",
       sorted(got.get("shown", [])) == ["gruvbox", "gruvbox-hard",
                                        "gruvbox-light", "gruvbox-light-hard"],
@@ -270,5 +270,14 @@ missing = [k for k in B.UI_STRINGS["en"] if k.startswith("theme")
 check("English and German both have them", not missing, ", ".join(missing))
 
 print("\n%d checks failed" % FAILS)
+# the Settings pane goes down before the process does: left open
+# through interpreter teardown it takes the engine with it now and
+# then, with every check already passed
+try:
+    win.close_settings()
+    spin(300)
+except Exception:
+    pass
 app.quit()
-sys.exit(1 if FAILS else 0)
+sys.stdout.flush()
+os._exit(1 if FAILS else 0)
