@@ -104,7 +104,23 @@ check("...and says the NVIDIA ones must come off",
       "__NV_PRIME_RENDER_OFFLOAD" in off, off)
 on, off = B.gpu_env("auto", cards)
 check("\"let the system decide\" sets nothing", on == {}, on)
-check("...and takes every one of them off", len(off) == 5, off)
+check("...and takes every one of them off, the decoder included",
+      len(off) == 6 and "LIBVA_DRIVER_NAME" in off, off)
+# the decoder and the card that composites must be the same one: his
+# own line further up browser.py forces LIBVA_DRIVER_NAME=nvidia
+# whenever an NVIDIA driver is installed, and decoding on one card
+# while another draws is a black video with the sound still playing
+on, _off = B.gpu_env(cards[0]["slot"], cards)
+check("choosing NVIDIA decodes on NVIDIA",
+      on.get("LIBVA_DRIVER_NAME") == "nvidia", on)
+on, _off = B.gpu_env(cards[1]["slot"], cards)
+check("choosing Intel moves the decoder to Intel as well",
+      on.get("LIBVA_DRIVER_NAME") == "iHD", on)
+env = {"LIBVA_DRIVER_NAME": "nvidia"}
+B.gpu_apply(cards[1]["slot"], cards, env)
+check("...so a machine told \"nvidia\" earlier is corrected",
+      env.get("LIBVA_DRIVER_NAME") == "iHD", env)
+
 check("a slot that is not here any more decides nothing",
       B.gpu_env("0000:09:00.0", cards)[0] == {})
 
