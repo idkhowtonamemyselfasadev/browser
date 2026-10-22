@@ -319,6 +319,30 @@ text = log.read_text()
 check("an oversized crash.log is started over, not appended to",
       len(text) < 100 * 1024 and "the second pretend bug" in text, len(text))
 
+# ---------------------------------------------------------------------
+print("\n(11) a line in the corner, after the window has gone")
+# A toast is the last thing a late answer does -- a download that lands
+# after the window closed, a reader that falls over while the browser is
+# quitting, a thread coming back on the way out. Giving a new child
+# widget a deleted C++ parent raises RuntimeError, and an exception out
+# of a Qt slot is not a line in a log: it is abort(). That is what a
+# suite printing "all good" and then dumping core looks like.
+from PyQt6 import sip  # noqa: E402
+
+doomed = B.Browser()
+check("a toast lands while the window is there",
+      B.Browser.flash(doomed, "still here") is True)
+sip.delete(doomed)
+check("the window really is gone now", sip.isdeleted(doomed))
+try:
+    answer = B.Browser.flash(doomed, "too late")
+    raised = None
+except Exception as exc:                 # pragma: no cover - the bug
+    answer, raised = None, exc
+check("a toast after that answers False instead of taking the process "
+      "down with it", answer is False, raised)
+check("...and raises nothing at all", raised is None, raised)
+
 print("\n%d checks failed" % len(fails))
 if fails:
     for f in fails:
