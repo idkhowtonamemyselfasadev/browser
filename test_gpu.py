@@ -374,6 +374,23 @@ for key in ("gpuWindows",):
           B.UI_STRINGS["en"].get(key) and B.UI_STRINGS["de"].get(key)
           and B.UI_STRINGS["en"][key] != B.UI_STRINGS["de"][key])
 
+check("...and a button that takes him to where it is made",
+      'id="gpuopenwin"' in page
+      and "bridge.openWindowsGraphics" in page
+      and 'open.hidden = choose' in page)
+check("the slot behind it exists and is a slot",
+      "def openWindowsGraphics(self)" in src
+      and "@pyqtSlot(result=bool)\n    def openWindowsGraphics" in src)
+check("...and it does nothing at all on this machine, rather than "
+      "handing an unknown address to the desktop",
+      B.Bridge.openWindowsGraphics(object()) is False)
+check("it opens the shell's own address for that page",
+      'os.startfile("ms-settings:display-graphics")' in src)
+for key in ("gpuOpenWindows",):
+    check("the word %s is in both languages" % key,
+          B.UI_STRINGS["en"].get(key) and B.UI_STRINGS["de"].get(key)
+          and B.UI_STRINGS["en"][key] != B.UI_STRINGS["de"][key])
+
 print("")
 if fails:
     print("FAILED (%d): %s" % (len(fails), "; ".join(fails[:8])))
