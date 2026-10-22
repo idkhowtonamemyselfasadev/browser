@@ -15,6 +15,7 @@ Covers, in the browser rather than in a docstring:
 Offscreen, against a scratch vault. Your own is never opened.
 """
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -292,7 +293,13 @@ def got_denied(text):
     print("\n%d checks failed" % len(fails))
     for f in fails:
         print("  - " + f)
-    app.exit(1 if fails else 0)
+    # the process goes down here rather than through interpreter
+    # teardown: the passwords pane is still open, and a live page torn
+    # down behind the engine takes the whole process with it about half
+    # the time (exit 139, with the tally printed right above it, which
+    # reads as a failed suite that passed every check)
+    sys.stdout.flush()
+    os._exit(1 if fails else 0)
 
 
 QTimer.singleShot(3500, step_open)

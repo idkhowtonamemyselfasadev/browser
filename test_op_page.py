@@ -208,7 +208,11 @@ def step_degrade():
     print("\n%d checks failed" % len(fails))
     for f in fails:
         print("  - " + f)
-    app.exit(1 if fails else 0)
+    # down here rather than through interpreter teardown: a live page
+    # torn down behind the engine can take the whole process with it
+    # (exit 139 with every check already printed) - see test_page.py
+    sys.stdout.flush()
+    os._exit(1 if fails else 0)
 
 
 QTimer.singleShot(3000, step_list)
