@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-10-22 — what the tabs are costing, on Windows too
+
+`process_cost` and `renderer_cpu` read `/proc`, and said so in their own
+docstrings: "Linux only, and deliberately so". The consequence over
+there was a **"What this is costing" page with nothing in it** — every
+tab reporting no memory and no processor time, which reads as a broken
+page rather than as a platform the code never asked about.
+
+Windows has the same two numbers in two calls: the working set out of
+`GetProcessMemoryInfo`, kernel and user time out of `GetProcessTimes`,
+opened with `QUERY_LIMITED_INFORMATION | VM_READ` and nothing more —
+every pid asked about is a renderer of ours. The arithmetic is kept
+apart from the call, so the suite can hand it numbers without a Windows
+to get them from: `test_winbranch.py` is at **76 checks**, including
+that a process that cannot be asked is an empty answer rather than a
+crash, and that a renderer which has gone is 0.0 seconds.
+
+**Memory pressure stays empty there on purpose.** Windows has no
+counter for "was anything stalled waiting for memory"; the one it does
+have is how full memory is, which is a different question with a
+different answer. The page already handles nothing. A made-up number
+would be worse.
+
 ## 2026-10-22 — three features that were dead on Windows
 
 Part of the port, and all three in this file rather than the other
