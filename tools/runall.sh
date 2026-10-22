@@ -50,7 +50,7 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_bar.py test_dev.py test_look2.py test_a11y.py test_nav2.py test_perf2.py test_capture2.py test_keys2.py test_agent2.py test_read3.py test_privacy3.py test_marks3.py test_tools3.py test_block3.py test_gaps3.py test_setpage.py test_gpu.py \
          test_devtools.py test_keyboard.py \
          test_agentops.py test_reading.py test_gaming.py test_files.py \
-         test_perf.py test_sitelook.py; do
+         test_perf.py test_sitelook.py test_winbranch.py; do
   [ -f "$t" ] || continue
   run "$t" "$t"
 done

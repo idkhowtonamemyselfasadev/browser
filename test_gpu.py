@@ -286,6 +286,94 @@ for key in ("gpuPickName", "gpuPickHint", "gpuAskName", "gpuAskHint",
           B.UI_STRINGS["en"].get(key) and B.UI_STRINGS["de"].get(key)
           and B.UI_STRINGS["en"][key] != B.UI_STRINGS["de"][key])
 
+print("\n(7) the same question on Windows, which answers it itself")
+# There is no sysfs there and no DRI_PRIME either: the cards are what
+# Windows lists, and WHICH card a program uses is kept in Windows' own
+# Graphics settings, per executable. So this edition lists them and
+# says where the choice lives, and sets nothing.
+SAMPLE = """
+NVIDIA GeForce RTX 5080|PCI\\VEN_10DE&DEV_2704&SUBSYS_123410DE&REV_A1\\4&2b8|0
+Intel(R) UHD Graphics 770|PCI\\VEN_8086&DEV_4680&SUBSYS_00000000&REV_0C\\3&11|2560
+Microsoft Basic Display Adapter||
+rubbish
+"""
+cards = B._gpu_windows_cards(SAMPLE)
+check("both real adapters are read, and the nameless one is not",
+      len(cards) == 2, [c.get("name") for c in cards])
+names = [c["name"] for c in cards]
+check("they keep the names Windows gives them",
+      names == ["NVIDIA GeForce RTX 5080", "Intel(R) UHD Graphics 770"],
+      names)
+check("the maker and the device come out of the device id",
+      [(c["vendor"], c["device"], c["maker"]) for c in cards]
+      == [("0x10de", "0x2704", "NVIDIA"), ("0x8086", "0x4680", "Intel")],
+      [(c["vendor"], c["device"], c["maker"]) for c in cards])
+check("the card that is driving a screen is marked, and only it",
+      [c["boot"] for c in cards] == [False, True],
+      [c["boot"] for c in cards])
+check("each card's identity is the device id, which survives a restart",
+      all(c["slot"] == c["card"] and "VEN_" in c["slot"] for c in cards),
+      [c["slot"] for c in cards])
+check("two cards never answer to one name",
+      len({c["slot"] for c in cards}) == 2)
+check("no output at all is no cards, not a crash",
+      B._gpu_windows_cards("") == [])
+
+real_sys = B.sys
+
+
+class FakeSys:
+    pass
+
+
+fake = FakeSys()
+fake.platform = "win32"
+fake.executable = real_sys.executable
+fake.argv = list(real_sys.argv)
+try:
+    B.sys = fake
+    # the Linux reader must not be reached: it would answer with this
+    # box's own Intel card on a machine that has no /sys at all
+    looked = []
+    real_list = os.listdir
+    os.listdir = lambda path: (looked.append(path), real_list(path))[1]
+    try:
+        win_cards = B.gpu_cards()
+    finally:
+        os.listdir = real_list
+    check("gpu_cards goes to Windows for its answer there",
+          not any("drm" in str(path) for path in looked), looked)
+    check("...and with no powershell to ask, that is no cards",
+          win_cards == [], win_cards)
+
+    on, off = B.gpu_env("PCI\\VEN_10DE&DEV_2704", cards)
+    check("a choice sets nothing in the environment on Windows",
+          (on, off) == ({}, []), (on, off))
+    check("...DRI_PRIME above all, which means nothing there",
+          "DRI_PRIME" not in on)
+    env = {"DRI_PRIME": "pci-0000_01_00_0", "PATH": "/x"}
+    B.gpu_apply("PCI\\VEN_10DE&DEV_2704", cards, env)
+    check("and an environment it was handed is left exactly as it was",
+          env == {"DRI_PRIME": "pci-0000_01_00_0", "PATH": "/x"}, env)
+finally:
+    B.sys = real_sys
+
+src = (HERE / "browser.py").read_text(encoding="utf-8")
+check("no window is ever put up on Windows",
+      'if sys.platform == "win32":\n        # there is nothing this window'
+      in src)
+check("Settings is told whether choosing is on offer at all",
+      '"gpuChoose": sys.platform != "win32"' in src)
+page = (HERE / "settings.html").read_text(encoding="utf-8")
+check("...and the page says where the choice lives instead",
+      'id="gpuwindows"' in page and "s.gpuChoose !== false" in page)
+check("the ask-at-every-start row is not offered there",
+      'askrow.closest(".wrow").hidden = !choose' in page)
+for key in ("gpuWindows",):
+    check("the word %s is in both languages" % key,
+          B.UI_STRINGS["en"].get(key) and B.UI_STRINGS["de"].get(key)
+          and B.UI_STRINGS["en"][key] != B.UI_STRINGS["de"][key])
+
 print("")
 if fails:
     print("FAILED (%d): %s" % (len(fails), "; ".join(fails[:8])))
