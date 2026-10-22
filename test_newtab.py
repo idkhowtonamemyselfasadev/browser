@@ -162,10 +162,12 @@ if len(sys.argv) > 1 and sys.argv[1] == "--settings":
     view = settings_view(win)
     out = {}
     # sections that are not the open one are display:none, and nothing
-    # inside one of those can take the focus - so open Browsing first
+    # inside one of those can take the focus - so open the one holding
+    # the box first. Found by the box, not by the section's name: these
+    # settings have moved between sections before.
     H.js(view, """(function () {
       var secs = visibleSections();
-      var want = document.querySelector('section[data-desc="descBrowsing"]');
+      var want = document.getElementById('newtaburl').closest('section');
       showCat(secs.indexOf(want));
       return 1;
     })()""", B.MAIN_WORLD_ID)
@@ -204,8 +206,18 @@ if len(sys.argv) > 1 and sys.argv[1] == "--settings":
       return sel ? sel.dataset.value : '?';
     })()""", B.MAIN_WORLD_ID)
 
-    # (c) the two page settings are separate fields. The box only
-    #     exists once the card beside it is picked, same as the other
+    # (c) the two page settings are separate fields, and they sit in
+    #     two different sections now - what a new tab shows is with the
+    #     tabs, the launch address with the rest of starting up. A field
+    #     in a section that is not open cannot take focus, so open its
+    #     one first.
+    H.js(view, """(function () {
+      var secs = visibleSections();
+      showCat(secs.indexOf(document.getElementById('starturl')
+                           .closest('section')));
+      return 1;
+    })()""", B.MAIN_WORLD_ID)
+    H.spin(300)
     H.js(view, """(function () {
       for (var c of document.querySelectorAll('#startpage .card'))
         if (c.dataset.value === 'custom') c.click();

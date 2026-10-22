@@ -842,8 +842,9 @@ check("...and the browser reads it",
 
 print("\n(30) Settings, the words, and the keys")
 page_text = (HERE / "settings.html").read_text()
-check("there is a section of its own",
-      'data-desc="descDownloadsMore"' in page_text)
+check("there is a section of its own, and only the one",
+      'data-desc="descDownloads"' in page_text
+      and 'data-desc="descDownloadsMore"' not in page_text)
 for ident in ("dlorigin", "dlhashall", "dlnotify", "dlautoextract",
               "dlroutemods", "dlscan", "altclicksave", "stripuploadexif",
               "imgbiggest", "privatedlwipe", "dlkeepdays", "dlbigmb",
@@ -867,7 +868,7 @@ need = ["dlFiles", "dlSource", "dlHash", "dlDelete", "dlExport",
         "imgConvert", "imgSaveAll", "dlNoTorrent", "dlNoYtdlp",
         "dlNoClam", "dlPrinter", "dlPreview", "dlBatch", "upPaste",
         "upRecent", "pageSaveOne", "pageSaveMd", "dlSearch",
-        "dlQueueMenu", "dlCarryOn", "descDownloadsMore"]
+        "dlQueueMenu", "dlCarryOn", "descDownloads"]
 missing_en = [k for k in need if not B.UI_STRINGS["en"].get(k)]
 missing_de = [k for k in need if not B.UI_STRINGS["de"].get(k)]
 check("every new word has an English", missing_en == [], missing_en)

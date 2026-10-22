@@ -159,7 +159,6 @@
     <div class="tabs">
       <button id="v_list" class="on">Pages</button>
       <button id="v_sites">Most visited</button>
-      <button id="v_searches">Searches</button>
       <button id="v_stats">Statistics</button>
     </div>
 
@@ -385,29 +384,6 @@
     }
   }
 
-  function renderSearches(rows) {
-    const list = document.getElementById("list");
-    list.innerHTML = "";
-    document.getElementById("empty").hidden = rows.length > 0;
-    for (const r of rows) {
-      const row = document.createElement("div");
-      row.className = "row";
-      const when = document.createElement("span");
-      when.className = "num";
-      when.textContent = new Date(r.t * 1000)
-        .toLocaleDateString(STR.lang || [], {day: "numeric", month: "numeric"});
-      const link = document.createElement("a");
-      link.className = "grow";
-      link.href = r.url;
-      link.textContent = r.q;
-      const host = document.createElement("span");
-      host.className = "host";
-      host.textContent = r.host;
-      row.append(when, link, host);
-      list.appendChild(row);
-    }
-  }
-
   function renderStats(stats) {
     const list = document.getElementById("list");
     list.innerHTML = "";
@@ -469,8 +445,6 @@
       });
     } else if (view === "sites") {
       bridge.mostVisited(30, (json) => renderSites(JSON.parse(json)));
-    } else if (view === "searches") {
-      bridge.searchQueries((json) => renderSearches(JSON.parse(json)));
     } else {
       bridge.browsingStats(7, (json) => renderStats(JSON.parse(json)));
     }
@@ -478,7 +452,7 @@
 
   function setView(which) {
     view = which;
-    for (const name of ["list", "sites", "searches", "stats"]) {
+    for (const name of ["list", "sites", "stats"]) {
       document.getElementById("v_" + name)
         .classList.toggle("on", name === which);
     }
@@ -575,7 +549,6 @@
           document.getElementById("empty").textContent = STR.noHistory;
           document.getElementById("v_list").textContent = STR.histPages || "Pages";
           document.getElementById("v_sites").textContent = STR.histMost || "Most visited";
-          document.getElementById("v_searches").textContent = STR.histSearches || "Searches";
           document.getElementById("v_stats").textContent = STR.histStats || "Statistics";
           document.getElementById("bygroup").textContent = STR.histBySite || "Group by site";
           document.getElementById("shownoise").textContent = STR.histHops || "Show hops";
