@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-22 — a button to where the graphics choice actually lives
+
+The cards are listed on Windows and the page says the choice belongs to
+Windows' own Graphics settings. Saying where something is and taking
+somebody there are two different things, so there is a button now:
+`ms-settings:display-graphics`, which is the shell's own address for
+that page — the same thing as pressing it in the Start menu. It is
+shown only where it leads somewhere, and the slot behind it does
+nothing at all on another platform rather than handing an unknown
+address to a desktop that has never heard of it.
+
+Also: **`test_setpage.py` stopped crashing after it passed.** It left
+the Settings pane open through interpreter teardown, which takes the
+engine down with it now and then — so a suite that printed "all good"
+exited 139 and read as a failure. It closes the pane and leaves on
+`os._exit`, the same way `test_theme.py` already did. Three runs in a
+row, clean.
+
 ## 2026-10-22 — reading a page aloud works on Windows
 
 The reader went through `spd-say`, a speech-dispatcher client, which is
