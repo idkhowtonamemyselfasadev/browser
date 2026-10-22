@@ -338,12 +338,16 @@ def gpu_env(choice, cards=None):
     picks" really does take the last answer off."""
     off = ["DRI_PRIME", "__NV_PRIME_RENDER_OFFLOAD",
            "__GLX_VENDOR_LIBRARY_NAME", "__VK_LAYER_NV_optimus",
-           "MESA_VK_DEVICE_SELECT",
-           # the decoder goes back to being the machine's own business
-           # too: the line further up sets it again at the next start
-           "LIBVA_DRIVER_NAME"]
+           "MESA_VK_DEVICE_SELECT"]
     if not choice or choice == "auto":
+        # "let the system decide" means exactly what the machine did
+        # before any of this existed -- and that includes the VA-API
+        # driver its own start-up line chose. Clearing that here would
+        # take hardware decoding away from a machine that had it.
         return {}, off
+    # a card he has chosen takes its decoder with it, so the one the
+    # line further up set is replaced rather than left disagreeing
+    off = off + ["LIBVA_DRIVER_NAME"]
     cards = cards if cards is not None else gpu_cards()
     card = next((c for c in cards if c["slot"] == choice), None)
     if card is None:
