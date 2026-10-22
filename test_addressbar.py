@@ -121,15 +121,10 @@ check("? forces a search even for something that looks like a host",
       win._resolve_typed("?example.com"))
 check("without ? that is an address",
       win._resolve_typed("example.com") == "https://example.com")
-check("a search is remembered",
-      "sodium" in str(win.config.get("recentSearches")),
-      win.config.get("recentSearches"))
-win.config["recentSearchList"] = False
-win.config["recentSearches"] = []
-win._resolve_typed("something else")
-check("...unless he switched that off",
-      not win.config.get("recentSearches"))
-win.config["recentSearchList"] = True
+check("a search is not remembered anywhere",
+      not win.config.get("recentSearches")
+      and not win.config.get("searchLog"),
+      (win.config.get("recentSearches"), win.config.get("searchLog")))
 
 print("\n(7) the suggestion rows")
 rows = win._own_suggestions("12*64")
@@ -171,7 +166,8 @@ check("and loads when chosen",
       win._suggest_actions.get(rows[0]) == ("url", "https://modrinth.com/mods"))
 win.config["recentSearches"] = ["sodium", "kit pvp"]
 rows = win.empty_bar_rows()
-check("the last searches are there too", "sodium" in rows, rows)
+check("and nothing he searched for, even with an old list in the config",
+      "sodium" not in rows, rows)
 QGuiApplication.clipboard().setText("not a link at all")
 rows = win.empty_bar_rows()
 check("ordinary text on the clipboard is not offered",

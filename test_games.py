@@ -262,16 +262,16 @@ check("asking twice holds one, not two", win.keep_awake(True) is True)
 check("letting go answers False", win.keep_awake(False) is False)
 H.spin(200)
 check("...and nothing is held", win.awake_holding() is False)
-win.config["keepAwake"] = False
+win.config["screenAwake"] = False
 check("the tick lets go when the setting is off",
       win._awake_tick() is False)
-win.config["keepAwake"] = True
+win.config["screenAwake"] = True
 check("with it on and a paused video it holds nothing",
       win._awake_tick(state={"paused": True}) is False)
 check("with something playing it holds",
       win._awake_tick(state={"paused": False}) is True)
 win.keep_awake(False)
-win.config["keepAwake"] = False
+win.config["screenAwake"] = False
 
 print("\n(5) a file off the disk, and the microphone test")
 check("there is a player page", (HERE / "player.html").exists())
@@ -925,7 +925,7 @@ check("it goes on for this site",
       win.cloud_gaming(host="luna.example.com", on=True, view=spare) is True)
 check("the site is on the list",
       "luna.example.com" in win.cloud_sites(), win.cloud_sites())
-check("the screen is held awake", win.config.get("keepAwake") is True)
+check("the screen is held awake", win.config.get("screenAwake") is True)
 check("the tab is protected", win.game_protected(spare) is True)
 check("the gamepad is let through", win.config.get("gamepadOn") is True)
 check("it goes off again",
@@ -933,7 +933,7 @@ check("it goes off again",
       is False)
 check("...and the site comes off the list",
       "luna.example.com" not in win.cloud_sites(), win.cloud_sites())
-win.config["keepAwake"] = False
+win.config["screenAwake"] = False
 win.keep_awake(False)
 
 print("\n(26) the gamepad")
@@ -1075,14 +1075,14 @@ page_text = (HERE / "settings.html").read_text()
 check("there is a section for it", 'data-desc="descGames"' in page_text)
 for ident in ("twitchpoints", "twitchads", "theatermode", "gamepadon",
               "discordroute", "discordbadge", "autogamemode", "mprison",
-              "keepawake", "pauseonlock", "sponsorskip", "lyricson",
+              "screenawake", "pauseonlock", "sponsorskip", "lyricson",
               "blurwords", "chathide", "chatusers", "chatme", "livewatch",
               "mcinstances", "streamchecks", "liveevery", "streamdelay",
               "obsurl", "obspw"):
     check("Settings has a row for " + ident,
           ('id="%s"' % ident) in page_text)
 for ident, key in (("twitchpoints", "twitchPoints"),
-                   ("mprison", "mprisOn"), ("keepawake", "keepAwake"),
+                   ("mprison", "mprisOn"), ("screenawake", "screenAwake"),
                    ("sponsorskip", "sponsorSkip"),
                    ("lyricson", "lyricsOn"), ("autogamemode", "autoGameMode")):
     check("...wired to " + key,

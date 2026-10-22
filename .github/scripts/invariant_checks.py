@@ -298,7 +298,9 @@ def channel_defaults(browser):
 def heal_never_trusts_a_site(browser):
     view, page = web_view(browser)
     installed = []
-    page._install_channel = lambda kind: installed.append(kind)
+    # the url rides along now (it settles the base colour behind
+    # the document), so the stand-in has to take it too
+    page._install_channel = lambda kind, url=None: installed.append(kind)
 
     # a healed reply that arrives after the page moved on to a website
     page._channel_kind = "full"
@@ -763,6 +765,37 @@ def connect_through(port, target):
 
 # ---------------------------------------------------------------- main
 ENGINE = True
+
+
+@check("no word is written down twice")
+def check_no_duplicate_strings(browser):
+    """A key given twice in one language table keeps only the second
+    one, silently -- and the two are rarely the same sentence.
+
+    Found by eye in Settings, where the footer read
+    “%s” saved — %d tabs: the session toast had been
+    written into the table under the same name as the footer's own
+    line, so the page printed a format string at him. Two more were
+    in there with it.
+    """
+    import ast as _ast
+    import collections as _collections
+    tree = _ast.parse((REPO / "browser.py").read_text())
+    trouble, counted = [], 0
+    for node in _ast.walk(tree):
+        if not (isinstance(node, _ast.Assign)
+                and any(getattr(t, "id", "") == "UI_STRINGS"
+                        for t in node.targets)):
+            continue
+        for lang, table in zip(node.value.keys, node.value.values):
+            keys = [k.value for k in table.keys]
+            counted += len(keys)
+            for name, n in _collections.Counter(keys).items():
+                if n > 1:
+                    trouble.append("%s: %s x%d" % (lang.value, name, n))
+    assert counted, "no string table found"
+    assert not trouble, "written twice: " + "; ".join(sorted(trouble))
+    return "%d strings, each written once" % counted
 
 
 @check("nothing in browser.py is defined twice")

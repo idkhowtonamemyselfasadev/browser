@@ -2530,8 +2530,7 @@
       if (!box) return;
       box.innerHTML = "";
       const S = window.STR || {};
-      for (const [key, label] of [["continue", S.startCarryOn || "Carry on"],
-                                  ["recent", S.startRecent || "Just added"]]) {
+      for (const [key, label] of [["recent", S.startRecent || "Just added"]]) {
         const rows = data[key] || [];
         if (!rows.length) continue;
         const row = document.createElement("div");

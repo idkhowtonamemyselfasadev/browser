@@ -1,5 +1,64 @@
 # Changelog
 
+## 2026-10-22 — Settings: nothing listed twice, and a page you can see through
+
+He opened Settings and found two sections called "The address bar", one
+under the other. Pulling on that thread found the rest:
+
+- **The duplicated section is gone.** It was a whole copy — markup,
+  the JavaScript that fills it and the JavaScript that binds it — which
+  is where **66 duplicated element ids** in one page came from. Zero now,
+  and `test_setpage.py` keeps it that way.
+- **Two switches that shared an id, so one of them did nothing.**
+  "Pause animations in tabs nobody is looking at" and "Pause a video
+  when its tab is hidden" were both `id="pausehidden"`; the first one
+  the page found got the binding and the second was a dead control.
+- **A switch that was quietly eating a list.** The never-sleep site
+  list and the "keep the screen awake while a video plays" switch were
+  both written to the config key `keepAwake` — a list and a boolean in
+  one key, in the page *and* in the browser. The switch is `screenAwake`
+  now, the list keeps `keepAwake`, and a config written by the old
+  version hands the boolean over on the way in.
+- **Eighteen headings were never translated**, because the map that
+  translates them had never been told about them: in German the rail
+  came out half in English. All eighteen are in the map.
+- **"Browsing" was a dumping ground** — 23 cards and 128 rows, with
+  cards named after other sections — while "Downloads" held two rows.
+  The cards now sit where their names say: new **Tabs**, **Video and
+  sound** and **Notes and tools** sections, keyboard shortcuts with the
+  keys, the screenshot card with recording, both privacy cards (named
+  apart: "Trackers and the home network", "Connections") under Privacy,
+  and the two download sections merged into one.
+- **The tab-click settings were offered twice** — a dropdown under Keys
+  and the mouse and a card picker under Browsing, both writing the same
+  setting. One place now, with the other tab settings.
+- **You can see the window through it.** The rail, the search strip and
+  every card are the palette's own colours at an alpha over a blur, and
+  under the glass look the page itself goes see-through: one of the
+  browser's own pages now asks the engine to paint no base colour
+  behind it, so the translucent window reaches the desktop. Every
+  colour is still a palette literal, so all 114 themes repaint exactly
+  as before — `test_contrast.py` measures them.
+- **Removed, by request: "carry on where you left off."** The row on
+  the start page, the switch that offered it, the code that worked it
+  out and its strings are all out, rather than switched off.
+- **Removed, by request: the search history.** "If I click [the bar] I
+  don't want to see what I have searched — I know what I search." So:
+  the last-searches list an empty address bar offered, the searches
+  page behind `searches.html`, the "Searches" view on the history page,
+  the log that fed them, both switches in Settings and every string
+  they used are out. A config that still holds `searchLog` /
+  `recentSearches` has them dropped the first time this version reads
+  it — the list is not kept, not merely hidden. An empty bar still
+  offers a link sitting on the clipboard.
+- **The tab-strip clicks existed twice, and Settings wrote to the dead
+  one.** `mouse.tabDouble`, `mouse.tabMiddle` and `mouse.barDouble`
+  were read by two methods nothing ever called; the strip's own event
+  filter has always read `tabDoubleClick`, `tabMiddleClick` and
+  `stripDoubleClick`. So whatever he picked in those three dropdowns
+  never happened. The dead half is gone, and what he had picked is
+  handed to the settings that work.
+
 ## 2026-10-18 — catching up to live, and six tests that were owed
 
 - **Catching up to a live stream** instead of jumping to its edge: a
