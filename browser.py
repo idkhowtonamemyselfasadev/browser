@@ -422,14 +422,46 @@ _GPU_WORDS = {
 _GPU_MARK = "BROWSER_GPU_CHOSEN"
 
 
+def _migrate_gpu_choice(config):
+    """The graphics-card chooser, switched back off on this update.
+
+    It went out, and within the hour YouTube live streams on his
+    machine were black and flickering while an ordinary video played.
+    This server cannot reproduce that -- it renders in software, where
+    the variables the chooser sets change nothing, measured at 121
+    frames in four seconds with them and 121 without -- so the honest
+    move is to stop applying them on his until there is something to
+    test with. A card he picked is kept under another name, the
+    chooser stops asking, and the environment the browser starts with
+    is the one it had before any of this existed. Settings turns it
+    back on when he wants to try again.
+    """
+    if config.get("gpuReset"):
+        return config
+    chosen = config.get("gpuCard")
+    if chosen and chosen != "auto":
+        config["gpuCardWas"] = chosen
+    config["gpuCard"] = "auto"
+    config["gpuAsk"] = False
+    config["gpuReset"] = 1
+    return config
+
+
 def _gpu_quiet():
     """Put a card he has already chosen into the environment, asking
     nothing. Runs at import, before anything of Qt's."""
     if os.environ.get(_GPU_MARK):
         gpu_apply(os.environ.get("BROWSER_GPU_CARD", ""))
         return
-    choice = str(_gpu_config().get("gpuCard", "") or "")
-    if choice:
+    data = _gpu_config()
+    if not data.get("gpuReset"):
+        # the config on disk is from before the chooser was switched
+        # off: nothing of it is applied until the browser has written
+        # the migration (main() does that, with the config object it
+        # owns -- this early there is only a dict read from a file)
+        return
+    choice = str(data.get("gpuCard", "") or "")
+    if choice and choice != "auto":
         gpu_apply(choice)
 
 
@@ -447,9 +479,9 @@ def _gpu_startup(release=None):
     data = _gpu_config()
     cards = gpu_cards()
     choice = str(data.get("gpuCard", "") or "")
-    ask = data.get("gpuAsk")
-    if ask is None:
-        ask = len(cards) > 1          # one card is not a question
+    # off unless he asks for it: the window went out once and made a
+    # working browser worse, so it does not come back on its own
+    ask = bool(data.get("gpuAsk", False))
     if len(cards) < 2 or not ask or os.environ.get("BROWSER_NO_GPU_ASK"):
         if choice:
             gpu_apply(choice, cards)
@@ -12752,7 +12784,7 @@ class Bridge(QObject):
             "perf": self.browser.perf_payload(),
             "gpuCards": gpu_cards(),
             "gpuCard": str(c.get("gpuCard", "") or ""),
-            "gpuAsk": bool(c.get("gpuAsk", len(gpu_cards()) > 1)),
+            "gpuAsk": bool(c.get("gpuAsk", False)),
             "keepAwake": self.browser.keep_awake_sites(),
             # a different thing with a near-identical name: the
             # list above is tabs that are never slept, this is
@@ -19771,6 +19803,8 @@ class Browser(QMainWindow):
         _migrate_tabclick_config(self.config)
         # ...and the searches he had made are not kept any more
         _migrate_drop_searches(self.config)
+        # ...and the graphics-card chooser is off until it is proved
+        _migrate_gpu_choice(self.config)
         # his own themes join the catalogue before anything looks a
         # theme up: the one in use may well be one of them
         self._note_step("config")
