@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-22 — the crash log nobody could find was never written
+
+Found while porting this edition to Windows, in code that came the
+other way: the hook that catches an exception nothing else caught
+writes its traceback to `crash.log` **beside the config** — and named
+`DATA_DIR` for that folder, which is a name only the Windows edition
+defines. Here the lookup raised `NameError`, the very `except
+Exception:` that stops one crash from becoming two swallowed it, and
+nothing was written. Every crash since that code arrived said its
+piece on stderr and nowhere else — and under `pythonw`, or started
+from the desktop, there is no stderr to read.
+
+It writes to `BROWSER_HOME` now, which is where the config actually
+lives and moves with it. `test_lifecycle.py` grew a section that
+raises a real exception through the hook and reads the file back: the
+traceback, the line that raised, the timestamp, stderr still getting
+its copy, and the half-megabyte cap starting a fresh file instead of
+appending forever.
+
 ## 2026-10-22 (night) — the graphics-card chooser is switched back off
 
 It went out, and within the hour his YouTube live streams were black
