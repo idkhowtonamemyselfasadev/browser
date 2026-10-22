@@ -1381,6 +1381,7 @@
         <div class="wsub" id="t_gpuPickHint">On a machine with more than one card the system picks for you, and the quiet card is the slow one. Applies when the browser is started again.</div>
         <div class="cards" id="gpucards"></div>
         <div class="hint" id="gpunone" hidden>Only one graphics card here, so there is nothing to choose.</div>
+        <div class="hint" id="gpuwindows" hidden>Windows decides which card a program draws with, in Settings &rarr; System &rarr; Display &rarr; Graphics. These are the cards it has to offer.</div>
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_gpuAskName">Ask at every start which card to use</span>
@@ -4083,20 +4084,36 @@
   function fillGpu(s) {
     const S = window.STR || {};
     const cards = s.gpuCards || [];
+    // on Windows the browser lists the cards and says so, because the
+    // choice itself belongs to Windows' own Graphics settings (per
+    // program, and the program here is python.exe) -- so there is no
+    // picker and no "ask at every start" to offer
+    const choose = s.gpuChoose !== false;
     const none = document.getElementById("gpunone");
     if (none) {
-      none.hidden = cards.length > 1;
+      none.hidden = cards.length > 1 || !choose;
       none.textContent = S.gpuNone || none.textContent;
+    }
+    const note = document.getElementById("gpuwindows");
+    if (note) {
+      note.hidden = choose;
+      note.textContent = S.gpuWindows || note.textContent;
+    }
+    const askrow = document.getElementById("gpuask");
+    if (askrow && askrow.closest(".wrow")) {
+      askrow.closest(".wrow").hidden = !choose;
     }
     const rows = cards.map((card) => ({
       value: card.slot,
       name: card.name || card.slot,
       sub: card.boot ? (S.gpuBoot || "the one the system starts on") : "",
     }));
-    rows.push({value: "auto", name: S.gpuAuto || "Let the system decide",
-               sub: ""});
-    renderCards("gpucards", rows, s.gpuCard || "auto",
-                (v) => saveSetting("gpuCard", v));
+    if (choose) {
+      rows.push({value: "auto", name: S.gpuAuto || "Let the system decide",
+                 sub: ""});
+    }
+    renderCards("gpucards", rows, choose ? (s.gpuCard || "auto") : "",
+                (v) => { if (choose) saveSetting("gpuCard", v); });
   }
 
   function fillPerf(s) {
