@@ -1372,6 +1372,24 @@
 
     <section data-group="adv" data-desc="descPerf">
       <h2 id="t_perfMenu">What this is costing</h2>
+
+      <!-- which card the engine draws on. The choice is carried out
+           before the browser starts, so this says so rather than
+           pretending it took effect. -->
+      <div class="panel">
+        <h2 class="sub" id="t_gpuPickName">Which graphics card draws the pages</h2>
+        <div class="wsub" id="t_gpuPickHint">On a machine with more than one card the system picks for you, and the quiet card is the slow one. Applies when the browser is started again.</div>
+        <div class="cards" id="gpucards"></div>
+        <div class="hint" id="gpunone" hidden>Only one graphics card here, so there is nothing to choose.</div>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_gpuAskName">Ask at every start which card to use</span>
+            <span class="wsub" id="t_gpuAskHint">A window before the browser opens, listing every card this machine has.</span>
+          </span>
+          <input type="checkbox" id="gpuask"><span class="wsw"></span>
+        </label>
+      </div>
+
       <div class="panel">
         <div class="group">
         <div class="wrow">
@@ -4061,8 +4079,29 @@
                      ["stophiddenvideo", "stopHiddenVideo"],
                      ["lazyimages", "lazyImages"]];
 
+  // the graphics cards this machine has, as a picker
+  function fillGpu(s) {
+    const S = window.STR || {};
+    const cards = s.gpuCards || [];
+    const none = document.getElementById("gpunone");
+    if (none) {
+      none.hidden = cards.length > 1;
+      none.textContent = S.gpuNone || none.textContent;
+    }
+    const rows = cards.map((card) => ({
+      value: card.slot,
+      name: card.name || card.slot,
+      sub: card.boot ? (S.gpuBoot || "the one the system starts on") : "",
+    }));
+    rows.push({value: "auto", name: S.gpuAuto || "Let the system decide",
+               sub: ""});
+    renderCards("gpucards", rows, s.gpuCard || "auto",
+                (v) => saveSetting("gpuCard", v));
+  }
+
   function fillPerf(s) {
     const S = window.STR || {};
+    fillGpu(s);
     for (const [id, key] of PERF_SWITCHES) setVal(id, s[key]);
     for (const [id, key] of PERF_NUMBERS) setVal(id, s[key] || 0);
     const page = s.perf || {};
@@ -5702,7 +5741,11 @@
             t_keyGlobalName:"keyGlobalName", t_keyMenu:"keyMenu",
             t_mouseMenu:"mouseMenu", t_navMenu:"navMenu",
             t_pageLookName:"pageLookName", t_perfFlags:"perfFlags",
-            t_perfMenu:"perfMenu", t_perfStartup:"perfStartup",
+            t_perfMenu:"perfMenu",
+            t_gpuPickName:"gpuPickName",
+            t_gpuPickHint:"gpuPickHint",
+            t_gpuAskName:"gpuAskName",
+            t_gpuAskHint:"gpuAskHint", t_perfStartup:"perfStartup",
             t_recMenu:"recMenu", t_startLayoutName:"startLayoutName",
             t_themeEditor:"themeEditor",
             t_themeStarName:"themeStarName",
@@ -5995,6 +6038,7 @@
   bindSwitch("favdock", "favDocked");
   bindSwitch("ownlog", "ownRequestLog");
   bindSwitch("cleanpaste", "cleanPaste");
+  bindSwitch("gpuask", "gpuAsk");
   bindSwitch("screenawake", "screenAwake");
   bindSwitch("pauseonlock", "pauseOnLock");
   bindSwitch("sponsorskip", "sponsorSkip");
