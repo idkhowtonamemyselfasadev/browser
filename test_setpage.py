@@ -284,5 +284,17 @@ check("...while the row beside it still works",
 print("")
 if fails:
     print("FAILED (%d): %s" % (len(fails), "; ".join(fails[:8])))
-    sys.exit(1)
-print("all good")
+else:
+    print("all good")
+# the Settings pane goes down before the process does: left open through
+# interpreter teardown it takes the engine with it now and then, which
+# reads as a failed suite with every check already passed (exit 139,
+# "all good" printed right above it)
+try:
+    win.close_settings()
+    H.spin(300)
+except Exception:
+    pass
+app.quit()
+sys.stdout.flush()
+os._exit(1 if fails else 0)
