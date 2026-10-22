@@ -219,6 +219,41 @@ finally:
     os.environ["BROWSER_NO_GPU_ASK"] = "1"
 
 
+print("\n(4b) and it is off until he asks for it")
+cfg = {"gpuCard": "0000:01:00.0", "gpuAsk": True}
+B._migrate_gpu_choice(cfg)
+check("a card chosen before this update is not applied any more",
+      cfg["gpuCard"] == "auto" and cfg["gpuAsk"] is False, cfg)
+check("...but it is kept, so turning it back on costs one click",
+      cfg.get("gpuCardWas") == "0000:01:00.0", cfg)
+again = dict(cfg)
+again["gpuCard"] = "0000:00:02.0"
+B._migrate_gpu_choice(again)
+check("...and a choice he makes afterwards is left alone",
+      again["gpuCard"] == "0000:00:02.0", again)
+fresh = {}
+B._migrate_gpu_choice(fresh)
+check("a fresh config starts with the environment untouched",
+      fresh["gpuCard"] == "auto" and fresh["gpuAsk"] is False, fresh)
+
+asked["n"] = 0
+try:
+    os.environ["BROWSER_DRM_ROOT"] = str(two)
+    os.environ.pop("BROWSER_NO_GPU_ASK", None)
+    B.CONFIG_FILE.write_text(json.dumps(
+        {"translateLang": "en", "gpuReset": 1, "gpuCard": "auto",
+         "gpuAsk": False}))
+    real_ask2, B._gpu_ask_window = B._gpu_ask_window, never
+    B._gpu_startup()
+    check("two cards and the chooser off: no window, no variables",
+          asked["n"] == 0 and not os.environ.get("DRI_PRIME"),
+          os.environ.get("DRI_PRIME"))
+finally:
+    B._gpu_ask_window = real_ask2
+    os.environ.pop("BROWSER_DRM_ROOT", None)
+    os.environ["BROWSER_NO_GPU_ASK"] = "1"
+
+
 print("\n(5) it is the browser that asks, not every launch")
 source = (HERE / "browser.py").read_text(encoding="utf-8")
 at_import = source.index("if not os.environ.get(\"BROWSER_NO_GPU_ASK\"):")
