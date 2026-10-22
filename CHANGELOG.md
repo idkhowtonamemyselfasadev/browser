@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-10-22 (night) — which graphics card draws the pages
+
+A machine with two cards hands the browser whichever one the system
+feels like, and on his (an RTX 5080 beside the processor's own Intel
+graphics) the quiet one is the laggy one.
+
+**A window before the browser starts.** It lists every card this
+machine has — read out of `/sys/class/drm`, with the names from
+`lspci` where it is installed and the PCI ids where it is not — marks
+the one the system boots on, and offers "let the system decide" beside
+them. Picking one starts the browser again with the environment that
+choice needs, because which card the engine uses is decided when its
+GPU process starts, long before any window of ours exists: pretending
+a change took effect later would be a lie.
+
+- NVIDIA gets the PRIME offload trio (`__NV_PRIME_RENDER_OFFLOAD`,
+  `__GLX_VENDOR_LIBRARY_NAME`, `__VK_LAYER_NV_optimus`) and its slot in
+  `DRI_PRIME`; Mesa cards get `DRI_PRIME` and `MESA_VK_DEVICE_SELECT`;
+  "let the system decide" takes all of them off again rather than
+  leaving the last answer behind.
+- The window is plain Qt widgets on purpose — no engine behind it, or
+  the GPU process would already have started before the question was
+  answered — and it wears the browser's own colours.
+- **It is the browser that asks, not every launch.** A link handed over
+  from Discord to a browser that is already running must not put a
+  window in anyone's way, so the question waits until this process has
+  claimed the single-instance socket, and gives that socket up before
+  restarting itself. A card already chosen is applied at import, before
+  Qt, asking nothing.
+- One card is not a question: a machine with a single GPU is never
+  asked.
+- Settings → What this is costing has the card picker and an "ask at
+  every start" switch, both of which say they take effect at the next
+  start.
+
+New `test_gpu.py`, 44 checks, against a `/sys/class/drm` of its own so
+two cards can be measured on a machine that has one. **What this box
+cannot prove: that the 5080 really takes the work.** It has one Intel
+card, so the reading, the listing, the environment, the window and the
+paths that do not ask are measured here; that the choice moves the
+rendering is for his machine to show.
+
 ## 2026-10-22 (evening) — Settings: the rail back, with ten shelves on it
 
 He did not like what the page became. The tiles, the chip strip across
