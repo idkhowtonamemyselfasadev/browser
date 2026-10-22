@@ -222,7 +222,7 @@ got = json.loads(js(page, """(function () {
                          back: document.querySelectorAll(".tcard").length});
 })()""") or "{}")
 check("the rail's own search finds the section by a theme's name",
-      got.get("rail") == ["Looks"], str(got.get("rail")))
+      got.get("rail") == ["Theme"], str(got.get("rail")))
 check("the box in the section narrows it to one family",
       sorted(got.get("shown", [])) == ["gruvbox", "gruvbox-hard",
                                        "gruvbox-light", "gruvbox-light-hard"],

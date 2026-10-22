@@ -281,12 +281,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "--allsettings":
       var secs = [...document.querySelectorAll('.content section')];
       var c = document.getElementById('content');
       var f = document.getElementById('drawfail');
-      var home = document.getElementById('home');
       return JSON.stringify({
         rail: document.querySelectorAll('#sidebar button').length,
         active: secs.filter((s) => s.classList.contains('active')).length,
-        home: !!(home && home.classList.contains('on')),
-        tiles: document.querySelectorAll('#home .tile').length,
         display: getComputedStyle(c).display,
         said: f ? f.textContent : null});
     })()"""
@@ -751,20 +748,15 @@ def settings_is_never_blank():
     check("its \"All settings\" button brings the pane up",
           o.get("paneUp") is True and "settings.html" in o.get("paneUrl", ""),
           o.get("paneUrl"))
-    # it opens on the tiles now -- a section is one click in, and the
-    # strip along the top is the other way there. Blank is still blank:
-    # what must never happen is neither of the two.
-    check("with the strip, the tiles and content on screen",
-          op.get("rail", 0) > 0 and op.get("home") is True
-          and op.get("tiles", 0) >= 10 and op.get("active") == 0
+    check("with a rail, one section showing and content on screen",
+          op.get("rail", 0) > 0 and op.get("active") == 1
           and op.get("display") != "none", op)
     st = o.get("stale") or {}
     check("a rail index pointing at nothing still leaves a section up",
           st.get("active") == 1 and st.get("display") != "none", st)
     se = o.get("settled") or {}
     check("nothing showing with an empty search box puts itself right",
-          (se.get("active") == 1 or se.get("home") is True)
-          and se.get("display") != "none", se)
+          se.get("active") == 1 and se.get("display") != "none", se)
     check("and a part that did not draw says so out loud",
           "themes" in (o.get("said") or ""), o.get("said"))
     fi = o.get("filtered") or {}
