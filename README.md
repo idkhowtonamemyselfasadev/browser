@@ -66,6 +66,30 @@ installed, and an absent Chrome means only that DRM-protected media will not pla
 
 ## A closer look
 
+### 116 themes, and the websites wear them too
+
+![Twelve of the 116 themes](screenshots/themes.png)
+
+Twelve of them. Settings → Theme has the other 104, searchable, each shown as a swatch
+of its own colours and applied on the spot — no restart, and open tabs change with it.
+Most are credited palettes; a few, like the last three above, bring a face and a texture
+of their own.
+
+### Six looks
+
+A theme decides what colour the browser is; a look decides what shape it is. Every look
+works with all 116 palettes, because a look defines geometry only and never a colour.
+
+| Classic | Taskbar |
+|:--|:--|
+| ![Classic](screenshots/look-classic.jpg) | ![Taskbar](screenshots/look-taskbar.jpg) |
+| The browser as it is drawn — the default. | A strip along the bottom with a start button, the pinned sites and a clock. |
+| **Dock** | **Circle** |
+| ![Dock](screenshots/look-dock.jpg) | ![Circle](screenshots/look-circle.jpg) |
+| A floating dock over the page with icon magnification, and a now-playing widget that works the transport of whatever is making the sound. | The start page becomes a ring: search in the middle, the quick links orbiting it, turned by the mouse wheel. |
+| **Flat mono** | **Liquid Glass** |
+| ![Flat mono](screenshots/look-flat.jpg) | Frosted, translucent chrome: the wallpaper shows softly through the tabs, the toolbar and the menus. Best seen running — a still of it is just the Classic shape. |
+
 ### Dark by default, not by filter
 
 ![Automatic dark mode](screenshots/dark-mode.png)
@@ -178,43 +202,16 @@ forward rather than opening a second one.
 </details>
 
 <details>
-<summary><b>Looks</b> — six interface shapes</summary>
+<summary><b>Themes</b> — how site theming works</summary>
 
-A theme decides what colour the browser is; a look decides what shape it is. Every look
-works with all 116 palettes, because a look defines geometry only and never a colour.
+**Websites are themed as well as the window.** Every page is recoloured in the selected
+palette, and the character themes bring their own typography and texture (Terminal glows,
+Newspaper sets in serif). This is on by default; Settings → Appearance → *Theme websites*
+disables it, and right-click → *Don't theme this site* exempts a single site. Sites that
+are dark by design are left alone, and a themed page is never darkened twice.
 
-- **Classic** — the default layout, unchanged by the existence of the others.
-- **Taskbar** — a strip along the bottom with a start button, your pinned sites and a
-  clock. The start button opens a search box over a grid of the pins.
-- **Dock** — a floating, rounded dock over the page with icon magnification, roomier
-  chrome throughout, and a now-playing widget whose play, pause and skip work the
-  transport of whatever page is making the sound.
-- **Circle** — the start page becomes a ring, with the search box at the centre and the
-  quick links orbiting it, turned by the mouse wheel. The caret still lands in the search
-  box.
-- **Liquid Glass** — frosted, translucent chrome; the wallpaper shows softly through the
-  tabs, the toolbar and the menus.
-- **Flat mono** — square corners, no shadows, no cards, lettered like a terminal.
-
-</details>
-
-<details>
-<summary><b>Themes</b> — 116 palettes, applied to websites as well</summary>
-
-Settings → Theme. Grouped as **Dark** (77), **Light** (28) and **With character** (11),
-searchable, each shown as a swatch of its own colours and applied immediately: no
-restart, and open tabs change with it.
-
-Most are credited palettes: Catppuccin, Gruvbox, Nord, Dracula, Solarized, Tokyo Night,
-Everforest, Rosé Pine, Kanagawa, Monokai, Ayu, Material, Oxocarbon, Nightfox, GitHub,
-VS Code… A few bring a face and a texture of their own: Steampunk, Terminal Green,
-Amber CRT, Blueprint, Newspaper, Game Boy, Frutiger Aero.
-
-**Websites are themed as well.** Every page is recoloured in the selected palette, and
-the character themes bring their own typography and texture (Terminal glows, Newspaper
-sets in serif). This is on by default; Settings → Appearance → *Theme websites* disables
-it, and right-click → *Don't theme this site* exempts a single site. Sites that are dark
-by design are left alone, and a themed page is never darkened twice.
+The palettes live in `_CATALOGUE` in `browser.py`: one row of colours each, so adding
+your own is a row rather than a stylesheet.
 
 </details>
 

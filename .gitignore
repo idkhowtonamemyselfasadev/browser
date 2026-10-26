@@ -22,3 +22,7 @@ CLAUDE.md
 
 # compiled artifact of ~/claude/web-engine — built, not committed
 web_engine.so
+
+# raw screenshot output from _gallery.py - the picked and scaled ones
+# live in screenshots/
+.shots-in/
