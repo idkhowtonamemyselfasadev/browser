@@ -79,33 +79,59 @@ app.processEvents(); time.sleep(0.05); app.processEvents()
 check("no second reload was scheduled", reloads == [view], reloads)
 check("the recovery page was shown for this view",
       len(pages) == 1 and pages[0][0] is view, pages)
-# _render_gone picks the target as `url() or _requested or _pending`,
-# so with a page actually loaded it is url() that is offered. This
-# check used to assert _requested won, which is only true while the
-# start page has not finished loading yet -- it passed or failed on
-# whether the tab beat the test, and on a quick machine it lost. Pin
-# both ends of the precedence instead of racing it.
-check("and it carries the page's address to reload",
-      pages and pages[0][1] == view.url().toString(), pages)
+# _render_gone offers `url() or _requested or _pending`. Which of the
+# three is non-empty depends on how far this view's load got, so a
+# check that names one of them is a check about the box it runs on:
+# this one first asserted _requested won (true only while the page had
+# not committed an address) and then that url() won (true only once it
+# had). It failed on Tim's desktop the first way and on the server the
+# second. Assert the precedence instead, on views whose three sources
+# the test sets itself -- and keep the claim about `view` to the one
+# thing that is true either way.
+check("and it carries one of the three addresses it may offer",
+      pages and pages[0][1] in (view.url().toString(),
+                                getattr(view, "_requested", ""),
+                                getattr(view, "_pending", "")), pages)
 check("...which is a real address, not nothing",
       pages and pages[0][1], pages)
-# and with no address on the view at all, the requested one is used
-blank = win.new_tab(url=None)
-app.processEvents()
-blank.url = lambda: QUrl()
-blank._requested = "https://example.test/page"
+
 asked = []
 rang = []
-# its own spies: the shared `reloads`/`pages` lists are what the later
-# sections assert on, and this extra crash must not land in them
+# their own spies: the shared `reloads`/`pages` lists are what the
+# later sections assert on, and these extra crashes must not land in
+# them
 win._show_crash_page = lambda v, t: asked.append((v, t))
 win._crash_reload = lambda v: rang.append(v)
-win._render_gone(blank, CRASH, 1)
-app.processEvents(); time.sleep(0.05); app.processEvents()
-win._render_gone(blank, CRASH, 1)
-app.processEvents(); time.sleep(0.05); app.processEvents()
-check("a view with no address of its own falls back to the requested one",
-      asked and asked[0][1] == "https://example.test/page", asked)
+
+
+def offered(address, requested, pending):
+    """What the recovery page is handed for a view whose three address
+    sources are exactly these. Two crashes: the first is spent on the
+    reload attempt, the second is the one that gives up and offers."""
+    probe = win.new_tab(url=None, blank=True)
+    app.processEvents()
+    probe.url = lambda: QUrl(address)
+    probe._requested = requested
+    probe._pending = pending
+    before = len(asked)
+    win._render_gone(probe, CRASH, 1)
+    app.processEvents(); time.sleep(0.05); app.processEvents()
+    win._render_gone(probe, CRASH, 1)
+    app.processEvents(); time.sleep(0.05); app.processEvents()
+    return asked[before][1] if len(asked) > before else None
+
+
+check("the view's own address wins when it has one",
+      offered("https://loaded.test/a", "https://asked.test/b",
+              "https://pending.test/c") == "https://loaded.test/a")
+check("...the requested one when it has not",
+      offered("", "https://asked.test/b",
+              "https://pending.test/c") == "https://asked.test/b")
+check("...and the pending one when there is nothing else",
+      offered("", "", "https://pending.test/c") == "https://pending.test/c")
+nothing = offered("", "", "")
+check("with none of the three, nothing is offered",
+      not nothing, nothing)
 win._show_crash_page = lambda v, t: pages.append((v, t))
 win._crash_reload = lambda v: reloads.append(v)
 
