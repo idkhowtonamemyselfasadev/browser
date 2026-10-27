@@ -14249,8 +14249,12 @@ class Bridge(QObject):
         if not since:
             return 0
         self.browser.close_pane()
+        # the end of the span is restore_day's to work out: it steps
+        # through the calendar, and `since + 86400` leaves the last hour
+        # of the day the clocks go back behind (see _day_step)
+        until = want.get("until")
         return len(self.browser.restore_day(
-            int(since), int(want.get("until") or (int(since) + 86400)),
+            int(since), int(until) if until else None,
             as_group=str(want.get("group") or "")))
 
     @pyqtSlot(str, result=str)
@@ -17435,6 +17439,38 @@ def _day_start(when):
     bits = time.localtime(when)
     return int(time.mktime((bits.tm_year, bits.tm_mon, bits.tm_mday,
                             0, 0, 0, 0, 0, -1)))
+
+
+def _day_step(when, days):
+    """The same clock time a whole number of calendar days away.
+
+    Not `when + days * 86400`. A local day is 23 or 25 hours long on
+    the morning after a clock change, so taking a flat 86400 off a
+    local midnight lands on 01:00 or 23:00 of the day before and never
+    on its midnight -- 23 hours out in spring, an hour in autumn.
+    Anything that walks day boundaries (the streaks, the per-day chart)
+    then looks for a midnight that is not there and reads a gap where
+    the day was. The clocks went back on 2026-10-25 and every streak in
+    the browser broke that morning.
+
+    Going through the calendar instead makes the step a date step, which
+    is what a "day" means to the person reading it.
+    """
+    bits = time.localtime(when)
+    return int(time.mktime((bits.tm_year, bits.tm_mon,
+                            bits.tm_mday + int(days),
+                            bits.tm_hour, bits.tm_min, bits.tm_sec,
+                            0, 0, -1)))
+
+
+def _day_before(when):
+    """The same clock time one calendar day earlier (see _day_step)."""
+    return _day_step(when, -1)
+
+
+def _day_after(when):
+    """The same clock time one calendar day later (see _day_step)."""
+    return _day_step(when, 1)
 
 
 def _clean_bookmark_url(text):
@@ -31237,7 +31273,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not url:
             return None
         if until_morning:
-            bits = time.localtime(time.time() + 86400)
+            # tomorrow's date through the calendar. `time.time() + 86400`
+            # is still *today* on the morning the clocks go back -- the
+            # tab would come back the same morning -- and skips a day
+            # when they go forward (see _day_step).
+            bits = time.localtime(_day_after(time.time()))
             at = int(time.mktime((bits.tm_year, bits.tm_mon, bits.tm_mday,
                                   8, 0, 0, 0, 0, -1)))
         else:
@@ -58852,10 +58892,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         today = _day_start(time.time())
         streak, day = 0, today
         if today not in days:
-            day = today - 86400       # not yet today: count up to yesterday
+            # not yet today: count up to yesterday. Through the
+            # calendar, not by 86400 -- see _day_step.
+            day = _day_before(today)
         while day in days:
             streak += 1
-            day -= 86400
+            day = _day_before(day)
         return {"streak": streak, "visits": visits, "days": len(days)}
 
     def most_visited(self, limit=20, since=None):
@@ -58895,7 +58937,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """Visits per day and per site over the last few days, counted
         here and shown here. Nothing is sent anywhere to make a chart."""
         days = max(1, int(days or 1))
-        start = _day_start(time.time()) - (days - 1) * 86400
+        start = _day_step(_day_start(time.time()), -(days - 1))
+        day_marks = [start]
+        for _ in range(days - 1):
+            day_marks.append(_day_after(day_marks[-1]))
         per_day, per_host = {}, {}
         for entry in self.history:
             when = entry.get("t", 0)
@@ -58907,9 +58952,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if host:
                 per_host[host] = per_host.get(host, 0) + 1
         return {
-            "days": [{"t": start + i * 86400,
-                      "pages": per_day.get(start + i * 86400, 0)}
-                     for i in range(days)],
+            # walked, not multiplied: a bucket at start + i * 86400 is
+            # an hour off the midnight per_day is keyed by as soon as a
+            # clock change falls inside the window, and that day then
+            # charts as zero
+            "days": [{"t": at, "pages": per_day.get(at, 0)}
+                     for at in day_marks],
             "sites": sorted(({"host": h, "pages": n}
                              for h, n in per_host.items()),
                             key=lambda r: -r["pages"])[:20],
@@ -58919,7 +58967,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def restore_day(self, since, until=None, as_group=""):
         """Every page from a span of history, opened again — the way
         back into a session he closed days ago."""
-        until = since + 86400 if until is None else until
+        until = _day_after(since) if until is None else until
         rows = self.history_rows(since=since, until=until, limit=60)
         seen, entries = set(), []
         for row in rows:
