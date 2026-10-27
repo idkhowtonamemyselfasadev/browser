@@ -78,7 +78,7 @@ check("a text fragment is dropped",
       "#:~:text=" not in B.clean_url("https://x.de/a#:~:text=hello"),
       B.clean_url("https://x.de/a#:~:text=hello"))
 check("a non-web address is handed back untouched",
-      B.clean_url("file://$HOME/x.html") == "file://$HOME/x.html")
+      B.clean_url("file:///home/you/x.html") == "file:///home/you/x.html")
 
 app = H.app()
 srv = H.Server({"/a": "<title>Alpha</title><p id=p>some words here</p>",

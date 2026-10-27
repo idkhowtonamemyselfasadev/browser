@@ -212,7 +212,7 @@ check("words are a search", B.looks_like_search("best mods 1.20") is True)
 check("an address is not", B.looks_like_search("https://example.com")
       is False)
 check("a host is not", B.looks_like_search("example.com") is False)
-check("a path is not", B.looks_like_search("$HOME/x") is False)
+check("a path is not", B.looks_like_search("/home/you/x") is False)
 check("a Windows path is not", B.looks_like_search("C:\\\\Users\\\\x")
       is False)
 check("an e-mail address is not",

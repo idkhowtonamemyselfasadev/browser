@@ -527,7 +527,7 @@ win.debug_port(False)
 check("localhost is a local address", win.is_local_address("localhost")
       is True)
 check("so is 127.0.0.1", win.is_local_address("127.0.0.1") is True)
-check("so is the home network", win.is_local_address("192.168.1.10")
+check("so is a home network", win.is_local_address("192.168.1.10")
       is True)
 check("a site on the internet is not",
       win.is_local_address("example.com") is False)

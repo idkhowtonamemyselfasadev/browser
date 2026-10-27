@@ -146,8 +146,8 @@ def check_request(config, url, page_url):
         return True, url
 
     # 1. a public page may not reach into the home network. A page on
-    #    the web sending a frame at 192.168.1.1 is looking at his
-    #    router, and there is no good reason for it.
+    #    the web sending a frame at 192.168.1.1 is looking at the
+    #    router on your own network, and there is no good reason for it.
     if (config.get("blockLocal", True) and is_local(host)
             and page_host and not is_local(page_host)):
         return False, url

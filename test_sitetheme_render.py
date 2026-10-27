@@ -327,7 +327,7 @@ from PyQt6.QtCore import QUrl  # noqa: E402
 cases = [("https://www.example.com/x", True, "theme"),
          ("https://discord.com/channels/1", True, "none"),
          ("https://www.google.de/search?q=x", True, "none"),
-         ("file://$HOME/browser/start.html", True, "none")]
+         ("file:///home/you/browser/start.html", True, "none")]
 for url, themed_on, want in cases:
     win.config["themeWeb"] = themed_on
     got = win.page_darkening(QUrl(url))
