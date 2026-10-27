@@ -14128,6 +14128,35 @@ class Bridge(QObject):
             limit=int(want.get("limit") or 2000))
         return json.dumps(rows)
 
+    @pyqtSlot(str, result=str)
+    def siteIcons(self, hosts_json):
+        """The kept icon for each of these sites, as data: URLs.
+
+        The history page used to build every row's icon as
+        google.com/s2/favicons?domain=<host>, which handed Google one
+        request per site in his history every time he opened the page
+        -- the whole list of where he has been, to one company, from
+        the one page that exists to be private. cache_favicon already
+        keeps the icon of every site he visits, for exactly the reason
+        its docstring gives. This serves those, and sites without one
+        get nothing rather than a fetch.
+        """
+        try:
+            hosts = json.loads(hosts_json or "[]")
+        except ValueError:
+            return json.dumps({})
+        if not isinstance(hosts, list):
+            return json.dumps({})
+        out = {}
+        for host in hosts[:400]:
+            host = str(host or "")
+            if not host or host in out:
+                continue
+            data = self.browser.site_icon_data(host)
+            if data:
+                out[host] = data
+        return json.dumps(out)
+
     @pyqtSlot(result=str)
     def searchEngines(self):
         """Every engine, for the page\'s filter and for the row of
@@ -50965,6 +50994,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if picture.isNull() or not picture.save(str(path), "PNG"):
             return False
         return str(path)
+
+    def site_icon_data(self, host_or_url=""):
+        """The kept icon for a site as a data: URL, or "" -- never a
+        fetch. What the local pages show instead of asking a third
+        party who he has been visiting (see cache_favicon)."""
+        path = self.cached_favicon(host_or_url)
+        if not path:
+            return ""
+        try:
+            raw = Path(path).read_bytes()
+        except OSError:
+            return ""
+        return "data:image/png;base64," + base64.b64encode(raw).decode()
 
     def cached_favicon(self, host_or_url=""):
         """The kept icon for this site, if there is one."""

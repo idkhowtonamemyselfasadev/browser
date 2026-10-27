@@ -63,6 +63,9 @@
   }
   .entry:hover { border-color: rgba(137, 180, 250, 0.35); background: rgba(13, 13, 18, 0.95); }
   .entry img { width: 16px; height: 16px; border-radius: 4px; }
+  /* a site whose icon was never kept: a quiet placeholder, never a
+     request to somebody else for it */
+  img.noicon { background: #313244; border-radius: 4px; }
   .entry .time { color: #6c7086; font-size: 12px; min-width: 44px; white-space: nowrap; flex-shrink: 0; }
   .entry .title {
     color: #cdd6f4;
@@ -218,10 +221,44 @@
     catch (err) { return ""; }
   }
 
+  // The icons this page shows come from the browser's own store, which
+  // keeps the icon of every site as it is visited. This used to be
+  // google.com/s2/favicons?domain=<host>, which sent Google one
+  // request per site in the history -- the entire list of where he had
+  // been, handed to one company, every time he opened the page that
+  // exists to be private. A site with no kept icon gets a quiet dot,
+  // not a request.
+  let icons = {};
+
   function iconFor(host) {
     const img = document.createElement("img");
-    img.src = "https://www.google.com/s2/favicons?sz=32&domain=" + host;
+    const kept = icons[host];
+    if (kept) {
+      img.src = kept;
+    } else {
+      img.className = "noicon";
+      img.alt = "";
+    }
     return img;
+  }
+
+  // Every host on screen, asked for in one call before the rows are
+  // drawn, so no row has to wait on its own round trip.
+  function withIcons(hosts, done) {
+    const want = hosts.filter((h) => h && !(h in icons));
+    if (!bridge || !want.length) { done(); return; }
+    bridge.siteIcons(JSON.stringify(want), (json) => {
+      try {
+        const got = JSON.parse(json);
+        for (const host in got) { icons[host] = got[host]; }
+      } catch (err) { /* no icons is not a broken page */ }
+      // a host asked for and not answered is remembered as "none", so
+      // the next render does not ask for it again
+      for (const host of want) {
+        if (!(host in icons)) { icons[host] = ""; }
+      }
+      done();
+    });
   }
 
   // What the range picker means, as a pair of seconds. "today" and
@@ -441,12 +478,20 @@
     document.getElementById("filters").hidden = view !== "list";
     if (view === "list") {
       bridge.historyRows(filterJson(), (json) => {
-        entries = JSON.parse(json); renderList();
+        entries = JSON.parse(json);
+        withIcons(entries.map((e) => hostOf(e.url)), renderList);
       });
     } else if (view === "sites") {
-      bridge.mostVisited(30, (json) => renderSites(JSON.parse(json)));
+      bridge.mostVisited(30, (json) => {
+        const rows = JSON.parse(json);
+        withIcons(rows.map((r) => r.host), () => renderSites(rows));
+      });
     } else {
-      bridge.browsingStats(7, (json) => renderStats(JSON.parse(json)));
+      bridge.browsingStats(7, (json) => {
+        const stats = JSON.parse(json);
+        withIcons((stats.sites || []).map((s) => s.host),
+                  () => renderStats(stats));
+      });
     }
   }
 
