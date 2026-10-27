@@ -11,6 +11,16 @@ downloads.json
 bookmarks.json
 passwords.json
 passwords.key
+passwords-meta.json
+privacy.json
+hosts.json
+cookies.txt
+tabs.txt
+crash.log
+edit.txt
+# 1password-token matches neither *.token nor *token.txt -- the name has
+# no dot and does not end in "token.txt". It needs its own line.
+1password-token
 *.token
 *token.txt
 .env
