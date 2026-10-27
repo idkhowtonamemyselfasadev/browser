@@ -213,4 +213,13 @@ def step_degrade():
 
 QTimer.singleShot(3000, step_list)
 QTimer.singleShot(40000, lambda: (print("TIMED OUT"), app.exit(1)))
-sys.exit(app.exec())
+# os._exit, not sys.exit: the window, its views and the profile are all
+# still alive here, and letting the interpreter tear them down takes the
+# engine with it often enough to matter -- a core dump with every check
+# already passed and printed, which a sweep reads as a failed suite.
+# test_page.py did it on 2 runs out of 3 on the test server. The code
+# app.exit() set is handed straight back, so no verdict changes.
+# test_theme.py leaves the same way.
+code = app.exec()
+sys.stdout.flush()
+os._exit(code)
