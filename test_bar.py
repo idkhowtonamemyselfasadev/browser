@@ -276,7 +276,14 @@ print("\n(9) the bar as a widget")
 bar = win.urlbar
 check("it is the browser's own line edit",
       isinstance(bar, B.UrlBar), type(bar).__name__)
-check("the progress starts at nothing", bar.progress() == 0)
+# The launch tab is still loading start.html when this section is
+# reached: sections (1)-(8) are pure-function checks and run in a few
+# milliseconds, far quicker than the start page finishes, so the bar
+# legitimately showed 0.7 here. Wait for the page the line belongs to
+# instead of asserting into the middle of its load.
+H.wait_for(lambda: bar.progress() == 0, timeout=8000)
+check("the progress starts at nothing", bar.progress() == 0,
+      bar.progress())
 check("it takes a fraction", bar.set_progress(0.4) == 0.4)
 check("...and clamps what is over one", bar.set_progress(4) == 1.0)
 check("...and zero means nothing is loading", bar.set_progress(0) == 0)
@@ -663,6 +670,43 @@ win.config["barProgress"] = False
 check("it can be switched off",
       win.bar_progress(50, win.current()) == 0)
 win.config["barProgress"] = True
+# loadProgress hands out a percent, always. The bar used to guess, and
+# treated anything <= 1 as a finished fraction: 1% flashed a full bar.
+check("one percent is one percent, not a full bar",
+      win.bar_progress(1, win.current()) == 0.01,
+      win.bar_progress(1, win.current()))
+check("...and ninety-nine is not finished either",
+      win.bar_progress(99, win.current()) == 0.99,
+      win.bar_progress(99, win.current()))
+
+# Switching away from a half-loaded tab left its line standing in the
+# bar for good: that tab's own loadFinished(0) lands when it is no
+# longer in front and was dropped, and nothing else cleared the bar.
+loading = win.current()
+win.bar_progress(60, loading)
+check("a loading tab puts its line up", win.urlbar.progress() == 0.6,
+      win.urlbar.progress())
+fresh = win.new_tab(url=None)
+H.spin(150)
+check("switching to another tab takes the line down",
+      win.urlbar.progress() == 0, win.urlbar.progress())
+check("...and the old tab finishing in the background leaves it down",
+      win.bar_progress(0, loading) is False
+      and win.urlbar.progress() == 0, win.urlbar.progress())
+win.tabs.setCurrentIndex(win.tabs.indexOf(loading))
+H.spin(150)
+check("...and coming back shows that tab, which is no longer loading",
+      win.urlbar.progress() == 0, win.urlbar.progress())
+win.bar_progress(35, win.current())
+win.tabs.setCurrentIndex(win.tabs.indexOf(fresh))
+H.spin(150)
+check("a tab still loading when you leave it keeps its own place",
+      win.urlbar.progress() == 0, win.urlbar.progress())
+win.tabs.setCurrentIndex(win.tabs.indexOf(loading))
+H.spin(150)
+check("...and shows it again when you come back",
+      abs(win.urlbar.progress() - 0.35) < 0.001, win.urlbar.progress())
+win.bar_progress(0, win.current())
 
 print("\n(26) a site that offers its own search")
 site = page("/searchable")

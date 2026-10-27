@@ -21,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from _boot import B  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
+from PyQt6.QtCore import QUrl  # noqa: E402
 from PyQt6.QtWebEngineCore import QWebEnginePage  # noqa: E402
 
 fails = []
@@ -78,8 +79,35 @@ app.processEvents(); time.sleep(0.05); app.processEvents()
 check("no second reload was scheduled", reloads == [view], reloads)
 check("the recovery page was shown for this view",
       len(pages) == 1 and pages[0][0] is view, pages)
+# _render_gone picks the target as `url() or _requested or _pending`,
+# so with a page actually loaded it is url() that is offered. This
+# check used to assert _requested won, which is only true while the
+# start page has not finished loading yet -- it passed or failed on
+# whether the tab beat the test, and on a quick machine it lost. Pin
+# both ends of the precedence instead of racing it.
 check("and it carries the page's address to reload",
-      pages and pages[0][1] == "https://example.test/page", pages)
+      pages and pages[0][1] == view.url().toString(), pages)
+check("...which is a real address, not nothing",
+      pages and pages[0][1], pages)
+# and with no address on the view at all, the requested one is used
+blank = win.new_tab(url=None)
+app.processEvents()
+blank.url = lambda: QUrl()
+blank._requested = "https://example.test/page"
+asked = []
+rang = []
+# its own spies: the shared `reloads`/`pages` lists are what the later
+# sections assert on, and this extra crash must not land in them
+win._show_crash_page = lambda v, t: asked.append((v, t))
+win._crash_reload = lambda v: rang.append(v)
+win._render_gone(blank, CRASH, 1)
+app.processEvents(); time.sleep(0.05); app.processEvents()
+win._render_gone(blank, CRASH, 1)
+app.processEvents(); time.sleep(0.05); app.processEvents()
+check("a view with no address of its own falls back to the requested one",
+      asked and asked[0][1] == "https://example.test/page", asked)
+win._show_crash_page = lambda v, t: pages.append((v, t))
+win._crash_reload = lambda v: reloads.append(v)
 
 print("\n(5) with nothing to reload, it goes straight to the recovery page")
 view2 = win.new_tab(url=None)

@@ -39386,17 +39386,29 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return menu
 
     # ---- the load progress in the bar ----
-    def bar_progress(self, fraction, view=None):
+    def bar_progress(self, percent, view=None):
         """Only for the tab in front: the bar says where *this* page
         is, and a background tab loading has its own place to say so
-        (the strip)."""
+        (the strip).
+
+        The percent is kept on the tab as well as painted. Switching
+        away from a half-loaded tab used to leave its line standing in
+        the bar for good: the tab's own loadFinished(0) arrives when it
+        is no longer the one in front, so the guard below dropped the
+        one call that would have cleared it, and nothing else ever
+        touched the bar on a switch. _tab_changed now paints from this.
+        """
         view = self.current() if view is None else view
+        if view is not None:
+            view._bar_pct = percent
         if view is not self.current():
             return False
         if not self.config.get("barProgress", True):
             return self.urlbar.set_progress(0)
-        return self.urlbar.set_progress(fraction / 100.0
-                                        if fraction > 1 else fraction)
+        # loadProgress is a percent, always. The old guess -- treat it
+        # as a fraction when it is <= 1 -- made a page reporting 1%
+        # flash a FULL bar, because 1 went through untouched.
+        return self.urlbar.set_progress(percent / 100.0)
 
     # ---- Ctrl+L, twice ----
     def focus_address(self):
@@ -45003,6 +45015,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if w is not None and hasattr(w, "url"):
             url = w.url()
             self.urlbar.setText("" if url == START_PAGE else url.toString())
+        # the line belongs to the tab in front, so it is repainted from
+        # that tab and not left showing where some other page got to
+        self.bar_progress(getattr(w, "_bar_pct", 0), w)
         bar = getattr(self, "_findbar", None)
         if bar is not None:
             bar.retarget()
