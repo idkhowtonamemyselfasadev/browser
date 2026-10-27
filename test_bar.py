@@ -682,12 +682,25 @@ check("...and ninety-nine is not finished either",
 # Switching away from a half-loaded tab left its line standing in the
 # bar for good: that tab's own loadFinished(0) lands when it is no
 # longer in front and was dropped, and nothing else cleared the bar.
+#
+# Every tab in this block has to be a tab that is NOT loading, because
+# the thing under test is what the bar does on a switch and a real load
+# writes the bar legitimately. `new_tab(url=None)` is not an empty tab
+# -- url=None means "whatever an empty tab opens on", so it loads the
+# start page and reports its progress like any other page. That made
+# these checks fail about one run in twelve with the bar reading 0.7:
+# not the switch failing to clear it, a real loadProgress(70) from the
+# new tab, honoured exactly as intended. `blank=True` is the one that
+# opens a tab and loads nothing (see `if not blank:` in new_tab).
+H.wait_for(lambda: win.urlbar.progress() == 0, timeout=8000)
 loading = win.current()
 win.bar_progress(60, loading)
 check("a loading tab puts its line up", win.urlbar.progress() == 0.6,
       win.urlbar.progress())
-fresh = win.new_tab(url=None)
+fresh = win.new_tab(url=None, blank=True)
 H.spin(150)
+check("the new tab is loading nothing of its own",
+      not fresh.url().toString(), fresh.url().toString())
 check("switching to another tab takes the line down",
       win.urlbar.progress() == 0, win.urlbar.progress())
 check("...and the old tab finishing in the background leaves it down",
