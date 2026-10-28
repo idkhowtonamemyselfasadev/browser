@@ -358,6 +358,41 @@ User data — history, settings, saved logins, downloads and cookies — is stor
 `~/.local/share/browser/`. Saved passwords are obfuscated with a per-install key file;
 the security boundary is the operating system account, not a master password.
 
+## What the in-browser pages need from `browser.py`
+
+The nine pages the browser serves itself — `start`, `history`, `downloads`,
+`bookmarks`, `notes`, `passwords`, `settings`, `player`, `mictest` — are copied
+into the Windows and macOS editions and ported
+back from here, and `~/claude/browser-pages` keeps them in step. It carries
+**HTML only** — so a page that starts calling a new `Bridge` method has a
+dependency the manifest cannot see, and the port leaves that method undefined.
+A `TypeError` inside a channel callback then abandons the rest of it, which
+looks exactly like a page that loaded and drew nothing. That is how
+`history.html` nearly shipped blank on Windows after an otherwise correct port:
+the page needs `Bridge.siteIcons` and `Browser.site_icon_data`, and neither
+travelled with it.
+
+So: **changing a shared page to call a new bridge method is a change to this
+table too.** 94 distinct methods across the nine pages as of 2026-10-28.
+
+| Page | Bridge methods it calls | Not in `browser.py` |
+|------|------------------------:|---------------------|
+| `start.html` | 12 | — |
+| `history.html` | 14 | — |
+| `downloads.html` | 10 | — |
+| `bookmarks.html` | 10 | — |
+| `notes.html` | 3 | — |
+| `passwords.html` | 22 | — |
+| `settings.html` | 33 | — |
+| `player.html` | 4 | `playerQueue`, `playerSubtitles` — guarded, and the feature is dead until it exists |
+| `mictest.html` | 1 | — |
+
+Ask for an optional one the way the pages already do — `if (bridge.x) { ... }`.
+An unguarded call to a method that is not there throws, and an uncaught throw
+in an inline script abandons every statement below it. `test_histrender.py`
+catches that shape for `getElementById`; nothing yet catches it for the bridge,
+so it is a review question.
+
 ## Automation: the agent bridge
 
 While the browser runs it listens on a second local socket, `$TMPDIR/browser-agent`
