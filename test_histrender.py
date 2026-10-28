@@ -39,7 +39,17 @@ It is the unguarded dereference that throws.
 
 Offscreen, against scratch data. Your own history and config are never
 opened.
+
+    test_histrender.py                 this tree: static half, then live
+    test_histrender.py --dir <path>    static half over another edition's
+                                       pages; the live half is skipped,
+                                       because it boots *this* build
+
+The windows and mac trees ship the same nine pages, so check (1) is the
+one thing one session can run for all of them. --dir never writes to the
+folder it is pointed at and never imports anything out of it.
 """
+import argparse
 import json
 import os
 import re
@@ -48,16 +58,18 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-from _boot import B  # noqa: E402
 
-# English, not whatever the box is set to: the live half reads text off
-# the page, and the first-run wizard comes up in German otherwise.
-B.CONFIG_FILE.write_text(json.dumps({"translateLang": "en",
-                                     "vaultPassword": True}))
+ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+ap.add_argument("--dir", metavar="PATH", default=None,
+                help="folder of .html pages to run the static half over "
+                     "(default: this tree, which also runs the live half)")
+ARGS = ap.parse_args()
 
-from tests.harness import app, spin  # noqa: E402
-from PyQt6.QtCore import QEventLoop, QTimer  # noqa: E402
+PAGEDIR = Path(ARGS.dir).expanduser().resolve() if ARGS.dir else HERE
+# The live half opens a pane in *this* build. Pointed at another
+# edition's folder it would say nothing about that edition, so it is
+# skipped rather than run against the wrong pages.
+LIVE = PAGEDIR == HERE
 
 fails = []
 
@@ -94,7 +106,13 @@ print("(1) every element the script dereferences exists in the page")
 DEREF = re.compile(
     r"""getElementById\(\s*["']([A-Za-z0-9_\-]+)["']\s*\)\s*\.\s*[A-Za-z_]""")
 
-PAGES = sorted(HERE.glob("*.html"))
+if not PAGEDIR.is_dir():
+    print("  FAIL no such folder  <%s>" % PAGEDIR)
+    sys.exit(1)
+if not LIVE:
+    print("    (%s)" % PAGEDIR)
+
+PAGES = sorted(PAGEDIR.glob("*.html"))
 check("there are pages to check at all", len(PAGES) > 5, len(PAGES))
 
 for page in PAGES:
@@ -116,8 +134,27 @@ for page in PAGES:
 
 
 # =====================================================================
+if not LIVE:
+    print("\n(2) the history page draws rows -- SKIPPED")
+    print("    --dir was given; the live half boots this tree's build, so it")
+    print("    would test %s's pages, not the ones above." % HERE.name)
+    print("\n%d checks failed" % len(fails))
+    sys.stdout.flush()
+    os._exit(1 if fails else 0)
+
 print("\n(2) the history page draws rows, with icons from the store")
 # =====================================================================
+sys.path.insert(0, str(HERE))
+from _boot import B  # noqa: E402
+
+# English, not whatever the box is set to: the live half reads text off
+# the page, and the first-run wizard comes up in German otherwise.
+B.CONFIG_FILE.write_text(json.dumps({"translateLang": "en",
+                                     "vaultPassword": True}))
+
+from tests.harness import app, spin  # noqa: E402
+from PyQt6.QtCore import QEventLoop, QTimer  # noqa: E402
+
 # Held in a name on purpose: nothing else references the QApplication,
 # and a bare app() call lets it be collected the moment it returns --
 # the next widget then dies with "Must construct a QApplication first".
