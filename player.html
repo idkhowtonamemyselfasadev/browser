@@ -200,11 +200,20 @@
           STR.mediaPlayPause || "Play / pause";
         document.getElementById("subs").textContent =
           (STR.subsOpen || "Subtitles") + "…";
-        bridge.playerQueue((json) => {
-          try { queue = JSON.parse(json || "[]"); } catch (e) { queue = []; }
-          if (queue.length) load(0);
-          else render();
-        });
+        // guarded like playerSubtitles above, and for the same
+        // reason: neither method exists on the Bridge. Unguarded this
+        // threw "bridge.playerQueue is not a function" on every open --
+        // harmless only because it was the last statement in this
+        // callback, so anything added after it would have been dead
+        // code with no symptom. The playlist does not arrive this way
+        // anyway: open_player injects window.__playerLoad(files).
+        if (bridge.playerQueue) {
+          bridge.playerQueue((json) => {
+            try { queue = JSON.parse(json || "[]"); } catch (e) { queue = []; }
+            if (queue.length) load(0);
+            else render();
+          });
+        }
       });
     });
   }
