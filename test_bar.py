@@ -239,11 +239,11 @@ check("a base can be asked for by its long name",
       B.bar_answer("31 to binary")[1] == "0b11111",
       B.bar_answer("31 to binary"))
 check("a network is written out",
-      "192.168.1.255" in B.bar_answer("ip 192.168.1.0/24")[0],
-      B.bar_answer("ip 192.168.1.0/24"))
+      "192.0.2.255" in B.bar_answer("ip 192.0.2.0/24")[0],
+      B.bar_answer("ip 192.0.2.0/24"))
 check("...with how many addresses are in it",
-      "254" in B.bar_answer("ip 192.168.1.0/24")[0],
-      B.bar_answer("ip 192.168.1.0/24"))
+      "254" in B.bar_answer("ip 192.0.2.0/24")[0],
+      B.bar_answer("ip 192.0.2.0/24"))
 check("a /32 is answered too",
       B.bar_answer("ip 10.0.0.1/32") is not None)
 check("nonsense is not answered", B.bar_answer("ip not.an.ip/99") is None)

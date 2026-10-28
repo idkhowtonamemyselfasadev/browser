@@ -510,13 +510,13 @@ check("...and each is a chrome:// address",
 check("the flags are his to set",
       win.set_flags("--disable-gpu\n--lang=de") is True
       and "disable-gpu" in win.flags_text())
-win.config["hostOverrides"] = "example.com 192.168.1.10\n# a note\nbad"
+win.config["hostOverrides"] = "example.com 192.0.2.10\n# a note\nbad"
 check("a host override is read",
-      win.host_overrides() == [("example.com", "192.168.1.10")],
+      win.host_overrides() == [("example.com", "192.0.2.10")],
       win.host_overrides())
 check("...and becomes the flag the engine takes",
       win.host_override_flag()
-      == "--host-resolver-rules=MAP example.com 192.168.1.10",
+      == "--host-resolver-rules=MAP example.com 192.0.2.10",
       win.host_override_flag())
 check("the debugging port is off until he asks",
       win.config.get("debugPort") in (None, False))

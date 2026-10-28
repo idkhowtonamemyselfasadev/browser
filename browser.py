@@ -1528,7 +1528,7 @@ def _encode_answer(text):
 def _base_answer(text):
     """Numbers in another base, and a network written out.
 
-    `0x1f to dec`, `1010b`, `255 in hex`, `ip 192.168.1.0/24` — the
+    `0x1f to dec`, `1010b`, `255 in hex`, `ip 192.0.2.0/24` — the
     four things a browser gets asked that it can answer without
     anybody\'s help."""
     text = str(text or "").strip().lower()

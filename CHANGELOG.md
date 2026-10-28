@@ -1114,7 +1114,7 @@ never sees tabs, and the desktop portal has no GlobalShortcuts here.
   OpenSearch offer where it has one — and a site that offers one can be
   added with a press.
 - **More answers in the bar**: `0x1f`, `1010b`, `255 in hex`,
-  `ip 192.168.1.0/24`, and `20 usd in eur` from a rate table you switch
+  `ip 192.0.2.0/24`, and `20 usd in eur` from a rate table you switch
   on (the European Central Bank's daily file, once a day). Enter on any
   answer copies it and says so.
 - **Shift+Enter** opens the result in a background tab, **middle-click**
