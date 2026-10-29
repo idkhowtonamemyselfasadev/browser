@@ -377,7 +377,12 @@ the page needs `Bridge.siteIcons` and `Browser.site_icon_data`, and neither
 travelled with it.
 
 So: **changing a shared page to call a new bridge method is a change to this
-table too.** 94 distinct methods across the nine pages as of 2026-10-28.
+table too.** 94 distinct methods across the nine pages as of 2026-10-29, and
+`test_bridgecalls.py` now checks every one of them against `class Bridge`'s own
+AST, so this table stops being the only thing standing between a port and a
+blank page. It has two verdicts: unguarded and missing is a throw and fails,
+guarded and missing is tolerated *and pinned by name*, so an existing gap stays
+and a new one is a failure rather than quietly joining the list.
 
 | Page | Bridge methods it calls | Not in `browser.py` |
 |------|------------------------:|---------------------|
@@ -388,7 +393,7 @@ table too.** 94 distinct methods across the nine pages as of 2026-10-28.
 | `notes.html` | 3 | — |
 | `passwords.html` | 22 | — |
 | `settings.html` | 33 | — |
-| `player.html` | 4 | `playerQueue`, `playerSubtitles` — guarded, and the feature is dead until it exists |
+| `player.html` | 5 | `playerQueue` — guarded; the playlist arrives through `window.__playerLoad` instead |
 | `mictest.html` | 1 | — |
 
 Ask for an optional one the way the pages already do — `if (bridge.x) { ... }`.
@@ -396,6 +401,14 @@ An unguarded call to a method that is not there throws, and an uncaught throw
 in an inline script abandons every statement below it. `test_histrender.py`
 catches that shape for `getElementById`; nothing yet catches it for the bridge,
 so it is a review question.
+
+A guarded call to a method that does not exist is not free, either. It does not
+throw, so nothing in a log says so — but if the page hangs a *button* on it, the
+browser is advertising something it cannot do, and clicking it does nothing at
+all: no error, no message. That is worse for someone using it than the feature
+simply being absent, because absent reads as a browser that is simple and dead
+reads as a browser that is broken. `player.html`'s **Subtitles…** sat like that
+from the day it was written until `Bridge.playerSubtitles` landed on 2026-10-29.
 
 **A method is not the only dependency.** `settings.html` calls two methods for
 every one of its switches — `getSettings` and `setSetting` — so a new setting

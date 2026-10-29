@@ -1,5 +1,85 @@
 # Changelog
 
+## 2026-10-29 — a button that did nothing, and two suites that would have said so
+
+**The Subtitles button was dead.** `player.html` has asked for
+`bridge.playerSubtitles` since it was written; `browser.py` never had
+it. The call is guarded, so nothing threw — clicking **Subtitles…**
+simply did nothing. No error, no message, no console line anyone would
+see.
+
+A guarded call to a method that is not there is usually the right way
+to ask for something optional. It stops being right the moment a page
+hangs a *button* on it, because then the browser is advertising a
+feature it cannot do, and a control that does nothing is worse than a
+feature that is absent: absent reads as a browser that is simple, dead
+reads as a browser that is broken.
+
+Everything behind it already existed. `load_subtitles` has picked a
+file, turned an `.srt` into WebVTT and handed it over as a `data:` URL
+for as long as there has been a captions menu. Only the door from the
+page was missing. So those three steps come out into
+`subtitle_data_url`, which has no opinion about where the answer goes,
+and both callers use it: `load_subtitles` puts it on the video in the
+tab you are looking at, `Bridge.playerSubtitles` hands it to the player
+page for its own `<track>`. Thirteen lines of new code, and the button
+works.
+
+`playerQueue` is the same family and was guarded on 2026-10-29
+(`51ecdbe`); it stays a known gap, because the playlist genuinely does
+not arrive that way any more — `open_player` injects
+`window.__playerLoad(files)`.
+
+**Two guard suites, written in the Windows edition, taken upstream.**
+Both catch a class of bug that lives in shared code, so they are worth
+more here than in the edition that happened to trip over them.
+
+`test_bridgecalls.py` reads `class Bridge` out of this file's AST — not
+a grep, because `def siteIcons` also matches a method of some other
+class and a name in a comment matches nothing at all — and checks all
+94 `bridge.X(` calls across the nine pages. Unguarded and missing
+fails. Guarded and missing is tolerated *and pinned by name with its
+reason*, so an existing gap can stay while a new one is a failure
+rather than quietly joining the list. The pin is checked in both
+directions: an entry that is no longer missing reports itself stale,
+which is how `playerSubtitles` left the list rather than sitting in it
+for ever.
+
+`test_themetokens.py` checks every literal token this file hands
+`theme_color`. That function is forgiving by design — an unknown token
+comes back `#000000` rather than raising, which is right for a theme
+file somebody wrote by hand and wrong for a token misspelled here,
+because the result is a colour instead of an error. It cost a real
+defect: `theme_color("base")`, and there is no `base`, so a sleeping
+tab was veiled in pure black on all 30 light themes. Found here while
+mirroring the strip into a vertical rail and independently in the
+Windows edition the same day.
+
+It needed one change on the way in, and it is the same lesson its
+sibling already teaches. It collected tokens with a regex over the
+source text, and the comment explaining the `base` fix *contains* the
+call it replaced — so the suite failed on the line documenting the
+repair. It reads the AST now: a parsed tree holds calls and not
+comments. The trap is kept as a check, so the fixture comment staying
+put is itself asserted.
+
+Together with `test_histrender.py` the pair closes both halves of one
+question. A page reaches for two kinds of thing — an element in its own
+markup and a method on the Bridge — and until now only the first was
+checked. Three bugs of this family have shipped: the
+`getElementById("v_searches")` orphan that drew an empty history page,
+`playerQueue` throwing on every player open, and Subtitles doing
+nothing at all.
+
+**And six suites nobody was running.** `test_histrender`,
+`test_histicon`, `test_sidebar`, `test_daystep`, and the two above were
+all absent from `tools/runall.sh`. A suite that is not in the runner is
+a suite that rots quietly, which is a worse place to be than not having
+written it. The two static guards go *first*: neither opens a window,
+both finish in seconds, and both ask a question about the whole tree
+rather than about one feature — worth knowing before the hour of
+browser boots, not after it.
+
 ## 2026-10-29 — the tabs down the side, and a setting nobody could reach
 
 `tabStrip` has had four values since the relocatable-strip work: `top`,

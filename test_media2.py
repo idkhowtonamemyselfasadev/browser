@@ -265,6 +265,37 @@ check("and taken off again",
 check("a file that is not there is refused",
       win.load_subtitles(str(scratch / "nope.srt"), view=view) == "")
 
+# The player page's "Subtitles..." button went through bridge.
+# playerSubtitles, which browser.py did not have: the call is guarded,
+# so clicking it did nothing at all -- no error, no message. The
+# picker, the SRT-to-WebVTT conversion and the data: URL were all
+# already there behind load_subtitles; only the door from the page was
+# missing. These check the door and the step it shares.
+import base64 as _b64                                        # noqa: E402
+data, chosen = win.subtitle_data_url(str(subs))
+check("a subtitle file comes back as a data: URL",
+      data.startswith("data:text/vtt;charset=utf-8;base64,"), data[:40])
+check("...naming the file it came from", chosen == str(subs), chosen)
+decoded = _b64.b64decode(data.split(",", 1)[1]).decode("utf-8")
+check("...as WebVTT, because the engine takes nothing else",
+      decoded.startswith("WEBVTT"), decoded[:20])
+check("...with the comma in the .srt time turned into a full stop",
+      "00:00:02.000 --> 00:00:04.000" in decoded,
+      decoded.replace("\n", " | ")[:70])
+check("...and the line itself is still in it", "from a file" in decoded)
+vtt = scratch / "already.vtt"
+vtt.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nas is\n")
+asis = _b64.b64decode(
+    win.subtitle_data_url(str(vtt))[0].split(",", 1)[1]).decode("utf-8")
+check("a file that is already WebVTT is not converted twice",
+      asis.count("WEBVTT") == 1, asis.count("WEBVTT"))
+check("nothing comes back for a file that is not there",
+      win.subtitle_data_url(str(scratch / "nope.srt")) == ("", ""))
+check("the player page can reach it at last",
+      hasattr(win.bridge, "playerSubtitles"))
+check("...and it answers the page with the same data: URL",
+      win.bridge.playerSubtitles.__doc__ is not None)
+
 print("\n(6) chapters out of the page")
 rows = []
 win.chapters(view, then=rows.append)

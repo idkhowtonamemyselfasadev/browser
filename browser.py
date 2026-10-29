@@ -9425,7 +9425,7 @@ class GroupTabBar(QTabBar):
         if getattr(w, "_asleep", False):
             # "bg", not "base": there is no `base` in THEME_SOURCE, so
             # theme_color("base") never found a palette entry and fell
-            # back to #000000 on every one of the 114 themes. On a
+            # back to #000000 on every theme in the catalogue. On a
             # light one that veiled a sleeping tab in black.
             veil = QColor(theme_color("bg"))
             veil.setAlpha(110)
@@ -14190,6 +14190,29 @@ class Bridge(QObject):
             browser.config["downloadDir"] = chosen
             browser.save_config()
         return str(browser.download_dir(create=False))
+
+    @pyqtSlot(result=str)
+    def playerSubtitles(self):
+        """The player page's "Subtitles..." button.
+
+        Picks a subtitle file and hands back WebVTT as a data: URL for
+        the page's own <track>; "" if he cancelled, which the page
+        reads as "nothing to do".
+
+        It is here because the button was dead. player.html has asked
+        for `bridge.playerSubtitles` since it was written, browser.py
+        never had it, and the call is guarded -- so clicking Subtitles
+        did nothing at all. No error, no message, no console line
+        anyone would see. A control that does nothing is worse than a
+        feature that is absent: absent reads as a browser that is
+        simple, and dead reads as a browser that is broken.
+
+        Everything behind it already existed -- the picker, the
+        SRT-to-WebVTT conversion, the data: URL -- in load_subtitles,
+        which puts subtitles on a video in an ordinary tab. Only the
+        door from the page was missing. See subtitle_data_url.
+        """
+        return self.browser.subtitle_data_url()[0]
 
     @pyqtSlot()
     def clearCookies(self):
@@ -34191,6 +34214,40 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         return self.media_tool2("captionstyle", view=view, arg=css)
 
+    def subtitle_data_url(self, path=None):
+        """A .srt or .vtt off the disk as a data: URL, and the path it
+        came from. Asks for one if it is not given.
+
+        The three steps -- pick, read, convert -- with no opinion about
+        where the answer goes, because there are two callers that want
+        exactly these and disagree about the rest. load_subtitles puts
+        it on the video in the tab he is looking at;
+        Bridge.playerSubtitles hands it to the player page for its own
+        <track> element.
+
+        A data: URL rather than a file:// one, for two reasons that
+        both still hold: the engine only takes WebVTT, so an .srt is
+        converted on the way in anyway, and the page never sees a path
+        of his.
+        """
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(
+                self, self._ui_str("subsOpen"), str(self.download_dir()),
+                "Subtitles (*.srt *.vtt);;All files (*)")
+        if not path:
+            return "", ""
+        try:
+            text = Path(str(path)).read_text(encoding="utf-8",
+                                             errors="replace")
+        except OSError:
+            self.flash(self._ui_str("subsFailed"))
+            return "", ""
+        if not text.lstrip().startswith("WEBVTT"):
+            text = _srt_to_vtt(text)
+        return ("data:text/vtt;charset=utf-8;base64,"
+                + base64.b64encode(text.encode("utf-8")).decode(),
+                str(path))
+
     def load_subtitles(self, path=None, offset=0.0, view=None):
         """A .srt or .vtt from the disk, on the video that is playing.
 
@@ -34200,27 +34257,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if view is None or self._is_header(view):
             return ""
-        if path is None:
-            path, _ = QFileDialog.getOpenFileName(
-                self, self._ui_str("subsOpen"), str(self.download_dir()),
-                "Subtitles (*.srt *.vtt);;All files (*)")
-        if not path:
+        data, chosen = self.subtitle_data_url(path)
+        if not data:
             return ""
-        try:
-            text = Path(str(path)).read_text(encoding="utf-8",
-                                             errors="replace")
-        except OSError:
-            self.flash(self._ui_str("subsFailed"))
-            return ""
-        if not text.lstrip().startswith("WEBVTT"):
-            text = _srt_to_vtt(text)
-        data = ("data:text/vtt;charset=utf-8;base64,"
-                + base64.b64encode(text.encode("utf-8")).decode())
+        name = Path(chosen).name
         self.media_tool2("addsubs", view=view,
-                         arg={"url": data, "label": Path(str(path)).name,
+                         arg={"url": data, "label": name,
                               "offset": float(offset or 0)})
-        self.flash(self._ui_str("subsAdded") % Path(str(path)).name)
-        return str(path)
+        self.flash(self._ui_str("subsAdded") % name)
+        return chosen
 
     def clear_subtitles(self, view=None):
         return self.media_tool2("addsubs", view=view, arg={"url": ""})
