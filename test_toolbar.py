@@ -162,14 +162,34 @@ check("the corner widget is let go with the tab groups button",
       (win.toggle_toolbar_button("tabgroups", False),
        win.tabs.cornerWidget(Qt.Corner.TopLeftCorner) is None)[1])
 win.toggle_toolbar_button("tabgroups", True)
+# These pinned 0 and 28, which were _sync_acct's own two guesses at
+# this margin -- and a right margin of 0 is wrong whenever any of the
+# four buttons that ride on the right (copy, clear, QR, key) is up,
+# because the address text then runs underneath them. That is the bug
+# place_bar_extras was given sole ownership of the margin to fix, so
+# the numbers moved and the intent did not. Asserted as the relation
+# now: the margin gives up exactly the star's room and takes it back,
+# and what is left still clears whatever else is in there.
+made = getattr(win, "_barextras", None) or {}
+others = [n for n in ("barkey", "barqr", "barcopy", "barclear")
+          if made.get(n) is not None and made[n].isVisible()]
+with_star = win.urlbar.textMargins().right()
+star_room = win.starbtn.width() + 2
 win.toggle_toolbar_button("star", False)
 app.processEvents()
-check("and the address bar takes its margin back when the star goes",
-      win.urlbar.textMargins().right() == 0)
+without = win.urlbar.textMargins().right()
+check("and the address bar takes the star's margin back when it goes",
+      without == with_star - star_room,
+      "%d -> %d, the star is %d wide" % (with_star, without,
+                                         win.starbtn.width()))
+check("...but keeps the room the other buttons still need",
+      without > 0 if others else without == 0,
+      "%d left, still in there: %s" % (without, others or "nothing"))
 win.toggle_toolbar_button("star", True)
 app.processEvents()
 check("and gives it up again when it returns",
-      win.urlbar.textMargins().right() == 28)
+      win.urlbar.textMargins().right() == with_star,
+      "%d -> %d" % (without, win.urlbar.textMargins().right()))
 
 
 print("\n(3) four of them do not go")

@@ -41165,6 +41165,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             left += lock.width() + 2
         elif lock is not None:
             lock.hide()
+        # The account handle was never in this sum. _place_acct put it
+        # at x=5 and the lock sits at x=4, both 20px wide, so on a site
+        # with more than one saved login the two were drawn on top of
+        # each other -- and neither got any margin of its own.
+        acct = getattr(self, "acctbtn", None)
+        if acct is not None and acct.isVisible():
+            acct.move(left, max(0, (height - acct.height()) // 2))
+            left += acct.width() + 2
         for name in ("_securelbl", "_uselbl"):
             label = getattr(self, name, None)
             if label is None or not label.isVisible():
@@ -47433,11 +47441,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if on:
             btn.setToolTip(self._ui_str("acctPickTip"))
         btn.setVisible(on)
-        star = getattr(self, "starbtn", None)
-        right = 28 if (star is not None and not star.isHidden()) else 0
-        self.urlbar.setTextMargins(24 if on else 0, 0, right, 0)
-        if on:
-            self._place_acct()
+        # The margins are not this function's to write. It used to set
+        # them from two guesses of its own -- 24px of left if the handle
+        # was up, and a right of 28 if the star was -- and _url_changed
+        # asks it on the line AFTER show_address. So every navigation
+        # threw away what place_bar_extras had just worked out: with the
+        # look-alike badge showing, 283px of left margin went back to 0
+        # and the address painted straight over the badge and the lock,
+        # and the right went 52 -> 28, so the text ran under the copy
+        # button. place_bar_extras is the one place that knows the lock,
+        # the handle, both marks and the four buttons on the right, so
+        # it owns both margins and this asks it instead.
+        if not self.place_bar_extras():
+            # before the extras exist there is nothing to measure
+            self.urlbar.setTextMargins(24 if on else 0, 0, 28, 0)
+            if on:
+                self._place_acct()
 
     def open_account_chooser(self):
         """Ctrl+Shift+M, or the handle in the address bar.
