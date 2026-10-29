@@ -15698,6 +15698,16 @@ class WebPage(QWebEnginePage):
                 if self.browser.http_allowed(url.host()):
                     pass          # he said "carry on" for this host
                 else:
+                    # Write down where he came from BEFORE sending the
+                    # tab to the secure address. Without this,
+                    # note_https_upgrade had no caller anywhere and
+                    # view._upgraded_from was never set, so
+                    # https_fallback -- whose own docstring calls
+                    # itself "the whole difference between https-only
+                    # and https-mostly" -- had nothing to read even
+                    # once it was connected.
+                    self.browser.note_https_upgrade(self._view, url,
+                                                    secure)
                     QTimer.singleShot(
                         0, lambda u=QUrl(secure): self.setUrl(u))
                     return False
@@ -22412,6 +22422,14 @@ class Browser(QMainWindow):
         view.loadFinished.connect(
             lambda _ok, v=view: setattr(v, "_in_flight", False))
         view.loadFinished.connect(lambda ok, v=view: self._autofill(v, ok))
+        # https-only: the secure address did not answer, so ask before
+        # anything insecure loads. The setting's own hint promises it --
+        # "An http address is tried over https first; if that fails you
+        # are asked before it loads" -- and this connect did not exist,
+        # so the promise was never kept. It failed CLOSED, which is
+        # safer than advertised: an http-only site was simply
+        # unreachable with no way through and no explanation.
+        view.loadFinished.connect(lambda ok, v=view: self.https_fallback(v, ok))
         # where he was in a PDF: the viewer puts the page in the
         # address, so the address moving is the only notice of it
         view.urlChanged.connect(lambda _u, v=view: self.note_pdf_place(v))
@@ -30600,10 +30618,33 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """The secure address did not answer. Ask once, and only then
         go to the insecure one -- which is the whole difference between
         https-only and https-mostly."""
-        if ok:
-            return False
         was = getattr(view, "_upgraded_from", "")
+        if ok:
+            # The secure address answered, so the breadcrumb has done
+            # its job and must not survive it. Left set -- which is
+            # what the original did, returning early before clearing
+            # it -- the next failed navigation ANYWHERE in this tab
+            # would offer the insecure address of the page before it.
+            # A downgrade prompt for an unrelated error is worse than
+            # no prompt at all.
+            if was:
+                try:
+                    view._upgraded_from = ""
+                except RuntimeError:
+                    pass
+            return False
         if not was:
+            return False
+        # and only for the navigation that WAS the upgrade. Measured:
+        # at loadFinished(False) the view still holds the address it
+        # tried, and a failure fires this twice, which is what clearing
+        # the breadcrumb below already covered.
+        went_to = getattr(view, "_upgraded_to", "")
+        try:
+            tried = view.url().toString()
+        except RuntimeError:
+            return False
+        if went_to and tried and tried != went_to:
             return False
         view._upgraded_from = ""
         host = (QUrl(was).host() or "").lower()
