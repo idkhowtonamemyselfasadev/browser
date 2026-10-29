@@ -5786,6 +5786,33 @@ def tint(qss, name=None):
     return _recolor(qss, theme_palette(entry["key"]), qt=True)
 
 
+def tint_js(source, name=None):
+    """The same substitution for a tool that paints something over a
+    page -- the selection bar, the footnote card, the click-to-load
+    placeholder, the measuring tag, the form badges.
+
+    Those are the browser speaking, not the site, and they were the
+    last surfaces still painted in fixed colours: the chrome, our own
+    pages and the reader all follow the theme, so a selection bar that
+    stayed dark on Latte was the odd one out. They were off-palette
+    even on the default theme -- they used upstream Catppuccin's
+    #11111b, which no palette here holds; the browser's own island
+    colour is surface, #0d0d12. Normalising them to real tokens is
+    what lets one `_recolor` cover all five.
+
+    Only the colours move. The regex matches hex and rgb()/rgba()
+    literals and nothing else, a black with alpha under 0.8 is left
+    alone as a shadow or a scrim (which is what keeps the
+    `rgba(0, 0, 0, 0)` the form inspector COMPARES against from being
+    rewritten into something that never matches), and an rgb triple
+    that is not a token's is returned untouched.
+    """
+    entry = theme_def(name)
+    if entry["key"] == DEFAULT_THEME:
+        return source
+    return _recolor(source, theme_palette(entry["key"]))
+
+
 def theme_color(token, name=None):
     return theme_palette(name).get(token, THEME_SOURCE.get(token, "#000000"))
 
@@ -32198,13 +32225,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         is left, and nothing else."""
         left = max(0, self.focus_until() - int(time.time()))
         host = (QUrl(str(url)).host() or "")
+        pal = theme_palette()
         return ("<!doctype html><meta charset=utf-8><title>%s</title>"
-                "<style>body{background:#000;color:#cdd6f4;font:16px "
+                "<style>body{background:%s;color:%s;font:16px "
                 "sans-serif;display:flex;flex-direction:column;"
                 "align-items:center;justify-content:center;height:100vh;"
-                "gap:10px}b{color:#89b4fa}</style>"
+                "gap:10px}b{color:%s}</style>"
                 "<div>%s</div><div><b>%s</b></div><div>%s</div>"
                 % (html.escape(self._ui_str("focusTitle")),
+                   pal["bg"], pal["text"], pal["accent"],
                    html.escape(self._ui_str("focusBlocked") % host),
                    html.escape(self._ui_str("focusLeft")
                                % (left // 60, left % 60)),
@@ -32519,8 +32548,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = DESK_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = source.replace("ARG", json.dumps(arg)
-                                if arg is not None else "null")
+        source = tint_js(source.replace("ARG", json.dumps(arg)
+                                        if arg is not None else "null"))
         view.page().runJavaScript(source, MAIN_WORLD_ID,
                                   then if then is not None else (lambda _r: None))
         return True
@@ -33058,13 +33087,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         host = (QUrl(str(url)).host() or "").lower().removeprefix("www.")
         limit = self.site_limit(host)
         used = int(self.site_minutes_today(host))
+        pal = theme_palette()
         return ("<!doctype html><meta charset=utf-8><title>%s</title>"
-                "<style>body{background:#000;color:#cdd6f4;font:16px "
+                "<style>body{background:%s;color:%s;font:16px "
                 "sans-serif;display:flex;flex-direction:column;"
                 "align-items:center;justify-content:center;height:100vh;"
-                "gap:10px}b{color:#89b4fa}</style>"
+                "gap:10px}b{color:%s}</style>"
                 "<div>%s</div><div><b>%s</b></div>"
                 % (html.escape(self._ui_str("limitTitle")),
+                   pal["bg"], pal["text"], pal["accent"],
                    html.escape(self._ui_str("limitBlocked") % host),
                    html.escape(self._ui_str("limitUsed") % (used, limit))))
 
@@ -33272,8 +33303,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = READ_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = source.replace("ARG", json.dumps(arg)
-                                if arg is not None else "null")
+        source = tint_js(source.replace("ARG", json.dumps(arg)
+                                        if arg is not None else "null"))
         try:
             view.page().runJavaScript(
                 source, MAIN_WORLD_ID,
@@ -33711,17 +33742,29 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.flash(self._ui_str("clipNothing"))
                 return
             options = self.reader_options()
+            # reader_extra_css's docstring says "one place decides the
+            # colours" -- and this was the place that did not. It wrote
+            # its own #000 / #cdd6f4 / #89b4fa, so reading a SELECTION
+            # came out black-on-pale on all 28 light themes while
+            # reading the same article as a whole page (reader_css,
+            # line 28573) came out in the theme. It also hardcoded 17px
+            # and ignored readerSize, so the two readers disagreed about
+            # the text size as well -- default 19, shown at 17.
+            pal = theme_palette()
             page = (
                 "<!doctype html><meta charset=utf-8><title>%s</title>"
-                "<style>body{background:#000;color:#cdd6f4;"
-                "font:%s 17px/1.7 %s;max-width:%dch;margin:0 auto;"
+                "<style>body{background:%s;color:%s;"
+                "font:%s %dpx/1.7 %s;max-width:%dch;margin:0 auto;"
                 "padding:2.5rem 1.2rem}img{max-width:100%%;height:auto;"
-                "%s}a{color:#89b4fa}%s</style><h1>%s</h1>%s"
-                % (html.escape(out.get("title") or ""), "normal",
+                "%s}a{color:%s}%s</style><h1>%s</h1>%s"
+                % (html.escape(out.get("title") or ""),
+                   pal["bg"], pal["text"], "normal",
+                   int(options["size"]),
                    "Georgia, serif" if options["serif"]
                    else "system-ui, sans-serif",
                    options["width"],
                    "" if options["images"] else "display:none",
+                   pal["accentLt"],
                    "body{hyphens:auto;text-align:justify}"
                    if options["hyphens"] else "",
                    html.escape(out.get("title") or ""), out["html"]))
@@ -34243,8 +34286,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = MEDIA_TOOLS2.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = source.replace("ARG", json.dumps(arg)
-                                if arg is not None else "null")
+        source = tint_js(source.replace("ARG", json.dumps(arg)
+                                        if arg is not None else "null"))
         try:
             view.page().runJavaScript(
                 source, MAIN_WORLD_ID,
@@ -35769,8 +35812,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = PLAY_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = source.replace("ARG", json.dumps(arg)
-                                if arg is not None else "null")
+        source = tint_js(source.replace("ARG", json.dumps(arg)
+                                        if arg is not None else "null"))
         try:
             view.page().runJavaScript(
                 source, MAIN_WORLD_ID,
@@ -36891,8 +36934,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = FORM_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = source.replace("ARG", json.dumps(arg)
-                                if arg is not None else "null")
+        source = tint_js(source.replace("ARG", json.dumps(arg)
+                                        if arg is not None else "null"))
         try:
             view.page().runJavaScript(
                 source, MAIN_WORLD_ID,
@@ -39733,8 +39776,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = FILE_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = source.replace("ARG", json.dumps(arg)
-                                if arg is not None else "null")
+        source = tint_js(source.replace("ARG", json.dumps(arg)
+                                        if arg is not None else "null"))
         try:
             view.page().runJavaScript(
                 source, MAIN_WORLD_ID,
@@ -42180,27 +42223,42 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def diff_html(self, text):
         """A .diff or .patch as something to read: green for what was
-        added, red for what went, and the file headers picked out."""
+        added, red for what went, and the file headers picked out.
+
+        Off the theme, not off Mocha. The note above THEMES promises
+        that "our own pages get it", and these two generators were the
+        ones that did not: every colour here was a Mocha literal, so a
+        patch opened on any of the 28 light themes arrived as a dark
+        slab in a light window, and on a character theme in the wrong
+        hue entirely. `_recolor` could not save them either -- it is
+        only ever run over the Qt stylesheet, and two of the literals
+        (the mauve below and the surface grey in markdown_html) are not
+        even tokens, so they would have survived it.
+        """
+        pal = theme_palette()
         out = []
         for line in str(text or "").splitlines():
             safe = html.escape(line)
             if line.startswith(("+++", "---")):
-                colour = "#89b4fa"
+                colour = pal["accent"]
             elif line.startswith("@@"):
-                colour = "#cba6f7"
+                # was a mauve with no token behind it; accentLt is the
+                # palette's own "second marker" and every theme has one
+                colour = pal["accentLt"]
             elif line.startswith("+"):
-                colour = "#a6e3a1"
+                colour = pal["green"]
             elif line.startswith("-"):
-                colour = "#f38ba8"
+                colour = pal["red"]
             elif line.startswith("diff "):
-                colour = "#f9e2af"
+                colour = pal["yellow"]
             else:
-                colour = "#cdd6f4"
+                colour = pal["text"]
             out.append('<div style="color:%s">%s</div>'
                        % (colour, safe or "&nbsp;"))
         return ("<!doctype html><meta charset=utf-8>"
-                "<style>body{background:#11111b;margin:0;padding:16px;"
+                "<style>body{background:%s;margin:0;padding:16px;"
                 "font:13px/1.5 monospace}div{white-space:pre-wrap}</style>"
+                % pal["bg"]
                 + "".join(out))
 
     def markdown_html(self, text, title=""):
@@ -42285,20 +42343,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             rows.append("</table>")
         if in_code:
             rows.append("</pre>")
+        pal = theme_palette()
         return ("<!doctype html><meta charset=utf-8><title>%s</title>"
-                "<style>body{background:#11111b;color:#cdd6f4;"
+                "<style>body{background:%s;color:%s;"
                 "font:15px/1.6 system-ui,sans-serif;max-width:46em;"
                 "margin:0 auto;padding:40px 20px}"
-                "a{color:#89b4fa}code{background:#1e1e2e;padding:1px 4px;"
+                "a{color:%s}code{background:%s;padding:1px 4px;"
                 "border-radius:4px;font:13px monospace}"
-                "pre{background:#1e1e2e;padding:12px;border-radius:8px;"
+                "pre{background:%s;padding:12px;border-radius:8px;"
                 "overflow:auto;font:13px monospace}"
-                "blockquote{border-left:3px solid #45475a;margin:0;"
-                "padding-left:12px;color:#a6adc8}"
-                "table{border-collapse:collapse}td{border:1px solid #45475a;"
-                "padding:4px 8px}hr{border:0;border-top:1px solid #45475a}"
+                "blockquote{border-left:3px solid %s;margin:0;"
+                "padding-left:12px;color:%s}"
+                "table{border-collapse:collapse}td{border:1px solid %s;"
+                "padding:4px 8px}hr{border:0;border-top:1px solid %s}"
                 "h1,h2,h3{line-height:1.25}</style>%s"
                 % (html.escape(str(title or "Markdown")),
+                   pal["bg"], pal["text"], pal["accent"], pal["surface"],
+                   pal["surface"], pal["muted"], pal["subtext"],
+                   pal["muted"], pal["muted"],
                    "\n".join(rows)))
 
     #: MiniMessage’s colours, as the server sends them and as the
@@ -43402,15 +43464,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not found["ok"]:
             self.flash(self._ui_str("devRegexBad") % found["error"])
             return False
+        pal = theme_palette()
         body = ["<p>%d matches</p>" % found["count"]]
         for row in found["matches"][:100]:
-            body.append("<div><b>%s</b> <span style='color:#6c7086'>"
+            body.append("<div><b>%s</b> <span style='color:%s'>"
                         "@%d</span> %s</div>"
-                        % (html.escape(row["text"]), row["start"],
+                        % (html.escape(row["text"]), pal["overlay"],
+                           row["start"],
                            html.escape(", ".join(row["groups"]))))
         self.show_html("<!doctype html><meta charset=utf-8>"
-                       "<style>body{background:#11111b;color:#cdd6f4;"
+                       "<style>body{background:%s;color:%s;"
                        "font:14px/1.6 monospace;padding:20px}</style>"
+                       % (pal["bg"], pal["text"])
                        + "".join(body), self._ui_str("devRegex"))
         return True
 
@@ -43492,11 +43557,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         elif ending in (".diff", ".patch"):
             body = self.diff_html(text)
         else:
+            pal = theme_palette()
             body = ("<!doctype html><meta charset=utf-8><title>%s</title>"
-                    "<style>body{background:#11111b;color:#cdd6f4;"
+                    "<style>body{background:%s;color:%s;"
                     "font:13px/1.6 monospace;padding:20px;"
                     "white-space:pre-wrap}</style>%s"
-                    % (html.escape(target.name), html.escape(text)))
+                    % (html.escape(target.name), pal["bg"], pal["text"],
+                       html.escape(text)))
         return self.show_html(body, target.name)
 
     # ---- the request log and what hangs off it (wave 26) ----
@@ -43984,16 +44051,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         % (html.escape(name), html.escape(value)))
         rows.append("</dl><pre>%s</pre>"
                     % html.escape(str(found.get("body", ""))[:100000]))
+        pal = theme_palette()
         return self.show_html(
             "<!doctype html><meta charset=utf-8><title>%s</title>"
-            "<style>body{background:#11111b;color:#cdd6f4;"
+            "<style>body{background:%s;color:%s;"
             "font:14px/1.6 system-ui,sans-serif;padding:24px}"
-            "h2{font-size:18px}.ms{color:#6c7086;font-size:13px}"
-            "dt{color:#89b4fa;font:13px monospace;margin-top:6px}"
-            "dd{margin:0;font:13px monospace;color:#a6adc8}"
-            "pre{background:#1e1e2e;padding:12px;border-radius:8px;"
+            "h2{font-size:18px}.ms{color:%s;font-size:13px}"
+            "dt{color:%s;font:13px monospace;margin-top:6px}"
+            "dd{margin:0;font:13px monospace;color:%s}"
+            "pre{background:%s;padding:12px;border-radius:8px;"
             "overflow:auto;font:12px monospace;white-space:pre-wrap}"
-            "</style>%s" % (self._ui_str("devHttp"), "".join(rows)),
+            "</style>%s" % (self._ui_str("devHttp"),
+                            pal["bg"], pal["text"], pal["overlay"],
+                            pal["accent"], pal["subtext"], pal["surface"],
+                            "".join(rows)),
             self._ui_str("devHttp"))
 
     def ask_http(self):
@@ -64313,7 +64384,7 @@ DESK_TOOLS = {
   if (window.__deskCounter) return "already";
   window.__deskCounter = true;
   var tag = document.createElement("div");
-  tag.style.cssText = "position:fixed;z-index:2147483646;background:#11111b;"
+  tag.style.cssText = "position:fixed;z-index:2147483646;background:#0d0d12;"
     + "color:#cdd6f4;border:1px solid #585b70;border-radius:7px;"
     + "padding:1px 6px;font:11px sans-serif;pointer-events:none;display:none";
   document.documentElement.appendChild(tag);
@@ -64624,7 +64695,7 @@ READ_TOOLS = {
   window.__footNotes = true;
   var box = document.createElement("div");
   box.style.cssText = "position:fixed;max-width:420px;z-index:2147483646;"
-    + "background:#11111b;color:#cdd6f4;border:1px solid #585b70;"
+    + "background:#0d0d12;color:#cdd6f4;border:1px solid #585b70;"
     + "border-radius:8px;padding:8px 10px;font:13px sans-serif;"
     + "display:none;box-shadow:0 6px 24px rgba(0,0,0,.6)";
   document.documentElement.appendChild(box);
@@ -64674,7 +64745,7 @@ READ_TOOLS = {
 "highlight": r"""(function () {
   if (window.__codeLit) return "already";
   window.__codeLit = true;
-  var C = {kw: "#cba6f7", str: "#a6e3a1", num: "#fab387",
+  var C = {kw: "#b4d0fb", str: "#a6e3a1", num: "#fab387",
            com: "#6c7086", fn: "#89b4fa"};
   var WORDS = ("function|return|var|let|const|if|else|for|while|class|def|"
     + "import|from|export|new|try|catch|finally|throw|await|async|public|"
@@ -64860,7 +64931,7 @@ READ_TOOLS = {
   window.__selBar = true;
   var bar = document.createElement("div");
   bar.style.cssText = "position:absolute;z-index:2147483646;display:none;"
-    + "background:#11111b;border:1px solid #585b70;border-radius:8px;"
+    + "background:#0d0d12;border:1px solid #585b70;border-radius:8px;"
     + "padding:2px;gap:2px;box-shadow:0 4px 18px rgba(0,0,0,.6)";
   var kinds = [["copy", "⧉"], ["search", "⌕"],
                ["translate", "文"], ["define", "ⓘ"],
@@ -65244,7 +65315,7 @@ DEV_TOOLS_PAGE = {
     + "background:rgba(137,180,250,.15);display:none";
   var label = document.createElement("div");
   label.style.cssText = "position:fixed;top:8px;left:8px;z-index:2147483647;"
-    + "background:rgba(17,17,27,.95);color:#cdd6f4;padding:4px 8px;"
+    + "background:rgba(13,13,18,.95);color:#cdd6f4;padding:4px 8px;"
     + "border-radius:6px;font:12px monospace;white-space:pre";
   box.append(band, label);
   document.documentElement.appendChild(box);
@@ -65393,7 +65464,7 @@ DEV_TOOLS_PAGE = {
   for (var f = 0; f < forms.length; f++) {
     var note = document.createElement("div");
     note.className = "__formnote";
-    note.style.cssText = "background:#11111b;color:#f9e2af;padding:4px 8px;"
+    note.style.cssText = "background:#0d0d12;color:#f9e2af;padding:4px 8px;"
       + "font:12px monospace;border-radius:6px;margin:4px 0";
     note.textContent = (forms[f].method || "get").toUpperCase() + " "
       + (forms[f].action || location.href);
@@ -65436,7 +65507,7 @@ DEV_TOOLS_PAGE = {
   if (window.__perfBox) return "already";
   var box = document.createElement("div");
   box.style.cssText = "position:fixed;top:6px;left:6px;z-index:2147483647;"
-    + "background:rgba(17,17,27,.92);color:#a6e3a1;padding:4px 8px;"
+    + "background:rgba(13,13,18,.92);color:#a6e3a1;padding:4px 8px;"
     + "border-radius:6px;font:12px monospace;white-space:pre;"
     + "pointer-events:none";
   document.documentElement.appendChild(box);
@@ -65539,7 +65610,7 @@ DEV_TOOLS_PAGE = {
   if (window.__keyView) return "already";
   var box = document.createElement("div");
   box.style.cssText = "position:fixed;bottom:12px;right:12px;"
-    + "z-index:2147483647;background:rgba(17,17,27,.95);color:#cdd6f4;"
+    + "z-index:2147483647;background:rgba(13,13,18,.95);color:#cdd6f4;"
     + "padding:8px 10px;border-radius:8px;font:12px monospace;"
     + "white-space:pre;max-width:40ch";
   box.textContent = "press a key";
@@ -66843,7 +66914,7 @@ MEDIA_TOOLS2 = {
     if (!hit || frames[i].dataset.heldBy) continue;
     var box = document.createElement("div");
     box.dataset.heldBy = "browser";
-    box.style.cssText = "position:relative;background:#11111b;color:#cdd6f4;"
+    box.style.cssText = "position:relative;background:#0d0d12;color:#cdd6f4;"
       + "display:flex;align-items:center;justify-content:center;"
       + "cursor:pointer;font:14px sans-serif;min-height:120px;"
       + "border:1px solid #585b70;border-radius:8px";
@@ -67041,7 +67112,7 @@ PLAY_TOOLS = {
   var show = function (text) {
     var key = document.createElement("span");
     key.textContent = text;
-    key.style.cssText = "background:rgba(17,17,27,.92);color:#cdd6f4;"
+    key.style.cssText = "background:rgba(13,13,18,.92);color:#cdd6f4;"
       + "border:1px solid #585b70;border-radius:6px;padding:4px 7px";
     box.appendChild(key);
     setTimeout(function () { key.remove(); }, 1200);
@@ -67070,7 +67141,7 @@ PLAY_TOOLS = {
   if (window.__fpsBox) return "already";
   var box = document.createElement("div");
   box.style.cssText = "position:fixed;top:6px;right:6px;z-index:2147483646;"
-    + "background:rgba(17,17,27,.9);color:#a6e3a1;border-radius:6px;"
+    + "background:rgba(13,13,18,.9);color:#a6e3a1;border-radius:6px;"
     + "padding:2px 6px;font:12px monospace;pointer-events:none";
   box.textContent = "…";
   document.documentElement.appendChild(box);
