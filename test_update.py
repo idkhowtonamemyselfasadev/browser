@@ -71,8 +71,24 @@ else:
     msg = said[-1] if said else ""
     check("it says the copy cannot update itself",
           "cannot update itself" in msg, msg)
-    check("and says what to do about it",
-          "zip" in msg.lower() and "clone" in msg.lower(), msg)
+    # Not "the message contains the words zip and clone". This suite is
+    # shared, and an edition that CORRECTLY says something else then
+    # fails on another edition's English -- which is what happened to
+    # browser-mac, whose old text told Mac users to replace a folder
+    # inside browser.app/Contents/Resources/app and break the bundle's
+    # signature. They fixed the message and a shared assertion went red
+    # on correct code.
+    #
+    # So the question is behavioural: does the message name a route the
+    # person can actually take? The union below is every edition's
+    # right answer, so each passes on its own wording and all of them
+    # still fail on a message that only diagnoses and never instructs.
+    ROUTES = ("zip", "clone", "download", "installer", "reinstall",
+              "re-install", "app bundle", ".app", "replace")
+    named = [w for w in ROUTES if w in msg.lower()]
+    check("and says what to do about it", bool(named), msg)
+    check("...with an instruction, not just a diagnosis",
+          len(msg.split()) >= 8, len(msg.split()))
     check("and git's own wording never reaches him",
           "filesystem boundary" not in msg and "GIT_DISCOVERY" not in msg,
           msg)

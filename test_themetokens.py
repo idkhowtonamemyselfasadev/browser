@@ -33,6 +33,7 @@ Needs Qt only to import browser.py; opens no window, keeps no data,
 writes nothing. Run with HOME pointed at a throwaway directory like
 everything else here.
 """
+import argparse
 import ast
 import collections
 import os
@@ -41,11 +42,26 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE
+
+ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+ap.add_argument("--dir", metavar="PATH", default=None,
+                help="an edition's folder to check instead of this one "
+                     "(default: this tree)")
+ARGS = ap.parse_args()
+REPO = Path(ARGS.dir).expanduser().resolve() if ARGS.dir else HERE
+MINE = REPO == HERE
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("BROWSER_NO_LIB_CHECK", "1")
+# the tree being checked goes FIRST, so `import browser` is that
+# edition's and not this one's. Reading only: nothing is written into
+# it, and the answer comes back here.
 sys.path.insert(0, str(REPO))
+if not MINE:
+    print("    (%s)" % REPO)
+    if not (REPO / "browser.py").is_file():
+        print("  FAIL no browser.py in  <%s>" % REPO)
+        sys.exit(1)
 
 fails = []
 
@@ -125,8 +141,14 @@ check("...so nothing still asks for it", not USED.get(gone, 0),
       USED.get(gone, 0))
 # and the trap that caught this suite on the way in, kept as a check:
 # the fix is explained in a comment that contains the call it replaced.
-check("...and a comment naming it is not read as a call",
-      'theme_color("%s")' % gone in SRC, "the fixture comment is gone")
+if MINE:
+    # upstream's own documentation, not every edition's: this asserts
+    # that the COMMENT explaining the base->bg fix is still in the file
+    # and still not read as a call. Another tree is not required to
+    # carry this tree's comments, so pointing --dir at one must not
+    # fail on their absence.
+    check("...and a comment naming it is not read as a call",
+          'theme_color("%s")' % gone in SRC, "the fixture comment is gone")
 
 
 print()
@@ -203,9 +225,13 @@ check("no page hard-codes a colour nobody declared", not unpinned, unpinned)
 for lit, why in sorted(PAGE_LITERALS.items()):
     where = sorted(p.name for p in pages
                    if lit in page_literals(p.read_text(encoding="utf-8")))
-    check("the pinned %s is still used, so the pin is not stale" % lit,
-          bool(where), where)
-    print("       declared: %s (%s) -- %s" % (lit, ", ".join(where), why))
+    if MINE:
+        # the pin is this tree's declaration; an edition that has not
+        # ported a page yet is not stale, it is behind
+        check("the pinned %s is still used, so the pin is not stale" % lit,
+              bool(where), where)
+    print("       declared: %s (%s) -- %s"
+          % (lit, ", ".join(where) or "not in this tree", why))
 
 # and it has to be able to find one, and to ignore one that is only
 # being talked about

@@ -37,7 +37,7 @@ run() {
 # those is worth knowing before the hour of browser boots below, not
 # after it.
 for t in test_bridgecalls.py test_themetokens.py test_uistrings.py \
-         test_updatecheck.py; do
+         test_updatecheck.py test_downloaddir.py; do
   [ -f "$t" ] || continue
   run "$t" "$t"
 done
@@ -64,7 +64,7 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_agentops.py test_reading.py test_gaming.py test_files.py \
          test_perf.py test_sitelook.py test_winbranch.py \
          test_histrender.py test_histicon.py test_sidebar.py \
-         test_daystep.py; do
+         test_daystep.py test_paintcontrast.py test_palette.py; do
   [ -f "$t" ] || continue
   run "$t" "$t"
 done
