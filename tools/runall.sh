@@ -66,7 +66,7 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_perf.py test_sitelook.py test_winbranch.py \
          test_histrender.py test_histicon.py test_sidebar.py \
          test_daystep.py test_paintcontrast.py test_palette.py \
-         test_sleep.py; do
+         test_sleep.py test_panecache.py; do
   [ -f "$t" ] || continue
   run "$t" "$t"
 done

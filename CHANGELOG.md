@@ -1,5 +1,58 @@
 # Changelog
 
+## 2026-10-29 — five pages you closed, still holding five renderers
+
+`Browser._panes` caches the browser's own pages so reopening Settings
+is instant. The dict was only ever written to. Nothing ever took a pane
+out, and `close_pane` calls `dismiss()`, which hides — and a hidden
+pane is a live `QWebEngineView` with a renderer process of its own.
+
+Measured here, PSS over the whole process tree:
+
+| | PSS | processes |
+|---|---:|---:|
+| baseline | 305.9 MB | 4 |
+| five of our pages opened once and **closed** | 451.5 MB | 9 |
+| | **+145.6 MB** | **+5** |
+
+Nothing on screen. Found by browser-mac, who measured 725.8 MiB for
+seven pages in RSS — and the two figures are not comparable, which is
+the point worth keeping: RSS double-counts the engine pages renderers
+share, PSS divides them. Both numbers are right about their own
+question. Say which one you took.
+
+`free_idle_panes()` gives them back: **78.0 MB and 4 processes** in the
+same run, keeping one.
+
+Which one it keeps is the part that is about the look rather than the
+megabytes. Closing Settings and opening it again is the common move, so
+the pane just closed stays and comes back instantly; the rest go 45
+seconds after they leave the screen. Under memory pressure they all go
+at once and before any tab is slept, because a page nobody is looking
+at is worth less than a tab he might want back.
+
+Two properties matter more than the saving, and both are asserted:
+
+- **A pane on screen is never freed**, whatever it is asked. The sweep
+  checks `isVisible()` and `is self._pane` and skips it.
+- **A freed page still opens.** The cache is an optimisation; it may
+  cost a moment and must never cost a feature. `open_pane` already
+  builds one when the cache has none and asks the URL callable afresh
+  either way, so a freed page comes back exactly as it did the first
+  time.
+
+The ring has to be broken by hand. The page holds the pane
+(`page().pane = self`, which is how the bridge finds its way home), the
+pane holds the view, and the view holds the page. Left alone that cycle
+outlives both ends and keeps the renderer with it — the same bug
+wearing a different hat — so `release()` clears `page.pane` itself
+before letting the view go.
+
+`test_panecache.py` proves the sweep is load-bearing by stubbing it to
+return nothing: 9 processes before and 9 after, memory flat at 458.6 →
+458.4 MB. A test that stays green with the feature torn out is testing
+its fixtures.
+
 ## 2026-10-29 — a tab that woke up and went on looking asleep
 
 `sleep_tab`'s own docstring says a discarded page "wakes by itself when

@@ -16869,6 +16869,49 @@ class PagePane(QWidget):
         if view is not None and not self.browser._is_header(view):
             view.setFocus()
 
+
+    def release(self):
+        """Give the renderer back and let this pane go.
+
+        dismiss() hides; this ends it. A hidden pane is a live
+        QWebEngineView with a renderer process of its own, and the
+        cache it sits in was only ever written to -- so five of the
+        browser's own pages, opened once each and closed, held 141.6 MB
+        and five renderer processes for the rest of the session with
+        nothing on screen.
+
+        The cycle has to be broken by hand. The page holds the pane
+        (page().pane = self, which is how the bridge finds its way
+        home), the pane holds the view, and the view holds the page.
+        Left alone that ring outlives both ends and takes the renderer
+        with it, which is the whole bug wearing a different hat.
+
+        Never called on a pane that is on screen -- Browser.
+        free_idle_panes is the only caller and it checks.
+        """
+        view, self.view = getattr(self, "view", None), None
+        self.hide()
+        if view is not None:
+            try:
+                page = view.page()
+            except RuntimeError:
+                page = None
+            if page is not None:
+                try:
+                    page.pane = None          # the ring, broken
+                except (AttributeError, RuntimeError):
+                    pass
+            try:
+                view.setParent(None)
+                view.deleteLater()
+            except RuntimeError:
+                pass
+        try:
+            self.setParent(None)
+            self.deleteLater()
+        except RuntimeError:
+            pass
+        return True
     def place(self):
         """The whole window, at every window size: the pane is what he
         asked for — settings on the full screen, not a strip below the
@@ -47796,6 +47839,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self._esc_timer.stop()
             self._esc_timer = None
 
+    #: how long a closed pane keeps its renderer before it is given
+    #: back. Closing Settings and opening it again is the common move,
+    #: so the one just closed stays instant; the rest are gone by the
+    #: time anybody notices.
+    PANE_IDLE_MS = 45000
+
     def close_pane(self):
         """Whatever pane is up goes down. Safe to call when none is."""
         pane, self._pane = self._pane, None
@@ -47803,6 +47852,42 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._pane_escape_forget()
         if pane is not None:
             pane.dismiss()
+            name = getattr(pane, "name", None)
+            QTimer.singleShot(self.PANE_IDLE_MS,
+                              lambda n=name: self.free_idle_panes(keep=n))
+
+    def free_idle_panes(self, keep=None):
+        """Give back the renderers of panes nobody is looking at.
+
+        `keep` is the one just closed and stays, because reopening what
+        you have this second shut is the common move and it should not
+        have to load again. Everything else goes.
+
+        A pane that is ON SCREEN is never freed, whatever is asked for.
+        This is an optimisation: it may cost a moment and it must never
+        cost a feature -- a freed page opens again exactly as it did
+        the first time, because open_pane builds one when the cache has
+        none and asks the URL callable afresh either way.
+        """
+        freed = []
+        for name in list(getattr(self, "_panes", {})):
+            if name == keep:
+                continue
+            pane = self._panes.get(name)
+            if pane is None:
+                continue
+            try:
+                if pane is self._pane or pane.isVisible():
+                    continue          # on screen: not ours to take
+            except RuntimeError:
+                pass
+            del self._panes[name]
+            try:
+                pane.release()
+            except RuntimeError:
+                pass
+            freed.append(name)
+        return freed
 
     def toggle_pane(self, name):
         """The shortcut that opened a pane closes it again: with the
@@ -55438,6 +55523,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         limit = float(self.config.get("pressureLimit") or 10.0)
         acted = []
         if some >= limit:
+            # A page nobody is looking at is worth less than a tab he
+            # might want back, so the pane cache goes first.
+            self.free_idle_panes()
             acted = self.sleep_oldest(2)
             if acted:
                 self.flash(self._ui_str("perfPressure") % len(acted))
