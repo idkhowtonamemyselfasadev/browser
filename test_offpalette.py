@@ -41,6 +41,7 @@ Needs Qt only to import browser.py; opens no window, writes nothing.
 Run with HOME pointed at a throwaway directory.
 """
 import argparse
+import ast
 import os
 import re
 import sys
@@ -504,6 +505,32 @@ for name, key in (("MEDIA_TOOLS", "wheelvolume"), ("PAGE_TOOLS", "edit")):
     check("%s.%s reads on every theme" % (name, key), worst >= 4.5,
           "worst %.2f:1 of 116" % worst)
 
+# And the other direction, which nothing asserted: every tint_js call
+# site has to BE one of those dispatchers. It holds in this tree -- all
+# of them are -- and it holds only until someone adds a tenth site,
+# which is why it is written down. Proposed by browser-windows-9a after
+# they found what tinting the wrong thing does; see section (7).
+# Parsed, not grepped: the question is which function the call is in.
+TREE = ast.parse(SRC)
+TABLE_GET = re.compile(r"[A-Z_]*TOOLS[A-Z0-9_]*\.get\(")
+sites, bad_sites = 0, []
+for func in ast.walk(TREE):
+    if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    if func.name == "tint_js":
+        continue
+    calls = [c for c in ast.walk(func)
+             if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+             and c.func.id == "tint_js"]
+    if not calls:
+        continue
+    sites += len(calls)
+    body = ast.unparse(func)
+    if not TABLE_GET.search(body):
+        bad_sites.append("%s:%d" % (func.name, calls[0].lineno))
+check("every tint_js call site is a painting-table dispatcher",
+      not bad_sites, bad_sites or "all %d of them" % sites)
+
 print("(7) the injected snippets take their colours from the payload")
 # A different question from (2), and the one (2) cannot ask. The tool
 # dicts go through tint_js, so for those "is it a token" is the whole
@@ -518,27 +545,61 @@ print("(7) the injected snippets take their colours from the payload")
 # rgba(137,180,250,0.12) on the line below. Catppuccin blue at 12%, a
 # real token's colour, wrong on 115 of the 116 themes -- the outline
 # moved with the theme and the fill did not.
-INJECTED = ("NAV_JS", "A11Y_JS")
+INJECTED = ("NAV_JS", "A11Y_JS", "THEME_JS")
+# These must NEVER be handed to tint_js, and the reasons have nothing
+# to do with palettes -- which matters, because "they are injected, not
+# dispatched" is a weak argument and these are three concrete harms.
+# Measured on this tree by diffing each blob against tint_js(blob,
+# "latte"), after browser-windows-9a swept 20 blobs on theirs:
+#
+#   THEME_JS  the swap table is keyed BY the THEME_SOURCE literals, so
+#             tinting rewrites the LOOKUP KEY, not a colour:
+#                 col = t.map["#000000"]  ->  t.map["#DCE0E8"]
+#             which is undefined, and the in-page swap stops working
+#             for the bg token on every one of our own pages. The
+#             comparison above it, `lit !== "#000000"`, inverts its
+#             meaning in the same edit.
+#   A11Y_JS   the contrast rescue picks its ink from a MEASURED
+#             luminance; theming either half undoes the fix.
+#   all three the fallbacks are rewritten, not just the paints:
+#                 (W.accentSoft || "rgba(137,180,250,0.12)")
+#                 (W.accentSoft || "rgb(27 90 217 / 0.12)")
+#             which freezes the fallback to whichever theme was live
+#             when the script was injected. A fallback frozen to one
+#             theme is exactly the bug a fallback exists to prevent.
+#             Nine lines in A11Y_JS and six in NAV_JS.
 # A colour reached as `(W.something || "<literal>")` is themed: the
 # literal is only the fallback for a payload that did not arrive.
 FALLBACK = re.compile(r'W\.[A-Za-z_]+\s*(?:\|\|\s*W\.[A-Za-z_]+\s*)*'
                       r'\|\|\s*"(?:#[0-9a-fA-F]{3,8}|rgba?\([^")]*\))"')
 ANY_COLOUR = re.compile(r'#[0-9a-fA-F]{3,8}\b|rgba?\([0-9.,\s]*\)')
 # Each of these is a decision, with the reason it is not themed.
+# Keyed by (blob, literal), not by literal alone. The global version
+# of this list is the mistake section (2) already had to fix: a reason
+# written for one place silently excuses the same bytes everywhere
+# else. #000000 appears in two of these blobs for two unrelated
+# reasons, and only one of them is about ink.
 NOT_THEMED = {
-    "rgba(0,0,0,0.92)": "the image lightbox backdrop, drawn over a "
-                        "SITE: a dim, not a surface. Lightening it on "
-                        "a light theme is the bug, not the fix",
-    "rgba(0, 0, 0, 0)": "the transparent value the contrast pass "
-                        "COMPARES against while walking up for a real "
-                        "background. Never painted",
-    "rgb(255, 255, 255)": "what an unstyled page's background is taken "
-                          "to be when nothing up the tree sets one. A "
-                          "measurement default, not a colour we paint",
-    "#000000": "half of a computed ink pair, picked against a MEASURED "
-               "luminance so low-contrast text on a site becomes "
-               "readable. A theme colour here would undo the fix",
-    "#ffffff": "the other half of that pair, same reason",
+    ("NAV_JS", "rgba(0,0,0,0.92)"):
+        "the image lightbox backdrop, drawn over a SITE: a dim, not a "
+        "surface. Lightening it on a light theme is the bug, not the fix",
+    ("A11Y_JS", "rgba(0, 0, 0, 0)"):
+        "the transparent value the contrast pass COMPARES against while "
+        "walking up for a real background. Never painted",
+    ("A11Y_JS", "rgb(255, 255, 255)"):
+        "what an unstyled page's background is taken to be when nothing "
+        "up the tree sets one. A measurement default, not a colour we paint",
+    ("A11Y_JS", "#000000"):
+        "half of a computed ink pair, picked against a MEASURED "
+        "luminance so low-contrast text on a site becomes readable. A "
+        "theme colour here would undo the fix",
+    ("A11Y_JS", "#ffffff"):
+        "the other half of that pair, same reason",
+    ("THEME_JS", "#000000"):
+        "not ink at all: this is the KEY the in-page swap table is "
+        "looked up by, and the literal it compares against. Theming it "
+        "rewrites the key to one the table does not hold, so the swap "
+        "stops working rather than coming out the wrong colour",
 }
 missing = [n for n in INJECTED if not hasattr(B, n)]
 check("the injected snippets are there", not missing,
@@ -551,7 +612,7 @@ for name in [n for n in INJECTED if hasattr(B, n)]:
     blanked = FALLBACK.sub(lambda m: " " * len(m.group(0)), body)
     for found in ANY_COLOUR.finditer(blanked):
         lit = found.group(0)
-        if lit in NOT_THEMED:
+        if (name, lit) in NOT_THEMED:
             continue
         line = body.count("\n", 0, found.start()) + 1
         loose_js.setdefault(lit, []).append("%s+%d" % (name, line))
@@ -559,6 +620,56 @@ check("there are payload fallbacks to find (the fixture)", covered > 10,
       covered)
 check("every colour is a payload fallback or a named exception",
       not loose_js, loose_js or "none")
+seen_js = set()
+for name in [n for n in INJECTED if hasattr(B, n)]:
+    body = getattr(B, name)
+    blanked = FALLBACK.sub(lambda m: " " * len(m.group(0)), body)
+    for found in ANY_COLOUR.finditer(blanked):
+        if (name, found.group(0)) in NOT_THEMED:
+            seen_js.add((name, found.group(0)))
+js_stale = sorted(set(NOT_THEMED) - seen_js)
+check("...and no reason is left explaining a literal that is gone",
+      not js_stale, js_stale or "all %d still there" % len(NOT_THEMED))
+
+# The class behind the two findings above, and the only shape a
+# fallback can take without being one theme's value frozen in: where
+# the fallback literal is a token's colour, it has to be THAT key's
+# token. Otherwise the literal is a record of an intent the code does
+# not carry out -- and because the payload only ever sends a few keys,
+# the fallback never runs, so nothing on screen ever contradicts it.
+#
+# Found on 2026-10-29: the find-in-page marks on the scroll rail asked
+# for W.accent and fell back to yellow's colour, and the outline that
+# marks an image with no alt text asked for W.accent and fell back to
+# red's. Both drew in accent, which is also the link colour and the
+# focus ring on most themes, so a search hit and an accessibility
+# problem both looked like links. Raised by browser-windows-9a.
+#
+# The LAST key in the chain is the one the literal belongs to:
+# (W.caretColour || W.accent || "#89b4fa") is correct, and reading the
+# first key instead reports it as a mismatch. That false positive is
+# why this is written as a chain and not as a single name.
+PAIR = re.compile(r'(?:W\.[A-Za-z_]+\s*\|\|\s*)*W\.([A-Za-z_]+)\s*'
+                  r'\|\|\s*"(#[0-9a-fA-F]{3,8}|rgba?\([^")]*\))"')
+BY_HEX = {v.lower(): k for k, v in B.THEME_SOURCE.items()
+          if isinstance(v, str) and v.startswith("#")}
+wrong_token, pairs = [], 0
+for name in [n for n in INJECTED if hasattr(B, n)]:
+    body = getattr(B, name)
+    for found in PAIR.finditer(body):
+        pairs += 1
+        key, lit = found.group(1), found.group(2).lower()
+        if len(lit) == 4:          # expand #abc before asking
+            lit = "#" + "".join(c + c for c in lit[1:])
+        owner = BY_HEX.get(lit)
+        if owner and owner != key:
+            wrong_token.append(
+                "%s+%d: W.%s falls back to %s, which is %s"
+                % (name, body.count("\n", 0, found.start()) + 1,
+                   key, found.group(2), owner))
+check("there are fallback pairs to check (the fixture)", pairs > 10, pairs)
+check("every fallback literal is its own key's token",
+      not wrong_token, wrong_token or "all %d agree" % pairs)
 
 # and the one that was wrong, checked where it is decided rather than
 # in the snippet: the fill has to follow the accent, and has to come

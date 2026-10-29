@@ -181,6 +181,33 @@ check("the margin still clears the badge",
 check("the tooltip is not a Python repr", "PyQt6" not in bar.toolTip(),
       bar.toolTip()[:40] or "(empty)")
 
+print("\n(4b) all three rows, including the one with no mark in it")
+# browser-windows-9a's table, and the row that matters most is the
+# third. Every check above has a badge in it, so a future change that
+# sums only the marks passes all of them and still loses the lock
+# button's room. That row is also the one that was broken longest:
+# before the fix _sync_acct put left back to 0 on an ORDINARY HTTPS
+# PAGE, so the address painted over the lock button on the commonest
+# case of all, long before any of today's badge work.
+ROWS = (("a look-alike domain", QUrl("https://xn--pple-43d.com/"), True),
+        ("a plain http page", QUrl("http://example.com/"), True),
+        ("an ordinary https page", QUrl("https://example.com/"), False))
+for label, url, want_badge in ROWS:
+    win.show_address(url)
+    win._sync_star()
+    win._sync_acct()
+    spin(80)
+    check("%s: the badge is %s (the fixture)"
+          % (label, "up" if want_badge else "down"),
+          badge.isVisible() is want_badge, badge.isVisible())
+    # whatever is in the bar, the text has to start after it
+    furniture = lock.x() + lock.width()
+    if badge.isVisible():
+        furniture = max(furniture, badge.x() + badge.width())
+    check("%s: the address starts clear of the furniture" % label,
+          ink_starts_at() >= furniture,
+          "ink at %d, furniture ends %d" % (ink_starts_at(), furniture))
+
 print("\n(5) the right-hand buttons keep their room")
 shown = [n for n in ("barkey", "barqr", "barcopy", "barclear")
          if made.get(n) is not None and made[n].isVisible()]

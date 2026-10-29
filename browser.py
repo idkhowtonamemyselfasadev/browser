@@ -6679,7 +6679,7 @@ NAV_JS = r"""(function (want) {
       box.id = "__navstructure";
       box.style.cssText = "position:fixed;right:12px;top:12px;" +
         "z-index:2147483647;max-height:80vh;overflow:auto;" +
-        "background:" + (W.bg || "#000") + ";color:" + (W.text || "#fff") +
+        "background:" + (W.bg || "#000") + ";color:" + (W.text || "#cdd6f4") +
         ";border:1px solid " + (W.accent || "#89b4fa") +
         ";border-radius:8px;padding:8px 10px;font:13px/1.5 monospace";
       for (var i = 0; i < rows.length && i < 60; i++) {
@@ -7002,7 +7002,7 @@ NAV_JS = r"""(function (want) {
       hits.forEach(function (top) {
         var tick = document.createElement("div");
         tick.style.cssText = "position:absolute;right:1px;width:8px;" +
-          "height:3px;background:" + (W.accent || "#f9e2af") + ";top:" +
+          "height:3px;background:" + (W.yellow || "#f9e2af") + ";top:" +
           (top / tall * 100) + "vh";
         rail.appendChild(tick);
       });
@@ -7244,7 +7244,7 @@ A11Y_JS = r"""(function (want) {
       if (alt) {
         if (!el.title) el.title = alt;
       } else {
-        el.style.outline = "2px dashed " + (W.accent || "#f38ba8");
+        el.style.outline = "2px dashed " + (W.red || "#f38ba8");
         if (!el.title) el.title = W.noAltWord || "no alt text";
       }
     });
@@ -7466,7 +7466,7 @@ A11Y_JS = r"""(function (want) {
         tip.textContent = text;
         tip.style.cssText = "position:fixed;z-index:2147483646;" +
           "background:" + (W.bg || "#000") + ";color:" +
-          (W.text || "#fff") + ";padding:4px 8px;border:1px solid " +
+          (W.text || "#cdd6f4") + ";padding:4px 8px;border:1px solid " +
           (W.accent || "#89b4fa") + ";border-radius:6px;font:13px sans-serif";
         (document.body || root).appendChild(tip);
         var box = el.getBoundingClientRect();
@@ -55902,6 +55902,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     # rather than derived.
                     "accentSoft": "rgba(%d, %d, %d, 0.12)"
                                   % _hex_rgb(palette["accent"]),
+                    # yellow, for the find-in-page marks on the scroll
+                    # rail. Same shape as red below in a11y_payload:
+                    # the ticks asked for W.accent and fell back to
+                    # yellow's own colour, and accent is usually the
+                    # link colour too, so search hits did not read as
+                    # search hits.
+                    "yellow": palette["yellow"],
                     # the keys and the mouse: what only the page can
                     # decide, decided in the page
                     # the table, not the answer: the script is in the
@@ -57340,6 +57347,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                             or want["spacingLetter"]) else None),
             "bg": palette["bg"], "text": palette["text"],
             "accent": palette["accent"],
+            # red, because the outline that marks an image with no alt
+            # text asked for W.accent and fell back to red's own
+            # colour. The payload never sent red, so the fallback could
+            # not run, and a problem marker drew in the same colour as
+            # every link and focus ring on the page. The literal was
+            # the only record of what was meant.
+            "red": palette["red"],
             "lang": str(self.config.get("translateLang", "en"))[:2],
             "noAltWord": self._ui_str("a11yNoAlt"),
         })
