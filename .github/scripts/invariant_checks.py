@@ -668,13 +668,13 @@ def permission_keys(browser):
     # migrating an old host-only config narrows, never widens
     cfg = {"permissions": {"p.example|MediaAudioCapture": True,
                            "p.example:8443|MediaVideoCapture": True,
-                           "192.168.1.9|Notifications": True,
+                           "192.0.2.9|Notifications": True,
                            "localhost|Notifications": True}}
     B._migrate_permission_config(cfg)
     assert cfg["permissions"] == {
         "https://p.example:443|MediaAudioCapture": True}, cfg["permissions"]
     assert set(cfg["permissionsLegacy"]) == {
-        "p.example:8443|MediaVideoCapture", "192.168.1.9|Notifications",
+        "p.example:8443|MediaVideoCapture", "192.0.2.9|Notifications",
         "localhost|Notifications"}, cfg["permissionsLegacy"]
     assert cfg["permissionsKeyVersion"] == 2
     before = json.dumps(cfg, sort_keys=True)

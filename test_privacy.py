@@ -47,7 +47,7 @@ check("an address with nothing to take off is handed back as it was",
 check("the page's own parameters are kept",
       "th=1" in privacy.strip_tracking("https://amazon.de/dp/X?th=1&utm_id=9"))
 for host, local in (("localhost", True), ("127.0.0.1", True),
-                    ("192.168.1.50", True), ("10.0.0.5", True),
+                    ("192.0.2.50", True), ("10.0.0.5", True),
                     ("fritz.box", False), ("printer.local", True),
                     ("example.com", False), ("8.8.8.8", False)):
     check("%s is %slocal" % (host, "" if local else "not "),
@@ -72,16 +72,16 @@ def ask(url, page, **config):
 
 
 print("\n(2) what a page may navigate to")
-allow, _ = ask("http://192.168.1.1/admin", "https://news.de/", blockLocal=True)
+allow, _ = ask("http://192.0.2.1/admin", "https://news.de/", blockLocal=True)
 check("a website may not reach the home network", not allow)
 allow, _ = ask("http://127.0.0.1:8123/api", "https://news.de/", blockLocal=True)
 check("...nor this machine", not allow)
 allow, _ = ask("http://printer.local/", "https://news.de/", blockLocal=True)
 check("...nor a .local name", not allow)
-allow, _ = ask("http://192.168.1.1/admin", "http://192.168.1.5/",
+allow, _ = ask("http://192.0.2.1/admin", "http://192.0.2.5/",
                blockLocal=True)
 check("but one local page may reach another", allow)
-allow, _ = ask("http://192.168.1.1/x", "https://news.de/", blockLocal=False)
+allow, _ = ask("http://192.0.2.1/x", "https://news.de/", blockLocal=False)
 check("and nothing is stopped while that is off", allow)
 allow, _ = ask("https://news.de/a", "https://news.de/", blockLocal=True)
 check("an ordinary page is an ordinary page", allow)

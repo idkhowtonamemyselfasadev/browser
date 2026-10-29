@@ -336,7 +336,7 @@ check("an http address is moved to https",
       win.https_upgrade(QUrl("http://example.com/x")).toString()
       == "https://example.com/x")
 check("the home network is left alone",
-      win.https_upgrade(QUrl("http://192.168.1.1/")) is None)
+      win.https_upgrade(QUrl("http://192.0.2.1/")) is None)
 check("and so is localhost",
       win.https_upgrade(QUrl("http://127.0.0.1:8000/")) is None)
 check("an https address needs nothing",

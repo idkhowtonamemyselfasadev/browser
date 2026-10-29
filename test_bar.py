@@ -139,9 +139,9 @@ check("a two-part country domain keeps three labels",
       == "example.co.uk",
       B.bar_domain_parts("https://shop.example.co.uk/x"))
 check("an IP address is the domain",
-      B.bar_domain_parts("http://192.168.1.50:7860/x")[1]
-      == "192.168.1.50",
-      B.bar_domain_parts("http://192.168.1.50:7860/x"))
+      B.bar_domain_parts("http://192.0.2.50:7860/x")[1]
+      == "192.0.2.50",
+      B.bar_domain_parts("http://192.0.2.50:7860/x"))
 check("something that is not an address has no domain",
       B.bar_domain_parts("just some words") == ("just some words", "", ""),
       B.bar_domain_parts("just some words"))

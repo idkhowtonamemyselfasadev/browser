@@ -77,7 +77,7 @@ VIDEO = """<title>A stream - Twitch</title>
 
 PRIVATE = """<title>An order</title>
   <p id=mail>Write to ada@example.com about it</p>
-  <p id=ip>The box is on 192.168.1.50 today</p>
+  <p id=ip>The box is on 192.0.2.50 today</p>
   <p id=street>He lives on Beispielstrasse</p>
   <p id=fine>Nothing private in this line at all</p>"""
 
