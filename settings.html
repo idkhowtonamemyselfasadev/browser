@@ -1331,7 +1331,7 @@
         </div>
         </div>
       </div>
-      <div class="panel">
+      <div class="panel" id="shotpanel">
         <h2 class="sub" id="t_shotMenu">Screenshot</h2>
         <div class="group">
         <div class="wrow">
@@ -1416,7 +1416,7 @@
           </span>
           <input type="number" id="memorybudget" min="0" max="65536" style="width:90px">
         </div>
-        <label class="wrow">
+        <label class="wrow" id="pressurerow">
           <span class="wlabel">
             <span class="wname" id="t_perfPressureName">Sleep background tabs before the machine swaps</span>
             <span class="wsub" id="t_perfPressureHint"></span>
@@ -4605,6 +4605,24 @@
       sp.appendChild(o);
     }
     document.getElementById("tabcount").checked = s.tabCount;
+    // A control is a promise. This one reads the kernel's own
+    // memory-pressure counter, and on a machine that has no such
+    // counter the switch can be turned on and nothing will ever
+    // happen -- which reads as a browser that is broken rather than
+    // one that is honest about what this machine can tell it. The
+    // browser answers whether the counter is actually readable here,
+    // not which platform this is: a Linux kernel built without PSI
+    // says no for the same reason macOS does.
+    const pressurerow = document.getElementById("pressurerow");
+    if (pressurerow) pressurerow.hidden = s.pressureAvailable === false;
+    // capture.py's own docstring says it: "if this file is missing or
+    // broken the browser still starts, it simply has no capture
+    // entries". The page menu already honours that; this page did not,
+    // so without capture.py the whole Screenshot panel was still
+    // offered -- a folder to choose, a format to pick and a redaction
+    // switch, for a feature that is not installed.
+    const shotpanel = document.getElementById("shotpanel");
+    if (shotpanel) shotpanel.hidden = s.captureAvailable === false;
     document.getElementById("guardfingerprint").checked = !!s.guardFingerprint;
     document.getElementById("guardclipboardread").checked = !!s.guardClipboardRead;
     document.getElementById("guardcopyguard").checked = !!s.guardCopyGuard;

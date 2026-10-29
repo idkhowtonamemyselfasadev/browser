@@ -13690,6 +13690,10 @@ class Bridge(QObject):
                 "screenAwake", False)),
             "freezeAfter": c.get("freezeAfter", 0),
             "memoryBudget": c.get("memoryBudget", 0),
+            # ...and whether the counter behind it is on this machine
+            # at all, so the page can leave the switch out rather than
+            # offer a promise it cannot keep
+            "pressureAvailable": self.browser.pressure_available(),
             "pressureWatch": c.get("pressureWatch", False),
             "cpuWatch": c.get("cpuWatch", False),
             "leakWatch": c.get("leakWatch", False),
@@ -55368,6 +55372,33 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             timer.timeout.connect(self._pressure_tick)
         timer.start(max(2, int(every)) * 1000)
         return True
+
+    def pressure_available(self):
+        """Whether this machine can answer "is it about to swap".
+
+        A CAPABILITY, not a platform. sys.platform != "win32" would be
+        the obvious test and it would be wrong twice over: it says yes
+        on macOS, which has no /proc at all, and it says yes on a Linux
+        kernel built without PSI or in a container where /proc is
+        restricted -- where the file is simply not there and the answer
+        is the same "no".
+
+        It matters because the switch is a promise. "Sleep background
+        tabs before the machine swaps" with the hint "reads the
+        kernel's own memory-pressure figure" tells somebody the browser
+        is watching their machine. Where the counter does not exist,
+        `some` stays 0.0, `0.0 >= limit` is never true, and the browser
+        is watching nothing -- which is worse than not offering it,
+        because the control's presence is the promise.
+
+        Asked once and remembered: the file either exists for this
+        kernel or it does not, and settings can be opened all day.
+        """
+        have = getattr(self, "_have_pressure", None)
+        if have is None:
+            have = bool(self.memory_pressure())
+            self._have_pressure = have
+        return have
 
     def _pressure_tick(self):
         """One look at the pressure, and the budget."""
