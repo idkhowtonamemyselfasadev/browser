@@ -51,6 +51,7 @@ run() {
 # after it.
 for t in test_bridgecalls.py test_themetokens.py test_uistrings.py test_idn.py \
          test_jssilence.py test_offpalette.py test_barmarks.py \
+         test_tmpscratch.py \
          test_capability.py \
          test_updatecheck.py test_downloaddir.py; do
   [ -f "$t" ] || { skip "$t"; continue; }

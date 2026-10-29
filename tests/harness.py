@@ -15,46 +15,30 @@ ROOT = os.path.dirname(HERE)                 # the browser itself
 # at the same time used to share this and wipe each other's data
 # half-way through, which shows up as failures in whichever run lost the
 # race rather than as anything to do with the code under test
-DATA = os.path.join(tempfile.gettempdir(),
-                    "browser-pwtest-%d" % os.getpid())
+sys.path.insert(0, ROOT)
+import tmpscratch  # noqa: E402
+
+# Swept for on the way in, which is the half that was missing: atexit
+# does not run when a process dies by a signal or calls os._exit, and
+# 19 suites end with os._exit to dodge a Qt teardown segfault. So the
+# runs most likely to leak were exactly the ones that had opted out of
+# the only mechanism that would have tidied up. The run that made the
+# mess cannot be relied on to clear it, so the next one does.
+DATA = tmpscratch.claim("browser-pwtest-")
 
 
 def _tidy_scratch():
-    """Take this run's scratch directory away when the process ends.
+    """This run's own directory, on the way out.
 
-    Why this is here at all: every run left its directory behind, and
-    a profile with a cache in it is 70-80 MB. After a few hundred runs
-    /tmp was full, and what that looks like is not "no space left" --
-    it is the last few tests of a suite segfaulting and timing out,
-    because a browser that cannot write its profile dies in a way that
-    looks like a bug in whatever it was doing.
-
-    Anything older than a day from a run that is no longer there goes
-    with it, so a suite that was killed does not leave its own behind.
+    The sweep of OTHER runs' leavings lives in tmpscratch and happens
+    at STARTUP now. It used to be here, and it asked the age before the
+    liveness: it skipped anything under a day old and only then checked
+    whether the process still existed. So the age did the deciding, the
+    pid check was never reached for anything from the same day, and a
+    day of this suite's own output is gigabytes. Liveness decides now,
+    and it decides in one place rather than two.
     """
     shutil.rmtree(DATA, ignore_errors=True)
-    parent = tempfile.gettempdir()
-    now = time.time()
-    try:
-        names = os.listdir(parent)
-    except OSError:
-        return
-    for name in names:
-        if not name.startswith("browser-pwtest-"):
-            continue
-        path = os.path.join(parent, name)
-        try:
-            if now - os.path.getmtime(path) < 86400:
-                continue
-            pid = int(name.rsplit("-", 1)[-1])
-        except (OSError, ValueError):
-            continue
-        try:
-            os.kill(pid, 0)          # still running: leave it alone
-        except ProcessLookupError:
-            shutil.rmtree(path, ignore_errors=True)
-        except OSError:
-            continue
 
 
 atexit.register(_tidy_scratch)

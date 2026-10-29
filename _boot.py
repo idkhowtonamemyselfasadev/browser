@@ -7,6 +7,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tmpscratch  # noqa: E402
+
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # no browser booted for a test or a screenshot goes looking for library
 # updates: a real dnf/pip per boot would be slow, would depend on what the
@@ -15,7 +18,11 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # `python3 test_wizard.py` (which stays up past LIB_FIRST_MS) would arm and
 # fire a real check without it -- so it belongs here too.
 os.environ.setdefault("BROWSER_NO_LIB_CHECK", "1")
-SCRATCH = Path(tempfile.mkdtemp(prefix="browsershot-"))
+# One scratch directory, swept for on the way in and swept after on
+# the way out -- see tmpscratch. This line used to be a bare
+# mkdtemp with no cleanup of any kind, and 33 suites import this
+# file, which is where 2.0 GB of the 3.7 GB in tmpfs came from.
+SCRATCH = Path(tmpscratch.claim("browsershot-"))
 os.environ["XDG_DATA_HOME"] = str(SCRATCH / "share")
 os.environ["XDG_CONFIG_HOME"] = str(SCRATCH / "config")
 os.environ["XDG_CACHE_HOME"] = str(SCRATCH / "cache")
