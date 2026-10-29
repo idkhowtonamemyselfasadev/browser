@@ -1,5 +1,79 @@
 # Changelog
 
+## 2026-10-29 — what the browser actually costs, measured
+
+Nobody had measured it. "Does not eat RAM" was a claim in the same
+position "no telemetry" was in: possibly true, unverified either way,
+and not something you can put in a README until somebody looks.
+
+`tools/memprofile.py` takes the numbers. It reads **PSS**, not RSS, and
+sums it over the whole process tree, because QtWebEngine is not one
+process — there is the browser process, a GPU process, a zygote, a
+utility process and roughly one renderer per tab. Our own RSS reports a
+fraction of the truth and the sum of their RSS reports far more than
+the truth, since those processes share a great deal of mapped library.
+PSS divides each shared page by the number of processes sharing it,
+which is the only number that adds up to something real.
+
+Offscreen, against scratch data, against local pages, with a floor on
+MemAvailable so a stage stops rather than pushing the machine into
+swap: a measurement taken while swapping is not a measurement.
+
+| | PSS | processes | over idle | per tab |
+|---|---:|---:|---:|---:|
+| just started | 318.2 MB | 4 | | |
+| 1 tab | 318.6 MB | 4 | +0.4 MB | |
+| 10 tabs | 399.0 MB | 13 | +80.8 MB | 8.1 MB |
+| 25 tabs | 529.9 MB | 28 | +211.7 MB | 8.5 MB |
+| 50 tabs | 738.0 MB | 53 | +419.8 MB | 8.4 MB |
+
+**The per-tab cost is flat and small** — 8.4 MB from ten tabs to fifty,
+no knee in the curve. These are small local pages, so that figure is a
+floor rather than what a heavy site costs; what it does say is that
+nothing in the tab machinery grows worse with the number of tabs.
+
+**The baseline is where the money is**, and it divides like this:
+
+| | PSS | this step costs |
+|---|---:|---:|
+| bare python | 4.9 MB | |
+| + `PyQt6.QtCore` | 12.3 MB | 7.4 MB |
+| + `PyQt6.QtWidgets` | 22.5 MB | 10.2 MB |
+| + `PyQt6.QtWebEngineWidgets` | 50.8 MB | 28.3 MB |
+| + `browser.py` | 66.7 MB | **15.9 MB** |
+
+So Qt is 46 MB of the 67 and this file is 15.9 MB of it. And of that
+15.9, the module-level *data* is **1.22 MB** — `UI_STRINGS` 0.87 MB,
+all 116 palettes together 0.28 MB, the rest noise. The remainder is
+code objects for a 67,000-line module.
+
+That is worth writing down because it kills an obvious optimisation
+before anyone spends a day on it: **loading the themes or the strings
+lazily would save under one megabyte of a 318 MB baseline.** The
+catalogue of 116 palettes is not the problem and never was.
+
+**The lever that does exist is a default.** Putting tabs to sleep
+already works, and works properly — the renderers really are released,
+not merely paused:
+
+| | PSS | processes |
+|---|---:|---:|
+| 25 tabs, all awake | 533.2 MB | 29 |
+| 25 tabs, the others asleep | 335.3 MB | 4 |
+| | **−198.0 MB (−37%)** | **−25** |
+
+`auto_sleep` is `sleepAfter` minutes and `sleepAfter` defaults to 0,
+which means never. So the largest single saving in the browser is a
+feature that works and is switched off.
+
+It is left switched off in this commit, deliberately. Waking a slept
+tab reloads it, and a reload throws away whatever was typed into a form
+and not submitted. Turning it on by default trades 198 MB against the
+possibility of losing somebody's half-written message, and that trade
+should be made with the reload hazard fixed first — a tab with unsaved
+input in it should not be a tab that sleeps. The number is recorded
+here so the decision is made against a measurement rather than a guess.
+
 ## 2026-10-29 — a button that did nothing, and two suites that would have said so
 
 **The Subtitles button was dead.** `player.html` has asked for
