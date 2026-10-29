@@ -1905,6 +1905,44 @@ def idn_safe_to_show(host):
     return True
 
 
+def as_qurl(url):
+    """An address as a QUrl, whether it arrived as one or as text.
+
+    `str()` of a QUrl is its REPR -- "PyQt6.QtCore.QUrl('https://x/')"
+    -- and QUrl() of that parses to an empty everything: no scheme, no
+    host, no path. Nothing raises. The caller gets a real QUrl that
+    answers every question with "" and goes quietly on.
+
+    `QUrl(str(url))` therefore reads as defensive and is the opposite.
+    Browser._host_of already said so in its docstring -- "every place
+    that takes either has to come through here" -- and 25 places did
+    not, because the broken form looks like the careful one.
+
+    What it cost, all of it found on 2026-10-29 and all of it silent:
+
+      update_bar_marks   both of the address bar's security marks.
+          The look-alike-domain badge AND the plain-http "not secure"
+          badge were asked about host "" on every real navigation
+          (urlChanged emits a QUrl) and so never appeared once. The
+          only caller that worked was restore_address -- Escape in the
+          bar -- because it happens to pass a string.
+      show_address       the tooltip shown when the bar cuts a long
+          address off displayed the Python repr.
+      save_link_target   scheme "" is not https, so Alt+click-to-save
+          and "save image as" returned False and saved nothing.
+      group_rule_for     host "", so a tab opened with a QUrl never
+      session_rule_for   matched a rule he had written.
+      discord_route      loaded the repr as if it were an address.
+
+    Found by browser-mac-8f, who drove the bar instead of reading it.
+    """
+    if isinstance(url, QUrl):
+        return QUrl(url)            # a copy: callers mutate what they get
+    if hasattr(url, "toString"):    # QUrl-alike (a mock, a wrapper)
+        return QUrl(url.toString())
+    return QUrl(str(url or ""))
+
+
 def lookalike_warning(host):
     """Whether a host is dressed up as another one.
 
@@ -18299,7 +18337,7 @@ def _hist_host(url):
     """The host of a history row, without www. Never raises: one
     hand-edited line must not take the whole page down."""
     try:
-        return (QUrl(str(url)).host() or "").lower().removeprefix("www.")
+        return (as_qurl(url).host() or "").lower().removeprefix("www.")
     except Exception:
         return ""
 
@@ -18512,7 +18550,7 @@ PIN_DEFAULTS = [{"name": "GitHub", "url": "https://github.com"},
 def _pin_key(url):
     """What makes two pins the same site. A www., a trailing slash and a
     fragment are not a different page."""
-    parsed = url if isinstance(url, QUrl) else QUrl(str(url or ""))
+    parsed = as_qurl(url)
     host = parsed.host().lower()
     if host.startswith("www."):
         host = host[4:]
@@ -25246,7 +25284,7 @@ class Browser(QMainWindow):
     def group_rule_for(self, url):
         """Which group a new tab on this address belongs in, by his own
         rules: "modrinth.com, curseforge.com -> Mods"."""
-        host = (QUrl(str(url)).host() or "").lower()
+        host = (as_qurl(url).host() or "").lower()
         if not host:
             return None
         for rule in self.config.get("groupRules", []):
@@ -25265,7 +25303,7 @@ class Browser(QMainWindow):
     def session_rule_for(self, url):
         """Which virtual browser a site always opens in: "twitch.tv ->
         the account that is logged in to twitch"."""
-        host = (QUrl(str(url)).host() or "").lower().removeprefix("www.")
+        host = (as_qurl(url).host() or "").lower().removeprefix("www.")
         if not host:
             return None
         rules = self.config.get("sessionSites")
@@ -30507,7 +30545,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         Opt-in: this tells the shortener that this machine has seen the
         link, which is the one thing a shortener is for finding out. A
         HEAD, no page fetched, the answer read off the Location header."""
-        request = QNetworkRequest(QUrl(str(url)))
+        request = QNetworkRequest(as_qurl(url))
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
             QNetworkRequest.RedirectPolicy.ManualRedirectPolicy)
@@ -32203,9 +32241,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
         str(QUrl) is "PyQt6.QtCore.QUrl(...)", not an address: every
         place that takes either has to come through here."""
-        if not isinstance(url, QUrl):
-            url = QUrl(str(url or ""))
-        return (url.host() or "").lower().removeprefix("www.")
+        return (as_qurl(url).host() or "").lower().removeprefix("www.")
 
     def focus_blocks(self, url):
         """Whether focus mode is holding this address back."""
@@ -32224,7 +32260,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """The page a blocked tab shows: what is blocked and how long
         is left, and nothing else."""
         left = max(0, self.focus_until() - int(time.time()))
-        host = (QUrl(str(url)).host() or "")
+        host = (as_qurl(url).host() or "")
         pal = theme_palette()
         return ("<!doctype html><meta charset=utf-8><title>%s</title>"
                 "<style>body{background:%s;color:%s;font:16px "
@@ -33084,7 +33120,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def limit_page(self, url=""):
         """What a site shows once today's time on it is used up: the
         site, the limit, and nothing else. Not a lecture."""
-        host = (QUrl(str(url)).host() or "").lower().removeprefix("www.")
+        host = (as_qurl(url).host() or "").lower().removeprefix("www.")
         limit = self.site_limit(host)
         used = int(self.site_minutes_today(host))
         pal = theme_palette()
@@ -33808,7 +33844,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """What a local or plain file wants to be shown as, by its name.
         "" for anything that is not one of those."""
         try:
-            path = QUrl(str(url)).path().lower()
+            path = as_qurl(url).path().lower()
         except Exception:
             return ""
         if path.endswith((".md", ".markdown")):
@@ -35483,7 +35519,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def _bare_media_url(self, url):
         """The same video at two timestamps is one video. Drops the
         fragment and the time parameter, keeps the rest."""
-        parsed = QUrl(str(url))
+        parsed = as_qurl(url)
         parsed.setFragment("")
         query = QUrlQuery(parsed.query())
         for name in ("t", "time_continue", "start"):
@@ -35630,7 +35666,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def _video_id(self, url):
         """The id of a YouTube video, or "" for anything else. Only
         YouTube, because that is all the service knows."""
-        parsed = QUrl(str(url))
+        parsed = as_qurl(url)
         host = self._host_of(parsed)
         if "youtu.be" in host:
             return parsed.path().strip("/")[:16]
@@ -36084,7 +36120,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 then("")
             return False
         target = Path(str(instance)).expanduser() / "mods"
-        source = QUrl(str(url))
+        source = as_qurl(url)
         leaf = Path(source.path()).name or str(name) or "mod.jar"
         leaf = re.sub(r"[^A-Za-z0-9._+-]", "_", leaf)[:120] or "mod.jar"
         reply = self._nam.get(QNetworkRequest(source))
@@ -36282,7 +36318,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             view = self.current() if view is None else view
             url = self._tab_url(view) if view is not None else ""
             if "twitch.tv" in self._host_of(url):
-                name = QUrl(str(url)).path().strip("/").split("/")[0]
+                name = as_qurl(url).path().strip("/").split("/")[0]
         name = str(name or "").strip().lower()
         if not re.fullmatch(r"[a-z0-9_]{3,25}", name or ""):
             return False
@@ -36407,7 +36443,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if view is None or self._is_header(view):
             return False
-        url = QUrl(str(self._tab_url(view)))
+        url = as_qurl(self._tab_url(view))
         query = QUrlQuery(url.query())
         for name in CLIP_JUNK:
             query.removeAllQueryItems(name)
@@ -36447,7 +36483,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.discord_tab(host)
         if view is None or (from_view is not None and view is from_view):
             return False
-        view.load(QUrl(str(url)))
+        view.load(as_qurl(url))
         index = self.tabs.indexOf(view)
         if index >= 0:
             self.tabs.setCurrentIndex(index)
@@ -36672,7 +36708,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """A stream in a small always-there window, for keeping half an
         eye on it while doing something else."""
         if url:
-            view = self.new_tab(QUrl(str(url)), switch=False)
+            view = self.new_tab(as_qurl(url), switch=False)
             index = self.tabs.indexOf(view)
         else:
             index = self.tabs.currentIndex()
@@ -37391,7 +37427,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return table
 
     def _draft_key(self, view):
-        url = QUrl(str(self._tab_url(view)))
+        url = as_qurl(self._tab_url(view))
         return (PasswordVault.normalize_host(url.host()) + url.path())[:200]
 
     def save_form_draft(self, view=None, then=None):
@@ -38595,7 +38631,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         counts = {}
         for entry in self.downloads:
             host = PasswordVault.normalize_host(
-                QUrl(str(entry.get("url", ""))).host())
+                as_qurl(entry.get("url", "")).host())
             if host:
                 counts[host] = counts.get(host, 0) + 1
         return sorted(counts.items(), key=lambda kv: -kv[1])
@@ -38908,7 +38944,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not dot:
             stem, ending = name, ""
         moment = time.localtime(when if when is not None else time.time())
-        host = PasswordVault.normalize_host(QUrl(str(url)).host())
+        host = PasswordVault.normalize_host(as_qurl(url).host())
         out = pattern
         for key, value in (("{name}", stem), ("{ext}", ending),
                            ("{site}", host),
@@ -39260,7 +39296,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if view is None or self._is_header(view):
             return 0
         for row in due:
-            view.page().download(QUrl(str(row.get("url", ""))),
+            view.page().download(as_qurl(row.get("url", "")),
                                  str(row.get("name") or ""))
         self.flash(self._ui_str("dlLaterStarted") % len(due))
         return len(due)
@@ -40170,7 +40206,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def save_link_target(self, url, view=None):
         """Save what a link points at instead of going there — what
         Alt+click does in every other browser."""
-        url = QUrl(str(url))
+        url = as_qurl(url)
         if url.scheme() not in ("http", "https"):
             return False
         view = self.current() if view is None else view
@@ -40428,7 +40464,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         www. left off if he asked for that.
 
         What is *copied* is never this — see copy_address."""
-        parsed = url if isinstance(url, QUrl) else QUrl(str(url or ""))
+        parsed = as_qurl(url)
         base = self.bar_text_for(parsed)
         return pretty_url(str(base or ""),
                           hide_scheme=bool(self.config.get("barHideScheme",
@@ -40449,7 +40485,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # the whole, decoded address on hover when the bar has cut it
         # off: the one case where a tooltip on an address bar is not
         # noise
-        self.urlbar.setToolTip("" if fits else pretty_url(str(url or "")))
+        self.urlbar.setToolTip(
+            "" if fits else pretty_url(as_qurl(url).toString()))
         self.update_bar_marks(url, view)
         return text
 
@@ -40474,7 +40511,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if url is None:
             view = self.current() if view is None else view
             url = self._tab_url(view) if view is not None else ""
-        parsed = QUrl(str(url or ""))
+        parsed = as_qurl(url)
         host = PasswordVault.normalize_host(parsed.host())
         label = getattr(self, "_securelbl", None)
         if label is not None:
@@ -40504,6 +40541,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 live.show()
             else:
                 live.hide()
+        # place_bar_extras says in its own docstring that it is asked
+        # "whenever one of them appears" -- and this, the function that
+        # makes them appear, was the one place that never asked. A mark
+        # that showed kept its default geometry at (0, 0), on top of the
+        # lock button, and setTextMargins was never recomputed, so it
+        # also painted over the start of the address. Invisible until
+        # now only because the two marks above never showed at all.
+        self.place_bar_extras()
         return True
 
     def media_in_use_kinds(self):
@@ -45118,7 +45163,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         limit = self.bar_row_limit()
 
         def allowed(url):
-            host = PasswordVault.normalize_host(QUrl(str(url)).host())
+            host = PasswordVault.normalize_host(as_qurl(url).host())
             bare = host[4:] if host.startswith("www.") else host
             return bare not in never and host not in never
 
@@ -49714,7 +49759,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return []
         seen = {}
         for row in (self.history or [])[-400:]:
-            host = QUrl(str(row.get("url", ""))).host()
+            host = as_qurl(row.get("url", "")).host()
             if host:
                 seen[host] = seen.get(host, 0) + 1
         best = sorted(seen.items(), key=lambda r: -r[1])[:max(1, count)]
@@ -51137,7 +51182,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         account should land in that account's browser. His rules first;
         then, if he asked to be asked, the question; otherwise the
         browser in front, as before."""
-        host = QUrl(str(url or "")).host().lower().removeprefix("www.")
+        host = as_qurl(url or "").host().lower().removeprefix("www.")
         for line in (self.config.get("outsideRules") or []):
             if not isinstance(line, str) or "=" not in line:
                 continue
@@ -52346,7 +52391,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         which = self.webmail_choice()
         if not which:
             return ""
-        url = QUrl(str(mailto or ""))
+        url = as_qurl(mailto or "")
         if url.scheme().lower() != "mailto":
             return ""
         to = url.path()
@@ -54915,7 +54960,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not want:
             return self.close_split()
         if url:
-            view = self.new_tab(url=QUrl(str(url)), switch=False)
+            view = self.new_tab(url=as_qurl(url), switch=False)
             index = self.tabs.indexOf(view)
         if index is None:
             here = self.tabs.currentIndex()
@@ -56226,7 +56271,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if first in text:
                 text = text.replace(first, second)
         if not re.match(r"^[a-z][a-z0-9+.-]*:", text):
-            return QUrl(url) if hasattr(url, "toString") else QUrl(str(url))
+            return as_qurl(url)
         return QUrl(text)
 
     def set_url_rewrites(self, rows):
@@ -57129,7 +57174,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if then:
                 then("")
             return False
-        reply = self._nam.get(QNetworkRequest(QUrl(str(url))))
+        reply = self._nam.get(QNetworkRequest(as_qurl(url)))
 
         def done():
             raw = bytes(reply.readAll())
