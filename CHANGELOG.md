@@ -1,5 +1,99 @@
 # Changelog
 
+## 2026-10-29 — the tabs down the side, and a setting nobody could reach
+
+`tabStrip` has had four values since the relocatable-strip work: `top`,
+`bottom`, `left`, `right`. `left` and `right` set Qt's own
+`TabPosition.West` and `East` — the tab bar rotated onto its side. Two
+things were wrong with that, and neither of them was the idea.
+
+**It was unreachable.** `tabStrip` is not in `getSettings()`, not in
+`settings.html`, has no action, no key and no menu entry. The only way
+to set it was to save a *mode* with it already in the config. A setting
+only its author can find is a setting the browser does not have.
+
+**And sideways was not the feature.** `GroupTabBar` paints a
+*horizontal* strip: group pills measured off `self.width()`, the group
+underline at `rect.bottom() - 2`, the unread badge at
+`rect.right() - 22`, the `+` placed from `tabRect(last).right()`.
+Rotated, all of that lands somewhere else. What a vertical strip is
+actually *for* — thirty tabs along the top are thirty slivers of a
+favicon; the same thirty down the side are thirty titles you can read —
+needs rows, not a turned bar.
+
+So `left` and `right` keep meaning exactly what they said and get a
+real implementation. `TabRail` draws the tabs as a list: the title
+elided to the width, the group as a coloured pill that folds, the
+site's tint, the loading line, the unread count, the asleep veil, the
+cross on the row under the pointer. `TabSidebar` holds it with a
+new-tab button, the count and a fold control, in a splitter of its own
+so the width is a handle rather than a number.
+
+Three things it deliberately does **not** do.
+
+It does not keep a model of the tabs. The rail asks the `QTabWidget`
+for everything, every time it paints — `tabIcon`, `tabText`,
+`isTabVisible`, `currentIndex` — so private tabs, flat favicons, the
+mute mark and a pinned tab's blank label are all already right, and the
+rail cannot be one tab behind the strip. Row visibility is read off
+`isTabVisible` rather than worked out again from the session and the
+folded groups: `setTabVisible` is called in exactly two places, both of
+which already answer "does this belong on screen", and asking the same
+question a second way is how two pictures of one thing drift apart.
+
+It does not reorder tabs itself. A drag calls `moveTab`, which emits
+`tabMoved`, which is what `_tab_moved` listens to for "the dragged tab
+joins the group it was dropped into"; the release calls
+`_finalize_drag`. So a drag in the rail joins and leaves groups by the
+strip's own rules, not by a second set written beside them.
+
+It does not hang off `tabLayoutChange`. That is where `GroupTabBar`
+keeps its own bookkeeping, and it stops firing the moment the bar is
+hidden — Qt defers a hidden bar's layout. The rail hangs off
+`tabInserted`, `tabRemoved`, `tabMoved`, `currentChanged` and the two
+visibility calls instead, which is every way the row *list* can change.
+A title, an icon, a badge or a loading line changes in a hundred places
+across this file and none of them emit anything, so there is also a
+fingerprint: one cheap tuple of everything the rail draws, compared on
+a half-second tick, redrawing only when something in it moved, and
+running only while the sidebar is on screen.
+
+One width, not two: the rail uses `tabStripWidth` and its existing
+80–420 clamp. Folded it is 46 pixels — an icon and its breathing room.
+The Qt position is still set to `West`/`East` underneath, so a mode or
+a hand-edited config that asks for it gets what it asked for; the
+rotated bar is simply hidden behind the rail.
+
+Reachable, at last: a four-card picker in Settings → Tabs (*Along the
+top*, *Down the left*, *Down the right*, *Below the page*), `F9` to
+move between the top and the side, `Shift+F9` to fold. Both keys are in
+`actions_list`, which is the one table the keys, the command palette,
+the cheat sheet and Settings all read, so they arrive in all four at
+once and can be reassigned like any other.
+
+Two smaller things came out of writing the rail, both in the strip it
+mirrors. A tab with no favicon was a blank row — a site that has not
+sent one yet, a local file, a new tab — which in the folded rail meant
+nothing at all to aim at, so it draws the first letter of the title in
+a chip instead. And `GroupTabBar` dimmed a sleeping tab with
+`theme_color("base")`: there is no `base` in `THEME_SOURCE`, so that
+call found no palette entry and fell back to `#000000` on every one of
+the 114 themes. On a light one it veiled a sleeping tab in black. It is
+`bg` now, which is the token that exists.
+
+`test_sidebar.py` is 70 checks, and most of them are the same shape:
+ask the rail what it is showing, ask the `QTabWidget` what is open, fail
+if they differ. Closing a tab, folding a group, switching virtual
+browser, a title changed behind the rail's back with no signal fired —
+each one ends in `rail == strip`. Three of them are about the other
+direction: fullscreen, an app window and auto-hidden chrome all take
+the rail away with everything else, and coming back out must give back
+*one* strip. `set_fullscreen` and `show_chrome` used to end with a bare
+`tabBar().setVisible(True)`, which with the rail on would have put the
+horizontal strip back as well; both go through
+`_apply_strip_visibility` now, which is the one place that knows which
+of the two this window has.
+
 ## 2026-10-22 — a suite that passes every check and then dumps core
 
 `test_page.py` segfaulted after printing its tally four times out of

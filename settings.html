@@ -2203,6 +2203,9 @@
       </div>
 
       <div class="panel">
+        <h2 class="sub" id="t_tabWhereName">Where the tabs are</h2>
+        <p class="hint" id="t_tabWhereHint">Down either side they are a list you can read the titles in, with the groups folding. F9 switches between the top and the side; Shift+F9 folds the list to icons.</p>
+        <div class="cards" id="tabwhere"></div>
         <h2 class="sub" id="t_tabWheelName">Mouse wheel over the tab strip</h2>
         <div class="cards" id="tabwheel"></div>
         <div class="group">
@@ -4805,6 +4808,14 @@
        sub: ""}],
       s.closeFocus || "right",
       (v) => saveSetting("closeFocus", v));
+    renderCards("tabwhere", [
+      {value: "top", name: S.tabWhereTop || "Along the top", sub: ""},
+      {value: "left", name: S.tabWhereLeft || "Down the left", sub: ""},
+      {value: "right", name: S.tabWhereRight || "Down the right", sub: ""},
+      {value: "bottom", name: S.tabWhereBottom || "Below the page",
+       sub: ""}],
+      s.tabStrip || "top",
+      (v) => saveSetting("tabStrip", v));
     renderCards("tabwheel", [
       {value: "off", name: S.tabWheelOff || "Nothing", sub: ""},
       {value: "scroll",
@@ -5483,6 +5494,7 @@
             t_blockAutoplay:"blockAutoplay",
             t_tabWheelName:"tabWheelName", t_tabWheelHint:"tabWheelHint",
             t_tabCountName:"tabCountName", t_tabCountHint:"tabCountHint",
+            t_tabWhereName:"tabWhereName", t_tabWhereHint:"tabWhereHint",
             t_guardFingerprint:"guardFingerprint",
             t_guardClipboardRead:"guardClipboardRead",
             t_guardCopyGuard:"guardCopyGuard",

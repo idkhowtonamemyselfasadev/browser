@@ -133,8 +133,11 @@ forward rather than opening a second one.
 
 - **Tabs and tab groups** — Chrome-style group pills, collapsible, colour-coded
 - **Split view** — two pages side by side in one window, optionally scrolled together
-- **A relocatable tab strip** — down the left or right edge at a width you drag, or
-  below the page, in up to four rows rather than scrolling
+- **A relocatable tab strip** — along the top, below the page, or **down either side
+  as a sidebar** (`F9`): the tabs become a list of rows with the titles readable, the
+  group pills folding in place, drag-to-reorder and a cross on the row under the
+  pointer. `Shift+F9` folds it to 46 pixels of favicons. The width is a splitter
+  handle. Along the top it can also run in up to four rows rather than scrolling
 - **Workspaces** — named sets of tabs within one window; the outgoing set is saved
   before the incoming one opens, so switching between them preserves both
 - **Virtual browsers** — several independent sessions in one window, each with its own
@@ -329,6 +332,7 @@ and `Ctrl+/` shows the complete list on a page.
 | `Ctrl+Shift+P` | Passwords (with Vault Password installed) |
 | `Ctrl+Shift+G` | Copy a fresh password to the clipboard |
 | `Ctrl+` `+` / `Ctrl+-` / `Ctrl+0` | Zoom in / out / back to the level in Settings |
+| `F9` / `Shift+F9` | Tabs down the side / fold the sidebar to icons |
 | `F11` | Fullscreen |
 | `F12` / `Ctrl+Shift+I` | Developer tools |
 | `Ctrl+Q` | Quit |
@@ -392,6 +396,17 @@ An unguarded call to a method that is not there throws, and an uncaught throw
 in an inline script abandons every statement below it. `test_histrender.py`
 catches that shape for `getElementById`; nothing yet catches it for the bridge,
 so it is a review question.
+
+**A method is not the only dependency.** `settings.html` calls two methods for
+every one of its switches — `getSettings` and `setSetting` — so a new setting
+adds no row to the table above and is still a change to this contract: the
+*key* has to be in what `getSettings` answers, and `setSetting` has to route it
+somewhere. The tab-sidebar picker added on 2026-10-29 needs `tabStrip` and
+`tabStripWidth` in both. Ported into a tree without them, the picker draws, it
+highlights the card that was clicked, it saves a config key nothing reads — and
+nothing happens. That is quieter than a `TypeError` and harder to spot, so a
+port of `settings.html` is finished when the new control has been *used*, not
+when the page has loaded.
 
 ## Automation: the agent bridge
 
