@@ -236,10 +236,29 @@ check("a plain code block is coloured",
 check("...with spans the page did not have",
       int(js(view, "document.querySelectorAll('pre span').length") or 0) > 1,
       js(view, "document.querySelectorAll('pre span').length"))
+# This pinned the literal "cba6f7" and went red when the off-palette
+# commit moved the keyword onto a token, which is the right thing to
+# have happened: the mauve was in no palette, so it survived _recolor
+# and FAILED 4.5:1 on 30 of the 116 themes -- unreadable keywords on
+# every light theme. Measured both states before changing this:
+#
+#   #cba6f7    4 of 116 too close to the fn colour, fails 4.5:1 on 30
+#   accentLt  50 of 116 too close to the fn colour, readable on 116
+#
+# So both were broken and the trade was deliberate: samey beats
+# unreadable. It is not solved -- the palette has 22 tokens and few
+# distinct hues, and every other candidate scores worse overall
+# (yellow collides with the number colour on 73 themes, red on 69).
+# Recorded as an open item rather than dressed up as a fix.
+inner = str(js(view, "document.querySelector('pre').innerHTML") or "")
+kw = B.theme_palette()["accentLt"]
+fn = B.theme_palette()["accent"]
 check("the keyword is coloured, not the whole block",
-      "cba6f7" in str(js(view, "document.querySelector('pre').innerHTML")
-                      or ""),
-      str(js(view, "document.querySelector('pre').innerHTML"))[:80])
+      kw.lower() in inner.lower(), inner[:80])
+check("...in a palette token, not a literal that cannot move",
+      kw.lower() in {v.lower() for v in B.THEME_SOURCE.values()}, kw)
+check("...and not the same colour as a function name",
+      kw.lower() != fn.lower(), "kw %s, fn %s" % (kw, fn))
 check("and the line-number stripper goes up",
       ask("nolinenumbers", view) == "on")
 

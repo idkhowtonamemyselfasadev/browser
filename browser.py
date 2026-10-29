@@ -2176,7 +2176,7 @@ PAGE_TOOLS = {
     mark.id = "__editmark";
     mark.textContent = "edit mode";
     mark.setAttribute("style", "position:fixed;left:8px;bottom:8px;z-index:2147483646;"
-      + "background:#000;color:#fff;font:12px monospace;padding:4px 8px;"
+      + "background:#000000;color:#ffffff;font:12px monospace;padding:4px 8px;"
       + "pointer-events:none;opacity:.8");
     document.documentElement.appendChild(mark);
   }
@@ -2631,7 +2631,7 @@ MEDIA_TOOLS = {
       var d = document.createElement("div");
       d.id = "__volmark";
       d.setAttribute("style", "position:fixed;left:50%%;top:10%%;transform:translateX(-50%%);"
-        + "z-index:2147483646;background:#000;color:#fff;font:14px monospace;"
+        + "z-index:2147483646;background:#000000;color:#ffffff;font:14px monospace;"
         + "padding:6px 10px;pointer-events:none;opacity:.85");
       document.documentElement.appendChild(d);
       return d;
@@ -6501,7 +6501,8 @@ NAV_JS = r"""(function (want) {
       box.id = "__navbox";
       box.style.cssText = "position:fixed;z-index:2147483646;" +
         "border:1px solid " + (W.accent || "#89b4fa") +
-        ";background:rgba(137,180,250,0.12);pointer-events:none;left:" +
+        ";background:" + (W.accentSoft || "rgba(137,180,250,0.12)") +
+        ";pointer-events:none;left:" +
         e.clientX + "px;top:" + e.clientY + "px;width:0;height:0";
       (document.body || root).appendChild(box);
       e.preventDefault();
@@ -25807,6 +25808,16 @@ class Browser(QMainWindow):
             return False
         if args:
             code = code % {k: json.dumps(v) for k, v in args.items()}
+        # The eighth and ninth dispatchers. Both were reported
+        # "dispatched cold, nothing to swap" while every literal in
+        # their tables was a non-token -- true at the time, and not a
+        # reason to add the call, because it would have gone green and
+        # changed no pixel. Normalising wheelvolume and edit onto real
+        # tokens is what gave the call something to do, and the guard
+        # said so in the same run: a table WITH token literals
+        # dispatched cold is a bug. The two halves only make sense
+        # together, in that order.
+        code = tint_js(code)
         if then is None:
             view.page().runJavaScript(code, APP_WORLD_ID)
         else:
@@ -25966,6 +25977,8 @@ class Browser(QMainWindow):
             return False
         if args:
             code = code % {k: json.dumps(v) for k, v in args.items()}
+        # see page_tool for why this call is new
+        code = tint_js(code)
         try:
             if then is None:
                 view.page().runJavaScript(code, APP_WORLD_ID)
@@ -41677,6 +41690,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if "ARG" in source:
             source = source.replace("ARG", json.dumps(arg)
                                     if arg is not None else "null")
+        # The seventh dispatcher, and the one the off-palette commit
+        # missed: DEV_TOOLS.update(DEV_TOOLS_PAGE) at the bottom of the
+        # file makes THIS the only route to the five overlays that
+        # commit normalised to tokens so they could be tinted. Six
+        # dispatchers got the call because they all spell it
+        # `source.replace("ARG"`; this one guards it with `if "ARG" in
+        # source` and so did not match. The literals moved onto tokens
+        # and the swap was never applied -- right on mocha, whose
+        # surface IS #0d0d12, and unchanged on all 28 light themes.
+        # Found by browser-windows-9a, who read the computed background
+        # out of the page instead of trusting the suite.
+        source = tint_js(source)
         world = MAIN_WORLD_ID if name in PAGE_WORLD_TOOLS else APP_WORLD_ID
         page = self._live_page(view)
         if page is None:
@@ -55867,6 +55892,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         mouse = self.mouse_config()
         out.update({"bg": palette["crust"], "text": palette["text"],
                     "accent": palette["accent"],
+                    # the fill of the alt-drag link box. Its BORDER has
+                    # always been W.accent and the fill beside it was a
+                    # hardcoded rgba(137,180,250,0.12) -- Catppuccin
+                    # blue at 12%, so on 115 of the 116 themes the
+                    # outline moved and the fill stayed blue. A soft
+                    # accent cannot be built from a hex in JS without a
+                    # parser, and the palette lives here, so it is sent
+                    # rather than derived.
+                    "accentSoft": "rgba(%d, %d, %d, 0.12)"
+                                  % _hex_rgb(palette["accent"]),
                     # the keys and the mouse: what only the page can
                     # decide, decided in the page
                     # the table, not the answer: the script is in the
