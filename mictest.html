@@ -22,7 +22,10 @@
     padding: 7px 11px; cursor: pointer; margin-right: 6px;
   }
   button:hover { border-color: #89b4fa; }
-  #meter { height: 16px; background: #11111b; border-radius: 8px;
+  /* the track is a themed token (QProgressBar wears the same one in
+     the Qt sheet); #11111b was in no palette, so it stayed near-black
+     behind the themed green fill on all 30 light themes */
+  #meter { height: 16px; background: #16161d; border-radius: 8px;
            overflow: hidden; margin: 10px 0; }
   #level { height: 100%; width: 0; background: #a6e3a1;
            transition: width .05s linear; }

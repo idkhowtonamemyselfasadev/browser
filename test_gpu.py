@@ -363,7 +363,44 @@ check("no window is ever put up on Windows",
       'if sys.platform == "win32":\n        # there is nothing this window'
       in src)
 check("Settings is told whether choosing is on offer at all",
-      '"gpuChoose": sys.platform != "win32"' in src)
+      '"gpuChoose": sys.platform not in ("win32", "darwin")' in src)
+check("...and, separately, whether there is a system page to open",
+      '"gpuWindowsPage": sys.platform == "win32"' in src)
+
+# One boolean used to answer both of those. "You cannot pick a card
+# here" is true on Windows AND macOS; "there is a Graphics page to
+# open" is true only on Windows. Sharing one flag showed macOS a
+# Windows instruction and a button whose handler returns False on
+# sight, and hid the macOS text that was already written.
+#
+# The rule, as a table, and the part that matters: the two platforms
+# that were already right have to come out EXACTLY as they did before,
+# or the fix moved something it was not aiming at.
+def rule(platform):
+    return (platform not in ("win32", "darwin"), platform == "win32")
+
+
+def rule_before(platform):
+    return (platform != "win32", platform == "win32")
+
+
+for platform, want in (("linux", (True, False)),
+                       ("win32", (False, True)),
+                       ("darwin", (False, False))):
+    check("%-7s -> picker=%-5s windows page=%s"
+          % (platform, want[0], want[1]), rule(platform) == want,
+          rule(platform))
+for platform in ("linux", "win32"):
+    check("...and %s is what it always was" % platform,
+          rule(platform) == rule_before(platform),
+          (rule(platform), rule_before(platform)))
+check("...while darwin is the one that moved",
+      rule("darwin") != rule_before("darwin"),
+      (rule("darwin"), rule_before("darwin")))
+check("exactly one of the three notes shows on each platform",
+      all(sum((picker, winpage, not picker and not winpage)) == 1
+          for picker, winpage in (rule(p) for p in
+                                  ("linux", "win32", "darwin"))))
 page = (HERE / "settings.html").read_text(encoding="utf-8")
 check("...and the page says where the choice lives instead",
       'id="gpuwindows"' in page and "s.gpuChoose !== false" in page)
@@ -377,7 +414,13 @@ for key in ("gpuWindows",):
 check("...and a button that takes him to where it is made",
       'id="gpuopenwin"' in page
       and "bridge.openWindowsGraphics" in page
-      and 'open.hidden = choose' in page)
+      and 'open.hidden = !winpage' in page)
+check("...which macOS is not offered, because it has nowhere to go",
+      'id="gpumac"' in page and 'mac.hidden = choose || winpage' in page)
+check("macOS gets its own sentence, in both languages",
+      B.UI_STRINGS["en"].get("gpuMac")
+      and B.UI_STRINGS["de"].get("gpuMac")
+      and B.UI_STRINGS["en"]["gpuMac"] != B.UI_STRINGS["de"]["gpuMac"])
 check("the slot behind it exists and is a slot",
       "def openWindowsGraphics(self)" in src
       and "@pyqtSlot(result=bool)\n    def openWindowsGraphics" in src)

@@ -1382,6 +1382,7 @@
         <div class="cards" id="gpucards"></div>
         <div class="hint" id="gpunone" hidden>Only one graphics card here, so there is nothing to choose.</div>
         <div class="hint" id="gpuwindows" hidden>Windows decides which card a program draws with, in Settings &rarr; System &rarr; Display &rarr; Graphics. These are the cards it has to offer.</div>
+        <div class="hint" id="gpumac" hidden>macOS decides which card a program draws with and gives no way to change it per program. These are the cards it has.</div>
         <button id="gpuopenwin" hidden>Open Windows&rsquo; graphics settings</button>
         <label class="wrow">
           <span class="wlabel">
@@ -4092,7 +4093,16 @@
     // choice itself belongs to Windows' own Graphics settings (per
     // program, and the program here is python.exe) -- so there is no
     // picker and no "ask at every start" to offer
+    // Two questions, and they used to share one answer. "Can you pick
+    // a card here?" is no on Windows AND on macOS -- Windows keeps the
+    // choice in its own Graphics settings, macOS hands the app its GPU
+    // through Metal. But only Windows has a page to open, so hanging
+    // the Windows note and its button off `choose` showed macOS a
+    // Windows instruction and a button whose handler returns False on
+    // sight: the dead-button shape again, and it hid the macOS text
+    // that was already written and translated.
     const choose = s.gpuChoose !== false;
+    const winpage = s.gpuWindowsPage === true;
     const none = document.getElementById("gpunone");
     if (none) {
       none.hidden = cards.length > 1 || !choose;
@@ -4100,12 +4110,17 @@
     }
     const note = document.getElementById("gpuwindows");
     if (note) {
-      note.hidden = choose;
+      note.hidden = !winpage;
       note.textContent = S.gpuWindows || note.textContent;
+    }
+    const mac = document.getElementById("gpumac");
+    if (mac) {
+      mac.hidden = choose || winpage;
+      mac.textContent = S.gpuMac || mac.textContent;
     }
     const open = document.getElementById("gpuopenwin");
     if (open) {
-      open.hidden = choose;
+      open.hidden = !winpage;
       open.textContent = S.gpuOpenWindows || open.textContent;
       open.onclick = () => { if (bridge) bridge.openWindowsGraphics(() => {}); };
     }
@@ -4507,7 +4522,23 @@
       el.onclick = () => {
         const name = document.getElementById("themenewname");
         bridge.appearanceAction(slot, (name && name.value) || "", (j) => {
-          refreshSettings();
+          // Both, not one: saving, importing, starring or resetting a
+          // theme changes the theme LIST and the settings behind the
+          // controls, and the page has to re-read each from its own
+          // door. This used to call refreshSettings(), which is
+          // defined in start.html and does not exist here -- a bare
+          // ReferenceError inside a channel callback, so every one of
+          // these seven buttons did its work and then failed to show
+          // it. Saving a theme really saved it and the list stayed as
+          // it was, which reads as a button that does nothing.
+          bridge.getSettings((s) => {
+            try { window._settings = JSON.parse(s); } catch (e) { return; }
+            load(window._settings);
+          });
+          bridge.themes((t) => {
+            try { window._themes = JSON.parse(t); } catch (e) { return; }
+            renderThemes();
+          });
         });
       };
     }
