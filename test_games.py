@@ -55,7 +55,7 @@ VIDEO = """<title>A stream - Twitch</title>
   <video id=v width=320 height=180></video>
   <div id=chatbox>
     <div class="chat-line__message">nightbot: follow the rules</div>
-    <div class="chat-line__message">someone: hello tim</div>
+    <div class="chat-line__message">someone: hello ada</div>
     <div class="chat-line__message">spammer: buy followers now</div>
   </div>
   <button aria-label="Claim Bonus" id=bonus>bonus</button>
@@ -76,7 +76,7 @@ VIDEO = """<title>A stream - Twitch</title>
   </script>"""
 
 PRIVATE = """<title>An order</title>
-  <p id=mail>Write to tim@example.com about it</p>
+  <p id=mail>Write to ada@example.com about it</p>
   <p id=ip>The box is on 192.168.1.50 today</p>
   <p id=street>He lives on Beispielstrasse</p>
   <p id=fine>Nothing private in this line at all</p>"""
@@ -767,10 +767,10 @@ check("the watcher goes off again",
       ask("twitchads", stream, arg=False) == "off")
 win.config["chatHide"] = "buy followers"
 win.config["chatUsers"] = "nightbot"
-win.config["chatMe"] = "tim"
+win.config["chatMe"] = "ada"
 check("his three lists are read together",
       win.chat_rules() == {"hide": ["buy followers"],
-                           "users": ["nightbot"], "me": ["tim"]},
+                           "users": ["nightbot"], "me": ["ada"]},
       win.chat_rules())
 check("the filters go on", win.chat_filters(view=stream) is not False)
 H.wait_for(lambda: js(stream, "!!window.__chatWatch") is True, 5000)
@@ -1041,7 +1041,7 @@ for name in ("twitchPoints", "twitchAds", "theaterMode", "gamepadOn",
 win.config["cloudSites"] = []
 check("with everything off, a page is left alone",
       win._play_settled(spare) == [], win._play_settled(spare))
-win.config["chatMe"] = "tim"
+win.config["chatMe"] = "ada"
 check("a chat rule is applied", "chat" in win._play_settled(spare),
       win._play_settled(spare))
 win.config["chatMe"] = ""

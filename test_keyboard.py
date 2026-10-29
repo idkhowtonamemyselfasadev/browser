@@ -58,7 +58,7 @@ check("no two actions want the same key", not clashes, clashes)
 check("every name is a real string, not a key that was never written",
       all(win.action_label(e) != e["str"] for e in actions),
       [e["str"] for e in actions if win.action_label(e) == e["str"]][:4])
-check("the keys Tim already knows are still the ones in the list",
+check("the keys he already knows are still the ones in the list",
       {("newtab", "Ctrl+T"), ("closetab", "Ctrl+W"),
        ("address", "Ctrl+L"), ("find", "Ctrl+F"),
        ("passwords", "Ctrl+Shift+P"), ("private", "Ctrl+Shift+N")}

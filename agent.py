@@ -23,7 +23,7 @@ prints the whole reply.
   agent.py markdown [SELECTOR] [--tab ID]      -> the page as Markdown
   agent.py box SELECTOR [--tab ID]             -> where it is, how it looks
   agent.py find TEXT [--tab ID]                -> elements by their words
-  agent.py fill '{"#user":"tim"}' [--tab ID]   -> a whole form at once
+  agent.py fill '{"#user":"ada"}' [--tab ID]   -> a whole form at once
   agent.py idle [QUIET_MS] [--tab ID]          -> wait for the fetching to stop
   agent.py links [PATTERN] [--tab ID]
   agent.py tables [INDEX] [--tab ID]
@@ -340,7 +340,7 @@ def main(argv):
         elif op == "find":
             req.update(text=" ".join(args))
         elif op == "fill":
-            # one JSON object: {"#user": "tim", "#pass": "..."}
+            # one JSON object: {"#user": "ada", "#pass": "..."}
             req.update(fields=json.loads(args[0]))
         elif op == "idle":
             req.update(quiet=int(args[0]) if args else 700,

@@ -145,7 +145,7 @@ ran = []
 real_run = subprocess.run
 try:
     B.subprocess.run = lambda *a, **k: ran.append((a, k))
-    B.os.environ["USERNAME"] = "tim"
+    B.os.environ["USERNAME"] = "ada"
     B._restrict_to_owner(target)
 finally:
     B.subprocess.run = real_run
@@ -155,7 +155,7 @@ cmd = ran[0][0][0] if ran else []
 check("it names the file", str(target) in cmd, cmd)
 check("inherited entries are dropped", "/inheritance:r" in cmd, cmd)
 check("and this user, alone, is granted full control",
-      "/grant:r" in cmd and "tim:F" in cmd, cmd)
+      "/grant:r" in cmd and "ada:F" in cmd, cmd)
 check("no console window flashes up under pythonw",
       ran and "creationflags" in ran[0][1], ran[0][1] if ran else None)
 check("it does not wait forever on a wedged icacls",
@@ -176,7 +176,7 @@ def explode(*a, **k):
 
 
 try:
-    B.os.environ["USERNAME"] = "tim"
+    B.os.environ["USERNAME"] = "ada"
     B.subprocess.run = explode
     B._restrict_to_owner(target)
     survived = True

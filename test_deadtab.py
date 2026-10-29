@@ -84,7 +84,7 @@ check("the recovery page was shown for this view",
 # check that names one of them is a check about the box it runs on:
 # this one first asserted _requested won (true only while the page had
 # not committed an address) and then that url() won (true only once it
-# had). It failed on Tim's desktop the first way and on the server the
+# had). It failed on the owner's desktop the first way and on the server the
 # second. Assert the precedence instead, on views whose three sources
 # the test sets itself -- and keep the claim about `view` to the one
 # thing that is true either way.

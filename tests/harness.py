@@ -181,7 +181,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     #: paths under this prefix ask for a basic-auth login, and only
     #: this one is accepted. A browser has no way to test its own
     #: http-auth dialog without a server that asks for one.
-    auth_user = "tim"
+    auth_user = "ada"
     auth_password = "letmein"
 
     def _auth_ok(self):

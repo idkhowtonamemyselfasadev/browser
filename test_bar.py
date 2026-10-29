@@ -216,7 +216,7 @@ check("a path is not", B.looks_like_search("/home/you/x") is False)
 check("a Windows path is not", B.looks_like_search("C:\\\\Users\\\\x")
       is False)
 check("an e-mail address is not",
-      B.looks_like_search("tim@example.com") is False)
+      B.looks_like_search("ada@example.com") is False)
 check("a long token is not",
       B.looks_like_search("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9") is False)
 check("a card-shaped number is not",

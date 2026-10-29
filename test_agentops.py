@@ -5,7 +5,7 @@ the console, dialogs, PDF, links, tables, cookies, bookmarks, downloads
 and the notice in the corner.
 
 Same shape as test_agent.py — a real socket, a real client in a thread,
-a real browser underneath, and its own socket name so the browser Tim is
+a real browser underneath, and its own socket name so the browser the owner is
 actually using is never touched."""
 import json
 import os
@@ -135,7 +135,7 @@ check("and the selector can be clicked", r.get("ok"), r)
 
 print("\n(4) filling a form")
 r = client("fill", {"op": "fill", "tab": tid, "fields": {
-    "#user": "tim", "#pass": "secret", "#pick": "b", "#agree": True,
+    "#user": "ada", "#pass": "secret", "#pick": "b", "#agree": True,
     "#missing": "x"}})
 result = r.get("result") or {}
 check("four fields were filled", len(result.get("filled", [])) == 4, result)
@@ -146,7 +146,7 @@ r = client("checkfill", {"op": "js", "tab": tid,
                                  "document.getElementById('pick').value,"
                                  "document.getElementById('agree').checked])"})
 check("the page really has them",
-      json.loads(r.get("result") or "[]") == ["tim", "b", True], r)
+      json.loads(r.get("result") or "[]") == ["ada", "b", True], r)
 
 print("\n(5) waiting for the fetching to stop")
 r = client("idle", {"op": "idle", "tab": tid, "quiet": 300, "timeout": 5000})

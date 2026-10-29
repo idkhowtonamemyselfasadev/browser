@@ -154,7 +154,7 @@ def _base_css(p, dark):
 
     What is *not* here any more is as important as what is. Pictures
     carried a brightness filter on every dark theme, which is exactly
-    the "washed out, too dark" Tim sees; headings, links, buttons and
+    the "washed out, too dark" he sees; headings, links, buttons and
     form fields were painted by selector, without anyone asking what
     was behind them, which is where gold-on-blue headlines and
     "every button lost its colour" came from. Colour that depends on
@@ -512,7 +512,7 @@ SITE_JS = """(function () {
   // ---- colour arithmetic ------------------------------------------
   // Everything below decides by measured contrast rather than by
   // "dark-ish/light-ish", because that is the whole difference between
-  // a page that reads and the light-grey-on-white Tim was getting.
+  // a page that reads and the light-grey-on-white he was getting.
 
   function parseColor(s) {
     s = s || "";
@@ -777,7 +777,7 @@ SITE_JS = """(function () {
   // writes: a write between two reads makes the engine recalculate the
   // whole page's style before the next read can be answered, and with
   // a few thousand elements that is the difference between a pass that
-  // is over before the page is painted and one Tim can watch happen.
+  // is over before the page is painted and one he can watch happen.
   // What a measured element is *going* to be painted lives in planned,
   // so a child measured in the same slice already sees the dark card
   // its parent is about to become.

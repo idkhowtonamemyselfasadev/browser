@@ -46,7 +46,7 @@ PAGES = {
       </article>
       <nav>menu junk</nav><footer>footer junk</footer>
       <table><tr><th>a</th><th>b</th></tr><tr><td>1</td><td>2</td></tr></table>
-      <a href="mailto:tim@example.com">mail</a>
+      <a href="mailto:ada@example.com">mail</a>
       <p>numbers: 12, 7.5 and 1.234,50</p>""",
     "/video": "<title>Vid</title><video id=v src='/x.mp4'></video>",
     "/block": "<title>Block</title><p>blocked?</p>",
@@ -339,7 +339,7 @@ check("every link is listed",
       any(r["url"] == "https://gnu.org/x" for r in out.get("links", [])),
       out.get("links"))
 check("and every email address",
-      "tim@example.com" in out.get("mails", []), out.get("mails"))
+      "ada@example.com" in out.get("mails", []), out.get("mails"))
 got.clear()
 win.desk_tool("pagelists", view=rich, then=got.append)
 H.wait_for(lambda: got, 4000)

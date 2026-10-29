@@ -628,7 +628,7 @@ class FakeVault:
         return list(self.rows)
 
 
-win.vault = FakeVault([{"id": 7, "host": "127.0.0.1", "username": "tim",
+win.vault = FakeVault([{"id": 7, "host": "127.0.0.1", "username": "ada",
                         "password": "hunter2", "scheme": "http"}])
 win.config["vaultPassword"] = True
 win.vault_lock._vault_key = b"k" * 32
@@ -640,9 +640,9 @@ win.place_bar_extras()
 check("...and then the key is shown", key.isVisible() is True)
 menu = win.key_menu_here(view=view)
 labels = [one.text() for one in menu.actions()]
-check("the menu names the login", any("tim" in one for one in labels),
+check("the menu names the login", any("ada" in one for one in labels),
       labels)
-sub = next(one.menu() for one in menu.actions() if one.text() == "tim")
+sub = next(one.menu() for one in menu.actions() if one.text() == "ada")
 subs = [one.text() for one in sub.actions()]
 check("...and offers to fill it",
       B.UI_STRINGS["de"]["barKeyFill"] in subs, subs)

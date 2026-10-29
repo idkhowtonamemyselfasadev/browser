@@ -96,7 +96,7 @@ NOAUTO = """<title>No autocomplete</title>
 
 OTP_LINK = """<title>Set up 2FA</title>
   <p>Scan this:</p>
-  <a id=l href="otpauth://totp/example.com:tim?secret=JBSWY3DPEHPK3PXP&amp;issuer=example">QR</a>"""
+  <a id=l href="otpauth://totp/example.com:ada?secret=JBSWY3DPEHPK3PXP&amp;issuer=example">QR</a>"""
 
 OTP_TEXT = """<title>Set up 2FA</title>
   <p>Can't scan it? Enter this instead:</p>
@@ -201,7 +201,7 @@ check("a code that is not there is", vault.use_code(codes["id"], "zzz")
       is False)
 
 print("\n(2) fields he added himself")
-entry = vault.set_entry("example.com", "https", "tim", "first-password")
+entry = vault.set_entry("example.com", "https", "ada", "first-password")
 check("a login to hang them on", entry is not None)
 check("an extra field goes on",
       vault.set_custom(entry["id"], "Customer number", "4711") is True)
@@ -226,7 +226,7 @@ check("dropping one works",
       and len(vault.custom_fields(entry["id"])) == 1)
 
 print("\n(3) the password it used to be")
-vault.set_entry("example.com", "https", "tim", "second-password")
+vault.set_entry("example.com", "https", "ada", "second-password")
 past = vault.password_history(entry["id"])
 check("the old password was kept", len(past) == 1, past)
 check("...without being in the listing",
@@ -278,7 +278,7 @@ check("nonsense is no date", B._card_expiry_seconds("soon") == 0)
 check("month 13 is no date", B._card_expiry_seconds("13/26") == 0)
 card = vault.add_item({"type": "card", "title": "Old card",
                        "number": "4111111111111111", "expiry": "01/20",
-                       "cvv": "123", "cardholder": "Tim"})
+                       "cvv": "123", "cardholder": "Ada"})
 soon = win.expiring_items(days=30)
 check("the key that runs out in five days is on the list",
       any(r["id"] == key["id"] for r in soon), soon)
@@ -292,14 +292,14 @@ check("nothing that lasts is on it",
       not any(r["id"] == entry["id"] for r in soon))
 
 print("\n(6) two entries that are one")
-vault.set_entry("double.example", "https", "tim", "older-one")
-first = vault.get("double.example", "tim")
+vault.set_entry("double.example", "https", "ada", "older-one")
+first = vault.get("double.example", "ada")
 first["created"] = int(time.time()) - 9999
 first["note"] = "short"
 first["tags"] = ["one"]
 vault._save(first)
 twin = vault._normalize({"type": "login", "host": "double.example",
-                         "username": "tim", "password": "newer-one",
+                         "username": "ada", "password": "newer-one",
                          "note": "a much longer note", "tags": ["two"],
                          "changed": int(time.time()) + 30,
                          "used": int(time.time()) + 30,
@@ -328,7 +328,7 @@ check("one entry alone is nothing to merge", vault.merge([first["id"]])
       is None)
 
 print("\n(7) the accounts he has stopped using")
-old = vault.set_entry("ancient.example", "https", "tim", "x")
+old = vault.set_entry("ancient.example", "https", "ada", "x")
 old["used"] = int(time.time()) - 400 * 86400
 vault._save(old)
 rows = win.unused_logins(days=365)
@@ -340,11 +340,11 @@ check("the oldest comes first",
       rows == sorted(rows, key=lambda r: r["last"]))
 
 print("\n(8) two factors, where they could be")
-vault.set_entry("github.com", "https", "tim", "gh-password")
+vault.set_entry("github.com", "https", "ada", "gh-password")
 rows = win.twofa_missing()
 check("a site that supports 2FA with no code is named",
       any(r["host"] == "github.com" for r in rows), rows)
-vault.update_item(vault.get("github.com", "tim")["id"],
+vault.update_item(vault.get("github.com", "ada")["id"],
                   {"totp": "otpauth://totp/github?secret=JBSWY3DPEHPK3PXP"})
 check("...and not once it has one",
       not any(r["host"] == "github.com" for r in win.twofa_missing()))
@@ -372,14 +372,14 @@ check("clearing it works", vault.clear_access_log() is True
 
 print("\n(10) a username with no password")
 check("set_entry still refuses an empty password",
-      vault.set_entry("nopass.example", "https", "tim", "") is None)
-only = vault.set_username_only("nopass.example", "https", "tim")
+      vault.set_entry("nopass.example", "https", "ada", "") is None)
+only = vault.set_username_only("nopass.example", "https", "ada")
 check("...but this saves it", only is not None and only["password"] == "",
       only and only.get("password"))
 check("it is a login like any other",
-      vault.get("nopass.example", "tim") is not None)
+      vault.get("nopass.example", "ada") is not None)
 check("twice is once", vault.set_username_only("nopass.example", "https",
-                                               "tim")["id"] == only["id"])
+                                               "ada")["id"] == only["id"])
 flags = (vault.health() or {}).get("flags") or {}
 check("a blank password is not called weak",
       only["id"] not in flags, flags.get(only["id"]))
@@ -443,7 +443,7 @@ bw = json.dumps({"items": [
      "fields": [{"name": "PIN", "value": "1111", "type": 1},
                 {"name": "Account", "value": "2222", "type": 0}]},
     {"type": 3, "name": "Bitwarden card",
-     "card": {"cardholderName": "Tim", "number": "4000000000000002",
+     "card": {"cardholderName": "Ada", "number": "4000000000000002",
               "brand": "Visa", "expMonth": "7", "expYear": "2029",
               "code": "321"}},
 ]})
@@ -520,8 +520,8 @@ check("it was written down as shown",
 
 print("\n(15) an address and a card, into a form")
 ident = vault.add_item({"type": "identity", "title": "Me",
-                        "fullname": "Tim Tester",
-                        "email": "tim@example.com", "phone": "+49 30 1",
+                        "fullname": "Ada Tester",
+                        "email": "ada@example.com", "phone": "+49 30 1",
                         "street": "Teststr. 5", "city": "Berlin",
                         "zip": "10115", "country": "Germany"})
 shop = page("/checkout")
@@ -531,7 +531,7 @@ check("the address goes in", win.fill_identity(ident["id"], view=shop,
 H.wait_for(lambda: filled, 5000)
 check("...several boxes of it", filled and filled[0] >= 6, filled)
 check("the e-mail box got the e-mail",
-      val(shop, "mail") == "tim@example.com", val(shop, "mail"))
+      val(shop, "mail") == "ada@example.com", val(shop, "mail"))
 check("the postcode box got the postcode", val(shop, "zip") == "10115")
 check("the city box got the city, not the street",
       val(shop, "city") == "Berlin", val(shop, "city"))
@@ -543,7 +543,7 @@ check("...and no password box was touched",
       == 0)
 mycard = vault.add_item({"type": "card", "title": "My card",
                          "number": "4111111111111111", "expiry": "08/28",
-                         "cvv": "999", "cardholder": "Tim Tester"})
+                         "cvv": "999", "cardholder": "Ada Tester"})
 done = []
 check("the card goes in, with the security number asked for",
       win.fill_card(mycard["id"], view=shop, cvv="321",
@@ -608,7 +608,7 @@ check("three is the fewest it will make",
       win.passphrase(1, "en").count("-") == 2)
 
 print("\n(18) the one-time code")
-login = vault.get("github.com", "tim")
+login = vault.get("github.com", "ada")
 codepage = page("/otpcode")
 showing = vault.totp_view(login["id"]) or {}
 check("the vault has a code to show", len(str(showing.get("code", ""))) == 6,
@@ -655,10 +655,10 @@ check("with nothing saved for that host it says so",
       win.fill_login_now(view=bare) is False)
 site = page("/login")
 host = B.PasswordVault.normalize_host(QUrl(srv.url("/login")).host())
-vault.set_entry(host, "http", "tim@example.com", "local-password")
+vault.set_entry(host, "http", "ada@example.com", "local-password")
 check("with something saved it fills", win.fill_login_now(view=site) is True)
-H.wait_for(lambda: val(site, "u") == "tim@example.com", 5000)
-check("...the username box", val(site, "u") == "tim@example.com",
+H.wait_for(lambda: val(site, "u") == "ada@example.com", 5000)
+check("...the username box", val(site, "u") == "ada@example.com",
       val(site, "u"))
 check("...and the password box",
       val(site, "p") == "local-password", val(site, "p"))
@@ -671,7 +671,7 @@ check("...and one tied to this one is",
       win.login_in_session({"session": "main"}, view=site) is True)
 check("a login with no browser named is offered everywhere",
       win.login_in_session({}, view=site) is True)
-mine = vault.get(host, "tim@example.com")
+mine = vault.get(host, "ada@example.com")
 check("tying a login to this browser works",
       win.tie_login_to_session(mine["id"], view=site) is True)
 check("...and it says which", vault.item(mine["id"]).get("session")
@@ -757,7 +757,7 @@ print("\n(23) what he typed, kept")
 win.config["formDraftsOn"] = True
 draft = page("/checkout")
 js(draft, "document.getElementById('note').value = 'a long message'")
-js(draft, "document.getElementById('full').value = 'Tim'")
+js(draft, "document.getElementById('full').value = 'Ada'")
 kept = []
 check("the draft is kept", win.save_form_draft(view=draft,
                                                then=kept.append) is True)
@@ -905,7 +905,7 @@ check("the dialog is asked for, which it never was before this wave",
 check("...and cancelling it leaves the page unloaded",
       "you are in" not in (js(panel, "document.body.innerText") or ""),
       (js(panel, "document.body.innerText") or "")[:40])
-answers = [("tim", True), ("letmein", True)]
+answers = [("ada", True), ("letmein", True)]
 QInputDialog.getText = staticmethod(
     lambda *a, **k: answers.pop(0) if answers else ("", False))
 panel2 = auth_page()
@@ -916,11 +916,11 @@ check("typing them in loads the page",
       (js(panel2, "document.body.innerText") or "")[:40])
 check("...and it offers to save that login",
       getattr(win, "_pw_pending", None) is not None
-      and win._pw_pending.get("username") == "tim",
+      and win._pw_pending.get("username") == "ada",
       getattr(win, "_pw_pending", None))
 authhost = B.PasswordVault.normalize_host(
     QUrl(srv.url("/auth/panel", host=AUTH)).host())
-saved = vault.set_entry(authhost, "http", "tim", "letmein")
+saved = vault.set_entry(authhost, "http", "ada", "letmein")
 check("a saved login for that host exists now", saved is not None)
 asked[:] = []
 win._auth_tried = {}
@@ -934,11 +934,11 @@ check("the saved login fills the box with no dialog at all",
 # and a saved login the server refuses must not be offered for ever:
 # the engine asks again on every refusal, and three rounds of the same
 # wrong password is what "this site can't be reached" is made of
-vault.set_entry(authhost, "http", "tim", "the-wrong-one")
-vault.touch(authhost, "tim")
+vault.set_entry(authhost, "http", "ada", "the-wrong-one")
+vault.touch(authhost, "ada")
 asked[:] = []
 win._auth_tried = {}
-answers = [("tim", True), ("letmein", True)]
+answers = [("ada", True), ("letmein", True)]
 # The engine keeps http credentials for the session once they work,
 # so a second challenge for the same realm cannot be provoked from
 # here. The guard itself is what matters and it is asked directly:
@@ -973,7 +973,7 @@ where = srv.url("/auth/panel", host=AUTH)
 first = FakeAuth()
 check("the first time, the saved login goes in",
       win._http_auth(where, first) is True)
-check("...the saved one, not a typed one", first.user == "tim", first.user)
+check("...the saved one, not a typed one", first.user == "ada", first.user)
 check("...and it is noted as tried", list(win._auth_tried) == [where],
       win._auth_tried)
 check("...with no dialog", asked == [], asked)
@@ -1046,7 +1046,7 @@ check("off, nothing is asked",
       win.breach_check(then=answer.append) is False)
 win.config["breachCheck"] = True
 win.config["breachApi"] = srv.url("")
-leaky = vault.set_entry("leaky.example", "https", "tim", LEAKED)
+leaky = vault.set_entry("leaky.example", "https", "ada", LEAKED)
 answer = []
 check("on, it asks", win.breach_check(item_id=leaky["id"],
                                       then=answer.append) is True)
@@ -1102,8 +1102,8 @@ check("it opens a tab", win.tabs.count() == tabs_before + 1)
 check("...at the well-known address",
       ".well-known/change-password" in win.current().url().toString(),
       win.current().url().toString())
-vault.set_entry("weak1.example", "https", "tim", "123456")
-vault.set_entry("weak2.example", "https", "tim", "123456")
+vault.set_entry("weak1.example", "https", "ada", "123456")
+vault.set_entry("weak2.example", "https", "ada", "123456")
 count = win.weak_logins_walk()
 check("the weak ones are opened one tab each", count >= 2, count)
 
@@ -1117,22 +1117,22 @@ check("...many boxes", done and int(done[0]) >= 10, done)
 check("the e-mail box got an obviously fake address",
       val(form, "mail") == "test@example.invalid", val(form, "mail"))
 check("...and it is not his real one",
-      val(form, "mail") != "tim@example.com")
+      val(form, "mail") != "ada@example.com")
 check("the checkbox was ticked",
       js(form, "document.getElementById('agree').checked") is True)
 check("the select moved off its first option",
       js(form, "document.getElementById('pick').selectedIndex") == 1)
-win.config["aliasEmail"] = "tim@example.com"
+win.config["aliasEmail"] = "ada@example.com"
 alias = win.email_alias("shop.example.de")
 check("a plus-address is built from the site",
-      alias == "tim+shop@example.com", alias)
+      alias == "ada+shop@example.com", alias)
 check("an address that is not one gives nothing",
       win.email_alias("shop.example.de", base="not-an-address") == "",
       win.email_alias("shop.example.de", base="not-an-address"))
 win.config["aliasEmail"] = ""
 check("...and with no address of his own, nothing",
       win.email_alias("shop.example.de") == "")
-win.config["aliasEmail"] = "tim@example.com"
+win.config["aliasEmail"] = "ada@example.com"
 js(form, "document.getElementById('mail').focus()")
 win.field_path(view=form)
 H.spin(300)
