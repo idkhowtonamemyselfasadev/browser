@@ -41,13 +41,21 @@ Two different verdicts, deliberately:
 Static: reads the nine pages and browser.py's AST. No Qt, no browser,
 no network, writes nothing. Runs from anywhere.
 """
+import argparse
 import ast
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE
+
+ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+ap.add_argument("--dir", metavar="PATH", default=None,
+                help="an edition's folder to check instead of this one "
+                     "(default: this tree)")
+ARGS = ap.parse_args()
+REPO = Path(ARGS.dir).expanduser().resolve() if ARGS.dir else HERE
+MINE = REPO == HERE
 
 # Methods the pages call that browser.py does not define, and which are
 # guarded so they fail silently rather than throwing. Each one is a
@@ -94,6 +102,17 @@ def guards(text, name):
     return any(re.search(p, text) for p in pats)
 
 
+if not REPO.is_dir() or not (REPO / "browser.py").is_file():
+    print("  FAIL no browser.py in  <%s>" % REPO)
+    sys.exit(1)
+if not MINE:
+    # Pointed at another tree, so that a tree nobody may edit can still
+    # be ASKED. Nothing is copied into it and nothing is written: the
+    # answer comes back here. That is the only way to check ~/browser,
+    # which is nobody's folder by the house rules and is also where
+    # this exact bug is still live.
+    print("    (%s)" % REPO)
+
 pages = sorted(REPO.glob("*.html"))
 src = (REPO / "browser.py").read_text(encoding="utf-8")
 HAVE = bridge_methods(src)
@@ -134,14 +153,24 @@ print()
 print("(3) the methods that are missing but guarded are the known ones")
 missing = sorted(n for n in called if n not in HAVE)
 new_gaps = [n for n in missing if n not in KNOWN_GAPS]
-check("no NEW feature advertised that the browser cannot do", not new_gaps,
-      new_gaps)
-# and the pin has to stay honest in the other direction too: a name
-# listed here that is no longer missing means the feature landed and the
-# list should say so.
-stale = sorted(n for n in KNOWN_GAPS if n in HAVE or n not in called)
-check("...and the pinned list has no entries that are fixed already",
-      not stale, stale)
+if MINE:
+    check("no NEW feature advertised that the browser cannot do",
+          not new_gaps, new_gaps)
+    # and the pin has to stay honest in the other direction too: a name
+    # listed here that is no longer missing means the feature landed
+    # and the list should say so.
+    stale = sorted(n for n in KNOWN_GAPS if n in HAVE or n not in called)
+    check("...and the pinned list has no entries that are fixed already",
+          not stale, stale)
+else:
+    # The pin is upstream's list, and another edition is legitimately
+    # allowed to be behind it or ahead of it. Reporting is the useful
+    # thing there; failing on it would be this tree's opinion about
+    # somebody else's porting schedule.
+    print("       (the pinned list is upstream's; reported, not asserted)")
+    for name in new_gaps:
+        print("       NOT PINNED HERE: bridge.%s (%s)"
+              % (name, ", ".join(sorted({p for p, _g in called[name]}))))
 for name in missing:
     where = ", ".join(sorted({p for p, _g in called[name]}))
     print("       known gap: bridge.%s (%s) -- %s"
