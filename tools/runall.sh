@@ -36,7 +36,7 @@ run() {
 # there", "does any colour this file asks for exist". A broken one of
 # those is worth knowing before the hour of browser boots below, not
 # after it.
-for t in test_bridgecalls.py test_themetokens.py test_uistrings.py \
+for t in test_bridgecalls.py test_themetokens.py test_uistrings.py test_idn.py \
          test_updatecheck.py test_downloaddir.py; do
   [ -f "$t" ] || continue
   run "$t" "$t"

@@ -1809,14 +1809,25 @@ def pretty_url(text, hide_scheme=False, decode=True):
         if url.isValid() and url.host():
             shown = url.toString(QUrl.ComponentFormattingOption
                                  .DecodeReserved)
-            # the host in its own letters: QUrl keeps punycode in
-            # toString, and the point of showing it decoded is that
-            # xn--pple-43d.com is not apple.com
+            # The host in letters a person can check -- which is
+            # NOT always its own letters.
+            #
+            # What was here before: a branch that decoded the host if
+            # it started with "xn--", with a comment saying QUrl keeps
+            # punycode in toString. Both halves were wrong. QUrl.host()
+            # has already decoded the IDN, so the test never once
+            # matched and the branch never ran; and the reasoning was
+            # backwards -- decoded, xn--pple-43d.com reads AS
+            # apple.com. Punycode is not the problem it was guarding
+            # against, punycode is the warning. Qt had been decoding
+            # the whole time and nothing was deciding whether it
+            # should.
             host = url.host()
-            if host.startswith("xn--") or ".xn--" in host:
-                pretty_host = url.host(QUrl.ComponentFormattingOption
-                                       .FullyDecoded)
-                shown = shown.replace(host, pretty_host, 1)
+            if host and not idn_safe_to_show(host):
+                shown = shown.replace(
+                    host,
+                    url.host(QUrl.ComponentFormattingOption
+                             .EncodeUnicode), 1)
             out = shown
         else:
             out = QUrl.fromPercentEncoding(text.encode())
@@ -1825,6 +1836,73 @@ def pretty_url(text, hide_scheme=False, decode=True):
         out = re.sub(r"^(https?://)?www\.", lambda m: m.group(1) or "",
                      out)
     return out
+
+
+#: Scripts a label may be written in. Anything outside this set is
+#: left alone: the point is to catch a name pretending to be Latin,
+#: not to have an opinion about writing systems the browser has never
+#: been asked about.
+KNOWN_SCRIPTS = ("LATIN", "CYRILLIC", "GREEK", "ARMENIAN", "HEBREW",
+                 "ARABIC")
+
+
+def idn_safe_to_show(host):
+    """Whether this host may be shown in its own letters.
+
+    The address bar is the only place a person can check who they are
+    actually talking to, so it is the one piece of chrome where
+    "looks right" IS the attack:
+
+        xn--pypal-4ve.com   decodes to   pаypal.com   (Cyrillic a)
+        xn--pple-43d.com    decodes to   аpple.com
+        xn--gogle-3nd.com   decodes to   g̵ogle.com  (a stroked g)
+
+    No font and no reader tells those from the real thing. Punycode is
+    ugly and unreadable and that is exactly its value here: it is the
+    form that cannot lie.
+
+    So, per label, and conservative in both directions because a rule
+    that breaks real names gets switched off:
+
+      more than one script in one label  ->  not safe.  pаypal is
+          Latin and Cyrillic at once, and no real name is.
+      a combining mark on a Latin label  ->  not safe.  Latin IDNs
+          arrive precomposed -- the u-umlaut in muenchen is one
+          character, category Ll -- so a Latin label carrying a
+          separate combining mark is doing something a real one does
+          not. Scripts that genuinely compose, like Arabic or
+          Devanagari, are not Latin and are not touched by this.
+      anything else                      ->  safe, show the letters.
+
+    münchen.de, bücher.de, the Chinese and the Russian names all stay
+    readable. What is NOT caught, and is pinned rather than pretended
+    about: a label confusable while being entirely ONE script --
+    xn--80ak6aa92e.com is five Cyrillic letters reading "apple" and
+    mixes nothing. Deciding that needs to know which alphabets the
+    person actually reads, which is a policy for four editions to
+    agree, not a default to invent inside one function. See
+    test_idn.py.
+    """
+    for label in str(host or "").strip(".").split("."):
+        scripts = set()
+        combining = False
+        for letter in label:
+            if letter.isdigit() or letter in "-_":
+                continue
+            if unicodedata.category(letter) == "Mn":
+                combining = True
+                continue
+            try:
+                name = unicodedata.name(letter).split()[0]
+            except ValueError:
+                continue
+            if name in KNOWN_SCRIPTS:
+                scripts.add(name)
+        if len(scripts) > 1:
+            return False
+        if combining and scripts <= {"LATIN"}:
+            return False
+    return True
 
 
 def lookalike_warning(host):
