@@ -57,7 +57,15 @@ def js(page, code):
                        lambda r: (box.update({"v": r}), loop.quit()))
     QTimer.singleShot(8000, loop.quit)
     loop.exec()
-    return box.get("v")
+    if "v" not in box:
+        # A timeout is not a value: returning box.get("v") here
+        # answered None for both "the page said null" and "the page
+        # never answered", and a caller writing `(js(...) or 0) >= 200`
+        # then read silence as a confident zero. See tests/harness.py.
+        raise AssertionError(
+            "js() timed out, so the answer is not a measurement: %s"
+            % str(code)[:120])
+    return box["v"]
 
 
 # an empty config: a first run, nothing chosen, no setupDone anywhere

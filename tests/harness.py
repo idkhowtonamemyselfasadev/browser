@@ -283,8 +283,47 @@ def wait_for(fn, timeout=8000, step=50):
     return False
 
 
+#: how long js() waits for the page before it gives up and says so
+JS_TIMEOUT_MS = 5000
+
+
 def js(view, code, world=None):
-    """Run JS and return the value (blocking)."""
+    """Run JS and return the value (blocking).
+
+    A TIMEOUT IS NOT A VALUE, and this used to answer `None` for both
+    "the page said null" and "the page never answered". Those are not
+    the same thing, and a suite cannot tell them apart afterwards:
+
+        check("...and the page is near where it was",
+              (js("window.scrollY|0", MAIN) or 0) >= 200,
+              js("window.scrollY|0", MAIN))
+
+    `or 0` turns "I never heard back" into a confident zero. Five runs
+    of exactly that line on a quiet machine, reported by
+    browser-windows:
+
+        run 3  FAIL  ...and the page is near where it was  <240>
+        run 5  ok    ...and the page is near where it was  <0>
+
+    Two verdicts out of five contradicting the evidence printed beside
+    them, in opposite directions. Run 5 is the one that matters: a red
+    check that is wrong gets investigated, and **a green check that
+    proves nothing is never looked at again**.
+
+    There are 495 check() verdicts across these suites whose condition
+    reads a js() value, 77 of them coercing with `or`. Every one was
+    free to treat silence as a measurement.
+
+    So silence raises. A suite that dies saying "js() timed out" is
+    telling the truth; one that says "ok, scroll was 0" is not.
+
+    Note what this does NOT fix. The example above asks the page twice
+    -- once for the condition and once for the detail -- and the value
+    can change between them, which is why run 3 failed while printing
+    240. That is a caller bug and it needs the caller to measure once
+    and assert on the thing it measured. Raising here only stops
+    silence being mistaken for data.
+    """
     box = {}
     loop = QEventLoop()
 
@@ -295,9 +334,13 @@ def js(view, code, world=None):
         view.page().runJavaScript(code, done)
     else:
         view.page().runJavaScript(code, world, done)
-    QTimer.singleShot(5000, loop.quit)
+    QTimer.singleShot(JS_TIMEOUT_MS, loop.quit)
     loop.exec()
-    return box.get("v")
+    if "v" not in box:
+        raise AssertionError(
+            "js() timed out after %d ms, so the answer below is not a "
+            "measurement: %s" % (JS_TIMEOUT_MS, str(code)[:120]))
+    return box["v"]
 
 
 def load(view, url):

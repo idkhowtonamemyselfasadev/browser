@@ -1,5 +1,79 @@
 # Changelog
 
+## 2026-10-29 — a test that passed while proving nothing, and the bug it was hiding
+
+`tests/harness.py`'s `js()` answered `None` for both "the page said
+null" and "the page never answered". Those are not the same thing and
+no caller could tell them apart:
+
+    check("...and the page is near where it was",
+          (js("window.scrollY|0", MAIN) or 0) >= 200,
+          js("window.scrollY|0", MAIN))
+
+`or 0` turns silence into a confident zero. Five runs of that exact
+line on a quiet machine, from browser-windows:
+
+    run 3  FAIL  ...and the page is near where it was  <240>
+    run 5  ok    ...and the page is near where it was  <0>
+
+Two verdicts out of five contradicting the evidence printed beside
+them, in opposite directions. **Run 5 is the one that matters.** A red
+check that is wrong gets investigated; a green check that proves
+nothing is never looked at again.
+
+Measured here: **64 suites call `js()`, 1214 call sites, 495 `check()`
+verdicts whose condition reads a `js()` value, 77 of them coercing with
+`or`.** Every one was free to treat silence as data.
+
+A timeout is not a value, so it raises now. A suite that dies saying
+"js() timed out" is telling the truth; one that says "ok, scroll was 0"
+is not.
+
+Thirty-nine suites define their own `js()`, which sounded like
+thirty-nine fixes and was eight. Twenty-five are thin wrappers that
+delegate to the harness and were fixed by fixing it. Five already
+returned a `"<timeout>"` sentinel — allowed, because `"<timeout>" >=
+200` raises `TypeError` in Python 3, which fails loudly, and loudly is
+the whole requirement. Two hand their answer to a callback and never
+return one. That left **seven** with the silent `return box.get("v")`.
+
+`test_jssilence.py` keeps it shut: every `def js(` in every test file
+must delegate, raise, or return a sentinel. `None` is not allowed,
+because `None` compares and coerces quietly.
+
+**What raising does not fix, and this is the larger half.** The example
+above asks the page twice — once for the condition, once for the detail
+— and the value can change between them. Nothing times out; both
+answers are real, they just come from different instants. **243
+verdicts in this tree ask the page more than once inside one
+`check()`.** Only measuring once fixes those.
+
+**And fixing the first one found a real bug.** With the verdict and its
+evidence finally taken from the same moment, `test_perf2` stopped
+contradicting itself and started honestly failing about half the time
+— which is what it had been quietly doing all along.
+
+`soft_reload` puts the scroll position back on `loadFinished`, and
+`loadFinished` fires before the document necessarily has its full
+height. `window.scrollTo(0, 240)` on a page that is momentarily 300
+pixels tall silently clamps to 0, and the reader's place is gone with
+nothing to say so. It retries on `requestAnimationFrame` now, bounded
+at twenty frames and stopping the moment it sticks. Six runs out of six
+at 240 afterwards, against two failures in four before.
+
+So the honest summary of the day's green numbers: they had an unknown
+error bar, and this is why. The suites re-run clean here — 27 of 28 of
+the most `js()`-heavy ones with zero timeouts, the twenty-eighth being
+the one that was right to fail.
+
+**`watch_pressure` refuses the half it cannot do.** Gating the Settings
+switch on `pressureAvailable` was half the job; a config set by hand or
+ported in reaches `watch_pressure` directly, and it started its
+ten-second timer whatever the machine could answer. The same tick also
+enforces the memory budget, and *that* works anywhere — so the refusal
+keeps that half alive and the message points at it. A capability test,
+not a platform one: a Linux kernel built without PSI lands here too.
+
 ## 2026-10-29 — five pages you closed, still holding five renderers
 
 `Browser._panes` caches the browser's own pages so reopening Settings

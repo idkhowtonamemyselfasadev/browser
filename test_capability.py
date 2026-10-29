@@ -132,6 +132,45 @@ finally:
 check("and this machine, which has one, answers yes",
       win.pressure_available() is True, win.pressure_available())
 
+print()
+print("(5) the mechanism refuses too, not only the control")
+# Gating the switch in Settings is half the job. A config set by hand,
+# or ported in from another edition, reaches watch_pressure directly --
+# and it used to start its ten-second timer whatever the machine could
+# answer, so `some` stayed 0.0, the threshold never fired, and the
+# browser watched nothing while the feature looked on.
+#
+# Half-dead rather than fully, which is why it was easy to miss: the
+# same tick enforces the memory budget, and that works anywhere. So the
+# refusal has to keep that half alive.
+win.watch_pressure(False)
+check("with a counter, it starts", win.watch_pressure(True) is True)
+win.watch_pressure(False)
+real = win.memory_pressure
+try:
+    win.memory_pressure = lambda: {}
+    win._have_pressure = None
+    win.config["memoryBudget"] = 0
+    check("without one and with no budget, it refuses",
+          win.watch_pressure(True) is False)
+    win.config["memoryBudget"] = 2048
+    win._have_pressure = None
+    check("...but a memory budget still runs, because that half works",
+          win.watch_pressure(True) is True)
+    win.watch_pressure(False)
+finally:
+    win.memory_pressure = real
+    win._have_pressure = None
+    win.config["memoryBudget"] = 0
+check("and it says why, in both languages",
+      B.UI_STRINGS["en"].get("pressureNoPsi")
+      and B.UI_STRINGS["de"].get("pressureNoPsi")
+      and B.UI_STRINGS["en"]["pressureNoPsi"]
+      != B.UI_STRINGS["de"]["pressureNoPsi"])
+check("...pointing at the thing that does work here",
+      "budget" in B.UI_STRINGS["en"]["pressureNoPsi"].lower(),
+      B.UI_STRINGS["en"]["pressureNoPsi"][:50])
+
 print("\n%d checks failed" % len(fails))
 sys.stdout.flush()
 os._exit(1 if fails else 0)

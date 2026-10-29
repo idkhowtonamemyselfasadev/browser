@@ -277,15 +277,36 @@ js("document.getElementById('typed').value = 'half a sentence'", MAIN)
 js("window.scrollTo(0, 240)", MAIN)
 H.spin(300)
 check("a soft reload runs", win.soft_reload(view=view) is True)
+# MEASURED ONCE, both of these. They used to ask the page for the
+# condition and ask it AGAIN for the detail -- three round trips for
+# the first check, two for the second -- and after a soft reload the
+# page is still settling, so the verdict and the number printed beside
+# it came from two different moments and were free to disagree.
+#
+# browser-windows caught this line printing
+#
+#     run 3  FAIL  ...and the page is near where it was  <240>
+#     run 5  ok    ...and the page is near where it was  <0>
+#
+# on five runs of identical code: 240 passes a >= 200 test and 0 does
+# not, so both verdicts contradict their own evidence, in opposite
+# directions. Run 5 is the one that matters -- a red check that is
+# wrong gets investigated, and a green check that proves nothing never
+# gets looked at again.
+#
+# tests/harness.py now raises rather than answering None when the page
+# does not reply, which stops silence being read as a measurement. It
+# does NOT fix this, because nothing here timed out: the answers were
+# real, they just came from different instants. Only asking once does.
 H.wait_for(lambda: js("document.getElementById('typed').value", MAIN)
            == "half a sentence", 8000)
+typed = js("document.getElementById('typed').value", MAIN)
 check("...and what was typed is still there",
-      js("document.getElementById('typed').value", MAIN)
-      == "half a sentence",
-      js("document.getElementById('typed').value", MAIN))
-check("...and the page is near where it was",
-      (js("window.scrollY|0", MAIN) or 0) >= 200,
-      js("window.scrollY|0", MAIN))
+      typed == "half a sentence", typed)
+H.wait_for(lambda: (js("window.scrollY|0", MAIN) or 0) >= 200, 8000)
+scrolled = js("window.scrollY|0", MAIN)
+check("...and the page is near where it was", (scrolled or 0) >= 200,
+      scrolled)
 
 print("\n(8) the engine's own knobs")
 check("the cache size can be set", win.set_cache_size(128) == 128)
