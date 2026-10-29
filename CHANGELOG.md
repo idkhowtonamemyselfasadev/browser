@@ -1,5 +1,73 @@
 # Changelog
 
+## 2026-10-29 — a tab that woke up and went on looking asleep
+
+`sleep_tab`'s own docstring says a discarded page "wakes by itself when
+the tab is looked at again". Nothing was listening for that. `_asleep`
+was set when the tab was put to sleep and cleared only by putting it
+back by hand, so after the first sleep it stayed True for ever — and
+both the tab strip and the sidebar draw a dimming veil and a mark from
+that flag. A tab that was awake, loaded and scrolled where you left it
+went on being drawn as asleep.
+
+The flag is a claim about the page, so the page is what makes it now:
+`lifecycleStateChanged` sets it, anything that is not Active is asleep
+and Active is awake, and the strip and the rail are both told.
+
+Found by writing the test, not by reading the code — and the first
+version of that test reported the wrong thing entirely.
+
+**On measuring this at all.** The first scroll check said "back at the
+top", confidently and wrongly. `tests/harness.py`'s `js()` takes an
+*expression*; the code handed to it had a `return` in it; the
+`SyntaxError` came back as `None`; and `None` reads exactly like a
+scroll position of zero. `js()` answering `None` for both "the page
+said null" and "that did not run" is a real sharp edge sitting under
+all 92 suites here. Every check in `test_sleep.py` therefore asserts
+its own fixture first: if the page did not scroll, nothing after it is
+evidence.
+
+**What the measurement actually found, once it was honest:** a
+sleeping tab *does* keep its place. scrollY 4000 before, 4000 after,
+`readyState` complete. browser-android had to add a saved scroll
+position to get that back after their own sleep work; Qt's `Discarded`
+lifecycle gives it here for nothing, so there is nothing to port.
+
+**And the memory it keeps is not a leak.** The main process holds about
+1.2 MB per tab that has been opened, and closing the tabs does not give
+it back — which looks alarming and is not. Opening and closing twenty
+tabs three times over costs **+16.8 MB, then +0.6, then +0.1**: the
+first round's memory is kept and reused. That is an allocator holding
+freed pages, not something to chase. The round-trip is the test that
+tells the two apart, and it is worth running before anyone spends a day
+on the first number.
+
+**Three functions with no caller at all**, found by sweeping for the
+mirror of `test_bridgecalls`: not a name that is called and does not
+exist, but a thing that exists, is documented, and nothing calls.
+
+- `https_fallback` — "The secure address did not answer. Ask once, and
+  only then go to the insecure one — which is the whole difference
+  between https-only and https-mostly." `httpsOnly` sets
+  `_upgraded_from` on the view and **the only code that reads it is
+  this dead function**. So that difference does not currently exist.
+  Named here rather than wired up at the end of a long day: where the
+  call belongs is a judgement about the failure path, and a
+  security-adjacent change deserves its own look.
+- `recover_crashed_tab` — a complete, correct, dead twin of
+  `_render_gone`, which is the one actually connected to
+  `renderProcessTerminated`. Crash recovery works. The hazard is that a
+  future fix lands in the wrong one of the two, which is exactly how
+  browser-android lost a memory cap: the policy object was correct, and
+  nothing was calling it.
+- `step_sleeping` — history stepping for a sleeping tab, with no road
+  to it from anywhere.
+
+The sweep itself is **not** shipped as a suite. It returns 26 with no
+caller, of which a spot check of five found four real and one false
+positive, and triaging the remaining twenty-one honestly is reading
+work rather than something to assert blind.
+
 ## 2026-10-29 — what the browser actually costs, measured
 
 Nobody had measured it. "Does not eat RAM" was a claim in the same

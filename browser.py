@@ -22279,6 +22279,16 @@ class Browser(QMainWindow):
         # unclickable tab forever; recover it rather than leave a ghost
         view.page().renderProcessTerminated.connect(
             lambda status, code, v=view: self._render_gone(v, status, code))
+        # A discarded page wakes BY ITSELF when the tab is looked at
+        # again -- sleep_tab's own docstring says so -- and nothing was
+        # listening, so `_asleep` stayed True for ever after the first
+        # sleep. The strip and the sidebar both draw a dimming veil and
+        # a mark from that flag, so a tab that was awake and loaded went
+        # on being shown as asleep until it was slept and woken by hand.
+        # The flag is a claim about the page; let the page be the one
+        # that makes it.
+        view.page().lifecycleStateChanged.connect(
+            lambda state, v=view: self._lifecycle_changed(v, state))
         # whether a load is in flight, which is how a server redirect's
         # second urlChanged is told apart from a hash router moving the
         # address with no navigation at all (see _blank_settled)
@@ -29026,7 +29036,28 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         view._asleep = bool(on)
         self.tabs.tabBar().update()
+        self._sidebar_moved()
         return True
+
+    def _lifecycle_changed(self, view, state):
+        """Qt moved a page between Active, Frozen and Discarded.
+
+        The only thing that has to happen here is that what is drawn
+        agrees with what is true: anything that is not Active is asleep
+        as far as the strip and the rail are concerned, and Active is
+        awake."""
+        try:
+            asleep = state != QWebEnginePage.LifecycleState.Active
+        except (AttributeError, RuntimeError):
+            return
+        if bool(getattr(view, "_asleep", False)) == asleep:
+            return
+        view._asleep = asleep
+        try:
+            self.tabs.tabBar().update()
+        except RuntimeError:
+            return
+        self._sidebar_moved()
 
     def sleeping_tabs(self):
         out = []
