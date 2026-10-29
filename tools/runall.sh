@@ -21,6 +21,19 @@ OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 bad=""
 
+missing=""
+
+# A name in a list below with no file behind it used to be skipped by a
+# bare `|| continue`, which says nothing. That is how a suite can be on
+# disk, in the port set, and never run: test_offpalette, test_barmarks
+# and test_barmargins were all in that state on 2026-10-29, found by
+# browser-mac-8f on their own tree. Skipping is still right -- an
+# edition need not carry every suite -- but it is reported at the end
+# so the next one is visible instead of silent.
+skip() {
+  missing="$missing $1"
+}
+
 run() {
   echo "=== $1 ==="
   timeout 900 python "$1" > "$OUT/log" 2>&1
@@ -37,10 +50,10 @@ run() {
 # those is worth knowing before the hour of browser boots below, not
 # after it.
 for t in test_bridgecalls.py test_themetokens.py test_uistrings.py test_idn.py \
-         test_jssilence.py \
+         test_jssilence.py test_offpalette.py test_barmarks.py \
          test_capability.py \
          test_updatecheck.py test_downloaddir.py; do
-  [ -f "$t" ] || continue
+  [ -f "$t" ] || { skip "$t"; continue; }
   run "$t" "$t"
 done
 
@@ -67,8 +80,8 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_perf.py test_sitelook.py test_winbranch.py \
          test_histrender.py test_histicon.py test_sidebar.py \
          test_daystep.py test_paintcontrast.py test_palette.py \
-         test_sleep.py test_panecache.py; do
-  [ -f "$t" ] || continue
+         test_sleep.py test_panecache.py test_barmargins.py; do
+  [ -f "$t" ] || { skip "$t"; continue; }
   run "$t" "$t"
 done
 
@@ -76,7 +89,7 @@ cd "$R/tests" || exit 1
 for t in test_twostep.py test_round3.py test_msaccounts.py test_identbox.py \
          test_subdomain.py test_acctpick.py test_private.py \
          test_masterlock.py test_masterwizard.py; do
-  [ -f "$t" ] || continue
+  [ -f "$t" ] || { skip "tests/$t"; continue; }
   run "$t" "tests/$t"
 done
 
@@ -87,6 +100,23 @@ rc=$?
 tail -4 "$OUT/log"
 echo "exit=$rc"
 [ "$rc" -eq 0 ] || bad="$bad invariants"
+
+if [ -n "$missing" ]; then
+  echo "NOT RUN (named here, no file):$missing"
+fi
+# and the other direction: a suite on disk that no list names. That is
+# the one that bit -- a guard nobody runs is a guard that is not there.
+unlisted=""
+for f in test_*.py; do
+  grep -q "$f" "$0" || unlisted="$unlisted $f"
+done
+for f in tests/test_*.py; do
+  grep -q "$(basename "$f")" "$0" || unlisted="$unlisted $f"
+done
+if [ -n "$unlisted" ]; then
+  echo "ON DISK BUT IN NO LIST:$unlisted"
+  bad="$bad unlisted-suites"
+fi
 
 if [ -n "$bad" ]; then
   echo "FAILED:$bad"
