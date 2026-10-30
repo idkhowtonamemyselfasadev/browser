@@ -1,0 +1,23 @@
+# Maintainer: Browser <noreply@users.noreply.github.com>
+pkgname=browser
+pkgver=1.0.88
+pkgrel=1
+pkgdesc="Minimal island-styled web browser"
+arch=('any')
+url="https://github.com/idkhowtonamemyselfasadev/browser"
+license=('MIT')
+depends=('python' 'python-pyqt6-webengine')
+source=("https://idkhowtonamemyselfasadev.github.io/browser/arch/browser-${pkgver}.tar")
+sha256sums=('f22ffb1e91fef60d4d504f2e6644b722e4793308dacd844e98618d9af09d04db')
+
+package() {
+  install -d "$pkgdir/usr/share/browser"
+  cp -a "$srcdir/browser-$pkgver/." "$pkgdir/usr/share/browser/"
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/browser" <<'SH'
+#!/bin/sh
+exec python3 /usr/share/browser/browser.py "$@"
+SH
+  install -Dm644 "$pkgdir/usr/share/browser/browser.desktop" "$pkgdir/usr/share/applications/browser.desktop"
+  install -Dm644 "$pkgdir/usr/share/browser/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/browser.svg"
+  rm -f "$pkgdir/usr/share/browser/browser.desktop"
+}

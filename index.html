@@ -1,8 +1,21 @@
 <!doctype html><meta charset=utf-8><title>Browser - install</title>
-<style>body{font:16px/1.6 system-ui;max-width:40em;margin:3em auto;padding:0 1em}code,pre{background:#f4f1ea;padding:.1em .3em;border-radius:4px}pre{padding:1em;overflow:auto}</style>
+<style>body{font:16px/1.6 system-ui;max-width:42em;margin:3em auto;padding:0 1em}code,pre{background:#f4f1ea;padding:.1em .3em;border-radius:4px}pre{padding:1em;overflow:auto}h2{margin-top:1.6em}</style>
 <h1>Browser</h1>
-<p>Fedora / RHEL / any dnf distro. Two commands, once:</p>
+<p>Pick your distro. Each is a one-time repo add, then install by name.</p>
+
+<h2>Fedora / RHEL / openSUSE (dnf, zypper)</h2>
 <pre>sudo curl -o /etc/yum.repos.d/browser.repo https://idkhowtonamemyselfasadev.github.io/browser/browser.repo
-sudo dnf install browser</pre>
-<p>After that: <code>sudo dnf upgrade</code> keeps it current. dnf pulls the Qt engine
-(<code>python3-pyqt6-webengine</code>) itself. The package is unsigned, so dnf asks you to confirm the repo once.</p>
+sudo dnf install browser        # openSUSE: sudo zypper install browser</pre>
+
+<h2>Ubuntu / Debian / Mint (apt)</h2>
+<pre>echo "deb [trusted=yes] https://idkhowtonamemyselfasadev.github.io/browser/apt ./" | sudo tee /etc/apt/sources.list.d/browser.list
+sudo apt update
+sudo apt install browser</pre>
+
+<h2>Arch / Manjaro</h2>
+<pre>curl -O https://idkhowtonamemyselfasadev.github.io/browser/arch/PKGBUILD
+makepkg -si</pre>
+
+<p>After that: your usual upgrade command keeps it current
+(<code>dnf upgrade</code> / <code>apt upgrade</code>). dnf and apt pull the Qt engine for you.
+Packages are unsigned, so the package manager asks you to trust the repo once.</p>

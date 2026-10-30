@@ -1,0 +1,17 @@
+Package: browser
+Version: 1.0.88
+Architecture: all
+Maintainer: Browser <noreply@users.noreply.github.com>
+Installed-Size: 5508
+Depends: python3, python3-pyqt6.qtwebengine
+Filename: ./browser_1.0.88_all.deb
+Size: 2292730
+MD5sum: 4a7dbd5fabb167b785c9c8ecaff0a5d7
+SHA1: 2b4eb195d43b82357055b81d60dfbafde51023b0
+SHA256: baf58181fd67e13cedfd6ae5a8fe1f0ca88cbd3f4de3f8b3d305765360d35d65
+Section: web
+Priority: optional
+Description: Minimal island-styled web browser
+ A minimal, themeable web browser built on PyQt6 WebEngine. The Qt
+ WebEngine dependency is resolved by apt.
+
