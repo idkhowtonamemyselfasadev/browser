@@ -1,0 +1,5 @@
+[browser]
+name=Browser
+baseurl=https://idkhowtonamemyselfasadev.github.io/browser/
+enabled=1
+gpgcheck=0
