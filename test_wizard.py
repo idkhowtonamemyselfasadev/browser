@@ -99,8 +99,8 @@ check("setup opens by itself on a first run", S.get("open") is True)
 # spelled out rather than read from wizPages() on purpose: this check
 # exists to notice when a page appears or disappears, and one that
 # asked the wizard how many pages it has could never notice anything.
-check("nine steps", S.get("steps") == 9, S.get("steps"))
-check("the counter says so too", S.get("stepno") == "Step 1 of 9",
+check("fourteen steps", S.get("steps") == 14, S.get("steps"))
+check("the counter says so too", S.get("stepno") == "Step 1 of 14",
       S.get("stepno"))
 check("Colours is the second rail entry",
       (S.get("rail") or [None, None])[1] == "Colours", S.get("rail"))
@@ -254,7 +254,7 @@ held = json.loads(js(page, """
   });
 """) or "{}")
 check("Next does not carry him off the step it was refused on",
-      held.get("step") == "Step 4 of 9", held.get("step"))
+      held.get("step") == "Step 4 of 14", held.get("step"))
 check("he is told, on the page the box is on",
       held.get("onStep") is True and held.get("bad") is True,
       held.get("msg"))
@@ -268,7 +268,7 @@ js(page, 'document.getElementById("wiznext").click(); return 1;')
 spin(900)
 check("pressing Next again goes - he is held once, not stuck",
       js(page, 'return document.getElementById("wizstepno").textContent;')
-      == "Step 5 of 9",
+      == "Step 5 of 14",
       js(page, 'return document.getElementById("wizstepno").textContent;'))
 
 # and an address the browser accepts still leaves in one press
@@ -284,7 +284,7 @@ js(page, """
 spin(1400)
 check("an address it accepts does not hold him up at all",
       js(page, 'return document.getElementById("wizstepno").textContent;')
-      == "Step 5 of 9",
+      == "Step 5 of 14",
       js(page, 'return document.getElementById("wizstepno").textContent;'))
 check("and it was written on the way past",
       win.config.get("startUrl") == "posteo.de", win.config.get("startUrl"))
@@ -382,9 +382,9 @@ walk = js(p3, """
   });
 """)
 W = json.loads(walk or "{}")
-check("every one of the nine pages built something",
+check("every one of the fourteen pages built something",
       all(n > 0 for n in (W.get("seen") or []))
-      and len(W.get("seen") or []) == W.get("total") == 9,
+      and len(W.get("seen") or []) == W.get("total") == 14,
       (W.get("seen"), W.get("total")))
 check("Finish closes setup", W.get("open") is False)
 check("and marks it done", W.get("done") == "1", W.get("done"))

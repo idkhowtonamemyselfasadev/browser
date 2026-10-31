@@ -1951,6 +1951,68 @@
     box.appendChild(el("div", "whint", STR.wizZoomHint));
   }
 
+  // ---- tabs & windows: how tabs open, close and come back ----
+  function pgTabs(box) {
+    box.appendChild(switchRow("crashRecovery", STR.crashRecoveryName,
+                              STR.crashRecoveryHint, true));
+    box.appendChild(switchRow("childNextToParent", STR.childNextName,
+                              STR.childNextHint, true));
+    box.appendChild(switchRow("backClosesTab", STR.backClosesName,
+                              STR.backClosesHint, false));
+    box.appendChild(switchRow("unreadBadge", STR.unreadBadgeName,
+                              STR.unreadBadgeHint, true));
+    box.appendChild(switchRow("tabCount", STR.tabCountName,
+                              STR.tabCountHint, false));
+  }
+
+  // ---- the address bar: what it suggests and where it sits ----
+  function pgBar(box) {
+    box.appendChild(switchRow("searchSuggestions", STR.searchSuggest,
+                              STR.searchSuggestHint, true));
+    box.appendChild(switchRow("barProgress", STR.barProgressName,
+                              STR.barProgressHint, true));
+    box.appendChild(switchRow("barDimPath", STR.barDimPathName,
+                              STR.barDimPathHint, true));
+    box.appendChild(switchRow("barBottom", STR.barBottomName,
+                              STR.barBottomHint, false));
+  }
+
+  // ---- video & sound: how pages may play, and the media keys ----
+  function pgMedia(box) {
+    box.appendChild(switchRow("blockAutoplay", STR.blockAutoplay,
+                              STR.blockAutoplayHint, false));
+    box.appendChild(switchRow("mediaResume", STR.mediaResumeName,
+                              STR.mediaResumeHint, true));
+    box.appendChild(switchRow("pauseForCalls", STR.pauseCallsName,
+                              STR.pauseCallsHint, false));
+    box.appendChild(switchRow("sponsorSkip", STR.sponsorName,
+                              STR.sponsorHint, false));
+  }
+
+  // ---- downloads: where files land and what happens to them ----
+  function pgDownloads(box) {
+    box.appendChild(switchRow("sortDownloads", STR.sortDownloadsName,
+                              STR.sortDownloadsHint, false));
+    box.appendChild(switchRow("dlScan", STR.dlScanName,
+                              STR.dlScanHint, false));
+    box.appendChild(switchRow("dlOrigin", STR.dlOriginName,
+                              STR.dlOriginHint, false));
+  }
+
+  // ---- tools & panels: the extras beside the page ----
+  function pgTools(box) {
+    box.appendChild(switchRow("clipHistory", STR.clipHistoryName,
+                              STR.clipHistoryHint, false));
+    box.appendChild(switchRow("desktopNotify", STR.desktopNotifyName,
+                              STR.desktopNotifyHint, true));
+    box.appendChild(switchRow("linkPreview", STR.linkPreviewName,
+                              STR.linkPreviewHint, false));
+    box.appendChild(switchRow("mprisOn", STR.mprisName,
+                              STR.mprisHint, false));
+    box.appendChild(switchRow("smoothScroll", STR.smoothScroll,
+                              STR.smoothScrollHint, true));
+  }
+
   // ---- page 5: privacy ----
   function pgPrivacy(box) {
     box.appendChild(switchRow("history", STR.saveHistory, STR.wizHistHint, true));
@@ -2268,6 +2330,16 @@
         build: pgLook },
       { nav: STR.wizNavWeb, title: STR.wizWebT, text: STR.wizWebP,
         build: pgWeb },
+      { nav: STR.wizNavTabs, title: STR.wizTabsT, text: STR.wizTabsP,
+        build: pgTabs },
+      { nav: STR.wizNavBar, title: STR.wizBarT, text: STR.wizBarP,
+        build: pgBar },
+      { nav: STR.wizNavMedia, title: STR.wizMediaT, text: STR.wizMediaP,
+        build: pgMedia },
+      { nav: STR.wizNavDownloads, title: STR.wizDlT, text: STR.wizDlP,
+        build: pgDownloads },
+      { nav: STR.wizNavTools, title: STR.wizToolsT, text: STR.wizToolsP,
+        build: pgTools },
       { nav: STR.wizNavPrivacy, title: STR.privacy, text: STR.wizPrivP,
         build: pgPrivacy },
       { nav: STR.wizNavMaster, title: STR.wizMasterT, text: STR.wizMasterP,
