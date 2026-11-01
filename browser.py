@@ -3210,6 +3210,25 @@ YOUTUBE_JS = r"""
   if (!(h === "youtube.com" || h.endsWith(".youtube.com")
         || h.endsWith("youtube-nocookie.com"))) return;
 
+  // Some QtWebEngine builds report AV1 support but cannot actually decode it,
+  // so YouTube serves AV1 and the player stays a black rectangle. Tell YouTube
+  // we cannot do AV1 (and the older VP8) so it falls back to VP9, which this
+  // engine really does decode. Scoped to YouTube; other sites are untouched.
+  try {
+    var _ist = MediaSource.isTypeSupported.bind(MediaSource);
+    MediaSource.isTypeSupported = function (t) {
+      if (t && /av01|av1|vp8[^0-9]/i.test(t)) return false;
+      return _ist(t);
+    };
+  } catch (e) {}
+  try {
+    var _cpt = HTMLMediaElement.prototype.canPlayType;
+    HTMLMediaElement.prototype.canPlayType = function (t) {
+      if (t && /av01|av1/i.test(t)) return "";
+      return _cpt.call(this, t);
+    };
+  } catch (e) {}
+
   // Only the ad data YouTube ships inside its own player data. Removing it in
   // the page means no ad plays and nothing is blocked at the network, so the
   // "turn off your ad blocker" wall has nothing to react to. The data is
