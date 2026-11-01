@@ -68,6 +68,7 @@ def arm(every=2, last=0):
     win._lib_checking = False
     win.config["libUpdateEvery"] = every
     win.config["libUpdateLast"] = last
+    win.config["autoUpdate"] = False   # the offer path; auto has its own block
     win.save_config()
     del runs[:]
 
@@ -253,6 +254,35 @@ check("and nothing is stamped, so the offer is not lost", stamped() == 0,
 win._hide_toast()
 app.processEvents()
 
+print("\nauto updates: the library updated without asking")
+arm(every=2, last=0)
+win.config["autoUpdate"] = True
+win._check_lib_updates()
+check("auto mode still starts with the rootless check", len(runs) == 1,
+      "%d commands" % len(runs))
+runs[0][2](100, "")          # dnf: something is waiting
+app.processEvents()
+check("it puts no toast on the screen", win._toast is None)
+check("and installs it itself", len(runs) == 2, "%d commands" % len(runs))
+if len(runs) > 1:
+    program, args, _ = runs[1]
+    if sys.platform == "win32":
+        check("via pip, in this interpreter",
+              program == sys.executable and "pip" in args,
+              "%s %s" % (program, args))
+    else:
+        check("never through pkexec, which would prompt",
+              program != "pkexec", program)
+        check("but non-interactively, so it never asks for a password",
+              program == "sudo" and "-n" in args and "upgrade" in args,
+              "%s %s" % (program, args))
+before = time.time()
+runs[1][2](0, "")
+app.processEvents()
+check("and the round is stamped so it does not hammer dnf",
+      stamped() >= int(before), str(stamped()))
+check("with still nothing on the screen", win._toast is None)
+
 print("\nthe setting reaches the settings page")
 arm(every=3, last=0)
 settings = json.loads(win.bridge.getSettings())
@@ -269,6 +299,14 @@ check("wired to the same key", '"libUpdateEvery"' in page)
 for key in ("libUpdates", "libUpdatesHint", "libAvailable", "libUpdateBtn",
             "libUpdating", "libUpdated", "libFailed", "restartNow"):
     check("English has a string for " + key, key in B.UI_STRINGS["en"])
+for key in ("autoUpdates", "autoUpdatesHint"):
+    check("English has a string for " + key, key in B.UI_STRINGS["en"])
+win.config.pop("autoUpdate", None)
+check("auto updates default on when the config never set it",
+      json.loads(win.bridge.getSettings()).get("autoUpdate") is True,
+      str(json.loads(win.bridge.getSettings()).get("autoUpdate")))
+check("the page has the auto-update toggle", 'id="autoupdate"' in page)
+check("wired to the autoUpdate key", '"autoUpdate"' in page)
 
 print("\nthe timers")
 check("the harness flag leaves the automatic check unarmed",

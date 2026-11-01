@@ -3197,6 +3197,108 @@ GOOGLE_LIGHT_JS = r"""
 })();
 """
 
+
+# YouTube ships its video ads inside its own player data and, when it
+# sees an ad blocker, blocks the player after one video. Blocking the
+# ad at the network is exactly what it detects, so instead this removes
+# the ad data from the response in the page -- no ad plays, nothing is
+# "blocked", and the wall has nothing to react to. MainWorld at
+# DocumentCreation so the hooks are in before any YouTube script runs.
+YOUTUBE_JS = r"""
+(function () {
+  var h = location.hostname;
+  if (!(h === "youtube.com" || h.endsWith(".youtube.com")
+        || h.endsWith("youtube-nocookie.com"))) return;
+
+  // The ad data YouTube ships inside its own player/next/browse
+  // responses. Remove it before the player ever sees it: no ad plays,
+  // and -- because nothing is blocked at the network -- nothing trips
+  // the "turn off your ad blocker" wall either. This is the same thing
+  // uBlock Origin does on YouTube, done in the page instead of a list.
+  var AD = ["adPlacements", "playerAds", "adSlots",
+            "adBreakHeartbeatParams", "adThrottling", "adParams"];
+
+  function scrub(o, depth) {
+    if (!o || typeof o !== "object" || depth > 6) return o;
+    try {
+      for (var i = 0; i < AD.length; i++) if (AD[i] in o) delete o[AD[i]];
+      // the wall arrives as a message renderer; drop it wherever it sits
+      if (o.playerResponse) scrub(o.playerResponse, depth + 1);
+      for (var k in o) {
+        if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
+        var v = o[k];
+        if (v && typeof v === "object") scrub(v, depth + 1);
+      }
+    } catch (e) {}
+    return o;
+  }
+
+  // 1. everything the page parses
+  var _parse = JSON.parse;
+  JSON.parse = function () { return scrub(_parse.apply(this, arguments), 0); };
+
+  // 2. fetch responses -- new YouTube pulls the player over fetch
+  var _fetch = window.fetch;
+  if (_fetch) {
+    window.fetch = function () {
+      var args = arguments;
+      return _fetch.apply(this, args).then(function (res) {
+        try {
+          var u = (args[0] && args[0].url) || args[0] || "";
+          if (typeof u === "string"
+              && /\/youtubei\/v1\/(player|next|browse|reel)/.test(u)) {
+            return res.clone().text().then(function (t) {
+              var j; try { j = _parse(t); } catch (e) { return res; }
+              scrub(j, 0);
+              return new Response(JSON.stringify(j), {
+                status: res.status, statusText: res.statusText,
+                headers: res.headers });
+            });
+          }
+        } catch (e) {}
+        return res;
+      });
+    };
+  }
+
+  // 3. the inline bootstrap copy the first page load reads
+  var _ipr;
+  try {
+    Object.defineProperty(window, "ytInitialPlayerResponse", {
+      configurable: true,
+      get: function () { return _ipr; },
+      set: function (v) { _ipr = scrub(v, 0); }
+    });
+  } catch (e) {}
+
+  // 4. if a wall still slips onto the screen, take it off and keep
+  //    playing. Cheap: it only looks when the DOM actually changed.
+  function unwall() {
+    try {
+      var sel = "ytd-enforcement-message-view-model,"
+              + "ytd-popup-container tp-yt-paper-dialog";
+      var any = document.querySelector(sel);
+      if (any) {
+        document.querySelectorAll(sel).forEach(function (el) {
+          var d = el.closest("tp-yt-paper-dialog") || el;
+          d.remove();
+        });
+        document.querySelectorAll("tp-yt-iron-overlay-backdrop")
+          .forEach(function (b) { b.remove(); });
+        var v = document.querySelector("video");
+        if (v && v.paused) { try { v.play(); } catch (e) {} }
+      }
+    } catch (e) {}
+  }
+  var mo = new MutationObserver(unwall);
+  function arm() {
+    if (document.body) mo.observe(document.body, { childList: true, subtree: true });
+    else setTimeout(arm, 200);
+  }
+  arm();
+})();
+"""
+
 # The headers already say Chrome (user-agent + client hints, see
 # _make_profile). But Google's sign-in also reads window.chrome from
 # page JS: real Chrome fills it with loadTimes/csi/app, and QtWebEngine
@@ -4156,8 +4258,10 @@ UI_STRINGS = {
 "clearHistory":"Clear history","clearCookies":"Clear cookies",
 "cookiesHint":"Clear cookies logs this virtual browser out everywhere.",
 "updates":"Updates","checkUpdates":"Check for updates","setupT":"Setup",
+"autoUpdates":"Auto updates",
+"autoUpdatesHint":"Keep the browser and its web engine up to date on their own. New versions are fetched and applied in the background — the browser is never restarted for you, the update loads the next time you open it. On by default.",
 "libUpdates":"Keep the libraries up to date",
-"libUpdatesHint":"How often to look for a newer web engine (PyQt6 and QtWebEngine). Nothing is ever installed without asking.",
+"libUpdatesHint":"How often to look for a newer web engine (PyQt6 and QtWebEngine). With auto updates off, it only offers — nothing is installed without asking.",
 "libAvailable":"Library updates are available","libUpdateBtn":"Update",
 "libUpdating":"Updating libraries\u2026",
 "libUpdated":"Libraries updated \u2014 restart to load them",
@@ -4309,8 +4413,10 @@ UI_STRINGS = {
 "clearCookies":"Cookies l\u00f6schen",
 "cookiesHint":"Cookies l\u00f6schen meldet diesen virtuellen Browser \u00fcberall ab.",
 "updates":"Updates","checkUpdates":"Nach Updates suchen","setupT":"Einrichtung",
+"autoUpdates":"Automatische Updates",
+"autoUpdatesHint":"Hält den Browser und seine Web-Engine von selbst aktuell. Neue Versionen werden im Hintergrund geladen und angewendet — der Browser wird nie für dich neu gestartet, das Update lädt beim nächsten Öffnen. Standardmäßig an.",
 "libUpdates":"Bibliotheken aktuell halten",
-"libUpdatesHint":"Wie oft nach einer neueren Web-Engine (PyQt6 und QtWebEngine) gesucht wird. Installiert wird nie ohne Nachfrage.",
+"libUpdatesHint":"Wie oft nach einer neueren Web-Engine (PyQt6 und QtWebEngine) gesucht wird. Bei ausgeschalteten automatischen Updates wird nur angeboten — installiert wird nie ohne Nachfrage.",
 "libAvailable":"Updates f\u00fcr die Bibliotheken verf\u00fcgbar",
 "libUpdateBtn":"Aktualisieren",
 "libUpdating":"Bibliotheken werden aktualisiert\u2026",
@@ -9203,6 +9309,69 @@ QTabBar::tab { border-radius: 6px 6px 0 0; }
 }
 
 
+def _rgba(hexc, a):
+    """'#rrggbb' + alpha -> 'rgb(r g b / a)', for theme CSS built from a palette."""
+    h = (hexc or "#000000").lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except (ValueError, IndexError):
+        r = g = b = 0
+    return "rgb(%d %d %d / %s)" % (r, g, b, a)
+
+
+def _auto_personality(entry):
+    """A light, palette-derived personality for any theme that was not given a
+    hand-made one in _THEME_EXTRAS. Every theme gets its own character this way,
+    drawn from its OWN colours, so none stays a bare palette: a dark theme glows
+    in its accent with two faint corner tints, a light one speaks in serif over a
+    soft paper grain. Kept subtle (low alpha, a central scrim behind the column)
+    so it never hurts readability. Hand-made entries and `exact` ones take
+    precedence and never reach here."""
+    sel = ':root[data-theme="%s"]' % entry["key"]
+    bg, text, accent = entry["bg"], entry["text"], entry["accent"]
+    green = entry.get("green", accent)
+    peach = entry.get("peach", accent)
+    if entry.get("dark"):
+        css = """
+%(sel)s h1, %(sel)s h2, %(sel)s body:not(.hasbg) #clock {
+  text-shadow: 0 0 2px %(glow1)s, 0 0 16px %(glow2)s;
+  letter-spacing: .01em;
+}
+%(sel)s body:not(.hasbg) {
+  background-image:
+    radial-gradient(130%% 85%% at 50%% 44%%, rgb(0 0 0 / 0) 46%%, %(scrim)s 100%%),
+    radial-gradient(58%% 44%% at 50%% 40%%, %(bloom)s, rgb(0 0 0 / 0) 70%%),
+    radial-gradient(circle at 15%% 86%%, %(c1)s, rgb(0 0 0 / 0) 42%%),
+    radial-gradient(circle at 86%% 15%%, %(c2)s, rgb(0 0 0 / 0) 42%%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+""" % {"sel": sel, "glow1": _rgba(accent, ".5"), "glow2": _rgba(accent, ".32"),
+       "scrim": _rgba(bg, ".55"), "bloom": _rgba(accent, ".09"),
+       "c1": _rgba(green, ".07"), "c2": _rgba(peach, ".06")}
+        return {"css": css}
+    css = """
+%(sel)s h1, %(sel)s h2, %(sel)s .cname {
+  font-family: "Charter", "Bitstream Charter", "Georgia",
+               "Liberation Serif", "Times New Roman", serif !important;
+  letter-spacing: .01em;
+}
+%(sel)s body:not(.hasbg) {
+  background-image:
+    repeating-linear-gradient(%(grain)s 0 1px, rgb(0 0 0 / 0) 1px 4px),
+    radial-gradient(135%% 120%% at 50%% 42%%, rgb(0 0 0 / 0) 55%%, %(edge)s 100%%),
+    radial-gradient(60%% 50%% at 50%% 38%%, %(wash)s, rgb(0 0 0 / 0) 72%%);
+  background-repeat: repeat, no-repeat, no-repeat;
+  background-attachment: fixed;
+}
+""" % {"sel": sel, "grain": _rgba(text, ".028"),
+       "edge": _rgba(text, ".06"), "wash": _rgba(accent, ".06")}
+    return {"css": css}
+
+
+
 def _build_themes():
     themes = []
     for row in _CATALOGUE:
@@ -9214,6 +9383,11 @@ def _build_themes():
                  "peach": peach, "red": red}
         entry.update(_THEME_EXTRAS.get(key, {}))
         entry["dark"] = group != "light" and _luma(bg) < 0.5
+        if "css" not in entry and not entry.get("exact"):
+            auto = _auto_personality(entry)
+            entry["css"] = auto["css"]
+            if auto.get("qss"):
+                entry["qss"] = auto["qss"]
         themes.append(entry)
     return themes
 
@@ -13395,6 +13569,7 @@ class Bridge(QObject):
         self.browser = browser
         self._updating = None
         self._last_generated = ""
+        self._saved_changes = ""
 
     @pyqtSlot()
     def runUpdate(self):
@@ -13426,6 +13601,7 @@ class Bridge(QObject):
         if not (APP_DIR / ".git").exists():
             self._update_without_clone()
             return
+        self._saved_changes = ""
         tidy = QProcess(self)
         self._updating = tidy
         tidy.setWorkingDirectory(str(APP_DIR))
@@ -13456,6 +13632,57 @@ class Bridge(QObject):
             return r.returncode, r.stdout.strip()
         except (OSError, subprocess.SubprocessError):
             return -1, ""
+
+    def _stash_uncommitted(self):
+        """Set every uncommitted change aside into a dated subfolder, then
+        leave the tree clean, so an update can always go ahead and nothing
+        the person was working on is lost. Edited tracked files and whole
+        untracked files are copied under  saved-changes-<when>/  keeping
+        their paths; then the tracked tree is reset and the untracked files
+        are removed (never the new subfolder). Returns the subfolder name,
+        "" when there was nothing to set aside, or None when it could not be
+        done cleanly -- in which case the update must not go on."""
+        code, dirty = self._git_quick("status", "--porcelain")
+        if code != 0:
+            return None
+        if not dirty:
+            return ""
+        sub = "saved-changes-" + time.strftime("%Y%m%d-%H%M%S")
+        dest = APP_DIR / sub
+        try:
+            for line in dirty.splitlines():
+                path = line[3:]
+                if " -> " in path:              # a rename: take the new name
+                    path = path.split(" -> ", 1)[1]
+                path = path.strip().strip('"')
+                if not path or path == sub or path.startswith(sub + "/"):
+                    continue
+                src = APP_DIR / path
+                if not src.exists():            # a deletion: git still has it
+                    continue
+                out = dest / path
+                out.parent.mkdir(parents=True, exist_ok=True)
+                if src.is_dir():
+                    shutil.copytree(src, out, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src, out)
+        except OSError:
+            return None
+        # now make the tree clean, but keep the subfolder just written
+        self._git_quick("reset", "--hard", "HEAD")
+        self._git_quick("clean", "-fd", "--exclude=" + sub)
+        code, dirty = self._git_quick(
+            "status", "--porcelain", "--untracked-files=no")
+        if code != 0 or dirty:
+            return None
+        return sub
+
+    def _saved_note(self):
+        """A sentence for the success message when uncommitted work was set
+        aside first, so the person knows where to find it."""
+        sub = getattr(self, "_saved_changes", "")
+        return ((" Your uncommitted changes were moved to the “%s” "
+                 "folder in the browser folder." % sub) if sub else "")
 
     def _reset_blocker(self):
         """Why a hard reset must NOT run here, or None when it may.
@@ -13530,7 +13757,8 @@ class Bridge(QObject):
             self.updateFinished.emit(
                 "Updated! Restart the browser to finish."
                 + (" (the old version is kept as branch %s)" % backup
-                   if backup else ""))
+                   if backup else "")
+                + self._saved_note())
         else:
             last = (err.strip().splitlines() or ["unknown error"])[-1]
             self.updateFinished.emit("Update failed: " + last)
@@ -13573,6 +13801,19 @@ class Bridge(QObject):
                 # onto this branch's own upstream, never over uncommitted
                 # work, and with the old HEAD kept under a backup branch.
                 blocker = self._reset_blocker()
+                if blocker and "not committed" in blocker:
+                    # don't stop on uncommitted work: set it aside into a
+                    # subfolder, then the tree is clean and the update goes on.
+                    saved = self._stash_uncommitted()
+                    if saved is None:
+                        self._updating = None
+                        self.updateFinished.emit(
+                            "Update stopped: your uncommitted changes could "
+                            "not be set aside safely, so nothing was touched.")
+                        return
+                    if saved:
+                        self._saved_changes = saved
+                    blocker = self._reset_blocker()
                 if blocker:
                     msg = blocker
                 else:
@@ -13585,9 +13826,26 @@ class Bridge(QObject):
                         return
                     msg = "Update stopped: could not keep a backup first."
             elif "would be overwritten" in err:
-                msg = ("Update stopped: this copy has changes that are not "
-                       "committed, and the update touches the same files. "
-                       "Commit or stash them and try again.")
+                # the pull wants files this copy has edited. Set the edits
+                # aside into a subfolder, then run the pull again on a clean
+                # tree so the update still lands.
+                saved = self._stash_uncommitted()
+                if not saved:
+                    # None = could not save; "" = nothing to save, yet the
+                    # pull still balked. Either way do NOT retry (it would
+                    # loop) -- stop clearly instead.
+                    self.updateFinished.emit(
+                        "Update stopped: your uncommitted changes could not "
+                        "be set aside safely, so nothing was touched.")
+                    return
+                self._saved_changes = saved
+                retry = QProcess(self)
+                self._updating = retry
+                retry.setWorkingDirectory(str(APP_DIR))
+                retry.finished.connect(lambda *_: self._update_done(retry))
+                retry.errorOccurred.connect(lambda *_: self._update_done(retry))
+                retry.start("git", ["pull", "--ff-only"])
+                return
             elif "unresolved conflict" in last or "MERGE_HEAD" in last:
                 msg = ("Update failed: a half-finished merge is in the way. "
                        "Try once more — this clears it first now.")
@@ -13603,9 +13861,9 @@ class Bridge(QObject):
             else:
                 msg = "Update failed: " + last
         elif "Already up to date" in out:
-            msg = "You have the newest version \u2713"
+            msg = "You have the newest version \u2713" + self._saved_note()
         else:
-            msg = "Updated! Restart the browser to finish."
+            msg = "Updated! Restart the browser to finish." + self._saved_note()
         self.updateFinished.emit(msg)
 
     @pyqtSlot()
@@ -13820,6 +14078,7 @@ class Bridge(QObject):
             "libUpdateEvery": lib_every,
             # so the settings page need not hardcode the default itself
             "libUpdateDefault": LIB_UPDATE_DAYS,
+            "autoUpdate": bool(c.get("autoUpdate", True)),
             "askDownload": bool(c.get("askDownload", False)),
             "downloadDir": str(self.browser.download_dir(create=False)),
             "downloadDirDefault": str(DOWNLOAD_DIR),
@@ -21929,7 +22188,12 @@ class Browser(QMainWindow):
                 return
             if code == 0 and out.isdigit() and int(out) > 0:
                 self._stranded = False
-                self._show_toast()
+                if self.config.get("autoUpdate", True):
+                    # auto mode: pull it in quietly, no toast, no restart
+                    # prompt -- the new files load next time it is opened
+                    self.bridge.runUpdate()
+                else:
+                    self._show_toast()
         proc.finished.connect(done)
         proc.start("git", ["rev-list", "--count", "HEAD..@{u}"])
 
@@ -22067,6 +22331,46 @@ class Browser(QMainWindow):
             return sys.executable, ["-m", "pip", "install", "--upgrade"] + LIB_PIP
         return "pkexec", ["dnf", "-y", "upgrade"] + LIB_RPMS
 
+    def _lib_auto_cmd(self):
+        """The engine upgrade for auto mode: non-interactive, so it never
+        puts a password box in front of somebody who did not ask for one.
+        On Linux that is `sudo -n` -- it runs only where it was granted
+        without a password and fails quietly otherwise, which is exactly
+        what "without asking" has to mean. The dnf edition folds its own
+        package in so the browser updates itself too; a git checkout gets
+        its code from the git pull above instead. On Windows/mac the
+        wheels go into his own environment and no elevation exists."""
+        if sys.platform in ("win32", "darwin"):
+            return sys.executable, ["-m", "pip", "install", "--upgrade"] + LIB_PIP
+        pkgs = list(LIB_RPMS)
+        if str(APP_DIR).startswith("/usr"):
+            pkgs.append("homebrowser")
+        return "sudo", ["-n", "dnf", "-y", "upgrade"] + pkgs
+
+    def _auto_lib_update(self):
+        """Auto mode found engine updates: install them without a word.
+        Guards against a second tick landing on top of this one, and runs
+        the non-interactive upgrade. It reaches no UI either way: auto
+        updates never report, they just keep things fresh."""
+        if self._lib_checking:
+            return
+        self._lib_checking = True
+        program, args = self._lib_auto_cmd()
+        try:
+            self._lib_run(program, args, self._auto_lib_done)
+        except Exception:
+            self._lib_checking = False
+            self._lib_stamp()
+
+    def _auto_lib_done(self, code, _out):
+        """However it went, this round is over. Stamped whether the
+        upgrade ran, found nothing, or could not elevate without a
+        password -- a silent feature that retried every tick would be a
+        silent feature hammering dnf. Turning on a passwordless rule
+        later takes effect at the next gate, not this one."""
+        self._lib_checking = False
+        self._lib_stamp()
+
     def _lib_run(self, program, args, done):
         """One command, asynchronously, answered as (exit code, output).
 
@@ -22153,6 +22457,10 @@ class Browser(QMainWindow):
         if not found:
             self._lib_stamp()
             return          # the common case, and it is silent on purpose
+        if self.config.get("autoUpdate", True):
+            # auto mode: install the engine update without asking
+            self._auto_lib_update()
+            return
         self._show_lib_toast()
 
     def _show_lib_toast(self):
@@ -46594,6 +46902,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # front rather than about which jar it came from.
         self.watch_cookies(profile)
         profile.scripts().insert(self._google_script())
+        profile.scripts().insert(self._youtube_script())
         profile.scripts().insert(self._chrome_stub_script())
         profile.scripts().insert(self._force_menu_script())
         profile.scripts().insert(self._error_hook_script())
@@ -46713,6 +47022,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         script.setSourceCode(
             GOOGLE_LIGHT_JS if self.config.get("googleLight", True)
             else GOOGLE_BLACK_JS)
+        return script
+
+    def _youtube_script(self):
+        """Strip YouTube's ads from its own data so the player never
+        blocks after one video. Runs only on YouTube (the script gates
+        itself on the hostname)."""
+        script = QWebEngineScript()
+        script.setName("youtube-ads")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        script.setRunsOnSubFrames(True)
+        script.setSourceCode(YOUTUBE_JS)
         return script
 
     def _theme_script(self):
@@ -53667,6 +53989,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if page_host in off or any(page_host.endswith("." + one)
                                        for one in off):
                 return ""
+        # YouTube is handled in the page, not here: its video ads live
+        # inside its own player data (see YOUTUBE_JS), and blocking its
+        # requests at the network is the one thing that trips its
+        # "turn off your ad blocker" wall. So never network-block a
+        # YouTube page -- the script removes the ads without being seen.
+        if page_host == "youtube.com" or page_host.endswith(".youtube.com") \
+                or page_host.endswith("youtube-nocookie.com"):
+            return ""
         hit = rules.blocks(text, page_host, request_kind(kind))
         if hit:
             counted = getattr(self, "_ad_counted", None)

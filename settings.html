@@ -3604,6 +3604,13 @@
         </div>
         <div class="wrow">
           <span class="wlabel">
+            <span class="wname" id="t_autoUpdates">Auto updates</span>
+            <span class="wsub" id="t_autoUpdatesHint"></span>
+          </span>
+          <input type="checkbox" id="autoupdate"><span class="wsw"></span>
+        </div>
+        <div class="wrow">
+          <span class="wlabel">
             <span class="wname" id="t_libUpdates">Keep the libraries up to date</span>
             <span class="wsub" id="t_libUpdatesHint">How often to look for a newer web engine (PyQt6 and QtWebEngine). Nothing is ever installed without asking.</span>
           </span>
@@ -4953,6 +4960,7 @@
     document.getElementById("libdaysval").textContent =
       libDaysText(parseInt(ld.value) || 0);
     paintRange(ld);
+    setVal("autoupdate", s.autoUpdate !== false);
     tbTake(s.toolbarItems, s.toolbarButtons);
     window._activeProxy = s.activeProxy || "system";
     window._proxyProfiles = s.proxyProfiles || [];
@@ -5520,6 +5528,7 @@
             t_histHint:"wizHistHint",
             t_cookiesHint:"cookiesHint", t_updates:"updates",
             t_libUpdates:"libUpdates", t_libUpdatesHint:"libUpdatesHint",
+            t_autoUpdates:"autoUpdates", t_autoUpdatesHint:"autoUpdatesHint",
             t_setup:"setupT", t_setupHint:"setupHint",
             t_plugins:"plugins", t_pluginsHint:"pluginsHint",
             t_quickInstall:"quickInstall", t_network:"network",
@@ -6416,6 +6425,7 @@
     paintRange(e.target);
     saveSetting("libUpdateEvery", v);
   };
+  bindSwitch("autoupdate", "autoUpdate");
   paintRange(document.getElementById("zoom"));
   paintRange(document.getElementById("minfont"));
   paintRange(document.getElementById("libdays"));
