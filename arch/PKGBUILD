@@ -1,6 +1,6 @@
 # Maintainer: Browser <noreply@users.noreply.github.com>
 pkgname=homebrowser
-pkgver=1.0.91
+pkgver=1.0.92
 pkgrel=1
 pkgdesc="Minimal island-styled web browser"
 arch=('any')
@@ -11,7 +11,7 @@ provides=('browser')
 conflicts=('browser')
 replaces=('browser')
 source=("https://idkhowtonamemyselfasadev.github.io/browser/arch/browser-${pkgver}.tar")
-sha256sums=('0b844490edff61b4d785171a5e457248e8565c76b874e46f6d123526e8eac129')
+sha256sums=('89e754a331013b707b1b08743b81f277025f7bfb2c0692f517f168f956a920c7')
 
 package() {
   install -d "$pkgdir/usr/share/browser"

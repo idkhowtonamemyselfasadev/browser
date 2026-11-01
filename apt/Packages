@@ -38,3 +38,23 @@ Description: Minimal island-styled web browser
  A minimal, themeable web browser built on PyQt6 WebEngine. The Qt
  WebEngine dependency is resolved by apt.
 
+Package: homebrowser
+Version: 1.0.92
+Architecture: all
+Maintainer: Browser <noreply@users.noreply.github.com>
+Installed-Size: 5532
+Depends: python3, python3-pyqt6.qtwebengine
+Conflicts: browser
+Replaces: browser
+Provides: browser
+Filename: ./homebrowser_1.0.92_all.deb
+Size: 5642432
+MD5sum: c9184f182b95cbc48a9dfff902289876
+SHA1: c459750a38f62400c9b06483f65f3fd72b7eeec2
+SHA256: 1a10820279490b56b16da678f3759e84c428efe8192a671e38c96a2c85b38498
+Section: web
+Priority: optional
+Description: Minimal island-styled web browser
+ A minimal, themeable web browser built on PyQt6 WebEngine. The Qt
+ WebEngine dependency is resolved by apt.
+
