@@ -3210,20 +3210,28 @@ YOUTUBE_JS = r"""
   if (!(h === "youtube.com" || h.endsWith(".youtube.com")
         || h.endsWith("youtube-nocookie.com"))) return;
 
-  // The ad data YouTube ships inside its own player/next/browse
-  // responses. Remove it before the player ever sees it: no ad plays,
-  // and -- because nothing is blocked at the network -- nothing trips
-  // the "turn off your ad blocker" wall either. This is the same thing
-  // uBlock Origin does on YouTube, done in the page instead of a list.
-  var AD = ["adPlacements", "playerAds", "adSlots",
-            "adBreakHeartbeatParams", "adThrottling", "adParams"];
+  // Only the ad data YouTube ships inside its own player data. Removing it in
+  // the page means no ad plays and nothing is blocked at the network, so the
+  // "turn off your ad blocker" wall has nothing to react to. The data is
+  // scrubbed IN PLACE -- never re-serialised into a new Response, which would
+  // leave the old content-length behind and corrupt the stream (black player).
+  var AD = ["adPlacements", "playerAds", "adSlots", "adBreakHeartbeatParams"];
+
+  function playerish(o) {
+    return o && typeof o === "object" && !Array.isArray(o)
+      && ("streamingData" in o || "playabilityStatus" in o
+          || "adPlacements" in o || "playerAds" in o || "playerResponse" in o);
+  }
 
   function scrub(o, depth) {
-    if (!o || typeof o !== "object" || depth > 6) return o;
+    if (!o || typeof o !== "object" || depth > 8) return o;
     try {
-      for (var i = 0; i < AD.length; i++) if (AD[i] in o) delete o[AD[i]];
-      // the wall arrives as a message renderer; drop it wherever it sits
-      if (o.playerResponse) scrub(o.playerResponse, depth + 1);
+      if (Array.isArray(o)) {
+        for (var i = 0; i < o.length; i++)
+          if (o[i] && typeof o[i] === "object") scrub(o[i], depth + 1);
+        return o;
+      }
+      for (var a = 0; a < AD.length; a++) if (AD[a] in o) delete o[AD[a]];
       for (var k in o) {
         if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
         var v = o[k];
@@ -3233,69 +3241,54 @@ YOUTUBE_JS = r"""
     return o;
   }
 
-  // 1. everything the page parses
+  // 1. the inline bootstrap copy, and anything parsed through JSON.parse
   var _parse = JSON.parse;
-  JSON.parse = function () { return scrub(_parse.apply(this, arguments), 0); };
+  JSON.parse = function () {
+    var r = _parse.apply(this, arguments);
+    try { if (playerish(r)) scrub(r, 0); } catch (e) {}
+    return r;
+  };
 
-  // 2. fetch responses -- new YouTube pulls the player over fetch
-  var _fetch = window.fetch;
-  if (_fetch) {
-    window.fetch = function () {
-      var args = arguments;
-      return _fetch.apply(this, args).then(function (res) {
-        try {
-          var u = (args[0] && args[0].url) || args[0] || "";
-          if (typeof u === "string"
-              && /\/youtubei\/v1\/(player|next|browse|reel)/.test(u)) {
-            return res.clone().text().then(function (t) {
-              var j; try { j = _parse(t); } catch (e) { return res; }
-              scrub(j, 0);
-              return new Response(JSON.stringify(j), {
-                status: res.status, statusText: res.statusText,
-                headers: res.headers });
-            });
-          }
-        } catch (e) {}
-        return res;
-      });
-    };
-  }
+  // 2. fetch().json() -- the new player path. Scrub the parsed object in
+  //    place; the Response itself is never touched, so the stream is intact.
+  var _json = Response.prototype.json;
+  Response.prototype.json = function () {
+    return _json.apply(this, arguments).then(function (d) {
+      try { if (playerish(d)) scrub(d, 0); } catch (e) {}
+      return d;
+    });
+  };
 
-  // 3. the inline bootstrap copy the first page load reads
+  // 3. window.ytInitialPlayerResponse, read on the first page load
   var _ipr;
   try {
     Object.defineProperty(window, "ytInitialPlayerResponse", {
       configurable: true,
       get: function () { return _ipr; },
-      set: function (v) { _ipr = scrub(v, 0); }
+      set: function (v) { try { scrub(v, 0); } catch (e) {} _ipr = v; }
     });
   } catch (e) {}
 
-  // 4. if a wall still slips onto the screen, take it off and keep
-  //    playing. Cheap: it only looks when the DOM actually changed.
+  // 4. if a wall still slips onto the screen, take it off and keep playing
   function unwall() {
     try {
       var sel = "ytd-enforcement-message-view-model,"
               + "ytd-popup-container tp-yt-paper-dialog";
-      var any = document.querySelector(sel);
-      if (any) {
-        document.querySelectorAll(sel).forEach(function (el) {
-          var d = el.closest("tp-yt-paper-dialog") || el;
-          d.remove();
-        });
-        document.querySelectorAll("tp-yt-iron-overlay-backdrop")
-          .forEach(function (b) { b.remove(); });
-        var v = document.querySelector("video");
-        if (v && v.paused) { try { v.play(); } catch (e) {} }
-      }
+      if (!document.querySelector(sel)) return;
+      document.querySelectorAll(sel).forEach(function (el) {
+        (el.closest("tp-yt-paper-dialog") || el).remove();
+      });
+      document.querySelectorAll("tp-yt-iron-overlay-backdrop")
+        .forEach(function (b) { b.remove(); });
+      var v = document.querySelector("video");
+      if (v && v.paused) { try { v.play(); } catch (e) {} }
     } catch (e) {}
   }
   var mo = new MutationObserver(unwall);
-  function arm() {
+  (function arm() {
     if (document.body) mo.observe(document.body, { childList: true, subtree: true });
     else setTimeout(arm, 200);
-  }
-  arm();
+  })();
 })();
 """
 
