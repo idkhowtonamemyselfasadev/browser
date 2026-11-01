@@ -64486,12 +64486,22 @@ def _install_proxy_flags():
     # switches on every GPU feature (raster, WebGL, ...) for drivers
     # Chromium knows to be broken, not only video decode.
     if "PlatformHEVCDecoderSupport" not in env:
-        nvidia = Path("/proc/driver/nvidia/version").exists()
-        env += (" --enable-features=PlatformHEVCDecoderSupport"
-                ",VaapiVideoDecoder,VaapiVideoDecodeLinuxGL"
-                ",AcceleratedVideoDecodeLinuxGL"
-                + (",VaapiOnNvidiaGPUs --ignore-gpu-blocklist"
-                   if nvidia else ""))
+        feats = "PlatformHEVCDecoderSupport"
+        # Hardware video decode is opt-in (the "vaapi" toggle). Forced on,
+        # a card/driver that cannot really do it -- NVIDIA VA-API most of
+        # all -- decodes every frame to black while the page renders fine.
+        # Off by default means software decode, which always draws; the
+        # toggle turns it on for smoother 4K where the hardware supports it.
+        if config.get("vaapi", False):
+            nvidia = Path("/proc/driver/nvidia/version").exists()
+            feats += (",VaapiVideoDecoder,VaapiVideoDecodeLinuxGL"
+                      ",AcceleratedVideoDecodeLinuxGL"
+                      + (",VaapiOnNvidiaGPUs" if nvidia else ""))
+            env += " --enable-features=" + feats
+            if nvidia:
+                env += " --ignore-gpu-blocklist"
+        else:
+            env += " --enable-features=" + feats
     # the import-time finder honours WIDEVINE_PATH and picks the newest
     # copy (incl. Chrome's updater ones under ~/.config); the other is
     # the fallback. The flag it set was stripped just above.
