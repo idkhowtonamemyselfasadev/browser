@@ -1,19 +1,22 @@
 # Maintainer: Browser <noreply@users.noreply.github.com>
-pkgname=browser
-pkgver=1.0.88
+pkgname=homebrowser
+pkgver=1.0.90
 pkgrel=1
 pkgdesc="Minimal island-styled web browser"
 arch=('any')
 url="https://github.com/idkhowtonamemyselfasadev/browser"
 license=('MIT')
 depends=('python' 'python-pyqt6-webengine')
+provides=('browser')
+conflicts=('browser')
+replaces=('browser')
 source=("https://idkhowtonamemyselfasadev.github.io/browser/arch/browser-${pkgver}.tar")
-sha256sums=('f22ffb1e91fef60d4d504f2e6644b722e4793308dacd844e98618d9af09d04db')
+sha256sums=('b5a3cee375d29241921a099b5cfc278a066e12718d35434ed31296c2838506b5')
 
 package() {
   install -d "$pkgdir/usr/share/browser"
   cp -a "$srcdir/browser-$pkgver/." "$pkgdir/usr/share/browser/"
-  install -Dm755 /dev/stdin "$pkgdir/usr/bin/browser" <<'SH'
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/homebrowser" <<'SH'
 #!/bin/sh
 exec python3 /usr/share/browser/browser.py "$@"
 SH
