@@ -22,7 +22,12 @@ import tempfile
 from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
-SCRATCH = Path(tempfile.mkdtemp(prefix="themefix-"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tmpscratch  # noqa: E402
+# not a bare mkdtemp: that left 68 directories and 223 MB in tmpfs,
+# because this suite ends in os._exit and atexit never runs. claim()
+# puts the pid in the name and sweeps what dead runs left.
+SCRATCH = Path(tmpscratch.claim("themefix-"))
 os.environ["XDG_DATA_HOME"] = str(SCRATCH / "share")
 os.environ["XDG_CONFIG_HOME"] = str(SCRATCH / "config")
 os.environ["XDG_CACHE_HOME"] = str(SCRATCH / "cache")

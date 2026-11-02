@@ -805,8 +805,17 @@ for wanted in ("barcopyurl", "barqrcode", "barsiteinfo", "barengines",
 print("\n(29) the test rig cleans up after itself")
 check("the harness takes its scratch directory away at exit",
       "_tidy_scratch" in (HERE / "tests" / "harness.py").read_text())
-check("...and anything left behind by a run that is gone",
-      "ProcessLookupError" in (HERE / "tests" / "harness.py").read_text())
+# this check used to scan harness.py for the word
+# "ProcessLookupError". c0405a9 moved the whole scratch lifecycle into
+# tmpscratch.py, so from that commit the guard was asking a file that
+# no longer owns the behaviour -- and it went red for the move, not for
+# a bug. A word in a file was never the thing worth pinning: what
+# matters is that the harness delegates and that the owner decides by
+# liveness. test_tmpscratch.py drives the sweep itself.
+check("...through tmpscratch, which is where that lives now",
+      "tmpscratch.claim" in (HERE / "tests" / "harness.py").read_text())
+check("...and it reaps by asking whether the pid is still alive",
+      "ProcessLookupError" in (HERE / "tmpscratch.py").read_text())
 
 print()
 if fails:

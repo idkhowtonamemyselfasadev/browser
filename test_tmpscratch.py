@@ -137,6 +137,47 @@ for prefix in T.PREFIXES:
     T.sweep(parent=str(YARD))
     check("%s is covered" % prefix, not d.exists())
 
+print("\n(6b) every prefix anyone claims is a prefix the sweep knows")
+# PREFIXES is how sweep() recognises a leftover. A claim() with a
+# prefix missing from that list makes a directory that gets a pid and
+# an atexit hook and still survives forever when the suite ends in
+# os._exit -- which is the exact shape of the original leak, rebuilt
+# one call site at a time. So the call sites are read off disk rather
+# than trusted: this found nothing on 2026-11-02 only because
+# themefix- and browser-shot- had just been added to the list.
+import ast as _ast
+claims = []
+for path in sorted(list(HERE.glob("*.py")) + list((HERE / "tests").glob("*.py"))):
+    try:
+        tree = _ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, OSError):
+        continue
+    for node in _ast.walk(tree):
+        if not (isinstance(node, _ast.Call) and node.args):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, _ast.Attribute) else getattr(
+            func, "id", "")
+        if name != "claim":
+            continue
+        arg = node.args[0]
+        while isinstance(arg, _ast.BinOp):      # "browser-shot-" + name + "-"
+            arg = arg.left
+        if isinstance(arg, _ast.Constant) and isinstance(arg.value, str):
+            claims.append((path.name, node.lineno, arg.value))
+check("there are claim() call sites to check at all", len(claims) >= 4,
+      len(claims))
+for where, line, prefix in claims:
+    check("%s:%d claims %r, which sweep knows"
+          % (where, line, prefix), prefix.startswith(T.PREFIXES), prefix)
+# the other direction: a prefix in the list that nothing claims is
+# either a site that was removed or a typo, and either way the list
+# stops being the truth
+for prefix in T.PREFIXES:
+    check("%r is claimed by something" % prefix,
+          any(p.startswith(prefix) or prefix.startswith(p)
+              for _w, _l, p in claims), prefix)
+
 print("\n(7) the real /tmp was never touched")
 check("the fixture yard is the only thing this suite made",
       str(YARD).startswith(tempfile.gettempdir())

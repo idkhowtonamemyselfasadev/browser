@@ -25,6 +25,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "tests"))
+import tmpscratch  # noqa: E402
 
 fails = []
 
@@ -37,7 +38,9 @@ def check(what, ok, detail=""):
 
 
 def scratch(name):
-    d = Path(tempfile.mkdtemp(prefix="browser-shot-" + name + "-"))
+    # through tmpscratch, so the pid is in the name and a dead run's
+    # leavings go: a bare mkdtemp here left 357 directories behind
+    d = Path(tmpscratch.claim("browser-shot-" + name + "-"))
     (d / "share").mkdir(parents=True, exist_ok=True)
     return d
 

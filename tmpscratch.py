@@ -42,7 +42,14 @@ import shutil
 import tempfile
 import time
 
-PREFIXES = ("browser-pwtest-", "browsershot-")
+# Every prefix claim() is called with, because the sweep has to
+# recognise a leftover by name and a prefix it does not know is a
+# directory nothing will ever take away. test_tmpscratch pins this
+# list against the call sites. "themefix-" and "browser-shot-" joined
+# on 2026-11-02: those three suites were still calling mkdtemp
+# directly, and had 425 directories and 225 MB of tmpfs between them.
+PREFIXES = ("browser-pwtest-", "browsershot-", "themefix-",
+            "browser-shot-")
 GRACE_S = 60
 
 
