@@ -186,10 +186,22 @@ check("every colour in a generated page is a token or allowed",
 # of leaving one is one sentence, and the cost of hiding one is a
 # guard nobody trusts.
 PENDING_AT = {
-    ("PAGE_TOOLS.visited", "#b48ead"):
-        "recolours the SITE's visited links, not our chrome. Whether "
-        "the browser should repaint somebody else's links in its own "
-        "accent is a product call, not a theming bug",
+    # PAGE_TOOLS.visited held #b48ead, an off-palette mauve, and this
+    # table carried the reason: "recolours the SITE's visited links,
+    # not our chrome. Whether the browser should repaint somebody
+    # else's links in its own accent is a product call, not a theming
+    # bug." 9acba95 (the setup wizard) changed that literal to
+    # #a6adc8, which IS a token -- `subtext` -- so there is no longer
+    # an off-palette literal here and this table has nothing to say
+    # about it. Entry removed on 2026-11-02, found by this suite going
+    # red and nobody running it.
+    #
+    # The PRODUCT question is not resolved and is deliberately written
+    # down here rather than deleted with the entry: the browser still
+    # repaints a site's visited links in its own colour, it is now
+    # just doing it in a themed one. A guard about literals cannot
+    # hold that question, but losing it when the literal moved is how
+    # it would have gone missing.
     ("READER_TOOLS.hints", "#ffd866"):
         "the highlighter pen's yellow. A highlighter is a real object "
         "and yellow is what one is; a themed highlighter is a "
@@ -319,12 +331,36 @@ check("no off-palette rgb() in any tool snippet", not rgbs,
 rgb_stale = sorted(set(RGB_ALLOWED) - set(rgb_open))
 check("...and no rgb exemption is left explaining a literal that is gone",
       not rgb_stale, rgb_stale or "none")
-check("no open item has been left out of PENDING_AT",
-      len(set(open_items)) == len(PENDING_AT),
-      "%d of %d named" % (len(set(open_items)), len(PENDING_AT)))
+# There used to be a row above this one checking
+#     len(set(open_items)) == len(PENDING_AT)
+# and it was the SAME check as the stale row below, written worse.
+# open_items only ever collects tuples that are already keys of
+# PENDING_AT (see the sweep: it appends in the `in PENDING_AT` branch
+# and nowhere else), so set(open_items) is a subset by construction
+# and the counts match exactly when nothing is stale. One question,
+# two rows, and the dropped one reported "4 of 5 named" -- a number
+# that tells whoever reads it nothing about WHICH.
+#
+# That mattered off this box: browser-windows-9a reported this suite
+# red on a ported tree and could not say why from a tail, and I could
+# not say why either, because neither row prints what it compared.
+# A guard on shared data has to carry its own evidence -- the reader
+# may be on an edition the author cannot see.
 stale = sorted(set(PENDING_AT) - set(open_items))
+why = []
+for where, low in stale:
+    table, _, key = where.partition(".")
+    holder = getattr(B, table, None)
+    if holder is None:
+        why.append("%s %s: the table %s is gone" % (where, low, table))
+    elif key not in holder:
+        why.append("%s %s: %s has no key %r now" % (where, low, table, key))
+    else:
+        now = sorted({h.lower() for h in HEX.findall(holder[key])})
+        why.append("%s %s: that key now holds %s"
+                   % (where, low, ", ".join(now) or "no hex literal"))
 check("...and no reason is left explaining a literal that is gone",
-      not stale, stale or "none")
+      not stale, "; ".join(why) or "none")
 print("      %d open item%s, awaiting a product decision:"
       % (len(set(open_items)), "" if len(set(open_items)) == 1 else "s"))
 for where, low in sorted(set(open_items)):
