@@ -298,15 +298,32 @@ check("a soft reload runs", win.soft_reload(view=view) is True)
 # does not reply, which stops silence being read as a measurement. It
 # does NOT fix this, because nothing here timed out: the answers were
 # real, they just came from different instants. Only asking once does.
-H.wait_for(lambda: js("document.getElementById('typed').value", MAIN)
-           == "half a sentence", 8000)
-typed = js("document.getElementById('typed').value", MAIN)
-check("...and what was typed is still there",
-      typed == "half a sentence", typed)
-H.wait_for(lambda: (js("window.scrollY|0", MAIN) or 0) >= 200, 8000)
-scrolled = js("window.scrollY|0", MAIN)
-check("...and the page is near where it was", (scrolled or 0) >= 200,
-      scrolled)
+# ...and then these two lines did it anyway, which browser-windows-9a
+# spotted reading the comment against the code beneath it. wait_for
+# returns a bool and nothing else, so the obvious pairing -- wait for
+# the condition, then ask again for the detail -- is exactly the two
+# round trips the paragraph above says only-asking-once fixed. The
+# comment described the fix; the code below it was the bug.
+def settles(code, ok, timeout=8000, world=MAIN):
+    """Wait for the page to satisfy ok(), and return the LAST answer it
+    actually gave -- one question per poll, and the answer kept, so the
+    verdict and the number printed beside it come from the same
+    instant. Returns (passed, value); value is what the final poll saw,
+    which is also what a timeout should print."""
+    last = [None]
+
+    def poll():
+        last[0] = js(code, world)
+        return ok(last[0])
+
+    return H.wait_for(poll, timeout), last[0]
+
+passed, typed = settles("document.getElementById('typed').value",
+                        lambda v: v == "half a sentence")
+check("...and what was typed is still there", passed, typed)
+passed, scrolled = settles("window.scrollY|0",
+                           lambda v: (v or 0) >= 200)
+check("...and the page is near where it was", passed, scrolled)
 
 print("\n(8) the engine's own knobs")
 check("the cache size can be set", win.set_cache_size(128) == 128)

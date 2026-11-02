@@ -17,6 +17,37 @@ export QT_QPA_PLATFORM=offscreen
 # test is inspecting. test_libs drives that check by hand instead.
 export BROWSER_NO_LIB_CHECK=1
 
+# Which python, decided ONCE and checked before a single suite runs.
+# This script said `timeout 900 python "$1"` for its whole life, and
+# this machine has no bare `python` -- only python3 and the venv. So
+# every suite exited 127, "timeout: failed to execute process", and
+# the run ended with all 110 names in the FAILED list. It fails loudly,
+# which is right, but it reads as 110 broken suites instead of one
+# missing interpreter, and the one line that would have said so was
+# three lines up in a tail nobody reads that far into.
+#
+# That is also the answer to why test_offpalette sat red for five
+# commits: a full run of this script has not completed on this box.
+#
+# The venv first, because it is the only one here with PyQt6 in it,
+# and then proved rather than assumed -- a python that cannot import
+# PyQt6 produces 110 identical import errors, which is the same
+# failure wearing a different number.
+PY=""
+for cand in "$R/.venv/bin/python" python3 python; do
+  if command -v "$cand" > /dev/null 2>&1 \
+     && "$cand" -c "import PyQt6.QtCore" > /dev/null 2>&1; then
+    PY="$cand"
+    break
+  fi
+done
+if [ -z "$PY" ]; then
+  echo "no python here can import PyQt6 -- tried the venv, python3, python."
+  echo "nothing was run. create the venv, or run this with it on PATH."
+  exit 2
+fi
+echo "interpreter: $PY"
+
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 bad=""
@@ -36,7 +67,7 @@ skip() {
 
 run() {
   echo "=== $1 ==="
-  timeout 900 python "$1" > "$OUT/log" 2>&1
+  timeout 900 "$PY" "$1" > "$OUT/log" 2>&1
   rc=$?
   tail -3 "$OUT/log"
   echo "exit=$rc"
@@ -97,7 +128,7 @@ done
 
 cd "$R" || exit 1
 echo "=== invariants ==="
-timeout 900 python .github/scripts/invariant_checks.py > "$OUT/log" 2>&1
+timeout 900 "$PY" .github/scripts/invariant_checks.py > "$OUT/log" 2>&1
 rc=$?
 tail -4 "$OUT/log"
 echo "exit=$rc"

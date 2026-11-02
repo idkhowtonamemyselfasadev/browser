@@ -10,6 +10,7 @@ it, and that a wizard finished with the switch off changes nothing.
 Nothing here touches your data (see harness.boot).
 """
 import json
+import re
 import sys
 
 import harness as H
@@ -76,11 +77,28 @@ H.load(view, B.START_PAGE.toString())
 H.spin(700)
 
 # ---------------------------------------------------------------- 1
-print("\nthe wizard has nine steps, and the ninth is where it belongs")
+# This section used to open with `check("nine pages", total == 9)`,
+# and before that with eight -- the row below it is still called
+# "%s no longer says eight", which is the tell. A count that the
+# product is expected to GROW cannot be pinned; it buys one release
+# and then fails for the feature that was supposed to be good news.
+# 9acba95 took the wizard to 14 and this went red, which is the second
+# time the same row has gone stale for the same reason.
+#
+# So the number is not asserted any more. What this section actually
+# cares about is ORDER -- that the master-password page exists, comes
+# straight after Privacy and before Quick links -- and those survive
+# the wizard growing. The count is still read, and still has to agree
+# with the rail, because a rail and an array that disagree IS a bug;
+# it just is not compared against a literal written last month.
+print("\nthe wizard's steps, and the master password among them")
 js("openWiz(0)")
 H.spin(400)
 total = js("wizPages().length")
-check("nine pages", total == 9, total)
+rail_count = js("document.querySelectorAll('#wizsteps > *').length")
+check("the wizard has pages at all", (total or 0) >= 2, total)
+check("...and the rail lists one entry per page", rail_count == total,
+      (rail_count, total))
 i_priv = page_index(br._ui_str("wizNavPrivacy"))
 i_master = page_index(STR_NAV)
 i_links = page_index(br._ui_str("wizNavLinks"))
@@ -94,13 +112,43 @@ rail = js("(function(){return [].slice.call("
           "return e.textContent;}).join('|');})()") or ""
 check("the rail lists it", STR_NAV in rail, rail)
 
-print("\nthe prose counts the steps the same way the array does")
-for lang, word in (("en", "Nine"), ("de", "Neun")):
+print("\nthe prose does not promise a number it would have to keep")
+# Same trap one level over: this asked for the word "Nine"/"Neun" in
+# the welcome text, so the prose was pinned to the page count too and
+# went stale with it. The product has since settled it properly -- en
+# reads "A few quick steps", de "Ein paar kurze Schritte", no number
+# at all -- which is the fix that cannot rot. So the invariant is:
+# EITHER the prose names no count, OR the count it names is the number
+# of pages there actually are. Both are correct; a stale number is
+# not.
+NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                "eleven": 11, "twelve": 12, "thirteen": 13,
+                "fourteen": 14,
+                "eins": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5,
+                "sechs": 6, "sieben": 7, "acht": 8, "neun": 9,
+                "zehn": 10, "elf": 11, "zwölf": 12, "dreizehn": 13,
+                "vierzehn": 14}
+# and the count has to be ATTACHED to the steps to be a step count.
+# A bare sweep for number words fails on this very sentence: en reads
+# "you can change every one of them later", so "one" matched and the
+# check went red against 14 pages. Written and watched failing here
+# before it was narrowed -- which is the same over-eager text scan
+# this tree keeps finding in its own guards.
+STEPS = re.compile(
+    r"([A-Za-zÄÖÜäöüß]+|\d{1,2})\s+(?:[A-Za-zÄÖÜäöüß]+\s+){0,2}"
+    r"(?:steps|schritte)")
+for lang in ("en", "de"):
     text = B.UI_STRINGS[lang]["wizWelcomeP"]
-    check("%s says %s quick steps" % (lang, word.lower()), word in text,
-          text[:60])
-    check("%s no longer says eight" % lang,
-          "Eight" not in text and "Acht" not in text, text[:60])
+    said = []
+    for head in STEPS.findall(text.lower()):
+        if head.isdigit():
+            said.append(int(head))
+        elif head in NUMBER_WORDS:
+            said.append(NUMBER_WORDS[head])
+    check("%s promises no step count, or the right one" % lang,
+          all(n == total for n in said),
+          "said %s, pages %s, %r" % (said, total, text[:46]))
 
 # ---------------------------------------------------------------- 2
 print("\nVault Password off: the page says so, and Next still works")
