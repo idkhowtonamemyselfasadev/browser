@@ -805,17 +805,26 @@ for wanted in ("barcopyurl", "barqrcode", "barsiteinfo", "barengines",
 print("\n(29) the test rig cleans up after itself")
 check("the harness takes its scratch directory away at exit",
       "_tidy_scratch" in (HERE / "tests" / "harness.py").read_text())
-# this check used to scan harness.py for the word
-# "ProcessLookupError". c0405a9 moved the whole scratch lifecycle into
-# tmpscratch.py, so from that commit the guard was asking a file that
-# no longer owns the behaviour -- and it went red for the move, not for
-# a bug. A word in a file was never the thing worth pinning: what
-# matters is that the harness delegates and that the owner decides by
-# liveness. test_tmpscratch.py drives the sweep itself.
+# This scanned harness.py for the word "ProcessLookupError" until
+# 2026-11-02. c0405a9 had moved the whole scratch lifecycle into
+# tmpscratch.py, so the guard was asking a file that no longer owned
+# the behaviour: it went red for the move, not for a bug, and would
+# have gone green again if anyone pasted the word back with no sweep
+# behind it.
+#
+# One row, and it is deliberately only about DELEGATION -- that this
+# harness does not make its own scratch directory any more. A text
+# scan can honestly answer that, because the thing it is asking about
+# IS a line of source. Everything behavioural (the pid in the name,
+# liveness deciding, a dead run's leavings going, a name that is not
+# ours being left alone, what the sweep may claim to have removed)
+# belongs to test_tmpscratch.py, which drives it against real
+# directories and a real os._exit subprocess. Two suites asserting the
+# same thing in different strengths is how the stale guard survived
+# this long.
 check("...through tmpscratch, which is where that lives now",
-      "tmpscratch.claim" in (HERE / "tests" / "harness.py").read_text())
-check("...and it reaps by asking whether the pid is still alive",
-      "ProcessLookupError" in (HERE / "tmpscratch.py").read_text())
+      "tmpscratch.claim" in (HERE / "tests" / "harness.py").read_text()
+      and "mkdtemp" not in (HERE / "tests" / "harness.py").read_text())
 
 print()
 if fails:

@@ -82,6 +82,17 @@ check("the fixture is there and its process is not (the fixture)",
 swept = T.sweep(parent=str(YARD))
 check("it was taken", not left.exists(), swept)
 check("...and this run's own was spared", Path(mine).is_dir())
+# the docstring promises "the names removed, so a test can watch it work
+# rather than take its word" -- and this suite took its word: `swept`
+# was passed as a DETAIL on the check above, so sweep() could have
+# returned [] and nothing went red. browser-windows-9a found that.
+check("...and the sweep says which one it took", left.name in swept, swept)
+# the length is the cheap place to notice a sweep reaching outside its
+# own names: `gone` is the only record of what was deleted, so a sweep
+# that removed three directories and was asked to remove one says so
+# here. Windows ran this against a prefix-blind sweep() and got
+# ['something-else-N', 'browsershot-ccc-N', 'browser-pwtest-aaa-N'].
+check("...and does not over-report", len(swept) == 1, swept)
 
 print("\n(3) a live run's directory is spared, whatever its age")
 alive = plant("browser-pwtest-", os.getpid(), age_s=99999)
@@ -182,8 +193,65 @@ print("\n(7) the real /tmp was never touched")
 check("the fixture yard is the only thing this suite made",
       str(YARD).startswith(tempfile.gettempdir())
       and "tmpscratch-test-" in str(YARD), YARD.name)
-check("...and nothing outside it was swept",
-      all(str(YARD) in str(Path(YARD) / n) for n in os.listdir(YARD)))
+# this row used to read
+#     all(str(YARD) in str(Path(YARD) / n) for n in os.listdir(YARD))
+# which is true for every n whatever is in the yard -- Path(YARD)/n
+# always starts with YARD -- and true for an empty yard too. It read
+# like it guarded the destructive direction and guarded nothing. Found
+# by browser-windows-9a reviewing this file, not by anything here.
+check("...and the only things left in the yard are ones this suite made",
+      all(n.startswith(("browsershot-", "browser-pwtest-", "themefix-",
+                        "browser-shot-", "not-ours-"))
+          for n in os.listdir(YARD)), sorted(os.listdir(YARD)))
+
+print("\n(8) and it never deletes a directory that is not ours")
+# The one bug in here with a blast radius outside the suite: in
+# production the parent IS the real /tmp. Drop the one line in sweep()
+# that asks whether the name is ours --
+#     if not name.startswith(PREFIXES): continue
+# -- and it deletes every directory in /tmp whose trailing -<digits>
+# happens to name a dead pid. Measured against that mutant: a planted
+# `not-ours-<dead pid>` holding a file was removed, sweep() returned
+# its name, and all 30 checks in this file stayed green.
+foreign = YARD / ("not-ours-%d" % dead_pid())
+foreign.mkdir()
+(foreign / "somebody-elses-work.txt").write_text("x" * 32)
+older = time.time() - 3600
+os.utime(foreign, (older, older))
+swept = T.sweep(parent=str(YARD))
+check("a name that is not ours is left alone, dead pid in it and all",
+      foreign.is_dir(), sorted(os.listdir(YARD)))
+check("...its contents with it", (foreign / "somebody-elses-work.txt").exists())
+check("...and the sweep does not claim it", foreign.name not in swept, swept)
+
+print("\n(9) and what it could not remove, it does not claim")
+# The contract its docstring sets: `gone` is the only record a caller
+# has of what a sweep actually deleted. browser-windows-9a proposed
+# the over-report check for this reason; measured, that check does NOT
+# cover it -- a sweep that appends without asking os.path.exists still
+# returns exactly one name when exactly one directory was in its way.
+# What shows it is a directory rmtree CANNOT remove, which needs a
+# parent it may not write to.
+if os.geteuid() == 0:
+    check("SKIPPED as root: file permissions do not apply", True,
+          "run as an ordinary user to exercise this")
+else:
+    locked = YARD / "locked"
+    locked.mkdir()
+    stuck = locked / ("browsershot-stuck-%d" % dead_pid())
+    stuck.mkdir()
+    (stuck / "profile").write_text("x" * 64)
+    older = time.time() - 3600
+    os.utime(stuck, (older, older))
+    os.chmod(locked, 0o500)              # read and enter, do not write
+    try:
+        swept = T.sweep(parent=str(locked))
+        check("a directory it cannot remove is still there", stuck.is_dir())
+        check("...and the sweep does not say it took it",
+              stuck.name not in swept, swept)
+        check("...it reports nothing at all", swept == [], swept)
+    finally:
+        os.chmod(locked, 0o700)
 
 shutil.rmtree(YARD, ignore_errors=True)
 print("")

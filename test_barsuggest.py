@@ -398,5 +398,14 @@ if fails:
     print("%d FAILED:" % len(fails))
     for one in fails:
         print("  - " + one)
-    sys.exit(1)
-print("all ok")
+print("all ok" if not fails else "")
+# os._exit, like 19 other suites here, because this one holds a real
+# window with several tabs and QtWebEngine tears that down with a
+# segfault about one run in five -- AFTER every check has printed and
+# the verdict is known. An exit code of 139 on a green run is worse
+# than a red one: it teaches whoever sees it to re-run until it passes.
+# Safe now in a way it was not before c0405a9: atexit never runs for
+# this, so the scratch directory is left behind, and the sweep in
+# tmpscratch.claim takes it at the start of the next run instead.
+sys.stdout.flush()
+os._exit(1 if fails else 0)
