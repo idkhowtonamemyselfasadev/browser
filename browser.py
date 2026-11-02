@@ -45518,6 +45518,29 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         target behind a wrapper, and — if he switched that on — where
         a short link goes. With Shift held, and only if he asked for
         it, the linked page itself in a small window."""
+        if sip.isdeleted(self):
+            # The page outlives this window on the way out and emits
+            # linkHovered("") as it goes -- an empty url, which is the
+            # branch that calls close_link_preview. Every instance
+            # attribute from here down then raises RuntimeError
+            # through sip, and PyQt turns an unhandled exception in a
+            # slot into abort(): exit 134, "wrapped C/C++ object of
+            # type Browser has been deleted", measured in
+            # test_permreload. So quitting with the pointer resting on
+            # a link could abort instead of exiting.
+            #
+            # close_link_preview already has `except RuntimeError` --
+            # around holder.close(), the object its author expected to
+            # die. The one that actually dies is `self`, and the line
+            # that touches it sits outside that guard. The except
+            # clause was the proof the error was live here; it was
+            # pointed one object away.
+            #
+            # Guarded at the slot rather than in that one function
+            # because this is the boundary a dead self arrives
+            # through: config, _preload_timer and three more methods
+            # below are all equally exposed.
+            return None
         keys = QApplication.keyboardModifiers()
         if url and (keys & Qt.KeyboardModifier.ShiftModifier) \
                 and self.config.get("linkPreview", False):
@@ -68530,7 +68553,12 @@ def main():
     try:
         import agent_bridge
         if headless:
-            agent_bridge.SOCKET_NAME += "-agent"
+            # a flag, not `SOCKET_NAME += "-agent"`. That mutated a
+            # module global the CLIENT does not share, so the headless
+            # agent browser was unreachable by agent.py -- in the one
+            # mode that exists to be driven by it. Both ends now read
+            # the name from agent_socket.
+            agent_bridge.HEADLESS = True
         agent_bridge.install(win)
     except Exception as e:
         print("agent bridge not started: %s" % e, file=sys.stderr)
@@ -68610,6 +68638,20 @@ def main():
 
 
 def _end_process(win):
+    """The real program's way out: tear the engine down, then end the
+    process outright, because Chromium/NVIDIA teardown can hang.
+
+    The `os._exit(0)` at the bottom is why this cannot be reused by
+    anything that needs a say in its own exit code -- a test calling
+    this would report 0 whatever its checks said, which is how a suite
+    turns green while failing. So the work is in _tear_down_engine
+    below and this is that plus the exit.
+    """
+    _tear_down_engine(win)
+    os._exit(0)
+
+
+def _tear_down_engine(win):
     """Close the cookie jars properly, then end the process outright.
 
     A profile writes its cookies out when it is destroyed, and it is
@@ -68653,7 +68695,6 @@ def _end_process(win):
             time.sleep(0.01)
     except Exception:
         pass
-    os._exit(0)
 
 
 if __name__ == "__main__":

@@ -101,7 +101,7 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_bpgame.py test_permreload.py test_callguard.py test_agent.py \
          test_saveimage.py test_screenshare.py test_sitetheme_render.py \
          test_tabwork.py test_tabwork2.py test_bookmarks2.py \
-         test_addressbar.py test_barsuggest.py \
+         test_addressbar.py test_barsuggest.py test_agentsock.py \
          test_pagetools.py test_media.py \
          test_capture.py test_privacy.py test_pageguard.py \
          test_privacy2.py test_desk.py test_reading2.py \

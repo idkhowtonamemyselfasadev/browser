@@ -43,6 +43,90 @@ def _tidy_scratch():
 
 atexit.register(_tidy_scratch)
 
+
+def _end_the_browsers():
+    """Tear the browser down the way the real program does, on the way
+    out of a suite.
+
+    MEASURED, 2026-11-02, and it inverts what three of us had concluded.
+    browser.py already has a thorough teardown -- _end_process: stop
+    every timer, sip.delete every view, every QWebEnginePage found
+    through gc (which reaches the PagePanes that _real_tabs cannot), then
+    every profile. It is wired twice, to app.aboutToQuit and again after
+    app.exec() returns, and BOTH of those live inside main(), which runs
+    only under __main__. A suite builds Browser() directly, so no test
+    has ever run any of it.
+
+    That is the whole story of the intermittent exit-139 at interpreter
+    shutdown. Driven in a probe with two tabs and one Settings pane:
+
+        without the product's teardown   3 pages left, 3 warnings, 3/3 runs
+        with it                          0 pages left, 0 warnings, 3/3 runs
+
+    Deterministic both ways, six runs, no crash-rate needed -- the
+    condition the race needs is simply absent once the product's own
+    teardown runs. So the fix is NOT a fifth page-releasing hook in
+    _release_engine_hooks, which is what the rate-hunting pointed at:
+    that would be a second implementation of what _end_process already
+    does, which is this tree's recurring bug. The product was right and
+    the harness was skipping it.
+
+    Registered AFTER _tidy_scratch so it runs BEFORE it (atexit is
+    LIFO): the browser goes while its scratch files still exist. Does
+    nothing for the suites that end in os._exit -- atexit cannot run
+    for them -- and those are also the ones that never see the crash,
+    because os._exit skips the teardown the fault lives in.
+    """
+    app = QApplication.instance()
+    if app is None:
+        return
+    mod = sys.modules.get("browser")
+    # _tear_down_engine, NOT _end_process: the latter is that plus
+    # os._exit(0), so a suite calling it would report success whatever
+    # its checks said. Nearly landed that way; what saved it was an
+    # atexit ordering accident, which is not a safety mechanism.
+    end = getattr(mod, "_tear_down_engine", None)
+    if end is None:
+        return
+    seen = []
+    for widget in app.topLevelWidgets():
+        if type(widget).__name__ == "Browser" and widget not in seen:
+            seen.append(widget)
+    for win in seen:
+        try:
+            end(win)
+        except Exception:
+            pass
+
+
+# NOT REGISTERED, and the measurement is why. Wiring this up did two
+# things, both bad:
+#
+#   it did not work. test_barsuggest took exit 139 at interpreter
+#   shutdown in a full 111-suite run WITH this active -- the third
+#   occurrence of the crash it was written for. atexit is LIFO and
+#   Browser.__init__ registers _release_engine_hooks later than this
+#   module is imported, so the profile is released BEFORE this would
+#   delete the pages. The 8 clean runs that convinced me were luck;
+#   the five "still not deleted" warnings staying at five were the
+#   evidence that it ran too late, and I read them and carried on.
+#
+# It is NOT, however, guilty of the other thing I first blamed it for.
+# test_downloads aborted ("wrapped C/C++ object of type Bridge has
+# been deleted") in the run with this active and was green in the run
+# before, and 5 runs each way read 1-in-5 against 0-in-5, which looked
+# like cause. Fifteen runs with this OFF gave 2 aborts in 15. So that
+# abort is pre-existing and intermittent, it was green at baseline by
+# luck, and this change did not cause it. Written down because the
+# first version of this comment said it did.
+#
+# So the product's teardown is still the right mechanism and this is
+# the wrong place to call it from: it has to run BEFORE the engine
+# hooks let the profile go, which means at the end of a suite rather
+# than at interpreter exit. Left here, unregistered, with the
+# measurement, because the next person will have the same idea.
+_END_THE_BROWSERS_DISABLED = _end_the_browsers
+
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["XDG_DATA_HOME"] = os.path.join(DATA, "share")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(DATA, "config")

@@ -65,7 +65,13 @@ from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWebEngineCore import QWebEngineScript
 from PyQt6.QtWidgets import QApplication
 
-SOCKET_NAME = "browser-agent"
+import agent_socket
+
+#: both ends of this socket agree through agent_socket, which has no Qt
+#: in it so agent.py can import it too. These two names used to be
+#: separate constants in separate files; see that module for what that
+#: cost.
+HEADLESS = False
 HTML_CAP = 2 * 1024 * 1024
 
 APP_WORLD = QWebEngineScript.ScriptWorldId.ApplicationWorld.value
@@ -86,9 +92,8 @@ KEY_TEXT = {"enter": "\r", "return": "\r", "tab": "\t", "space": " "}
 
 
 def socket_path():
-    """Where the socket lives: QLocalServer puts a bare name into
-    QDir::tempPath(), which is $TMPDIR or /tmp."""
-    return os.path.join(os.environ.get("TMPDIR") or "/tmp", SOCKET_NAME)
+    """Where this bridge listens. One answer, shared with the client."""
+    return agent_socket.socket_path(HEADLESS)
 
 
 def _json_or(raw, fallback):
@@ -466,17 +471,61 @@ class AgentBridge:
         # JS in every tab, logged-in ones included
         self.server.setSocketOptions(
             QLocalServer.SocketOption.UserAccessOption)
-        if not self.server.listen(SOCKET_NAME):
-            # a dead predecessor's socket file; nobody else uses this name
-            QLocalServer.removeServer(SOCKET_NAME)
-            if not self.server.listen(SOCKET_NAME):
-                return False
-        self.server.newConnection.connect(self._accept)
-        return True
+        path = socket_path()
+        if self.server.listen(path):
+            self.server.newConnection.connect(self._accept)
+            return True
+        # Something is in the way. It used to say "a dead predecessor's
+        # socket file; nobody else uses this name" and unlink it -- an
+        # assumption the code cannot check, standing in front of a
+        # destructive call. In a shared directory that unlink is aimed
+        # at a file we may not own. So: only if it is ours.
+        if agent_socket.is_ours(path):
+            QLocalServer.removeServer(path)
+            if self.server.listen(path):
+                self.server.newConnection.connect(self._accept)
+                return True
+        self._why_not(path)
+        return False
+
+    def _why_not(self, path):
+        """Say why the bridge is not there.
+
+        This used to be a bare `return False` into install(), which
+        returned None, which browser.py ignored because it only prints
+        on an exception. So every bind failure -- a long temp path, a
+        stale socket owned by somebody else, a read-only directory --
+        produced NOTHING, and the first thing to notice was a KeyError
+        three frames away pointing at the bridge rather than at the
+        path. That silence was the worse half of this bug.
+        """
+        limit = agent_socket.sun_path_max()
+        why = self.server.errorString()
+        print("agent bridge: cannot listen on %s" % path, file=sys.stderr)
+        print("  reason: %s" % why, file=sys.stderr)
+        if limit is None:
+            # an unmeasurable ceiling must not be reported as a number
+            print("  path length %d; this kernel's AF_UNIX maximum could "
+                  "not be measured" % len(path), file=sys.stderr)
+        elif len(path) > limit:
+            print("  path is %d bytes and this kernel takes %d: shorten "
+                  "TMPDIR, or set %s to a short directory"
+                  % (len(path), limit, agent_socket.DIR_ENV),
+                  file=sys.stderr)
+        else:
+            print("  path length %d is within this kernel's %d, so it is "
+                  "not the length" % (len(path), limit), file=sys.stderr)
 
     def close(self):
         self.server.close()
-        QLocalServer.removeServer(SOCKET_NAME)
+        # the same resolved path listen() used, and only if it is ours.
+        # A bare name here would resolve against QDir::tempPath() while
+        # the server was bound somewhere else entirely -- an unlink
+        # aimed at the OLD shared location, on the path that runs at
+        # every normal exit.
+        path = socket_path()
+        if agent_socket.is_ours(path):
+            QLocalServer.removeServer(path)
 
     def _accept(self):
         while self.server.hasPendingConnections():

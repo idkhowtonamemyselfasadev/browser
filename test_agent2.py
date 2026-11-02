@@ -545,9 +545,23 @@ mirror.stop()
 source = Path("browser.py").read_text()
 check("the headless instance is a launch flag",
       '"--agent" in argv' in source)
+# This used to scan browser.py for the literal
+#     agent_bridge.SOCKET_NAME += "-agent"
+# which is the line that WAS the bug: it mutated a module global the
+# agent CLIENT does not share, so `browser --agent` -- the mode whose
+# purpose is to be driven by agent.py -- could not be reached by it.
+# The guard was pinning the defect's spelling, so fixing the defect
+# turned it red. The invariant it meant to protect is real and is
+# behavioural, so ask it that way: a headless instance must not use
+# the sockets the browser he is using holds.
+import agent_socket as _AS  # noqa: E402
 check("...with its own sockets, never the one he is using",
-      'SINGLE_INSTANCE_SOCKET += "-agent"' in source
-      and 'agent_bridge.SOCKET_NAME += "-agent"' in source)
+      _AS.socket_path(True) != _AS.socket_path(False)
+      and 'SINGLE_INSTANCE_SOCKET += "-agent"' in source,
+      (_AS.socket_path(True), _AS.socket_path(False)))
+check("...and the headless flag is what picks it, not a mutated global",
+      "agent_bridge.HEADLESS = True" in source
+      and 'agent_bridge.SOCKET_NAME' not in source)
 check("...and it shows no window at all",
       "nothing is shown at all" in source)
 

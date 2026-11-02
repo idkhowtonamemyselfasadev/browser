@@ -76,11 +76,30 @@ import socket
 import sys
 import time
 
-SOCKET_NAME = "browser-agent"
+import agent_socket
 
 
 def socket_path():
-    return os.path.join(os.environ.get("TMPDIR") or "/tmp", SOCKET_NAME)
+    """Which browser to talk to, decided by looking rather than guessing.
+
+    This file used to own a second copy of the name and the path, and
+    could not reach a headless browser because browser.py renames the
+    server's socket and this constant never heard. The client cannot
+    know whether the browser it wants is headless, so it does not
+    assume: it takes the first candidate that is a socket AND belongs
+    to us. BROWSER_AGENT_SOCKET short-circuits the search.
+
+    The ownership test is the point, not a tidy-up. The server puts
+    0700 on the socket IT created, which says nothing about what we
+    dial; a stranger's socket in a shared directory is 0777 and theirs,
+    and connecting to it hands our commands to them.
+    """
+    for path in agent_socket.candidate_paths():
+        if agent_socket.is_ours(path):
+            return path
+    # nothing of ours is listening: return the primary so the caller's
+    # own error names the path it expected rather than a guess
+    return agent_socket.socket_path(False)
 
 
 def call(req, timeout=60.0):
