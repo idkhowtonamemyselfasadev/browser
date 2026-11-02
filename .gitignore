@@ -36,3 +36,16 @@ web_engine.so
 # raw screenshot output from _gallery.py - the picked and scaled ones
 # live in screenshots/
 .shots-in/
+
+# built packages and the local package repositories they are served
+# from. 57 MB of .deb and .rpm, rebuilt from the tree by
+# packaging/make-*.sh, plus the repo metadata; none of it belongs in
+# git. packaging/repo also carries a repository address that names the
+# machine it is served from, so this keeps a `git add -A` from even
+# offering it. The scripts themselves are NOT ignored: they are worth
+# committing, and they still hold the home path, that address and the
+# owner's name, so they need a placeholder pass before they can be
+# (sweep: 15 occurrences over 6 files, 2026-11-02).
+packaging/dist/
+packaging/repo/
+packaging/aptrepo/
