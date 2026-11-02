@@ -693,7 +693,7 @@ from PyQt6.QtCore import (
     QMarginsF, QMimeData, QRect, QSizeF,
     QBuffer, QElapsedTimer, QEvent, QEventLoop, QFile, QIODevice, QLocale,
     QObject, QPoint, QProcess, QProcessEnvironment, QRect, QSize,
-    QStringListModel, QTime,
+    QModelIndex, QStringListModel, QTime,
     QDateTime, QFileSystemWatcher, QTimer, QUrl, QUrlQuery, Qt,
     pyqtProperty, pyqtSignal, pyqtSlot,
 )
@@ -899,6 +899,156 @@ SEARCH_ENGINES = {
     "startpage": ("Startpage", "https://www.startpage.com/sp/search?query={}"),
 }
 SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
+# A search engine's own results page is a record of something he
+# searched for, not a page in its own right. Those addresses sit in the
+# history like any other, so every suggestion row built out of the
+# history was handing him back his own searches -- which is the thing
+# he asked to stop seeing ("i dont wanna see what i have searched, i
+# know what i search"). Wave 26 dropped the separate list and the rows
+# an empty bar showed; this is the half that was left.
+#
+# Matched by engine name among the host's labels, so google.de and
+# news.google.com count, and by a results path, so google.com/maps?q=
+# and a bookmarked mail link do not.
+# Two arms, because either alone is wrong.
+#
+# The first is the engine table itself: every engine the browser can be
+# set to, read off its own template so a seventh engine added to
+# SEARCH_ENGINES is covered without anyone remembering this function.
+# That arm is what catches DuckDuckGo, whose results live at
+# `duckduckgo.com/?q=` with no /search in it, and Startpage, whose
+# parameter is `query` and not `q`. A rule written as "/search?q=" --
+# which is the obvious one -- misses both of them, and misses them
+# quietly: Google and Bing look fixed.
+#
+# The second is the engine's NAME among the host's labels, for the ones
+# not in the table: google.de, news.google.com, yandex, baidu, yahoo.
+SEARCH_ENGINE_HOST_WORDS = frozenset({
+    "google", "duckduckgo", "bing", "brave", "ecosia", "startpage",
+    "yahoo", "yandex", "qwant", "mojeek", "searx", "searxng", "baidu",
+    "perplexity",
+})
+# "/html" and "/lite" are DuckDuckGo's no-JavaScript results pages,
+# which is what a text browser or a strict blocker lands on.
+SEARCH_RESULT_PATHS = ("", "/search", "/sp/search", "/results",
+                       "/web", "/s", "/suche", "/html", "/lite")
+SEARCH_QUERY_KEYS = ("q", "query", "p", "text", "wd", "eingabe")
+# a value no engine's own template carries, so the parameter found is
+# the one the query goes in and not some other parameter that happens
+# to read the same
+_SEARCH_SENTINEL = "qqsentinelqq"
+
+
+def _bare_host(url):
+    host = (url.host() or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _query_out(query, name):
+    """A query parameter as he typed it.
+
+    The order matters and was wrong here for as long as the function
+    existed. A query string writes a space as `+` and a real plus as
+    `%2B`, so the `+`s have to go BEFORE the percent-decoding -- read
+    fully decoded first and `%2B` has already become a `+` that the
+    next line turns into a space. Measured on the shipped code:
+
+        searched for   c++      bar showed  "c  "
+        searched for   a+b      bar showed  "a b"
+
+    and pressing Enter on that searched for the spaces."""
+    pretty = query.queryItemValue(name)
+    if not pretty:
+        return ""
+    return QUrl.fromPercentEncoding(pretty.replace("+", " ").encode())
+
+
+def _engine_result_urls(extra=()):
+    """Every engine URL with the sentinel standing where the query
+    goes: the built-in table, then his own engines from
+    Browser.own_engines, which write their slot as `%s` or
+    `{searchTerms}` rather than `{}`.
+
+    His own engines are in here because the default engine is not the
+    only thing a typed line can reach -- _resolve_typed asks
+    engine_url(engine_for_text(...)) first, which can land on one of
+    his. Without them the filter would work for six engines and
+    quietly not for his. The keyword table (`gh`, `so`, `yt`) is a
+    DIFFERENT config key, searchKeywords, and deliberately not here: a
+    search on a site is a page he went to."""
+    out = [pattern.format(_SEARCH_SENTINEL)
+           for _name, pattern in SEARCH_ENGINES.values()]
+    for raw in extra or ():
+        filled = str(raw or "").replace("{searchTerms}", _SEARCH_SENTINEL) \
+                               .replace("%s", _SEARCH_SENTINEL)
+        if _SEARCH_SENTINEL in filled:
+            out.append(filled)
+    return out
+
+
+def search_query_of(url, extra=()):
+    """What was searched for, if this address is an engine showing
+    results -- and "" if it is somewhere he went.
+
+    One walk of SEARCH_ENGINES, because there were nearly two. The
+    address bar has read the query out of a results page since the
+    beginning (bar_text_for: it shows "i like pancakes", not a hundred
+    characters of google.com/search), and the drop-down needed the
+    same question answered to stop offering him his own searches. Two
+    implementations of one thing with only one of them live is this
+    codebase's recurring bug -- see _migrate_tabclick_config, where
+    the dropdowns wrote `mouse.tabDouble` and the live strip read
+    something else -- so the second one is this function instead.
+
+    The path gate applies to both arms and is what keeps the engines'
+    other pages: `google.com/maps?q=berlin` is a map, not a search for
+    Berlin, and the shipped bar showed "berlin" for it. Because the
+    whole test is host-based, a search ON a site is untouched --
+    `github.com/search?q=`, `stackoverflow.com/search?q=`, every
+    keyword search -- those hosts are not engines.
+    """
+    url = as_qurl(url)
+    host = _bare_host(url)
+    if not host:
+        return ""
+    path = (url.path() or "").rstrip("/")
+    query = QUrlQuery(url.query())
+    # arm one: an engine we know the template of, matched against its
+    # OWN template -- host, path, and the parameter the query goes in.
+    # The path has to come from the template and not from a list of
+    # likely paths, which is what the first version of this did: a
+    # list says `/search` and `/` and then an engine whose results
+    # live at `/find` is missed, while `google.com/maps?q=berlin`
+    # matches a list entry it has no business matching.
+    for filled in _engine_result_urls(extra):
+        template = QUrl(filled)
+        if _bare_host(template) != host:
+            continue
+        if (template.path() or "").rstrip("/") != path:
+            continue
+        for name, value in QUrlQuery(template.query()).queryItems():
+            if value != _SEARCH_SENTINEL:
+                continue
+            got = _query_out(query, name)
+            if got:
+                return got
+    # arm two: an engine by name, for the ones not in the table. Here
+    # the path list is the only thing standing between a results page
+    # and his mail, so it stays.
+    if not (path in SEARCH_RESULT_PATHS or path.startswith("/search")):
+        return ""
+    if not set(host.split(".")) & SEARCH_ENGINE_HOST_WORDS:
+        return ""
+    for name in SEARCH_QUERY_KEYS:
+        got = _query_out(query, name)
+        if got:
+            return got
+    return ""
+
+
+def is_search_result(url, extra=()):
+    """Whether this address is a record of what he searched for."""
+    return bool(search_query_of(url, extra))
 DOWNLOAD_DIR = Path.home() / "Downloads"
 
 
@@ -41716,6 +41866,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return want_bottom
 
     # ---- engines and keywords (wave 25) ----
+    def own_engine_urls(self):
+        """Just the addresses of his own engines, for the two places
+        that have to recognise a results page (see search_query_of)."""
+        return [str(row.get("url") or "") for row in self.own_engines()]
+
     def own_engines(self):
         """His own search engines, on top of the built-in ones.
 
@@ -45632,10 +45787,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     break
 
         seen = set()
+        own_engines = self.own_engine_urls()
         if want["history"] and scope in ("", "history"):
             for entry in reversed(self.history[-4000:]):
                 url = entry.get("url", "")
                 if url in seen or not allowed(url):
+                    continue
+                if is_search_result(url, own_engines):
+                    # what he searched for, handed back to him. The
+                    # title of a results page IS the query, so typing
+                    # any word of a past search matched it and the row
+                    # read like a saved search. He asked for this gone;
+                    # the history page still has it, the bar does not.
                     continue
                 hay = (entry.get("title", "") + " " + url).lower()
                 if not all(w in hay for w in words):
@@ -45709,14 +45872,34 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._suggest_actions = actions
         return rows
 
+    def _show_rows(self, rows):
+        """Put rows in the drop-down and open it -- the only place that
+        does, so it can never open with a row already picked.
+
+        Measured before this existed: the popup\'s row 0 was current
+        the moment it opened, and on a real desktop the popup holds the
+        keyboard, so Enter went to the popup and activated that row
+        instead of reaching the bar. Typing `i like pancakes` and
+        pressing Enter loaded the old results page row 0 was pointing
+        at -- the bar "trapping" him. With no current row QCompleter
+        hides the popup and lets the key through to returnPressed, and
+        Down still picks row 0 for anyone who wants it."""
+        self.suggest_model.setStringList(rows)
+        if not rows or not self.urlbar.hasFocus():
+            return
+        self.completer.complete()
+        popup = self.completer.popup()
+        if popup is not None:
+            popup.setCurrentIndex(QModelIndex())
+            popup.clearSelection()
+
     def _show_empty_rows(self):
         if self.urlbar.text().strip() or not self.urlbar.hasFocus():
             return
         rows = self.empty_bar_rows()
         if not rows:
             return
-        self.suggest_model.setStringList(rows)
-        self.completer.complete()
+        self._show_rows(rows)
 
     def _fetch_suggestions(self):
         # not while a private tab is in front: a suggestion is this
@@ -45733,8 +45916,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         text = text.lower()
         if len(text) < 2 or "://" in text:
             if mine:
-                self.suggest_model.setStringList(mine[:10])
-                self.completer.complete()
+                self._show_rows(mine[:10])
             return
         domains = [d for d in COMMON_SITES + sorted(self.known_hosts)
                    if d.startswith(text) or d.split(".")[0].startswith(text)
@@ -45767,9 +45949,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # hand the search engine a word-by-word account of what he
             # is looking for. The guesses from his own history and the
             # common-site list still show.
-            self.suggest_model.setStringList(domains)
-            if domains and self.urlbar.hasFocus():
-                self.completer.complete()
+            self._show_rows(domains)
             return
         url = QUrl(SUGGEST_URL)
         q = QUrlQuery()
@@ -45793,9 +45973,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if self.urlbar.text().strip().lower() != text:
             return  # user typed on; a newer request is coming
         items = domains + [s for s in searches if s not in domains][:6]
-        self.suggest_model.setStringList(items)
-        if items and self.urlbar.hasFocus():
-            self.completer.complete()
+        self._show_rows(items)
 
     def bar_text_for(self, url):
         """What the address bar shows for a page.
@@ -45806,22 +45984,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         text = url.toString()
         if not self.config.get("searchInBar", True):
             return text
-        host = url.host().removeprefix("www.")
-        for key, (_name, pattern) in SEARCH_ENGINES.items():
-            if QUrl(pattern.format("x")).host().removeprefix("www.") != host:
-                continue
-            field = QUrlQuery(QUrl(pattern.format("x")).query())
-            names = [k for k, v in field.queryItems() if v == "x"]
-            query = QUrlQuery(url.query())
-            for name in names:
-                if query.hasQueryItem(name):
-                    got = query.queryItemValue(
-                        name, QUrl.ComponentFormattingOption.FullyDecoded)
-                    if got:
-                        # a query string writes a space as +, and a real
-                        # plus as %2B, which is already decoded by here
-                        return got.replace("+", " ")
-        return text
+        # this walked SEARCH_ENGINES itself until 2026-11-02. It is the
+        # same walk the drop-down's filter needs, so it moved out to
+        # search_query_of and both ask that. Two things changed with
+        # the move, both measured: a map (`/maps?q=berlin`) is no
+        # longer shown as a search for Berlin, and `c++` is no longer
+        # shown as two spaces.
+        return search_query_of(url, self.own_engine_urls()) or text
 
     def _remember_host(self, url):
         host = url.host()
