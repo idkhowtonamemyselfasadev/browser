@@ -399,13 +399,43 @@ if fails:
     for one in fails:
         print("  - " + one)
 print("all ok" if not fails else "")
-# os._exit, like 19 other suites here, because this one holds a real
-# window with several tabs and QtWebEngine tears that down with a
-# segfault about one run in five -- AFTER every check has printed and
-# the verdict is known. An exit code of 139 on a green run is worse
-# than a red one: it teaches whoever sees it to re-run until it passes.
-# Safe now in a way it was not before c0405a9: atexit never runs for
-# this, so the scratch directory is left behind, and the sweep in
-# tmpscratch.claim takes it at the start of the next run instead.
-sys.stdout.flush()
-os._exit(1 if fails else 0)
+# sys.exit, NOT os._exit, and the reason is measured rather than
+# preferred.
+#
+# This suite segfaulted once in QtWebEngine teardown -- exit 139 after
+# all 117 checks had printed green. I read that as "about one run in
+# five" and switched it to os._exit, which was wrong twice over. The
+# rate came from a SINGLE occurrence, and one event is not a rate. And
+# os._exit cannot be the test of its own fix: it issues the syscall
+# immediately, so no interpreter teardown runs, so a teardown crash
+# cannot be observed after it. It removes the crash and the signal
+# together.
+#
+# So it was run both ways, same suite, same box, 30 runs each,
+# differing only in this line:
+#
+#     os._exit    30/30 exit 0   (cannot see a teardown crash at all)
+#     sys.exit    30/30 exit 0   (the only arm that can)
+#
+# And then it crashed again on the THIRD run after this line went back
+# to sys.exit. Two occurrences now, both with all 117 checks printed
+# green first. So read the block above as what it is: 30 runs clean is
+# weak evidence about an event this rare. At a true rate of 1 in 20,
+# the chance of seeing nothing in 30 runs is 0.95^30 = 21% -- not a
+# surprise, and not a clearance. The experiment answered the question
+# it was built for (os._exit vs sys.exit, and whether 1 in 5 was real)
+# and was underpowered for the one it looked like it answered.
+#
+# Best estimate: 2 in roughly 45 runs, about 1 in 20, clustered rather
+# than even. A flake that rare is not worth buying with a blind spot:
+# three suites here
+# (test_block3, test_callguard, test_desk) deliberately end this way
+# so that interpreter teardown runs and their exit code IS the check
+# that the engine got its Python back -- see _release_engine_hooks,
+# whose docstring records the same signature, "one segfault in six
+# runs of tests/test_acctpick.py ... after every check had passed".
+# browser-windows-9a has since seen 139 in test_addressbar, which also
+# ends in sys.exit, so the phenomenon is fleet-wide and wants to stay
+# VISIBLE. If this goes red at 139 with every check green, that is the
+# teardown path talking, not this suite.
+sys.exit(1 if fails else 0)
