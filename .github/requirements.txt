@@ -3,5 +3,5 @@
 # packages for that — but the engine version pinned here is the one the
 # checks report on, so Dependabot keeps it current and a bump here is the
 # signal that a newer Chromium is available.
-PyQt6==6.11.0
+PyQt6==6.12.0
 PyQt6-WebEngine==6.11.0
