@@ -48757,22 +48757,63 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 for (name, domain), expiry in sorted(
                     (getattr(self, "_cookies", None) or {}).items())]
 
+    def _bookmark_in(self, url, parent):
+        """The bookmark for this address IN THIS FOLDER, if any.
+
+        Per-container, which _bookmark_for is not. A page can honestly
+        be in a Tabs<date> snapshot of what was open AND in a folder he
+        chose: those are two different statements and collapsing them
+        is what let the star edit a snapshot."""
+        key = _bookmark_key(url)
+        if not key:
+            return None
+        for entry in self.bookmarks:
+            if (entry.get("type") == "link"
+                    and entry.get("parent") == parent
+                    and _bookmark_key(entry.get("url", "")) == key):
+                return entry
+        return None
+
+    def _add_link(self, url, title="", parent=0, icon=""):
+        """The one place a link becomes a bookmark.
+
+        Three routes used to append their own: this one (the bridge),
+        bookmark_link (the link menu) and add_bookmark_here (the star).
+        Two of the three checked for a duplicate first and one did not,
+        so the link menu made a second identical bookmark every time --
+        and the inconsistency was documented in the third, which says
+        "asking for it to be in there and getting a second one of it is
+        nobody's meaning". Two routes forgot what the third wrote down.
+
+        Scoped to the folder, per browser-android's invariant: the rule
+        belongs to lists that stand for a page's STATE (bookmarks, read
+        later, watch later), not to appending in general -- separators
+        and folders are outside it on purpose -- and it is scoped to
+        the container, so filing a page does not disturb a snapshot
+        that happens to hold it.
+        """
+        url = _clean_bookmark_url(str(url or ""))
+        if not url or QUrl(url).scheme() not in ("http", "https"):
+            return None
+        there = self._bookmark_in(url, parent)
+        if there is not None:
+            return there
+        if len(self.bookmarks) >= BOOKMARKS_MAX:
+            return None
+        entry = {"id": max((e["id"] for e in self.bookmarks), default=0) + 1,
+                 "type": "link",
+                 "title": (str(title or "").strip()
+                           or QUrl(url).host() or url)[:300],
+                 "url": url, "icon": icon, "parent": parent,
+                 "t": int(time.time())}
+        self.bookmarks.append(entry)
+        self.save_bookmarks()
+        return entry
+
     def add_bookmark_url(self, url, title=""):
         """Bookmark an address that is not necessarily the page in
         front — what the bridge's bookmark op adds with."""
-        url = (url or "").strip()
-        if not url.startswith(("http://", "https://")):
-            return False
-        if self._bookmark_for(QUrl(url)) is not None:
-            return True
-        if len(self.bookmarks) >= BOOKMARKS_MAX:
-            return False
-        self.bookmarks.append({
-            "id": max((e["id"] for e in self.bookmarks), default=0) + 1,
-            "type": "link", "title": (title or QUrl(url).host())[:300],
-            "url": url, "icon": "", "parent": 0, "t": int(time.time())})
-        self.save_bookmarks()
-        return True
+        return self._add_link(url, title, parent=0) is not None
 
     def _all_profiles(self, profile=None):
         """Every cookie jar there is — the main one and every virtual
@@ -61502,14 +61543,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         parent = _sane_number(parent)
         if parent and parent not in self._bookmark_folder_ids():
             parent = 0
-        entry = {"id": max((e["id"] for e in self.bookmarks), default=0) + 1,
-                 "type": "link",
-                 "title": (str(title or "").strip()
-                           or QUrl(url).host() or url)[:300],
-                 "url": url, "icon": "", "parent": parent,
-                 "t": int(time.time())}
-        self.bookmarks.append(entry)
-        self.save_bookmarks()
+        entry = self._add_link(url, title, parent=parent)
+        if entry is None:
+            return None
         self._remember_folder(parent)
         return entry
 
@@ -62132,8 +62168,37 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if entry is None:
             self.add_bookmark_here(0)
             return
-        self.bookmarks.remove(entry)
-        self.save_bookmarks()
+        # remove_bookmark, not list.remove. This was its own deletion
+        # and inherited neither of the two things remove_bookmark grew:
+        #
+        #   the lock check -- whose own comment says "a folder he
+        #   locked is not deleted by a stray click", and the star IS
+        #   the stray click. Measured: the menu refused a locked entry
+        #   and Ctrl+D deleted it.
+        #
+        #   the undo snapshot. Every other delete in this browser is
+        #   recoverable; the one people actually use was not.
+        #
+        # It passes the ID, like move_bookmark and remove_bookmark
+        # already take.
+        #
+        # What that does NOT fix, and an earlier version of this
+        # comment claimed it did: the SELECTION. `entry` still comes
+        # from _bookmark_for, which answers "which record" by url
+        # resemblance and returns the first match in list order. So
+        # with the same page in a Tabs<date> snapshot and in a folder
+        # he made, insertion order still decides which copy this acts
+        # on -- measured both ways round, and one of them takes the
+        # bookmark he saved and leaves the automatic copy. The id
+        # cannot cure that, because the id came from the search.
+        #
+        # Fixing the selection means deciding what the star should do
+        # about a page that is in a snapshot and in a folder, which
+        # reverses what add_bookmark_here's docstring argues for, so it
+        # is a product call and it is parked. The lock and the undo are
+        # not: they are this browser disagreeing with itself, and they
+        # are fixed here whichever way that call goes.
+        self.remove_bookmark(entry["id"])
 
     def add_bookmark_here(self, parent=0):
         """This page, into the folder he pointed at.

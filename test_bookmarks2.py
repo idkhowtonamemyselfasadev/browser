@@ -272,8 +272,51 @@ check("and holds what matches now",
 check("a folder that is not there holds nothing",
       win.smart_folder_matches("nope") == [])
 
+print("\n(13b) the star deletes the way the menu does, or not at all")
+# No suite caught this: toggle_bookmark had its own list.remove() and
+# inherited neither of the two things remove_bookmark grew -- the lock
+# check whose comment says "a folder he locked is not deleted by a
+# stray click" (the star IS the stray click), and the undo snapshot
+# that makes every other delete here recoverable. Found by mutation:
+# putting the private deletion back leaves every existing suite green.
+# the list is borrowed and given back: the sections below this one
+# depend on the fixtures built above it, and wiping it here broke five
+# of them the first time round.
+_kept = list(win.bookmarks)
+_U = "https://star-test.example/page"
+_real_bookmarkable = win._bookmarkable
+win._bookmarkable = lambda view=None: B.QUrl(_U)
+try:
+    win.bookmarks = []
+    _locked = win.bookmark_link(_U, "locked one")
+    _locked["locked"] = True
+    win._bookmark_undo = None
+    win.toggle_bookmark()
+    check("the star refuses a locked bookmark, as the menu does",
+          len([e for e in win.bookmarks if e.get("url") == _U]) == 1)
+    win.bookmarks = []
+    win.bookmark_link(_U, "plain one")
+    win._bookmark_undo = None
+    win.toggle_bookmark()
+    check("...and on an ordinary one it deletes",
+          not [e for e in win.bookmarks if e.get("url") == _U])
+    check("...leaving an undo, which it never used to",
+          win._bookmark_undo is not None)
+finally:
+    win._bookmarkable = _real_bookmarkable
+    win.bookmarks = _kept
+
 print("\n(14) duplicates, and the ones he never opens")
-dupe = win.bookmark_link(srv.url("/a"), "Alpha again")
+# in ANOTHER folder, because the link menu no longer makes a second
+# copy in the same one. This fixture used to be two calls to
+# bookmark_link with the same url and the same parent, which worked
+# only because that route forgot to dedupe -- the test was using the
+# bug to build its own setup. Duplicates still happen the honest way
+# (two folders, an import, a Tabs<date> snapshot beside a folder he
+# chose), and find_duplicate_bookmarks groups across the whole tree,
+# so the feature is unchanged; only the way to provoke it is.
+_elsewhere = win.add_bookmark_folder("Somewhere else")
+dupe = win.bookmark_link(srv.url("/a"), "Alpha again", parent=_elsewhere)
 groups = win.find_duplicate_bookmarks()
 check("two bookmarks on one page are found as a pair",
       len(groups) == 1 and len(groups[0]) == 2, groups)
