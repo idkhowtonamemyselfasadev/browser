@@ -38,9 +38,12 @@ def check(what, ok, detail=""):
         fails.append(what)
 
 
-def fake_machine(where, cards):
+def fake_machine(where, cards, outputs=None):
     """A /sys/class/drm of our own, so two cards can be measured on a
-    machine that has one."""
+    machine that has one.
+
+    `outputs` is {"card2-DP-4": "connected", ...}: which sockets have a
+    cable in them, which is what says a card is driving a screen."""
     for name, (vendor, device, boot, slot) in cards.items():
         folder = where / name / "device"
         folder.mkdir(parents=True, exist_ok=True)
@@ -50,6 +53,10 @@ def fake_machine(where, cards):
         (folder / "uevent").write_text("PCI_SLOT_NAME=%s\n" % slot)
     # an output is not a card, and must not be counted as one
     (where / "card1-DP-1").mkdir(parents=True, exist_ok=True)
+    for out, state in (outputs or {}).items():
+        folder = where / out
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "status").write_text(state + "\n")
     return where
 
 
@@ -62,6 +69,30 @@ two = fake_machine(scratch / "drm-two", {
 one = fake_machine(scratch / "drm-one", {
     "card0": ("0x8086", "0x5912", True, "0000:00:02.0"),
 })
+# his own machine, as /sys/class/drm really reports it: the Intel has
+# five sockets and nothing in any of them, and all three monitors hang
+# off the discrete card -- which is the shape the chooser was never
+# written for (see (2b))
+his = fake_machine(scratch / "drm-his", {
+    "card1": ("0x8086", "0x7d67", False, "0000:00:02.0"),
+    "card2": ("0x10de", "0x2c02", True, "0000:02:00.0"),
+}, {"card1-DP-1": "disconnected", "card1-DP-2": "disconnected",
+    "card1-HDMI-A-1": "disconnected",
+    # a writeback connector is memory, not a monitor, and some drivers
+    # call it connected with nothing attached: it must not make the
+    # Intel card look like it is driving a screen
+    "card1-Writeback-1": "connected",
+    "card2-DP-4": "connected", "card2-DP-5": "connected",
+    "card2-DP-6": "connected", "card2-HDMI-A-3": "disconnected"})
+# a VA-API driver directory of our own. LIBVA_DRIVERS_PATH replaces
+# libva's search path rather than adding to it, so this decides what
+# _va_driver_here can find whatever is installed on the box running
+# the suite -- and the answer is the same on every box.
+vadir = scratch / "dri"
+vadir.mkdir(parents=True, exist_ok=True)
+for _name in ("nvidia", "iHD"):
+    (vadir / (_name + "_drv_video.so")).write_text("")
+os.environ["LIBVA_DRIVERS_PATH"] = str(vadir)
 
 app = H.app()
 
@@ -112,27 +143,97 @@ keep = {"LIBVA_DRIVER_NAME": "nvidia", "DRI_PRIME": "pci-0000_01_00_0"}
 B.gpu_apply("auto", cards, keep)
 check("...so hardware decoding is not taken from a machine that had it",
       keep == {"LIBVA_DRIVER_NAME": "nvidia"}, keep)
-# the decoder and the card that composites must be the same one: his
-# own line further up browser.py forces LIBVA_DRIVER_NAME=nvidia
-# whenever an NVIDIA driver is installed, and decoding on one card
-# while another draws is a black video with the sound still playing
-on, _off = B.gpu_env(cards[0]["slot"], cards)
+# the decoder and the card that composites must be the same one:
+# decoding on one card while another draws is a black video with the
+# sound still playing. That pairing only arises where there is going
+# to be hardware decoding at all, which is the "vaapi" toggle.
+on, _off = B.gpu_env(cards[0]["slot"], cards, vaapi=True)
 check("choosing NVIDIA decodes on NVIDIA",
       on.get("LIBVA_DRIVER_NAME") == "nvidia", on)
-on, _off = B.gpu_env(cards[1]["slot"], cards)
+check("...through the backend that driver needs",
+      on.get("NVD_BACKEND") == "direct", on)
+on, _off = B.gpu_env(cards[1]["slot"], cards, vaapi=True)
 check("choosing Intel moves the decoder to Intel as well",
       on.get("LIBVA_DRIVER_NAME") == "iHD", on)
+check("...and leaves NVIDIA's backend behind",
+      "NVD_BACKEND" not in on and "NVD_BACKEND" in _off, (on, _off))
 env = {"LIBVA_DRIVER_NAME": "nvidia"}
-B.gpu_apply(cards[1]["slot"], cards, env)
+B.gpu_apply(cards[1]["slot"], cards, env, vaapi=True)
 check("...so a machine told \"nvidia\" earlier is corrected",
       env.get("LIBVA_DRIVER_NAME") == "iHD", env)
+
+# ...and with the toggle off nothing decodes through VA-API, so naming
+# a driver buys no speed and risks exactly the black frame above. This
+# was set on every machine with an NVIDIA module loaded regardless of
+# the toggle, which is the whole of the 2026-11-03 black-player report.
+on, off = B.gpu_env(cards[0]["slot"], cards, vaapi=False)
+check("with hardware decode off, no VA-API driver is named",
+      "LIBVA_DRIVER_NAME" not in on and "NVD_BACKEND" not in on, on)
+check("...and a stale one is taken off instead",
+      "LIBVA_DRIVER_NAME" in off and "NVD_BACKEND" in off, off)
+check("a driver that is not installed is never named",
+      B._va_driver_here("iHD") and not B._va_driver_here("radeonsi")
+      and not B._va_driver_here(""),
+      [B._va_driver_here(n) for n in ("iHD", "radeonsi", "")])
+# the same question the import-time block now asks, asked here: a name
+# with no .so behind it leaves libva unable to initialise at all --
+# worse than the driver it would have found by itself.
+nocard = [dict(cards[0], vendor="0x1002", device="0x7480")]
+on, _off = B.gpu_env(cards[0]["slot"], nocard, vaapi=True)
+check("...not even the one the card would want",
+      "LIBVA_DRIVER_NAME" not in on, on)
+
+
+# and the same three conditions as the shipped line, which this box
+# cannot reach on its own: there is no NVIDIA module in it.
+check("the driver is named only with the module, the toggle AND the file",
+      [B._nvidia_va_wanted(nvidia=n, vaapi=v)
+       for n in (True, False) for v in (True, False)]
+      == [True, False, False, False],
+      [B._nvidia_va_wanted(nvidia=n, vaapi=v)
+       for n in (True, False) for v in (True, False)])
+os.environ["LIBVA_DRIVERS_PATH"] = str(scratch / "empty-dri")
+check("...and not at all on a machine without libva-nvidia-driver",
+      B._nvidia_va_wanted(nvidia=True, vaapi=True) is False)
+os.environ["LIBVA_DRIVERS_PATH"] = str(vadir)
+
+
+print("\n(2b) and nothing is offloaded to the card that already draws")
+hiscards = B.gpu_cards(str(his))
+check("which outputs have a cable in them is read, not thrown away",
+      [(c["maker"], c["outputs"], c["drives"]) for c in hiscards]
+      == [("Intel", 0, False), ("NVIDIA", 3, True)],
+      [(c["maker"], c["outputs"], c["drives"]) for c in hiscards])
+check("...and the card with nothing plugged in is offered first",
+      hiscards[0]["maker"] == "Intel" and not hiscards[0]["drives"],
+      [c["maker"] for c in hiscards])
+on, off = B.gpu_env("0000:02:00.0", hiscards, vaapi=False)
+check("picking the card the monitors are on asks for no offload",
+      on == {}, on)
+check("...and clears every variable it could have set",
+      all(k in off for k in ("DRI_PRIME", "__NV_PRIME_RENDER_OFFLOAD",
+                             "__GLX_VENDOR_LIBRARY_NAME",
+                             "__VK_LAYER_NV_optimus", "LIBVA_DRIVER_NAME",
+                             "NVD_BACKEND")), off)
+on, _off = B.gpu_env("0000:02:00.0", hiscards, vaapi=True)
+check("...but the decoder still goes with it when he asked for one",
+      on == {"LIBVA_DRIVER_NAME": "nvidia", "NVD_BACKEND": "direct"}, on)
+on, _off = B.gpu_env("0000:00:02.0", hiscards, vaapi=False)
+check("the card with nothing plugged into it is still a real offload",
+      on.get("DRI_PRIME") == "pci-0000_00_02_0"
+      and on.get("MESA_VK_DEVICE_SELECT") == "8086:7d67", on)
+env = {"PATH": "/x", "LIBVA_DRIVER_NAME": "nvidia", "NVD_BACKEND": "direct",
+       "DRI_PRIME": "stale", "__NV_PRIME_RENDER_OFFLOAD": "1"}
+B.gpu_apply("0000:02:00.0", hiscards, env, vaapi=False)
+check("so his own machine starts with none of this on it at all",
+      env == {"PATH": "/x"}, env)
 
 check("a slot that is not here any more decides nothing",
       B.gpu_env("0000:09:00.0", cards)[0] == {})
 
 env = {"PATH": "/x", "DRI_PRIME": "stale",
        "__GLX_VENDOR_LIBRARY_NAME": "nvidia"}
-B.gpu_apply(cards[1]["slot"], cards, env)
+B.gpu_apply(cards[1]["slot"], cards, env, vaapi=True)
 check("applying one card clears the other's leftovers",
       env.get("DRI_PRIME") == "pci-0000_00_02_0"
       and "__GLX_VENDOR_LIBRARY_NAME" not in env, env)
@@ -280,8 +381,10 @@ check("...and a switch for being asked every start",
       'id="gpuask"' in page and 'bindSwitch("gpuask", "gpuAsk")' in page)
 check("the page is told what the cards are",
       '"gpuCards"' in (HERE / "browser.py").read_text(encoding="utf-8"))
+check("...and the row says which card the screens are on",
+      "card.drives" in page and "gpuDrives" in page)
 for key in ("gpuPickName", "gpuPickHint", "gpuAskName", "gpuAskHint",
-            "gpuAuto", "gpuBoot", "gpuRestart", "gpuNone"):
+            "gpuAuto", "gpuBoot", "gpuDrives", "gpuRestart", "gpuNone"):
     check("the word %s is in both languages" % key,
           B.UI_STRINGS["en"].get(key) and B.UI_STRINGS["de"].get(key)
           and B.UI_STRINGS["en"][key] != B.UI_STRINGS["de"][key])

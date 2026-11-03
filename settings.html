@@ -4136,10 +4136,15 @@
     if (askrow && askrow.closest(".wrow")) {
       askrow.closest(".wrow").hidden = !choose;
     }
+    // which card the monitors are plugged into is the fact that
+    // decides what picking it can do: there is nothing to offload to
+    // the card that is already drawing, so that row sets nothing and
+    // has to say which one it is rather than look like a switch.
     const rows = cards.map((card) => ({
       value: card.slot,
       name: card.name || card.slot,
-      sub: card.boot ? (S.gpuBoot || "the one the system starts on") : "",
+      sub: card.drives ? (S.gpuDrives || "your screens are on this one")
+         : card.boot ? (S.gpuBoot || "the one the system starts on") : "",
     }));
     if (choose) {
       rows.push({value: "auto", name: S.gpuAuto || "Let the system decide",
