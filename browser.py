@@ -168,7 +168,16 @@ def _nvidia_va_wanted(nvidia=None, vaapi=None):
     switched hardware video decode on, and the driver is really there.
     One function so the suite can ask the shipped condition on a box
     that has no NVIDIA in it -- `nvidia` and `vaapi` are None in the
-    real call and read from the machine and the config."""
+    real call and read from the machine and the config.
+
+    If this is ever tidied up, leave the literal
+    `Path("/proc/driver/nvidia/version").exists()` where it is. The
+    macOS edition's own suite splits its environment lint on that exact
+    text, and nothing in this tree can discover that: a refactor that
+    read the path from a constant would stay green here and go red over
+    there, for a reason no measurement on this machine could explain.
+    Written down here because a comment beside the code is the only
+    note that travels with it."""
     here = (Path("/proc/driver/nvidia/version").exists()
             if nvidia is None else bool(nvidia))
     want = _vaapi_wanted() if vaapi is None else bool(vaapi)
