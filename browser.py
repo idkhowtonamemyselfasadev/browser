@@ -178,6 +178,22 @@ def _nvidia_va_wanted(nvidia=None, vaapi=None):
 if _nvidia_va_wanted():
     os.environ.setdefault("LIBVA_DRIVER_NAME", "nvidia")
     os.environ.setdefault("NVD_BACKEND", "direct")
+elif not _vaapi_wanted():
+    # ...and with the toggle off it is not enough to skip setting them.
+    # A desktop session can name a VA-API driver for every program it
+    # starts -- his Hyprland does, `env = LIBVA_DRIVER_NAME,nvidia` and
+    # `env = NVD_BACKEND,direct` -- so the engine inherits the name
+    # before any of this file runs, and the contradiction this gate was
+    # written to remove (software decode asked for, the card's decoder
+    # named anyway) arrives through the front door instead. The toggle
+    # is a statement about THIS browser's video, so this browser's
+    # environment has to agree with it: off means off.
+    #
+    # Only when it is off. With hardware decode ON and this machine not
+    # the NVIDIA case above, a name the session chose is very likely the
+    # right one for the card (iHD, radeonsi) and is left exactly alone.
+    os.environ.pop("LIBVA_DRIVER_NAME", None)
+    os.environ.pop("NVD_BACKEND", None)
 # Widevine: the module Amazon Music, Spotify and Netflix decrypt their
 # streams with. The engine underneath is Chromium and knows perfectly
 # well how to load it, but no Linux distribution is allowed to ship the

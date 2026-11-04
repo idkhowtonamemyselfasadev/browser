@@ -198,6 +198,58 @@ check("...and not at all on a machine without libva-nvidia-driver",
 os.environ["LIBVA_DRIVERS_PATH"] = str(vadir)
 
 
+print("\n(2c) a driver name the session handed us, with decode off")
+# The gate above only decides whether to NAME the driver. A desktop
+# session can name it for every program it starts, and his does:
+# ~/.config/hypr/configs/ENVariables.conf has `env =
+# LIBVA_DRIVER_NAME,nvidia` and `env = NVD_BACKEND,direct`, so the
+# engine inherited the name before this file ran and 8d9734c's gate
+# never touched it. These run the shipped lines themselves, with an os
+# of their own, the way test_winbranch runs the Windows ones.
+_src = (HERE / "browser.py").read_text(encoding="utf-8")
+_from = _src.index("if _nvidia_va_wanted():")
+_block = _src[_from:_src.index("# Widevine:", _from)]
+check("the names are settled before Qt is imported at all",
+      _from < _src.index("from PyQt6.QtCore import"), _from)
+
+
+class FakeOS:
+    """os, as far as those lines reach into it."""
+
+    def __init__(self, env):
+        self.environ = env
+
+
+def shipped(env, module, toggle):
+    """The real block, with the machine and the toggle as answers."""
+    ns = {"os": FakeOS(env),
+          "_nvidia_va_wanted": lambda: bool(module and toggle),
+          "_vaapi_wanted": lambda: bool(toggle)}
+    exec(compile(_block, "browser.py (the block)", "exec"), ns)
+    return env
+
+
+named = {"LIBVA_DRIVER_NAME": "nvidia", "NVD_BACKEND": "direct"}
+check("decode off: a name the session set is taken off again",
+      shipped(dict(named), module=True, toggle=False) == {})
+check("...on a machine with no NVIDIA in it as well",
+      shipped(dict(named), module=False, toggle=False) == {})
+check("...and an environment that never had one is not harmed",
+      shipped({"PATH": "/x"}, module=True, toggle=False) == {"PATH": "/x"})
+check("decode on, NVIDIA: the name is set, as it always was",
+      shipped({}, module=True, toggle=True) == named)
+check("...and one already there is left as it was found",
+      shipped({"LIBVA_DRIVER_NAME": "iHD"}, module=True, toggle=True)
+      == {"LIBVA_DRIVER_NAME": "iHD", "NVD_BACKEND": "direct"})
+# the case that says this is not a flat line-drop: hardware decode is
+# ON and this is not NVIDIA, so the name the machine chose for its own
+# card (iHD on his Intel, radeonsi on an AMD) is the right one and
+# nothing here knows better than it does.
+check("decode on, no NVIDIA module: the machine's own name stands",
+      shipped({"LIBVA_DRIVER_NAME": "iHD"}, module=False, toggle=True)
+      == {"LIBVA_DRIVER_NAME": "iHD"})
+
+
 print("\n(2b) and nothing is offloaded to the card that already draws")
 hiscards = B.gpu_cards(str(his))
 check("which outputs have a cable in them is read, not thrown away",
