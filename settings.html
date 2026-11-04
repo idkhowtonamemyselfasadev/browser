@@ -2678,6 +2678,13 @@
           </span>
           <input type="checkbox" id="blocknotif"><span class="wsw"></span>
         </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_ytAdSkipName">Skip YouTube’s ads</span>
+            <span class="wsub" id="t_ytAdSkipHint">Off, because YouTube notices: it counts the videos, then puts its “allow ads” wall where the player was and nothing plays at all. Takes hold at the next start.</span>
+          </span>
+          <input type="checkbox" id="ytadskip"><span class="wsw"></span>
+        </label>
         </div>
       </div>
 
@@ -4858,6 +4865,7 @@
     renderKeys(s.actions || []);
     document.getElementById("blocklocal").checked = s.blockLocal;
     document.getElementById("striptracking").checked = s.stripTracking;
+    document.getElementById("ytadskip").checked = s.ytAdSkip;
     document.getElementById("shotdir").value = s.shotDir || "";
     document.getElementById("shotname").value = s.shotName || "";
     document.getElementById("shotformat").value = s.shotFormat || "png";
@@ -5660,6 +5668,7 @@
             t_discordRouteName:"discordRouteName", t_discordRouteHint:"discordRouteHint",
             t_discordBadgeName:"discordBadgeName", t_discordBadgeHint:"discordBadgeHint",
             t_gameModeName:"gameModeName", t_gameModeHint:"gameModeHint",
+            t_ytAdSkipName:"ytAdSkipName", t_ytAdSkipHint:"ytAdSkipHint",
             t_mprisName:"mprisName", t_mprisHint:"mprisHint",
             t_pdfPlaceName:"pdfPlaceName",
             t_fsAskName:"fsAskName", t_fsAskHint:"fsAskHint",
@@ -6297,6 +6306,7 @@
   bindSwitch("mousebuttons", "mouseButtons");
   bindSwitch("blocklocal", "blockLocal");
   bindSwitch("striptracking", "stripTracking");
+  bindSwitch("ytadskip", "ytAdSkip");
   for (const [id, key] of [["shotdir", "shotDir"], ["shotname", "shotName"]]) {
     const box = document.getElementById(id);
     box.addEventListener("change", () => saveSetting(key, box.value.trim()));

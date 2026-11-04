@@ -38,6 +38,7 @@ def check(what, ok, detail=""):
         fails.append(what)
 
 
+source = (HERE / "browser.py").read_text(encoding="utf-8")
 app = H.app()
 srv = H.Server({"/": "<html><body><p>a page</p></body></html>"})
 win = B.Browser()
@@ -151,7 +152,6 @@ engine_says = H.js(
 check("the page is told about AV1 exactly what the engine says",
       page_says == engine_says, (page_says, engine_says))
 
-source = (HERE / "browser.py").read_text(encoding="utf-8")
 yt = source[source.index("YOUTUBE_JS = r"):
             source.index("IMAGE_AT_POINT_JS")]
 code = "\n".join(line for line in yt.splitlines()
@@ -162,6 +162,51 @@ check("nothing in the script's own code names a codec any more",
       [w for w in ("av01", "isTypeSupported", "canPlayType") if w in code])
 check("...and it still says why it used to",
       "measured FALSE on two" in yt)
+
+print("\n(5) and it is off until he asks for it")
+# This is the one that cost two days. With the script in, YouTube
+# counts the videos ("after 3 videos you cannot watch YouTube any
+# more"), then puts its enforcement wall where the player was -- and
+# unwall() above takes the wall off the screen, so what is left is a
+# black rectangle with no picture, no sound, no error and nothing in
+# the console. Every measurement went into the graphics stack.
+check("a fresh config does not strip ads",
+      B._ad_skip_wanted({}) is False)
+check("...nor a config that says so outright",
+      B._ad_skip_wanted({"ytAdSkip": False}) is False)
+check("...and it is on only when he turns it on",
+      B._ad_skip_wanted({"ytAdSkip": True}) is True)
+check("a config that is not there at all decides nothing",
+      B._ad_skip_wanted(None) is False
+      and B._ad_skip_wanted("not a config") is False)
+# ...and the script really is absent from the engine, not merely
+# gated inside itself: a profile built from a fresh config carries no
+# youtube script at all
+installed = [one.name() for one in
+             view.page().profile().scripts().toList()]
+check("the profile a fresh config builds carries no youtube script",
+      "youtube-ads" not in installed, installed)
+check("...while the rest of them are still there",
+      "video-watch" in installed and "theme" in installed, installed)
+check("the insert is behind that decision",
+      "if _ad_skip_wanted(self.config):\n"
+      "            profile.scripts().insert(self._youtube_script())"
+      in source)
+page = (HERE / "settings.html").read_text(encoding="utf-8")
+check("Settings has a switch for it",
+      'id="ytadskip"' in page
+      and 'bindSwitch("ytadskip", "ytAdSkip")' in page
+      and "s.ytAdSkip" in page)
+check("...and the browser tells the page where it stands",
+      '"ytAdSkip": c.get("ytAdSkip", False),' in source)
+for key in ("ytAdSkipName", "ytAdSkipHint"):
+    check("the word %s is in both languages" % key,
+          B.UI_STRINGS["en"].get(key) and B.UI_STRINGS["de"].get(key)
+          and B.UI_STRINGS["en"][key] != B.UI_STRINGS["de"][key])
+check("...and the hint says what it costs, not just what it does",
+      "wall" in B.UI_STRINGS["en"]["ytAdSkipHint"]
+      and "Sperre" in B.UI_STRINGS["de"]["ytAdSkipHint"],
+      B.UI_STRINGS["en"]["ytAdSkipHint"])
 
 print("")
 if fails:

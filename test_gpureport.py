@@ -430,6 +430,22 @@ H.js(view, "var real = JSON.parse;"
            "JSON.parse = function (text) { return real(text); }")
 check("a builtin the page replaced is seen as replaced",
       H.js(view, B.MEDIA_PROBE_JS, main)["ours"]["adScrub"] is True)
+# and the wall itself, which is what the black rectangle turned out to
+# be: YouTube replacing the player because it decided the ads were not
+# playing. The element's name, never the words on it.
+H.js(view, "document.body.appendChild(document.createElement("
+           "'ytd-enforcement-message-view-model'))")
+check("the enforcement wall is reported when it is on the page",
+      H.js(view, B.MEDIA_PROBE_JS, main).get("wall")
+      == "ytd-enforcement-message-view-model",
+      H.js(view, B.MEDIA_PROBE_JS, main).get("wall"))
+check("...and the sampler says so with the frame facts too",
+      H.js(view, "window.__videoWatch()", world).get("wall") is True)
+H.js(view, "document.querySelectorAll("
+           "'ytd-enforcement-message-view-model')"
+           ".forEach(function (w) { w.remove(); })")
+check("...and not when it is gone",
+      H.js(view, B.MEDIA_PROBE_JS, main).get("wall") is False)
 check("the page's video state comes with it",
       isinstance(H.js(view, B.MEDIA_PROBE_JS, main).get("video"), dict),
       H.js(view, B.MEDIA_PROBE_JS, main).get("videos"))
