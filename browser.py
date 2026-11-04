@@ -3961,9 +3961,20 @@ GOOGLE_LIGHT_JS = r"""
 # YouTube ships its video ads inside its own player data and, when it
 # sees an ad blocker, blocks the player after one video. Blocking the
 # ad at the network is exactly what it detects, so instead this removes
-# the ad data from the response in the page -- no ad plays, nothing is
-# "blocked", and the wall has nothing to react to. MainWorld at
-# DocumentCreation so the hooks are in before any YouTube script runs.
+# the ad data from the response in the page: no ad plays and nothing is
+# "blocked" at the network.
+#
+# That was believed to leave the "turn off your ad blocker" wall with
+# nothing to react to. IT DOES NOT. YouTube checks that an ad actually
+# PLAYED, not that a request was refused, so it sees this too, counts
+# the videos and puts its wall where the player was (2026-11-04:
+# "after 3 videos you cannot watch YouTube any more"). Which is why
+# all of this is off unless he asks for it -- see _ad_skip_wanted, and
+# do not restore the old claim: it is what sent two days of measuring
+# into the graphics stack.
+#
+# MainWorld at DocumentCreation so the hooks are in before any YouTube
+# script runs.
 def _ad_skip_wanted(config):
     """Should YouTube's own ad data be taken out of its player data?
 
@@ -4007,8 +4018,9 @@ YOUTUBE_JS = r"""
   // what the engine can play is the engine's answer to give.
 
   // Only the ad data YouTube ships inside its own player data. Removing it in
-  // the page means no ad plays and nothing is blocked at the network, so the
-  // "turn off your ad blocker" wall has nothing to react to. The data is
+  // the page means no ad plays and nothing is blocked at the network -- which
+  // YouTube notices anyway: it checks that an ad PLAYED, so the wall still
+  // comes, and that is why none of this runs unless he asks. The data is
   // scrubbed IN PLACE -- never re-serialised into a new Response, which would
   // leave the old content-length behind and corrupt the stream (black player).
   var AD = ["adPlacements", "playerAds", "adSlots", "adBreakHeartbeatParams"];
@@ -4065,13 +4077,25 @@ YOUTUBE_JS = r"""
     });
   } catch (e) {}
 
-  // 4. if a wall still slips onto the screen, take it off and keep playing
+  // 4. a dismissible nag over a player that still works is taken off, and
+  //    playing picked up again. The ENFORCEMENT wall is left exactly where
+  //    it is: it is not an overlay over a working player, it IS what
+  //    replaced the player, so taking it off the screen deletes YouTube's
+  //    own explanation and leaves a black rectangle with no picture, no
+  //    sound, no error and nothing in the console. That is what this did
+  //    until 2026-11-04 and it cost two days of measuring the graphics
+  //    stack. Where the wall is up the video is not coming back, and its
+  //    message is the most useful thing on the page -- in his own language,
+  //    which no toast of ours would be.
   function unwall() {
     try {
-      var sel = "ytd-enforcement-message-view-model,"
-              + "ytd-popup-container tp-yt-paper-dialog";
-      if (!document.querySelector(sel)) return;
-      document.querySelectorAll(sel).forEach(function (el) {
+      if (document.querySelector("ytd-enforcement-message-view-model")) {
+        return;
+      }
+      var nag = document.querySelectorAll(
+        "ytd-popup-container tp-yt-paper-dialog");
+      if (!nag.length) { return; }
+      nag.forEach(function (el) {
         (el.closest("tp-yt-paper-dialog") || el).remove();
       });
       document.querySelectorAll("tp-yt-iron-overlay-backdrop")

@@ -117,7 +117,15 @@ check("...and so does a broken one, as the error it is",
                  " catch (e) { return e.name; } })()") == "SyntaxError")
 
 
-print("\n(3) a wall that reaches the screen is taken off it")
+print("\n(3) the nag comes off; the wall that IS the player stays")
+# This inverted on 2026-11-04. Taking the enforcement wall off the
+# screen does not bring the video back -- the wall is what REPLACED the
+# player -- it only deletes YouTube's own explanation, and what is left
+# is a black rectangle with no picture, no sound, no error and nothing
+# in the console. Windows filed it as W-B32 against the switch's ON
+# state: the trap was still armed for anyone who turned the stripping
+# back on.
+as_host("www.youtube.com")
 H.js(view, """(function () {
   var wall = document.createElement("ytd-enforcement-message-view-model");
   wall.id = "thewall";
@@ -126,10 +134,73 @@ H.js(view, """(function () {
   back.id = "theback";
   document.body.appendChild(back);
 })()""")
-H.wait_for(lambda: H.js(view, "!document.getElementById('thewall')"), 4000)
-check("the wall is gone", H.js(view, "!document.getElementById('thewall')"))
-check("...and the grey over the page with it",
-      H.js(view, "!document.getElementById('theback')"))
+H.spin(600)
+check("the enforcement wall is left where YouTube put it",
+      H.js(view, "!!document.getElementById('thewall')"))
+check("...and so is the grey behind it, rather than half a wall",
+      H.js(view, "!!document.getElementById('theback')"))
+check("...so there is always something on screen saying what happened",
+      H.js(view, "document.querySelectorAll("
+                 "'ytd-enforcement-message-view-model').length") == 1)
+
+# ...and the shape YouTube really ships, which is the one that matters:
+# the wall INSIDE a popup dialog. The old selector swept exactly this
+# up, and a bare element on the body -- the first case above -- cannot
+# tell that mutation from the fix, because there is no dialog for the
+# removal to catch.
+as_host("www.youtube.com")
+H.js(view, """(function () {
+  var box = document.createElement("ytd-popup-container");
+  var dialog = document.createElement("tp-yt-paper-dialog");
+  dialog.id = "walldialog";
+  var wall = document.createElement("ytd-enforcement-message-view-model");
+  wall.id = "nestedwall";
+  dialog.appendChild(wall);
+  box.appendChild(dialog);
+  document.body.appendChild(box);
+})()""")
+H.spin(700)
+check("the wall inside its own dialog is left alone as well",
+      H.js(view, "!!document.getElementById('nestedwall')")
+      and H.js(view, "!!document.getElementById('walldialog')"),
+      H.js(view, "document.body.innerHTML.length"))
+
+# a dismissible nag is a different thing: it sits OVER a player that
+# still works, so it comes off and playing picks up again
+as_host("www.youtube.com")
+H.js(view, """(function () {
+  var box = document.createElement("ytd-popup-container");
+  var nag = document.createElement("tp-yt-paper-dialog");
+  nag.id = "thenag";
+  box.appendChild(nag);
+  document.body.appendChild(box);
+  var back = document.createElement("tp-yt-iron-overlay-backdrop");
+  back.id = "nagback";
+  document.body.appendChild(back);
+})()""")
+H.wait_for(lambda: H.js(view, "!document.getElementById('thenag')"), 4000)
+check("a nag over a working player is taken off",
+      H.js(view, "!document.getElementById('thenag')"))
+check("...and the grey with it", H.js(view, "!document.getElementById('nagback')"))
+
+# ...and with the wall up, even a nag beside it is left alone: the
+# video is not coming back, and half a cleaned-up page is worse than
+# none
+as_host("www.youtube.com")
+H.js(view, """(function () {
+  var wall = document.createElement("ytd-enforcement-message-view-model");
+  wall.id = "wall2";
+  document.body.appendChild(wall);
+  var box = document.createElement("ytd-popup-container");
+  var nag = document.createElement("tp-yt-paper-dialog");
+  nag.id = "nag2";
+  box.appendChild(nag);
+  document.body.appendChild(box);
+})()""")
+H.spin(600)
+check("with the wall up, nothing at all is taken off the page",
+      H.js(view, "!!document.getElementById('wall2')")
+      and H.js(view, "!!document.getElementById('nag2')"))
 
 
 print("\n(4) what the engine can play is the engine's answer to give")
@@ -188,6 +259,21 @@ check("the profile a fresh config builds carries no youtube script",
       "youtube-ads" not in installed, installed)
 check("...while the rest of them are still there",
       "video-watch" in installed and "theme" in installed, installed)
+# ...and the other way, which windows added and is right to: a default
+# that cannot be turned back on is as broken as one that cannot be
+# turned off. A fresh private jar rather than a second window -- two
+# Browsers in one process hang Qt WebEngine at exit.
+win.config["ytAdSkip"] = True
+try:
+    turned_on = [one.name() for one in
+                 win._make_profile(None).scripts().toList()]
+finally:
+    win.config["ytAdSkip"] = False
+check("turned on, the profile really does carry the script",
+      "youtube-ads" in turned_on, turned_on)
+check("...and the switch is read at profile build, not cached",
+      "youtube-ads" not in
+      [one.name() for one in win._make_profile(None).scripts().toList()])
 check("the insert is behind that decision",
       "if _ad_skip_wanted(self.config):\n"
       "            profile.scripts().insert(self._youtube_script())"
