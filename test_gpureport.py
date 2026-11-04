@@ -211,19 +211,29 @@ check("it is asked once per start, after the engine has settled",
 record = source[source.index("def _gpu_record"):
                 source.index("def _check_updates")]
 check("...and nothing waits for the answer: it is handed to a callback",
-      "runJavaScript(" in record and "done)" in record
+      "runJavaScript(" in record and "lambda" in record
       and ".exec(" not in record and "QEventLoop" not in record)
+asks_own = [line for line in record.splitlines()
+            if "_own_open_pages" in line and not line.strip().startswith("#")]
+check("...and it reads every tab, not only the browser's own pages",
+      "self.tabs.widget(i)" in record and not asks_own, asks_own)
 check("...and it looks again later, for the pages' own reports",
       "QTimer.singleShot(60000, self._gpu_record)" in record)
 check("...but writes nothing again while nothing has changed",
       "mark == self._gpu_said" in record)
 
 
+class Deleted:
+    """what is left of a Qt object after its C++ side is gone."""
+
+    def count(self):
+        raise RuntimeError("wrapped C/C++ object of type QTabWidget deleted")
+
+
 class Closed:
     """a window that has been shut, with a tick still on the way."""
 
-    def _own_open_pages(self):
-        raise RuntimeError("wrapped C/C++ object of type Browser deleted")
+    tabs = Deleted()
 
 
 check("...and a tick that arrives after its window is gone is quiet",
@@ -334,10 +344,117 @@ if shutil.which("ffmpeg"):
           seen["white"])
     check("and the page's own scripts cannot see the sampler",
           H.js(view, "typeof window.__videoWatch") == "undefined")
+    check("the engine's own codec answers travel with the frame",
+          isinstance(seen["white"].get("mse"), dict)
+          and set(seen["white"]["mse"]) >= {"vp9", "av1", "h264"},
+          seen["white"].get("mse"))
     shows.stop()
 else:
     print("  --   no ffmpeg here, so the frame readback itself is not "
           "measured in this run")
+
+print("\n(6b) ...and the empty player, which is the case he actually has")
+# His report came back frames=[] with YouTube open for minutes: no
+# video element ever reached readyState 2, so the first cut of this
+# sampler -- which only spoke from readyState 2 up -- stayed silent for
+# the one case it was written to explain. An empty player is not a
+# black player, and it has to say which it is.
+world = B.QWebEngineScript.ScriptWorldId.ApplicationWorld.value
+main = B.QWebEngineScript.ScriptWorldId.MainWorld.value
+quiet = H.Server({"/empty": "<html><body><video id=v></video></body></html>",
+                  "/none": "<html><body><p>no player here</p></body></html>"})
+view = win.current()
+H.load(view, quiet.url("/empty"))
+H.spin(400)
+fact = H.js(view, "window.__videoWatch()", world)
+check("a player with nothing in it still reports", isinstance(fact, dict),
+      fact)
+check("...saying it is empty, not black",
+      fact.get("ready") == 0 and fact.get("pixels") == "nothing decoded yet",
+      fact)
+check("...and that nothing was ever handed to it",
+      fact.get("src") == "none" and fact.get("videos") == 1, fact)
+check("...and how far the engine would go if anything were",
+      isinstance(fact.get("mse"), dict), fact.get("mse"))
+check("no error on an empty player is not an invented one",
+      "error" not in fact, fact.get("error"))
+# a page with no player at all stays quiet: the record is for videos,
+# and every page on the machine logging a line every five seconds
+# would push the real ones out of the console's three hundred
+H.js(view, "document.querySelectorAll('video')"
+           ".forEach(function (v) { v.remove(); })")
+check("a page with no <video> says nothing at all",
+      H.js(view, "window.__videoWatch()", world) is None
+      and H.js(view, "document.querySelectorAll('video').length") == 0)
+# ...and it says a thing once rather than every five seconds. Done on
+# the one page, by changing the page: a reload here read as a video
+# that was not there yet and measured the wrong thing.
+
+
+def reports():
+    return len([1 for line in view.page().console_log
+                if line.get("text", "").startswith("[gpu-frame] ")])
+
+
+H.js(view, "document.body.appendChild(document.createElement('video'))")
+H.js(view, "window.__videoWatch()", world)
+said = reports()
+H.js(view, "window.__videoWatch()", world)
+check("the same state is not written down twice over", reports() == said,
+      (said, reports()))
+H.js(view, "document.body.appendChild(document.createElement('video'))")
+H.js(view, "window.__videoWatch()", world)
+check("...but a change in it is written down once",
+      reports() == said + 1, (said, reports()))
+
+
+print("\n(7) and the same codec questions in the page's own world")
+# The sampler asks the engine (its world has the untouched builtins).
+# This asks the page's own copies, where our YouTube script's overrides
+# live. The difference between the two answers is what that script is
+# doing -- which nobody has measured, and both of its halves are
+# suspects for a player that gets nothing at all.
+media = H.js(view, B.MEDIA_PROBE_JS, main)
+check("it answers from the main world", isinstance(media, dict), media)
+check("...asking MediaSource and canPlayType both",
+      set(media) >= {"mse", "canPlay", "ours", "videos"}, sorted(media))
+check("...and reporting which of our hooks is in force",
+      media["ours"] == {"codecGate": False, "canPlayType": False,
+                        "adScrub": False, "responseJson": False},
+      media["ours"])
+# ...and that reading is not vacuous: replace one in the page and it
+# has to notice. A replaced builtin no longer stringifies as native,
+# which is how this is read -- no mark in the page, because a mark is
+# one more thing a site could use to notice the ad stripping.
+H.js(view, "var real = JSON.parse;"
+           "JSON.parse = function (text) { return real(text); }")
+check("a builtin the page replaced is seen as replaced",
+      H.js(view, B.MEDIA_PROBE_JS, main)["ours"]["adScrub"] is True)
+check("the page's video state comes with it",
+      isinstance(H.js(view, B.MEDIA_PROBE_JS, main).get("video"), dict),
+      H.js(view, B.MEDIA_PROBE_JS, main).get("videos"))
+
+
+print("\n(8) the whole chain, as the browser runs it")
+B.GPU_REPORT_FILE.unlink(missing_ok=True)
+win._gpu_said = None
+win._gpu_record()
+H.wait_for(lambda: B.GPU_REPORT_FILE.is_file(), 9000)
+check("the browser writes the record by itself", B.GPU_REPORT_FILE.is_file())
+whole = json.loads(B.GPU_REPORT_FILE.read_text()) \
+    if B.GPU_REPORT_FILE.is_file() else {}
+check("...with what the engine says about its own drawing",
+      "webgl" in whole.get("web", {}), sorted(whole.get("web", {})))
+check("...and what the page says about codecs, from the page's world",
+      isinstance(whole.get("web", {}).get("media"), dict),
+      whole.get("web", {}).get("media"))
+check("...and the sampler's own reports",
+      isinstance(whole.get("frames"), list)
+      and any(f.get("ready") == 0 for f in whole["frames"]),
+      whole.get("frames"))
+check("...and still nothing of his login anywhere in it",
+      str(Path.home()) not in json.dumps(whole))
+quiet.stop()
 
 print("")
 if fails:

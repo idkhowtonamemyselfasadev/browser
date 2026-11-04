@@ -750,60 +750,183 @@ def gpu_report(web=None, path=None, root="/proc", logs=None):
 #: window.__videoWatch, which only that world can reach.
 VIDEO_WATCH_JS = r"""(function () {
   if (window.__videoWatch) { return; }
+  var ticks = 0, last = "";
+  //: the strings YouTube really asks about, not the pretty ones
+  var CODECS = {
+    vp9: 'video/webm; codecs="vp09.00.51.08.01.01.01.01.00"',
+    vp9plain: 'video/webm; codecs="vp9"',
+    av1: 'video/mp4; codecs="av01.0.08M.08"',
+    h264: 'video/mp4; codecs="avc1.640028"',
+    aac: 'audio/mp4; codecs="mp4a.40.2"',
+    opus: 'audio/webm; codecs="opus"'
+  };
+  function viaMse() {
+    // what the ENGINE says, not what the page is told: this runs in a
+    // world of its own, so these are the untouched builtins. The same
+    // questions are asked of the page's own copies in MEDIA_PROBE_JS,
+    // and the difference between the two answers is what our YouTube
+    // script is doing to this page.
+    var out = {};
+    for (var name in CODECS) {
+      try {
+        out[name] = (window.MediaSource
+                     && MediaSource.isTypeSupported(CODECS[name])) ? 1 : 0;
+      } catch (err) { out[name] = String((err && err.name) || err); }
+    }
+    return out;
+  }
   function sample() {
     var all = document.querySelectorAll("video");
-    var video = null;
-    for (var i = 0; i < all.length; i++) {
-      if (!video || all[i].currentTime > video.currentTime) {
-        video = all[i];
-      }
+    if (!all.length) { return null; }
+    ticks++;
+    var video = all[0];
+    for (var i = 1; i < all.length; i++) {
+      if (all[i].currentTime > video.currentTime) { video = all[i]; }
     }
-    if (!video || video.readyState < 2) { return null; }
     var quality = {};
     try {
       if (video.getVideoPlaybackQuality) {
         quality = video.getVideoPlaybackQuality();
       }
     } catch (err) { quality = {}; }
+    var src = String(video.currentSrc || video.src || "");
     var fact = {
       // the host, never the address: which site it was matters, which
       // video he was watching is his business and not the bug's
       host: location.hostname,
+      tick: ticks,
+      videos: all.length,
       at: Math.round(video.currentTime * 10) / 10,
       w: video.videoWidth, h: video.videoHeight,
-      ready: video.readyState, paused: !!video.paused,
+      // a player that never gets data sits at readyState 0 with
+      // nothing to decode. That is NOT a black video, it is an empty
+      // one, and it has to say so -- the first cut of this sampler
+      // only spoke when readyState was 2 or more, so the one case it
+      // was written to explain was the one case it stayed silent for.
+      ready: video.readyState,
+      network: video.networkState,
+      paused: !!video.paused,
+      // the scheme alone. blob: means the page is feeding the player
+      // through MSE and the stream is its own business; https: means
+      // a plain file; "none" means nothing was ever handed to it
+      src: src ? src.split(":")[0] : "none",
+      buffered: video.buffered ? video.buffered.length : -1,
       decoded: quality.totalVideoFrames || video.webkitDecodedFrameCount || 0,
-      dropped: quality.droppedVideoFrames || video.webkitDroppedFrameCount || 0
+      dropped: quality.droppedVideoFrames || video.webkitDroppedFrameCount || 0,
+      mse: viaMse()
     };
-    try {
-      var canvas = document.createElement("canvas");
-      canvas.width = 8;
-      canvas.height = 8;
-      var flat = canvas.getContext("2d");
-      flat.drawImage(video, 0, 0, 8, 8);
-      var bytes = flat.getImageData(0, 0, 8, 8).data;
-      var low = 255, high = 0, total = 0, count = bytes.length / 4;
-      for (var at = 0; at < bytes.length; at += 4) {
-        var light = (bytes[at] * 299 + bytes[at + 1] * 587
-                     + bytes[at + 2] * 114) / 1000;
-        if (light < low) { low = light; }
-        if (light > high) { high = light; }
-        total += light;
-      }
-      fact.pixels = {low: Math.round(low), high: Math.round(high),
-                     mean: Math.round(total / count)};
-    } catch (err) {
-      // a protected stream taints the canvas and getImageData throws.
-      // That is an answer as well: it says the frames cannot be read
-      // here, not that the reading is broken.
-      fact.pixels = String(err && err.name ? err.name : err);
+    if (video.error) {
+      // code 4 is MEDIA_ERR_SRC_NOT_SUPPORTED, which is the engine
+      // saying it was handed something it cannot play -- and the
+      // message usually names what
+      fact.error = {code: video.error.code,
+                    text: String(video.error.message || "").slice(0, 200)};
     }
-    console.log("[gpu-frame] " + JSON.stringify(fact));
+    if (video.readyState >= 2) {
+      try {
+        var canvas = document.createElement("canvas");
+        canvas.width = 8;
+        canvas.height = 8;
+        var flat = canvas.getContext("2d");
+        flat.drawImage(video, 0, 0, 8, 8);
+        var bytes = flat.getImageData(0, 0, 8, 8).data;
+        var low = 255, high = 0, total = 0, count = bytes.length / 4;
+        for (var at = 0; at < bytes.length; at += 4) {
+          var light = (bytes[at] * 299 + bytes[at + 1] * 587
+                       + bytes[at + 2] * 114) / 1000;
+          if (light < low) { low = light; }
+          if (light > high) { high = light; }
+          total += light;
+        }
+        fact.pixels = {low: Math.round(low), high: Math.round(high),
+                       mean: Math.round(total / count)};
+      } catch (err) {
+        // a protected stream taints the canvas and getImageData throws.
+        // That is an answer as well: it says the frames cannot be read
+        // here, not that the reading is broken.
+        fact.pixels = String((err && err.name) || err);
+      }
+    } else {
+      fact.pixels = "nothing decoded yet";
+    }
+    // one line when something changes, and a heartbeat every twelfth
+    // tick. A stuck player used to be able to say the same thing two
+    // hundred times and push everything else out of the console's
+    // three hundred lines.
+    var state = [fact.videos, fact.ready, fact.network, fact.paused,
+                 fact.src, fact.error ? fact.error.code : 0,
+                 fact.decoded > 0,
+                 (fact.pixels && fact.pixels.mean !== undefined)
+                   ? (fact.pixels.mean <= 2) : fact.pixels].join("/");
+    if (state !== last || ticks % 12 === 1) {
+      last = state;
+      console.log("[gpu-frame] " + JSON.stringify(fact));
+    }
     return fact;
   }
   window.__videoWatch = sample;
   setInterval(sample, 5000);
 })()"""
+
+#: the same codec questions, asked of the page's OWN copies of the
+#: functions -- so this one runs in the main world, where our YouTube
+#: script's overrides live. The difference between this and the `mse`
+#: block above is exactly what that script is doing to the page, which
+#: is the measurement nobody has had: both of its halves are suspects
+#: for a player that gets nothing at all, and until now we could only
+#: read what they were MEANT to do.
+#:
+#: Which of our hooks is in force is read off the functions they
+#: replaced -- a replaced builtin no longer stringifies as native --
+#: rather than from a mark in the page. A mark would be one more thing
+#: a site could use to notice the ad stripping.
+MEDIA_PROBE_JS = r"""(function () {
+  var CODECS = {
+    vp9: 'video/webm; codecs="vp09.00.51.08.01.01.01.01.00"',
+    vp9plain: 'video/webm; codecs="vp9"',
+    av1: 'video/mp4; codecs="av01.0.08M.08"',
+    h264: 'video/mp4; codecs="avc1.640028"',
+    aac: 'audio/mp4; codecs="mp4a.40.2"',
+    opus: 'audio/webm; codecs="opus"'
+  };
+  var out = {mse: {}, canPlay: {}, ours: {}};
+  var probe = document.createElement("video");
+  for (var name in CODECS) {
+    try {
+      out.mse[name] = (window.MediaSource
+                       && MediaSource.isTypeSupported(CODECS[name])) ? 1 : 0;
+    } catch (err) { out.mse[name] = String((err && err.name) || err); }
+    try {
+      out.canPlay[name] = probe.canPlayType(CODECS[name]);
+    } catch (err) { out.canPlay[name] = String((err && err.name) || err); }
+  }
+  function replaced(fn) {
+    try { return String(fn).indexOf("[native code]") < 0; }
+    catch (err) { return null; }
+  }
+  try {
+    out.ours.codecGate = window.MediaSource
+      ? replaced(MediaSource.isTypeSupported) : null;
+    out.ours.canPlayType = replaced(HTMLMediaElement.prototype.canPlayType);
+    out.ours.adScrub = replaced(JSON.parse);
+    out.ours.responseJson = replaced(Response.prototype.json);
+  } catch (err) { out.ours = String(err); }
+  var all = document.querySelectorAll("video");
+  out.videos = all.length;
+  if (all.length) {
+    var video = all[0];
+    var src = String(video.currentSrc || video.src || "");
+    out.video = {ready: video.readyState, network: video.networkState,
+                 paused: !!video.paused, w: video.videoWidth,
+                 src: src ? src.split(":")[0] : "none",
+                 error: video.error
+                   ? {code: video.error.code,
+                      text: String(video.error.message || "").slice(0, 200)}
+                   : null};
+  }
+  return out;
+})()"""
+
 
 #: how the sampler's lines are told apart from everything else a page
 #: says to the console
@@ -22736,7 +22859,14 @@ class Browser(QMainWindow):
         cannot answer, the machine's half of the record is written on
         its own."""
         try:
-            views = list(self._own_open_pages())
+            # every tab, not _own_open_pages(): that one answers with
+            # the browser's OWN pages (file: scheme) and a YouTube tab
+            # is never among them, so the reports this is here to
+            # collect could not have been reached at all. His first
+            # record came back with an empty list and the readyState
+            # gate took the blame for all of it; this was the other
+            # half.
+            views = [self.tabs.widget(i) for i in range(self.tabs.count())]
         except RuntimeError:
             # a window that has been closed, with a tick still on the
             # way to it. There is nothing left to ask and nothing to
@@ -22760,17 +22890,31 @@ class Browser(QMainWindow):
             return
         self._gpu_said = mark
 
-        def done(facts):
+        def write(facts, media=None):
             try:
-                gpu_report(web=facts if isinstance(facts, dict) else
-                           {"page": str(facts)[:200]}, logs=logs)
+                web = (dict(facts) if isinstance(facts, dict)
+                       else {"page": str(facts)[:200]})
+                if isinstance(media, dict):
+                    web["media"] = media
+                gpu_report(web=web, logs=logs)
             except Exception:
                 pass
+
+        def then_media(page, facts):
+            """...and the same questions in the page's own world."""
+            try:
+                page.runJavaScript(
+                    MEDIA_PROBE_JS,
+                    QWebEngineScript.ScriptWorldId.MainWorld.value,
+                    lambda media: write(facts, media))
+            except Exception:
+                write(facts)
         try:
             page = self.current().page()
             page.runJavaScript(
                 GPU_PROBE_JS,
-                QWebEngineScript.ScriptWorldId.ApplicationWorld.value, done)
+                QWebEngineScript.ScriptWorldId.ApplicationWorld.value,
+                lambda facts: then_media(page, facts))
         except Exception:
             try:
                 gpu_report(logs=logs)
