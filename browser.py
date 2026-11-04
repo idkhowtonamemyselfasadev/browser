@@ -583,14 +583,37 @@ def _gpu_config():
     return data if isinstance(data, dict) else {}
 
 
+#: the graphics variables THIS run put into the environment, and the
+#: only ones it ever takes back out. Anything else found in there came
+#: from the desktop session, which started every other program on the
+#: machine with it -- and these never outlive a process, so at a fresh
+#: start there is nothing of ours in the environment to clean up.
+#:
+#: His own machine is why this is a set and not a list of names: the
+#: card he picked is the card his monitors are already on, so there is
+#: nothing to offload to it and the pick sets nothing (see gpu_env).
+#: With a flat take-the-others-off, that pick did nothing BUT delete --
+#: and what it deleted was his session's `__GLX_VENDOR_LIBRARY_NAME`,
+#: `LIBVA_DRIVER_NAME` and `NVD_BACKEND`, measured gone from every
+#: engine process his browser had running. The browser was the only
+#: program on that desktop whose graphics were set up differently from
+#: all the rest, and it was the browser that did it.
+_GPU_PUT = set()
+
+
 def gpu_apply(choice, cards=None, env=None, vaapi=None):
-    """Put one card's environment on, and take the other's off."""
+    """Put one card's environment on, and take this run's own off."""
     env = os.environ if env is None else env
     on, off = gpu_env(choice, cards, vaapi)
     for key in off:
-        env.pop(key, None)
+        # not a variable the session set: switching cards inside one
+        # run has to undo the previous pick, and nothing else
+        if key in _GPU_PUT:
+            env.pop(key, None)
     for key, value in on.items():
         env[key] = value
+    _GPU_PUT.difference_update(off)
+    _GPU_PUT.update(on)
     return env
 
 

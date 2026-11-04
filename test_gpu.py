@@ -140,6 +140,8 @@ check("...and takes the five it set off again",
 check("...but leaves the VA-API driver the machine chose alone",
       "LIBVA_DRIVER_NAME" not in off, off)
 keep = {"LIBVA_DRIVER_NAME": "nvidia", "DRI_PRIME": "pci-0000_01_00_0"}
+B._GPU_PUT.clear()
+B._GPU_PUT.add("DRI_PRIME")         # as if a pick in this run set it
 B.gpu_apply("auto", cards, keep)
 check("...so hardware decoding is not taken from a machine that had it",
       keep == {"LIBVA_DRIVER_NAME": "nvidia"}, keep)
@@ -274,10 +276,39 @@ on, _off = B.gpu_env("0000:00:02.0", hiscards, vaapi=False)
 check("the card with nothing plugged into it is still a real offload",
       on.get("DRI_PRIME") == "pci-0000_00_02_0"
       and on.get("MESA_VK_DEVICE_SELECT") == "8086:7d67", on)
-env = {"PATH": "/x", "LIBVA_DRIVER_NAME": "nvidia", "NVD_BACKEND": "direct",
-       "DRI_PRIME": "stale", "__NV_PRIME_RENDER_OFFLOAD": "1"}
+# ...and a pick that sets nothing must not become a pick that only
+# DELETES. Everything in the environment at a fresh start came from the
+# desktop session -- his Hyprland names a GL vendor and a VA-API driver
+# for every program it starts, and these variables never outlive a
+# process, so none of it can be a leftover of ours. Measured on his
+# machine on 2026-11-04: every engine process his browser had running
+# was missing all three, and this browser was the only program on that
+# desktop whose graphics were set up differently from the rest of it.
+session = {"PATH": "/x", "LIBVA_DRIVER_NAME": "nvidia",
+           "NVD_BACKEND": "direct", "__GLX_VENDOR_LIBRARY_NAME": "nvidia"}
+env = dict(session)
+B._GPU_PUT.clear()
 B.gpu_apply("0000:02:00.0", hiscards, env, vaapi=False)
-check("so his own machine starts with none of this on it at all",
+check("his pick sets nothing, so it takes nothing away either",
+      env == session, env)
+# The two VA-API names in there ARE wrong for a machine with hardware
+# decode off -- and taking them off is the toggle's own business, done
+# by the line at the top of browser.py that owns that question. This
+# one owns which card draws, and deletes only what it set itself.
+env = dict(session, DRI_PRIME="pci-0000_00_02_0",
+           MESA_VK_DEVICE_SELECT="8086:7d67")
+B._GPU_PUT.clear()
+B._GPU_PUT.update({"DRI_PRIME", "MESA_VK_DEVICE_SELECT"})
+B.gpu_apply("0000:02:00.0", hiscards, env, vaapi=False)
+check("...but a card it offloaded to earlier in this run is undone",
+      env == session, env)
+# the same thing with nothing told to it: two picks through the real
+# function, which has to remember for itself what the first one set
+B._GPU_PUT.clear()
+env = {"PATH": "/x"}
+B.gpu_apply(cards[0]["slot"], cards, env, vaapi=False)
+B.gpu_apply("auto", cards, env, vaapi=False)
+check("two picks in one run, and the second undoes the first alone",
       env == {"PATH": "/x"}, env)
 
 check("a slot that is not here any more decides nothing",
@@ -285,6 +316,8 @@ check("a slot that is not here any more decides nothing",
 
 env = {"PATH": "/x", "DRI_PRIME": "stale",
        "__GLX_VENDOR_LIBRARY_NAME": "nvidia"}
+B._GPU_PUT.clear()
+B._GPU_PUT.update({"DRI_PRIME", "__GLX_VENDOR_LIBRARY_NAME"})
 B.gpu_apply(cards[1]["slot"], cards, env, vaapi=True)
 check("applying one card clears the other's leftovers",
       env.get("DRI_PRIME") == "pci-0000_00_02_0"
