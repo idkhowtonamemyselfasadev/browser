@@ -209,7 +209,12 @@ print("\n(2c) a driver name the session handed us, with decode off")
 # never touched it. These run the shipped lines themselves, with an os
 # of their own, the way test_winbranch runs the Windows ones.
 _src = (HERE / "browser.py").read_text(encoding="utf-8")
-_from = _src.index("if _nvidia_va_wanted():")
+# anchored on the comment, not on the guard's own text: a slice keyed
+# to `if sys.platform not in (...)` cannot be mutated at all -- change
+# the guard and the suite dies looking for it instead of going red,
+# which is a guard that proves nothing. Rewrite the comment and this
+# raises ValueError, loudly, which is the failure we want.
+_from = _src.index("# ...and only where libva exists at all.")
 _block = _src[_from:_src.index("# Widevine:", _from)]
 check("the names are settled before Qt is imported at all",
       _from < _src.index("from PyQt6.QtCore import"), _from)
@@ -222,9 +227,16 @@ class FakeOS:
         self.environ = env
 
 
-def shipped(env, module, toggle):
+class FakeSys:
+    """...and sys, which is only asked which platform this is."""
+
+    def __init__(self, platform):
+        self.platform = platform
+
+
+def shipped(env, module, toggle, platform="linux"):
     """The real block, with the machine and the toggle as answers."""
-    ns = {"os": FakeOS(env),
+    ns = {"os": FakeOS(env), "sys": FakeSys(platform),
           "_nvidia_va_wanted": lambda: bool(module and toggle),
           "_vaapi_wanted": lambda: bool(toggle)}
     exec(compile(_block, "browser.py (the block)", "exec"), ns)
@@ -250,6 +262,24 @@ check("...and one already there is left as it was found",
 check("decode on, no NVIDIA module: the machine's own name stands",
       shipped({"LIBVA_DRIVER_NAME": "iHD"}, module=False, toggle=True)
       == {"LIBVA_DRIVER_NAME": "iHD"})
+
+# ...and nowhere that has no libva to name a driver for. VA-API is a
+# Linux and BSD interface; on macOS both names are forbidden outright
+# (MAC_FORBIDDEN_ENV, linted by that edition's own suite, which this
+# tree cannot run), and on Windows they mean nothing. Neither setting
+# NOR clearing them is this file's business there.
+for platform in ("darwin", "win32"):
+    check("%s is left exactly as it was found, decode off" % platform,
+          shipped(dict(named), module=True, toggle=False,
+                  platform=platform) == named)
+    check("...and %s with decode on" % platform,
+          shipped({"LIBVA_DRIVER_NAME": "whatever"}, module=True,
+                  toggle=True, platform=platform)
+          == {"LIBVA_DRIVER_NAME": "whatever"})
+check("...while this platform is the one that answers",
+      shipped({}, module=True, toggle=True, platform="linux") == named
+      and shipped({}, module=True, toggle=True, platform="freebsd12")
+      == named)
 
 
 print("\n(2b) and nothing is offloaded to the card that already draws")
