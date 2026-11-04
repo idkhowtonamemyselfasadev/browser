@@ -22504,7 +22504,17 @@ class Browser(QMainWindow):
                 lambda: engine_pane.toggle(self))
 
         self.bridge.updateFinished.connect(self._toast_result)
-        QTimer.singleShot(3000, self._check_updates)
+        # ...but not while the suites run. This asks git a question
+        # three seconds in, and on a checkout whose commits are not
+        # pushed yet `git merge-base --is-ancestor HEAD @{u}` exits 1 --
+        # a real, correct "this copy cannot pull, it can be replaced"
+        # toast. Two suites that assert no toast is up then go red for
+        # a reason that has nothing to do with what they test, and
+        # twenty minutes went into bisecting that in clean worktrees
+        # before the cause turned out to be git state rather than code.
+        # BROWSER_NO_LIB_CHECK exists for exactly the same reason.
+        if not os.environ.get("BROWSER_NO_UPDATE_CHECK"):
+            QTimer.singleShot(3000, self._check_updates)
         # ...and once, a little later than that, what the graphics
         # turned out to be. Later because a renderer has to exist
         # before its command line can be read, and the answer is worth

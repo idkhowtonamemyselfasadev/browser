@@ -131,6 +131,11 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["XDG_DATA_HOME"] = os.path.join(DATA, "share")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(DATA, "config")
 os.environ["XDG_CACHE_HOME"] = os.path.join(DATA, "cache")
+# no suite asks git whether this checkout is behind its remote, and a
+# checkout with unpushed commits raises a real toast three seconds into
+# every window. Two suites assert that no toast is up; they were red
+# for a day's worth of commits for that reason alone.
+os.environ["BROWSER_NO_UPDATE_CHECK"] = "1"
 
 sys.path.insert(0, ROOT)
 

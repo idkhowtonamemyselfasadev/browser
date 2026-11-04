@@ -160,6 +160,16 @@ check("the pull is still --ff-only, never a plain pull",
       '"pull", "--ff-only"' in SRC and '"pull"]' not in SRC)
 check("a stranded copy is offered a replace, not a pull",
       "_stranded" in SRC and "Replace it" in SRC)
+# ...and the suites do not ask it at all. The question it asks git is
+# about the checkout, not about the code, so a tree with unpushed
+# commits used to raise a genuine toast three seconds into every
+# window -- and two suites elsewhere assert that no toast is up.
+check("the check is skipped when the suites say so",
+      'if not os.environ.get("BROWSER_NO_UPDATE_CHECK"):\n'
+      "            QTimer.singleShot(3000, self._check_updates)" in SRC)
+check("...and the harness says so for every suite at once",
+      'os.environ["BROWSER_NO_UPDATE_CHECK"] = "1"' in
+      (HERE / "tests" / "harness.py").read_text(encoding="utf-8"))
 
 shutil.rmtree(SCRATCH, ignore_errors=True)
 print("\n%d checks failed" % len(fails))
