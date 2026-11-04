@@ -573,6 +573,202 @@ def gpu_env(choice, cards=None, vaapi=None):
     return on, [k for k in off if k not in on]
 
 
+#: the record of what the graphics really resolved to, written on an
+#: ordinary start and overwritten by the next one. It answers the one
+#: question nobody could answer about the 2026-11-03 black player: not
+#: "what did we hand the engine", which every variable in here already
+#: says, but what Qt and Chromium decided afterwards. His own browser
+#: writes its stderr to /dev/null, so Chromium's GPU log is gone the
+#: moment it is printed, and he is not going to start a browser from a
+#: terminal to get it back. This costs him nothing: he opens a page the
+#: way he always does, and the file is there to read.
+GPU_REPORT_FILE = BROWSER_HOME / "gpu-report.json"
+
+#: the graphics variables the engine was handed, and what says which
+#: desktop session handed them over
+_GPU_REPORT_ENV = (
+    "LIBVA_DRIVER_NAME", "NVD_BACKEND", "DRI_PRIME",
+    "__GLX_VENDOR_LIBRARY_NAME", "__NV_PRIME_RENDER_OFFLOAD",
+    "__VK_LAYER_NV_optimus", "MESA_VK_DEVICE_SELECT",
+    "QTWEBENGINE_CHROMIUM_FLAGS", "QT_QPA_PLATFORM", "QSG_RHI_BACKEND",
+    "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP")
+
+
+def _no_home(text):
+    """His home folder, kept out of anything this writes down.
+
+    The record exists to be read by somebody else -- carried to another
+    session, pasted into a brief -- and the engine's own command line
+    has `--widevine-path=/home/<him>/...` sitting in it. The record is
+    about graphics; whose login it ran under is not part of it."""
+    if not isinstance(text, str):
+        return text
+    home = str(Path.home())
+    return text.replace(home, "~") if home not in ("", "/") else text
+
+
+def _vulkan_drivers(places=("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d")):
+    """Which Vulkan drivers are installed, by name.
+
+    Chromium's `Vulkan` feature can only reach a card that has one of
+    these behind it. His machine has `nvidia_icd`; this server has
+    Mesa's software one and nothing else, which is the whole reason a
+    compositing fault on his box cannot be reproduced on this one."""
+    found = []
+    for place in places:
+        try:
+            found.extend(sorted(os.listdir(place)))
+        except OSError:
+            continue
+    return found
+
+
+def _engine_children(pid=None, root="/proc"):
+    """Every engine process this browser started, with its command line.
+
+    Qt and Chromium add flags of their own to the ones set at the top
+    of this file -- on his machine the `Vulkan` feature and
+    `--disable-features=AcceleratedVideoDecoder` are neither of them
+    ours -- and a child's /proc entry is the only place the final
+    answer is written down.
+
+    Note what is NOT read here: this process's own
+    /proc/<pid>/environ. That is the exec-time block, which setenv and
+    unsetenv never rewrite, so it reports what the session handed in
+    and nothing about what this file did with it afterwards. Reading it
+    as the live environment cost a day of the black-player hunt. A
+    CHILD's copy is honest, because the child was exec'd after us."""
+    pid = os.getpid() if pid is None else pid
+    kids, lines = {}, {}
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return []
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            with open(os.path.join(root, name, "stat")) as fh:
+                stat = fh.read()
+            with open(os.path.join(root, name, "cmdline"), "rb") as fh:
+                line = fh.read().decode("utf-8", "replace")
+        except OSError:
+            continue
+        # a process name can hold spaces and brackets both, so the
+        # fields behind it are counted from the LAST bracket, never
+        # from a split on whitespace
+        tail = stat.rsplit(")", 1)[-1].split()
+        if len(tail) < 2:
+            continue
+        kids.setdefault(tail[1], []).append(name)
+        lines[name] = line.replace("\0", " ").strip()
+    out, seen, stack = [], set(), [str(pid)]
+    while stack:
+        one = stack.pop()
+        if one in seen:
+            continue
+        seen.add(one)
+        stack.extend(kids.get(one, ()))
+        text = lines.get(one, "")
+        if "--type=" in text:
+            out.append({"pid": int(one),
+                        "kind": text.split("--type=", 1)[1].split()[0],
+                        "cmdline": _no_home(text)})
+    return sorted(out, key=lambda c: c["pid"])
+
+
+def _engine_features(children):
+    """What the engine was actually told, from a renderer's own line.
+
+    One renderer is enough: they are all started from the same
+    command line, and it carries the merged answer -- ours, Qt's and
+    Chromium's own defaults together."""
+    for child in children:
+        if child["kind"] != "renderer":
+            continue
+        got = {}
+        for token in child["cmdline"].split():
+            for flag in ("--enable-features=", "--disable-features=",
+                         "--use-gl=", "--use-angle=", "--ozone-platform="):
+                if token.startswith(flag):
+                    got[flag.strip("-=")] = token.split("=", 1)[1]
+        return got
+    return {}
+
+
+def gpu_report(web=None, path=None, root="/proc"):
+    """Write down what the graphics resolved to on this ordinary start.
+
+    `web` is what the page itself answered (see GPU_PROBE_JS): the
+    WebGL renderer string is ANGLE's, and ANGLE names the backend it is
+    really running on, which is the fact no environment variable in
+    here will give up."""
+    where = GPU_REPORT_FILE if path is None else Path(path)
+    children = _engine_children(root=root)
+    data = {
+        "when": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "platform": sys.platform,
+        "env": dict((key, _no_home(os.environ[key]))
+                    for key in _GPU_REPORT_ENV if key in os.environ),
+        "config": dict((key, _gpu_config().get(key)) for key in
+                       ("vaapi", "gpuCard", "gpuAsk", "gpuReset")),
+        "cards": [dict((key, card.get(key)) for key in
+                       ("maker", "name", "slot", "boot", "outputs",
+                        "drives")) for card in gpu_cards()],
+        "vulkanDrivers": _vulkan_drivers(),
+        "engineFeatures": _engine_features(children),
+        "engine": children,
+        "web": web if isinstance(web, dict) else {},
+    }
+    try:
+        where.parent.mkdir(parents=True, exist_ok=True)
+        where.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    return data
+
+
+#: what the engine's GPU process says about itself, asked from inside a
+#: page because that is the only place it can be asked: WebGL's
+#: renderer string comes from ANGLE, and ANGLE writes its real backend
+#: into it ("ANGLE (NVIDIA, ... (Vulkan 1.3 ...))"). Nothing is added
+#: to the page -- the canvas is never attached to the document -- and
+#: it runs in a world of its own, so no site can see it happen.
+GPU_PROBE_JS = r"""(function () {
+  var out = {};
+  try {
+    var canvas = document.createElement("canvas");
+    var gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    if (!gl) {
+      out.webgl = "no context: the engine is drawing in software";
+    } else {
+      var info = gl.getExtension("WEBGL_debug_renderer_info");
+      out.webgl = {
+        vendor: gl.getParameter(gl.VENDOR),
+        renderer: gl.getParameter(gl.RENDERER),
+        version: gl.getParameter(gl.VERSION),
+        cardVendor: info && gl.getParameter(info.UNMASKED_VENDOR_WEBGL),
+        card: info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL)
+      };
+    }
+  } catch (err) {
+    out.webgl = "asking failed: " + err;
+  }
+  try {
+    var video = document.createElement("video");
+    out.codecs = {
+      vp9: video.canPlayType('video/webm; codecs="vp9"'),
+      av1: video.canPlayType('video/mp4; codecs="av01.0.04M.08"'),
+      h264: video.canPlayType('video/mp4; codecs="avc1.42E01E"'),
+      hevc: video.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"')
+    };
+  } catch (err) {
+    out.codecs = "asking failed: " + err;
+  }
+  return out;
+})()"""
+
+
 def _gpu_config():
     """The two answers this needs, read with the standard library."""
     import json as _json
@@ -22009,6 +22205,11 @@ class Browser(QMainWindow):
 
         self.bridge.updateFinished.connect(self._toast_result)
         QTimer.singleShot(3000, self._check_updates)
+        # ...and once, a little later than that, what the graphics
+        # turned out to be. Later because a renderer has to exist
+        # before its command line can be read, and the answer is worth
+        # nothing before the engine has settled on one (gpu_report).
+        QTimer.singleShot(9000, self._gpu_record)
         self._toast = None
         # ...and the libraries under the browser, on a longer rope and
         # a slower tick. See _check_lib_updates.
@@ -22424,6 +22625,29 @@ class Browser(QMainWindow):
                 self._toggle_collapse(name)
 
     # ---- updates ----
+    def _gpu_record(self):
+        """Write down what the graphics resolved to, and move on.
+
+        Nothing depends on this and nothing waits for it: if the page
+        cannot answer, the machine's half of the record is written on
+        its own."""
+        def done(facts):
+            try:
+                gpu_report(web=facts if isinstance(facts, dict) else
+                           {"page": str(facts)[:200]})
+            except Exception:
+                pass
+        try:
+            page = self.current().page()
+            page.runJavaScript(
+                GPU_PROBE_JS,
+                QWebEngineScript.ScriptWorldId.ApplicationWorld.value, done)
+        except Exception:
+            try:
+                gpu_report()
+            except Exception:
+                pass
+
     def _check_updates(self):
         """Quietly look for a newer version on GitHub at startup."""
         if not (APP_DIR / ".git").exists():

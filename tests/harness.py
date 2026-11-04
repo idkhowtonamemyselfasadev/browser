@@ -156,7 +156,8 @@ def boot():
     B.DOWNLOADS_FILE = cfg / "downloads.json"
     B.HOSTS_FILE = cfg / "hosts.json"
     B.BOOKMARKS_FILE = cfg / "bookmarks.json"
-    for name in ("SESSION_FILE", "PLUGINS_DIR", "PLUGIN_FILE", "TABS_FILE"):
+    for name in ("SESSION_FILE", "PLUGINS_DIR", "PLUGIN_FILE",
+                 "TABS_FILE", "GPU_REPORT_FILE"):
         if hasattr(B, name):
             v = getattr(B, name)
             setattr(B, name, cfg / os.path.basename(str(v)))
