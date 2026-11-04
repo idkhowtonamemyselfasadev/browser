@@ -15,8 +15,11 @@ of them ours), which Vulkan drivers are installed at all, and what the
 engine's own GPU process says about itself through WebGL. He opens a
 page the way he always does; the file is there to read.
 """
+import base64
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -210,6 +213,131 @@ record = source[source.index("def _gpu_record"):
 check("...and nothing waits for the answer: it is handed to a callback",
       "runJavaScript(" in record and "done)" in record
       and ".exec(" not in record and "QEventLoop" not in record)
+check("...and it looks again later, for the pages' own reports",
+      "QTimer.singleShot(60000, self._gpu_record)" in record)
+check("...but writes nothing again while nothing has changed",
+      "mark == self._gpu_said" in record)
+
+
+class Closed:
+    """a window that has been shut, with a tick still on the way."""
+
+    def _own_open_pages(self):
+        raise RuntimeError("wrapped C/C++ object of type Browser deleted")
+
+
+check("...and a tick that arrives after its window is gone is quiet",
+      B.Browser._gpu_record(Closed()) is None)
+
+print("\n(6) and whether the picture is really reaching the screen")
+# A black player with sound is two faults wearing one face. This is
+# what tells them apart, and nobody has had the distinction for the
+# 2026-11-03 report: read a frame back off the video while the
+# decoder's own count runs. Picture in the canvas and black on screen
+# is a compositing fault; black in both is the decode path; a count
+# that never moves is an empty player and not a black one at all.
+log = [{"level": "InfoMessageLevel", "text": "something the page said"},
+       {"level": "InfoMessageLevel",
+        "text": '[gpu-frame] {"at": 1.0, "decoded": 19, '
+                '"pixels": {"mean": 0}}'},
+       {"text": "[gpu-frame] not json at all"},
+       {"text": '[gpu-frame] "a string, not a report"'},
+       # a site logging JSON of its own, which plenty do: without the
+       # marker this reads exactly like a report and lands in the
+       # record as one
+       {"text": '{"at": 99.0, "decoded": 1, "pixels": {"mean": 7}}'},
+       {"level": "InfoMessageLevel",
+        "text": '[gpu-frame] {"at": 6.0, "decoded": 180, '
+                '"pixels": {"mean": 124}}'}]
+frames = B._video_frames([log])
+check("the reports are picked out of what the page said",
+      [f["at"] for f in frames] == [1.0, 6.0], frames)
+check("...and a line that is not one of them is left where it was",
+      all("decoded" in f for f in frames), frames)
+check("...including a site's own JSON, which only the marker tells apart",
+      all(f["at"] != 99.0 for f in frames), frames)
+check("only the last few are kept",
+      len(B._video_frames([log] * 9, limit=3)) == 3)
+check("no pages, or a page that said nothing, is no reports",
+      B._video_frames(None) == [] and B._video_frames([None, []]) == [])
+
+check("the sampler runs in a world the site cannot reach",
+      "ScriptWorldId.ApplicationWorld" in source[
+          source.index("def _video_watch_script"):
+          source.index("def _video_watch_script") + 700])
+check("...after the document exists, since it looks for a <video>",
+      "InjectionPoint.DocumentReady" in source[
+          source.index("def _video_watch_script"):
+          source.index("def _video_watch_script") + 700])
+check("...and it is installed with the other scripts",
+      "profile.scripts().insert(self._video_watch_script())" in source)
+check("the record carries what the sampler said",
+      B.gpu_report(path=str(where), root=str(proc),
+                   logs=[log])["frames"][-1]["decoded"] == 180)
+
+if shutil.which("ffmpeg"):
+    # two videos of one flat colour each, made here rather than kept in
+    # the repo: 729 bytes of webm, inline in the page, so no server
+    # needs to learn to serve video for this
+    vids = scratch / "vid"
+    vids.mkdir(parents=True, exist_ok=True)
+    for colour in ("black", "white"):
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+             "-i", "color=c=%s:s=64x64:r=10:d=1" % colour, "-c:v",
+             "libvpx-vp9", "-pix_fmt", "yuv420p", "-y",
+             str(vids / (colour + ".webm"))], check=True)
+
+    def video_page(colour):
+        raw = base64.b64encode((vids / (colour + ".webm")).read_bytes())
+        return ("<html><body><video id=v muted autoplay playsinline "
+                "src=\"data:video/webm;base64,%s\"></video></body></html>"
+                % raw.decode())
+
+    shows = H.Server({"/black": video_page("black"),
+                      "/white": video_page("white")})
+    world = B.QWebEngineScript.ScriptWorldId.ApplicationWorld.value
+    seen = {}
+    for colour in ("black", "white"):
+        view = win.current()
+        H.load(view, shows.url("/" + colour))
+        H.wait_for(lambda: (H.js(view, "document.getElementById('v')"
+                                       ".readyState") or 0) >= 2, 8000)
+        # offscreen Chromium pauses video-only background media, so a
+        # passive wait would read a frozen player as a broken one. A
+        # seek forces a decode whatever the autoplay rules are doing.
+        H.js(view, "var v=document.getElementById('v');"
+                   "v.currentTime=0.4;v.play()")
+        H.spin(1200)
+        got = H.js(view, "JSON.stringify(window.__videoWatch())", world)
+        seen[colour] = json.loads(got) if got else {}
+    check("a video that really is black reads back black",
+          seen["black"].get("pixels", {}).get("mean") == 0,
+          seen["black"])
+    check("...and one with a picture in it does not",
+          seen["white"].get("pixels", {}).get("mean") == 255,
+          seen["white"])
+    check("...while the decoder's count says frames arrived either way",
+          seen["black"].get("decoded", 0) > 0
+          and seen["white"].get("decoded", 0) > 0,
+          [seen[c].get("decoded") for c in ("black", "white")])
+    check("...so the two faults can be told apart at all",
+          seen["black"].get("pixels", {}).get("mean")
+          != seen["white"].get("pixels", {}).get("mean"),
+          [seen[c].get("pixels") for c in ("black", "white")])
+    check("the size and the time it was read at are in the report",
+          seen["white"].get("w") == 64 and (seen["white"].get("at") or 0) > 0,
+          seen["white"])
+    check("the host is written down, and the address never is",
+          seen["white"].get("host") == "127.0.0.1"
+          and not any("/white" in str(v) for v in seen["white"].values()),
+          seen["white"])
+    check("and the page's own scripts cannot see the sampler",
+          H.js(view, "typeof window.__videoWatch") == "undefined")
+    shows.stop()
+else:
+    print("  --   no ffmpeg here, so the frame readback itself is not "
+          "measured in this run")
 
 print("")
 if fails:

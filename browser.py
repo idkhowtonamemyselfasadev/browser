@@ -696,7 +696,7 @@ def _engine_features(children):
     return {}
 
 
-def gpu_report(web=None, path=None, root="/proc"):
+def gpu_report(web=None, path=None, root="/proc", logs=None):
     """Write down what the graphics resolved to on this ordinary start.
 
     `web` is what the page itself answered (see GPU_PROBE_JS): the
@@ -719,6 +719,7 @@ def gpu_report(web=None, path=None, root="/proc"):
         "engineFeatures": _engine_features(children),
         "engine": children,
         "web": web if isinstance(web, dict) else {},
+        "frames": _video_frames(logs),
     }
     try:
         where.parent.mkdir(parents=True, exist_ok=True)
@@ -726,6 +727,109 @@ def gpu_report(web=None, path=None, root="/proc"):
     except OSError:
         pass
     return data
+
+
+#: how a page answers "is the picture actually there". A black player
+#: with sound is two different faults wearing one face, and this tells
+#: them apart: read a frame back off the video into a canvas while the
+#: decoder's own frame count runs.
+#:
+#:   decoder advancing, canvas has a picture  -> it decoded fine and
+#:       the compositor lost it on the way to the screen
+#:   decoder advancing, canvas black too      -> the frames themselves
+#:       are black, so it is the decode path
+#:   decoder not advancing                    -> nothing was decoded at
+#:       all, and "black" is just an empty player
+#:
+#: Nobody has had that distinction for the 2026-11-03 report, and it is
+#: the whole difference between looking at compositing and looking at
+#: the decoder. It runs in a world of its own, so no site can see it or
+#: patch it, and it says its piece to the console because that is the
+#: one road out of a page that every page here already keeps
+#: (javaScriptConsoleMessage). The suite drives it by hand through
+#: window.__videoWatch, which only that world can reach.
+VIDEO_WATCH_JS = r"""(function () {
+  if (window.__videoWatch) { return; }
+  function sample() {
+    var all = document.querySelectorAll("video");
+    var video = null;
+    for (var i = 0; i < all.length; i++) {
+      if (!video || all[i].currentTime > video.currentTime) {
+        video = all[i];
+      }
+    }
+    if (!video || video.readyState < 2) { return null; }
+    var quality = {};
+    try {
+      if (video.getVideoPlaybackQuality) {
+        quality = video.getVideoPlaybackQuality();
+      }
+    } catch (err) { quality = {}; }
+    var fact = {
+      // the host, never the address: which site it was matters, which
+      // video he was watching is his business and not the bug's
+      host: location.hostname,
+      at: Math.round(video.currentTime * 10) / 10,
+      w: video.videoWidth, h: video.videoHeight,
+      ready: video.readyState, paused: !!video.paused,
+      decoded: quality.totalVideoFrames || video.webkitDecodedFrameCount || 0,
+      dropped: quality.droppedVideoFrames || video.webkitDroppedFrameCount || 0
+    };
+    try {
+      var canvas = document.createElement("canvas");
+      canvas.width = 8;
+      canvas.height = 8;
+      var flat = canvas.getContext("2d");
+      flat.drawImage(video, 0, 0, 8, 8);
+      var bytes = flat.getImageData(0, 0, 8, 8).data;
+      var low = 255, high = 0, total = 0, count = bytes.length / 4;
+      for (var at = 0; at < bytes.length; at += 4) {
+        var light = (bytes[at] * 299 + bytes[at + 1] * 587
+                     + bytes[at + 2] * 114) / 1000;
+        if (light < low) { low = light; }
+        if (light > high) { high = light; }
+        total += light;
+      }
+      fact.pixels = {low: Math.round(low), high: Math.round(high),
+                     mean: Math.round(total / count)};
+    } catch (err) {
+      // a protected stream taints the canvas and getImageData throws.
+      // That is an answer as well: it says the frames cannot be read
+      // here, not that the reading is broken.
+      fact.pixels = String(err && err.name ? err.name : err);
+    }
+    console.log("[gpu-frame] " + JSON.stringify(fact));
+    return fact;
+  }
+  window.__videoWatch = sample;
+  setInterval(sample, 5000);
+})()"""
+
+#: how the sampler's lines are told apart from everything else a page
+#: says to the console
+_FRAME_MARK = "[gpu-frame] "
+
+
+def _video_frames(logs, limit=8):
+    """The sampler's reports, out of what the pages have said.
+
+    `logs` are the pages' own console records, which they keep anyway
+    for the agent bridge -- so this reads something that was already
+    being written down rather than opening a channel of its own."""
+    out = []
+    for log in logs or ():
+        for line in log or ():
+            text = (line.get("text", "") if isinstance(line, dict)
+                    else str(line))
+            if not text.startswith(_FRAME_MARK):
+                continue
+            try:
+                fact = json.loads(text[len(_FRAME_MARK):])
+            except ValueError:
+                continue
+            if isinstance(fact, dict):
+                out.append(fact)
+    return out[-limit:]
 
 
 #: what the engine's GPU process says about itself, asked from inside a
@@ -22631,10 +22735,35 @@ class Browser(QMainWindow):
         Nothing depends on this and nothing waits for it: if the page
         cannot answer, the machine's half of the record is written on
         its own."""
+        try:
+            views = list(self._own_open_pages())
+        except RuntimeError:
+            # a window that has been closed, with a tick still on the
+            # way to it. There is nothing left to ask and nothing to
+            # ask it with, so the chain ends here rather than throwing
+            # a deleted-object traceback into a quiet session.
+            return
+        logs = []
+        for view in views:
+            try:
+                logs.append(view.page().console_log)
+            except Exception:
+                continue
+        frames = _video_frames(logs)
+        # ...and nothing is written again for a browser that has been
+        # sitting still: the record is rewritten when the sampler has
+        # something new to say about a video, which is what changes.
+        mark = json.dumps(frames[-1], sort_keys=True) if frames else ""
+        if getattr(self, "_gpu_said", None) is not None \
+                and mark == self._gpu_said:
+            QTimer.singleShot(60000, self._gpu_record)
+            return
+        self._gpu_said = mark
+
         def done(facts):
             try:
                 gpu_report(web=facts if isinstance(facts, dict) else
-                           {"page": str(facts)[:200]})
+                           {"page": str(facts)[:200]}, logs=logs)
             except Exception:
                 pass
         try:
@@ -22644,9 +22773,10 @@ class Browser(QMainWindow):
                 QWebEngineScript.ScriptWorldId.ApplicationWorld.value, done)
         except Exception:
             try:
-                gpu_report()
+                gpu_report(logs=logs)
             except Exception:
                 pass
+        QTimer.singleShot(60000, self._gpu_record)
 
     def _check_updates(self):
         """Quietly look for a newer version on GitHub at startup."""
@@ -47487,6 +47617,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.watch_cookies(profile)
         profile.scripts().insert(self._google_script())
         profile.scripts().insert(self._youtube_script())
+        profile.scripts().insert(self._video_watch_script())
         profile.scripts().insert(self._chrome_stub_script())
         profile.scripts().insert(self._force_menu_script())
         profile.scripts().insert(self._error_hook_script())
@@ -47619,6 +47750,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         script.setRunsOnSubFrames(True)
         script.setSourceCode(YOUTUBE_JS)
+        return script
+
+    def _video_watch_script(self):
+        """Is the picture actually reaching the screen (VIDEO_WATCH_JS).
+
+        A world of its own, so a site can neither see it nor stop it,
+        and after the document exists, because it goes looking for a
+        <video> element."""
+        script = QWebEngineScript()
+        script.setName("video-watch")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentReady)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
+        script.setRunsOnSubFrames(True)
+        script.setSourceCode(VIDEO_WATCH_JS)
         return script
 
     def _theme_script(self):
