@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-07 — websites stay readable in every theme, and the chrome calms down
+
+Fifty-four real sites in all 116 themes, measured in the page (`_sitematrix.py`,
+`_siteaudit.js`) and looked at, after "Outlook is unreadable in some theme". It was
+not Outlook and not a theme: the site theming pass fought itself. The full account,
+with the before/after matrix, is in `THEME-FIX.md`.
+
+- **A theme switched while a page is open no longer leaves the last theme behind.**
+  The previous run's observer stayed alive with the previous palette and repainted
+  the new theme's cards in the old theme's dark (the Microsoft sign-in page in Latte
+  after Mocha). One run at a time now.
+- **No more colour transition on sites.** Every element eased between colours over
+  .35 s, and the pass read its own writes back mid-fade, took the finished colour
+  for the site's doing, and restored and repainted in a loop that kept the Outlook
+  landing page's main thread busy for as long as the tab was open. Sites switch in
+  one frame, like the chrome; a site's *own* fades are waited out, and anything that
+  sits on a panel that is still fading waits with it (Outlook's calendar dates were
+  judged against the dark the panel was leaving).
+- **Late styles are seen.** The pass re-looked at a page at most four times; a
+  stylesheet chunk that landed after that (office.com's cards) was never seen. Looks
+  are rate-limited, not counted out, and a scroll asks for one.
+- **A picture under the text, not above it, is seen.** A headline over a positioned
+  `<img>` was repainted in the theme's light text and vanished on the light photo.
+- **Text that already reads is kept**, links and headings included; the accent comes
+  only when the site's colour stops reading on the fill the pass made.
+- **Placeholders are measured like text** and recoloured only when they fail
+  (`dim`, the quietest token that clears 4.5:1 on every surface of all 116 palettes).
+- **A heading filled in by a script** after the first look is looked at again.
+- A live re-theme of a 16000-element page takes under two seconds instead of a
+  style recalculation per element.
+- **The chrome, calmer and rounder:** a 12 px address bar with no hairline until it
+  has focus, 10 px tabs with one thin accent bar on the current one instead of a box,
+  12 px menus, 14 px panels, half-strength hairlines; the settings and start pages'
+  cards, rows, fields and switches rounded to match. Colours unchanged; Flat mono
+  still squares everything and the corner-radius setting still wins.
+- `test_sitetheme_rules.py`: one page per cause, 30 checks; 15 are red on the old
+  module.
+
 ## 2026-10-29 — a test that passed while proving nothing, and the bug it was hiding
 
 `tests/harness.py`'s `js()` answered `None` for both "the page said

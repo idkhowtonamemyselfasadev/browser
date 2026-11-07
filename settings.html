@@ -128,7 +128,7 @@
     border-bottom: 1px solid rgba(108, 112, 134, .25);
   }
   #navfilter {
-    flex: 1 1 240px; max-width: 400px;
+    flex: 1 1 240px; max-width: 400px; border-radius: 12px;
     transition: border-color .15s ease, background .15s ease;
   }
   #navfilter:focus { background: #0a0a0d; }
@@ -139,7 +139,7 @@
   }
   #searchtips.on { display: block; }
   #showall {
-    display: none; padding: 7px 12px;
+    display: none; padding: 7px 12px; border-radius: 10px;
     background: transparent; border: 1px solid rgba(108, 112, 134, 0.45);
     color: #a6adc8; font-size: 12px; text-align: left; cursor: pointer;
   }
@@ -215,7 +215,8 @@
      between the rows rather than round each of them. */
   .panel {
     background: #0d0d12;
-    border: 1px solid rgba(108, 112, 134, .3);
+    border: 1px solid rgba(108, 112, 134, .18);
+    border-radius: 14px;
     display: flex; flex-direction: column;
   }
   h2.sub {
@@ -266,9 +267,17 @@
      each drawing its own box: one block, not a stack of cards */
   .group { display: flex; flex-direction: column; gap: 0; }
   .group > .wrow + .wrow { margin-top: -1px; }
+  /* rows that share their hairlines share one rounded outline too:
+     the corners are the block's, not each row's */
+  .group > .wrow { border-radius: 0; }
+  .group > .wrow:first-child { border-radius: 12px 12px 0 0; }
+  .group > .wrow:last-child { border-radius: 0 0 12px 12px; }
+  .group > .wrow:first-child:last-child { border-radius: 12px; }
+  .panel .wrow, .panel .row { border-radius: 0; }
   .wrow {
     display: flex; align-items: center; gap: 20px;
     border: 1px solid rgba(108, 112, 134, .3);
+    border-radius: 12px;
     padding: 15px 18px; position: relative;
     transition: border-color .15s ease, background .15s ease,
                 opacity .15s ease, box-shadow .15s ease;
@@ -303,14 +312,15 @@
     width: 0; height: 0; margin: 0;
   }
   .wsw {
-    flex: 0 0 42px; width: 42px; height: 20px;
+    flex: 0 0 42px; width: 42px; height: 22px;
     border: 1px solid #6c7086; background: #000000;
+    border-radius: 11px;
     position: relative;
     transition: background .2s ease, border-color .2s ease;
   }
   .wsw::after {
-    content: ""; position: absolute; top: 3px; left: 3px;
-    width: 12px; height: 12px; background: #6c7086;
+    content: ""; position: absolute; top: 4px; left: 4px;
+    width: 12px; height: 12px; background: #6c7086; border-radius: 50%;
     transition: transform .22s cubic-bezier(.2, .8, .25, 1),
                 width .15s ease, background .2s ease;
   }
@@ -356,6 +366,7 @@
   .card {
     display: flex; align-items: center; gap: 12px;
     border: 1px solid rgba(108, 112, 134, .4);
+    border-radius: 12px;
     background: #000000; padding: 14px 16px; cursor: pointer;
     transition: all .12s;
   }
@@ -373,11 +384,12 @@
   .row {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     border: 1px solid rgba(108, 112, 134, .3);
+    border-radius: 10px;
     padding: 12px 16px; font-size: 14px; position: relative;
     transition: border-color .15s ease, background .15s ease,
                 opacity .15s ease, box-shadow .15s ease;
   }
-  .row + .row { margin-top: -1px; }
+  .row + .row { margin-top: 6px; }
   .row:hover { border-color: rgba(108, 112, 134, .55); z-index: 1; }
   .row > span:first-child { flex: 1; min-width: 120px; }
   .switchrow { cursor: pointer; }
@@ -399,7 +411,7 @@
 
   select, button {
     background: #000000; border: 1px solid rgba(108, 112, 134, .5);
-    border-radius: 0; color: #cdd6f4; font: inherit; font-size: 13px;
+    border-radius: 10px; color: #cdd6f4; font: inherit; font-size: 13px;
     padding: 9px 14px; cursor: pointer; outline: none;
     transition: all .15s;
   }
@@ -416,7 +428,7 @@
   #clearhist:hover, #clearcookies:hover { color: #f38ba8; border-color: #f38ba8; }
   input[type=text], input[type=password], input[type=number], textarea {
     background: #000000; border: 1px solid rgba(108, 112, 134, .4);
-    border-radius: 0; color: #cdd6f4; font: inherit; font-size: 13px;
+    border-radius: 10px; color: #cdd6f4; font: inherit; font-size: 13px;
     padding: 9px 12px; outline: none;
   }
   textarea { resize: vertical; }
@@ -473,7 +485,7 @@
   }
   .tcard {
     display: flex; align-items: center; gap: 10px; cursor: pointer;
-    border: 1px solid rgba(108, 112, 134, .4);
+    border: 1px solid rgba(108, 112, 134, .4); border-radius: 10px;
     background: #000000; padding: 9px 11px; transition: all .12s;
   }
   .tcard:hover { border-color: #a6adc8; }

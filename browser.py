@@ -5847,8 +5847,8 @@ QMainWindow, #chrome, #root { background: #000000; }
 QLineEdit#urlbar {
     background: rgba(13, 13, 18, 230);
     color: #cdd6f4;
-    border: 1px solid rgba(108, 112, 134, 70);
-    border-radius: 0px;
+    border: 1px solid transparent;
+    border-radius: 12px;
     padding: 7px 16px;
     selection-background-color: #45475a;
     selection-color: #ffffff;
@@ -5859,7 +5859,7 @@ QToolButton {
     background: rgba(13, 13, 18, 230);
     color: #cdd6f4;
     border: none;
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 5px 11px;
     font-weight: bold;
 }
@@ -5870,14 +5870,14 @@ QTabBar { background: transparent; }
 QTabBar::tab {
     background: rgba(13, 13, 18, 200);
     color: #a6adc8;
-    border-radius: 0px;
-    padding: 7px 6px 7px 14px;
-    margin: 4px 3px 6px 3px;
+    border-radius: 10px;
+    padding: 7px 6px 7px 16px;
+    margin: 5px 3px 6px 3px;
 }
 QTabBar::tab:selected {
     background: #16161d;
     color: #cdd6f4;
-    border: 1px solid rgba(108, 112, 134, 90);
+    border: none;
 }
 QTabBar::tab:hover { color: #cdd6f4; }
 
@@ -5887,7 +5887,7 @@ QTabBar::tab:hover { color: #cdd6f4; }
    new-tab button, the count and the fold control. */
 QWidget#tabsidebar {
     background: #0a0a0d;
-    border-right: 1px solid rgba(108, 112, 134, 110);
+    border-right: 1px solid rgba(108, 112, 134, 60);
 }
 QWidget#tabrail { background: transparent; }
 QScrollArea#railscroll { background: transparent; border: none; }
@@ -5947,10 +5947,10 @@ QToolButton#tabclose {
 }
 QToolButton#tabclose:hover { background: rgba(243, 139, 168, 70); color: #f38ba8; }
 
-#toast { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 110); }
-#permcard { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 130); }
+#toast { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 60); border-radius: 14px; }
+#permcard { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 60); border-radius: 14px; }
 #permcard QLabel { color: #cdd6f4; }
-#permcard QToolButton { padding: 6px 16px; border: 1px solid rgba(108, 112, 134, 90); }
+#permcard QToolButton { padding: 6px 16px; border: 1px solid rgba(108, 112, 134, 60); border-radius: 10px; }
 #permcard QToolButton#permallow { background: #a6e3a1; color: #000000; border: none; }
 #permcard QToolButton#permallow:hover { background: #c4f0c0; }
 #permcard QLabel#permhint { color: #6c7086; font-size: 11px; }
@@ -5958,14 +5958,14 @@ QToolButton#tabclose:hover { background: rgba(243, 139, 168, 70); color: #f38ba8
 
 /* the screen-share picker: same island over a dimmed window, square */
 #sharepane { background: rgba(0, 0, 0, 200); }
-#sharepanel { background: #000000; border: 1px solid rgba(108, 112, 134, 130); }
+#sharepanel { background: #000000; border: 1px solid rgba(108, 112, 134, 60); border-radius: 14px; }
 #sharepanel QLabel { color: #cdd6f4; }
 #sharepanel QLabel#sharehead { color: #6c7086; font-size: 11px; }
 #sharepanel QScrollArea { background: transparent; border: none; }
 #sharepanel QToolButton {
-    border-radius: 0px;
+    border-radius: 10px;
     padding: 7px 12px;
-    border: 1px solid rgba(108, 112, 134, 90);
+    border: 1px solid rgba(108, 112, 134, 60);
     font-weight: normal;
 }
 #sharepanel QToolButton#shareitem {
@@ -5977,7 +5977,7 @@ QToolButton#tabclose:hover { background: rgba(243, 139, 168, 70); color: #f38ba8
 
 /* the account chooser: the same island, listing names and nothing else */
 #acctpane { background: rgba(0, 0, 0, 200); }
-#acctpanel { background: #000000; border: 1px solid rgba(108, 112, 134, 130); }
+#acctpanel { background: #000000; border: 1px solid rgba(108, 112, 134, 60); border-radius: 14px; }
 #acctpanel QLabel { color: #cdd6f4; }
 #acctpanel QLabel#accthead { font-size: 15px; }
 #acctpanel QLabel#acctbody { color: #a6adc8; font-size: 12px; }
@@ -5986,9 +5986,9 @@ QToolButton#tabclose:hover { background: rgba(243, 139, 168, 70); color: #f38ba8
    pale default through the gap under a short list */
 #acctpanel QScrollArea > QWidget > QWidget { background: transparent; }
 #acctpanel QToolButton {
-    border-radius: 0px;
+    border-radius: 10px;
     padding: 8px 12px;
-    border: 1px solid rgba(108, 112, 134, 90);
+    border: 1px solid rgba(108, 112, 134, 60);
     font-weight: normal;
 }
 #acctpanel QToolButton#acctitem {
@@ -6000,7 +6000,7 @@ QToolButton#tabclose:hover { background: rgba(243, 139, 168, 70); color: #f38ba8
 QToolButton#acctbtn {
     background: transparent;
     border: none;
-    border-radius: 0px;
+    border-radius: 8px;
     color: #6c7086;
     font-size: 13px;
     padding: 0px;
@@ -6010,10 +6010,11 @@ QToolButton#acctbtn:hover { color: #cdd6f4; }
 QMenu {
     background: #0d0d12;
     color: #cdd6f4;
-    border: 1px solid rgba(108, 112, 134, 110);
-    padding: 4px;
+    border: 1px solid rgba(108, 112, 134, 60);
+    border-radius: 12px;
+    padding: 6px;
 }
-QMenu::item { padding: 6px 18px; }
+QMenu::item { padding: 7px 18px; border-radius: 8px; }
 QMenu::item:selected { background: #16161d; color: #ffffff; }
 /* the sheet sets QMenu's colour, which wins over the palette, so
    without this a menu entry that cannot be picked looks exactly
@@ -6025,12 +6026,12 @@ QToolButton#groupbtn {
     font-size: 15px;
     padding: 5px 12px;
     margin: 4px 0 6px 6px;
-    border-radius: 0px;
+    border-radius: 10px;
 }
 QToolButton#newtabbtn {
     padding: 0px;
     margin: 0px;
-    border-radius: 0px;
+    border-radius: 8px;
     font-size: 15px;
 }
 /* how many tabs are open, after the + . Plain digits, quiet colour:
@@ -6054,25 +6055,27 @@ QLineEdit#paletteinput {
 }
 /* the side panel: a thin head with the site picker and three buttons,
    and a divider that is his to drag */
-QWidget#sidepanel { border-left: 1px solid rgba(108, 112, 134, 110); }
+QWidget#sidepanel { border-left: 1px solid rgba(108, 112, 134, 60); }
 QWidget#panelhead { background: #16161d; }
 QToolButton#panelbtn, QToolButton#panelpick {
     padding: 2px 8px;
-    border-radius: 0px;
+    border-radius: 8px;
 }
 QSplitter#panelsplit::handle { background: rgba(108, 112, 134, 90); width: 2px; }
 QLabel#hoverlink {
     background: #16161d;
     color: #cdd6f4;
     font-size: 11px;
-    padding: 2px 8px;
-    border: 1px solid rgba(108, 112, 134, 110);
+    padding: 3px 10px;
+    border: 1px solid rgba(108, 112, 134, 60);
+    border-radius: 8px;
 }
 QLabel#zoomlbl {
     color: #a6adc8;
     font-size: 11px;
-    padding: 1px 5px;
-    border: 1px solid rgba(108, 112, 134, 110);
+    padding: 1px 6px;
+    border: 1px solid rgba(108, 112, 134, 60);
+    border-radius: 6px;
 }
 
 /* the bookmarks bar: a thin strip under the address bar */
@@ -6081,14 +6084,14 @@ QLabel#zoomlbl {
    catch a click that means "somewhere else", and to keep the card out
    of a popup of its own so that a drag inside it can work. */
 #favshade { background: transparent; }
-#favpanel { background: #0a0a0d; border: 1px solid rgba(108, 112, 134, 110); }
+#favpanel { background: #0a0a0d; border: 1px solid rgba(108, 112, 134, 60); border-radius: 14px; }
 #favhead { background: #0d0d12; }
 QLabel#favtitle { color: #cdd6f4; font-size: 15px; font-weight: bold; }
 QLabel#favhint { color: #6c7086; font-size: 12px; }
 QToolButton#favshut {
     background: transparent;
     color: #a6adc8;
-    border-radius: 0px;
+    border-radius: 8px;
     font-size: 15px;
     padding: 3px 9px;
 }
@@ -6096,8 +6099,8 @@ QToolButton#favshut:hover { background: #16161d; color: #ffffff; }
 QLineEdit#favsearch {
     background: rgba(13, 13, 18, 230);
     color: #cdd6f4;
-    border: 1px solid rgba(108, 112, 134, 70);
-    border-radius: 0px;
+    border: 1px solid rgba(108, 112, 134, 50);
+    border-radius: 10px;
     padding: 8px 11px;
     font-size: 14px;
 }
@@ -6118,7 +6121,7 @@ QTreeWidget#favtree QLineEdit {
     background: #0d0d12;
     color: #cdd6f4;
     border: 1px solid #a6adc8;
-    border-radius: 0px;
+    border-radius: 6px;
     selection-background-color: #45475a;
     selection-color: #ffffff;
 }
@@ -6126,8 +6129,8 @@ QTreeWidget#favtree QLineEdit {
 QToolButton#favbtn {
     background: rgba(13, 13, 18, 230);
     color: #cdd6f4;
-    border: 1px solid rgba(108, 112, 134, 70);
-    border-radius: 0px;
+    border: 1px solid rgba(108, 112, 134, 50);
+    border-radius: 10px;
     font-weight: normal;
     padding: 8px 12px;
 }
@@ -6142,7 +6145,7 @@ QToolButton#favbtn:disabled {
 QToolButton#bmitem {
     background: transparent;
     color: #a6adc8;
-    border-radius: 0px;
+    border-radius: 8px;
     padding: 4px 8px;
     font-weight: normal;
     font-size: 12px;
@@ -6151,7 +6154,7 @@ QToolButton#bmitem:hover { background: #16161d; color: #ffffff; }
 QToolButton#bmmore {
     background: transparent;
     color: #6c7086;
-    border-radius: 0px;
+    border-radius: 8px;
     padding: 4px 8px;
     font-size: 13px;
 }
@@ -6162,7 +6165,7 @@ QLabel#bmempty { color: #45475a; font-size: 12px; }
 QToolButton#starbtn {
     background: transparent;
     color: #a6adc8;
-    border-radius: 0px;
+    border-radius: 8px;
     padding: 0px;
     font-size: 15px;
     font-weight: normal;
@@ -6173,12 +6176,12 @@ QToolButton#starbtn[on="true"]:hover { color: #f9e2af; }
 QToolButton#starbtn:disabled { color: #45475a; background: transparent; }
 
 /* find in page: a small island in the top right of the page area */
-#findbar { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 110); }
+#findbar { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 60); border-radius: 14px; }
 QLineEdit#findinput {
     background: #000000;
     color: #cdd6f4;
-    border: 1px solid rgba(108, 112, 134, 70);
-    border-radius: 0px;
+    border: 1px solid rgba(108, 112, 134, 50);
+    border-radius: 8px;
     padding: 5px 8px;
     selection-background-color: #45475a;
     selection-color: #ffffff;
@@ -6190,20 +6193,20 @@ QLabel#findcount[dim="0"] { color: #cdd6f4; }
     background: transparent;
     color: #a6adc8;
     border: 1px solid transparent;
-    border-radius: 0px;
+    border-radius: 8px;
     padding: 4px 8px;
     font-weight: normal;
 }
 #findbar QToolButton:hover { background: #16161d; color: #ffffff; }
 #findbar QToolButton:checked {
     background: #16161d; color: #ffffff;
-    border: 1px solid rgba(108, 112, 134, 110);
+    border: 1px solid rgba(108, 112, 134, 60);
 }
 #findbar QToolButton:disabled { color: #45475a; background: transparent; }
 
 /* the tab switcher: a dimmed backdrop with a list floating on it */
 #switchpane { background: rgba(0, 0, 0, 200); }
-#switchpanel { background: #000000; border: 1px solid rgba(108, 112, 134, 110); }
+#switchpanel { background: #000000; border: 1px solid rgba(108, 112, 134, 60); border-radius: 14px; }
 QLineEdit#switchinput {
     background: #0d0d12;
     color: #cdd6f4;
@@ -6221,12 +6224,12 @@ QListWidget#switchlist {
     outline: 0;
 }
 QListWidget#switchlist::item { border: none; }
-QListWidget#switchlist::item:selected { background: #16161d; }
+QListWidget#switchlist::item:selected { background: #16161d; border-radius: 8px; }
 QListWidget#switchlist QScrollBar:vertical {
     background: #000000; width: 8px; margin: 0px;
 }
 QListWidget#switchlist QScrollBar::handle:vertical {
-    background: rgba(108, 112, 134, 90); min-height: 26px; border-radius: 0px;
+    background: rgba(108, 112, 134, 90); min-height: 26px; border-radius: 4px;
 }
 QListWidget#switchlist QScrollBar::add-line:vertical,
 QListWidget#switchlist QScrollBar::sub-line:vertical { height: 0px; }
@@ -6244,7 +6247,7 @@ QLabel#switchempty { color: #6c7086; }
 #setpanel { background: #000000; }
 #sethead {
     background: #0d0d12;
-    border-bottom: 1px solid rgba(108, 112, 134, 70);
+    border-bottom: 1px solid rgba(108, 112, 134, 40);
 }
 QLabel#setescl { color: #6c7086; font-size: 12px; }
 
@@ -6259,7 +6262,7 @@ QToolButton#taskpin, QToolButton#taskmore, QToolButton#taskadd {
     background: transparent;
     color: #a6adc8;
     border: none;
-    border-radius: 0px;
+    border-radius: 8px;
     padding: 4px 8px;
     font-weight: normal;
 }
@@ -6267,7 +6270,7 @@ QToolButton#taskstart {
     background: transparent;
     color: #cdd6f4;
     border: none;
-    border-radius: 0px;
+    border-radius: 8px;
     padding: 4px 11px;
     font-size: 15px;
     font-weight: bold;
@@ -6283,12 +6286,12 @@ QLabel#taskclock { color: #6c7086; font-size: 12px; }
    that means "somewhere else", the same as the Favourites one. */
 #startshade { background: transparent; }
 #startgrid { background: transparent; }
-#startmenu { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 130); }
+#startmenu { background: #0d0d12; border: 1px solid rgba(108, 112, 134, 60); border-radius: 14px; }
 QLineEdit#startsearch {
     background: #000000;
     color: #cdd6f4;
-    border: 1px solid rgba(108, 112, 134, 70);
-    border-radius: 0px;
+    border: 1px solid rgba(108, 112, 134, 50);
+    border-radius: 10px;
     padding: 8px 11px;
     font-size: 14px;
     selection-background-color: #45475a;
@@ -6303,7 +6306,7 @@ QToolButton#starttile {
     background: transparent;
     color: #a6adc8;
     border: none;
-    border-radius: 0px;
+    border-radius: 10px;
     padding: 10px 2px;
     font-size: 12px;
     font-weight: normal;
@@ -6313,7 +6316,7 @@ QToolButton#startfoot {
     background: transparent;
     color: #6c7086;
     border: none;
-    border-radius: 0px;
+    border-radius: 8px;
     padding: 6px 12px;
     font-size: 12px;
     font-weight: normal;
@@ -10548,6 +10551,16 @@ class GroupTabBar(QTabBar):
         if getattr(w, "group_header", None) is not None:
             return
         browser = self.browser
+        # which tab is in front: one thin bar in the accent down its
+        # left edge, inside the padding, where the timetable's cards
+        # carry theirs. The selected tab used to be boxed in a hairline
+        # instead, and a box round a rounded tab is noise.
+        if index == self.currentIndex():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(theme_color("accent")))
+            painter.drawRoundedRect(
+                QRect(rect.x() + 7, rect.y() + 10, 3, rect.height() - 18),
+                1.5, 1.5)
         # the site's own tint, under everything else it says. Very
         # faint on purpose: this is a hint, not a highlight.
         tint = browser.site_tint(w) if self._opt("tabTint", False) else None
@@ -10840,11 +10853,10 @@ class TabRail(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         if active:
             painter.setBrush(QColor(theme_color("hover")))
-            painter.setPen(QPen(QColor(theme_color("overlay")), 1))
-            painter.drawRoundedRect(rect.adjusted(0, 0, -1, -1), 8, 8)
+            painter.drawRoundedRect(rect.adjusted(0, 0, -1, -1), 10, 10)
         elif hovered:
             painter.setBrush(QColor(theme_color("surface")))
-            painter.drawRoundedRect(rect, 8, 8)
+            painter.drawRoundedRect(rect, 10, 10)
         painter.setPen(Qt.PenStyle.NoPen)
 
         # the site's own tint, under everything else and as faint as

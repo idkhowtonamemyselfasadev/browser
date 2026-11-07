@@ -1,0 +1,61 @@
+# the sites the theme matrix is measured on: public and sign-in pages only
+# --- the ones he named
+outlook.live.com
+outlook.office.com
+login.live.com
+login.microsoftonline.com
+https://www.office.com
+https://mail.google.com
+https://accounts.google.com
+https://www.google.com/search?q=browser+theme+test
+https://www.youtube.com
+https://github.com
+https://www.wikipedia.org
+https://en.wikipedia.org/wiki/Germany
+https://www.reddit.com
+https://www.amazon.de
+https://www.amazon.de/s?k=ssd
+https://www.ebay.de
+https://www.twitch.tv
+https://discord.com
+https://open.spotify.com
+https://www.netflix.com/de/
+https://www.microsoft.com/de-de
+https://www.apple.com/de/
+https://stackoverflow.com/questions
+https://developer.mozilla.org/en-US/docs/Web/CSS/color-mix
+https://www.spiegel.de
+https://www.tagesschau.de
+https://www.bbc.com
+https://www.nytimes.com
+# --- more news
+https://www.heise.de
+https://www.theguardian.com/europe
+https://www.zeit.de
+# --- mail, shops, forms, tables
+https://www.gmx.net
+https://web.de
+https://www.paypal.com/de/signin
+https://www.facebook.com
+https://www.linkedin.com
+https://www.bahn.de/
+https://www.booking.com
+https://www.ikea.com/de/de/
+https://www.kleinanzeigen.de
+https://www.sparkasse.de
+https://www.deepl.com/translator
+https://duckduckgo.com/?q=browser+theme+test
+# --- code, docs, tables, forms
+https://docs.python.org/3/library/functions.html
+https://news.ycombinator.com
+https://www.w3schools.com/html/html_forms.asp
+https://getbootstrap.com/docs/5.3/forms/overview/
+https://www.gnu.org/software/bash/manual/bash.html
+# --- dark by design, not on the native-dark list
+https://linear.app
+https://www.shadertoy.com
+https://www.minecraft.net/de-de
+# --- images and video
+https://vimeo.com
+https://unsplash.com
+https://chatgpt.com

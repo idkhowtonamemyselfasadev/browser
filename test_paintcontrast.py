@@ -84,6 +84,7 @@ PAINTED = [
     ("bright", "hover", "the loading line, selected tab", GLYPH),
     ("bright", "surface", "the dot saying a tab changed", GLYPH),
     ("bright", "hover", "the ring round a ctrl-clicked tab", GLYPH),
+    ("accent", "hover", "the accent bar down the current tab", GLYPH),
     # ---- TabRail: the vertical sidebar ----
     ("subtext", "mantle", "an ordinary row's title", TEXT),
     ("subtext", "surface", "a hovered row's title", TEXT),

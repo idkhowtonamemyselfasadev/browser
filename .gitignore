@@ -49,3 +49,22 @@ web_engine.so
 packaging/dist/
 packaging/repo/
 packaging/aptrepo/
+
+# the site x theme matrix: measurements and thousands of screenshots of
+# real sites, made by theme-audit/drive.sh. The scripts and the four
+# chrome before/after shots THEME-FIX.md shows are kept; the rest is
+# rebuilt by running it.
+theme-audit/*
+!theme-audit/sites.txt
+!theme-audit/capped.sh
+!theme-audit/drive.sh
+!theme-audit/run-matrix.sh
+!theme-audit/desktop-run.sh
+!theme-audit/chrome/
+theme-audit/chrome/*
+!theme-audit/chrome/*.png
+# inspiration images: not ours to commit
+tools/theme-inspo/
+!theme-audit/check/
+theme-audit/check/*
+!theme-audit/check/rules_on_head.py

@@ -6,9 +6,11 @@ second, separate script into every cookie jar that does the opposite —
 it skips file:// entirely and gives ordinary websites the active theme.
 
 Three layers, all in one injected script:
-  1. base CSS      — palette colours for page, text, links, forms,
-                     scrollbars, selection; smooth transitions between
-                     themes; focus rings.
+  1. base CSS      — palette colours for page, text, forms,
+                     scrollbars, selection; focus rings. No transition
+                     between themes: see _base_css for why a fade on
+                     every element was the fault behind most of what
+                     the 2026-11-07 site matrix found.
   2. adaptive pass — JavaScript reads each element's real colours and
                      remaps them: on a dark theme a white card becomes a
                      `surface` card (brighter cards stay relatively
@@ -18,15 +20,18 @@ Three layers, all in one injected script:
                      that build themselves as you scroll.
 
                      Three rules it never breaks, because breaking them
-                     is what made websites look broken: text is only
-                     recoloured when the new colour measures at least
-                     4.5:1 against what is really behind it (and text
-                     over a photo or a gradient is not touched at all,
-                     since nothing here can know what it lies on);
-                     an element it has already painted is recognised as
-                     its own work and never remapped twice, while an
-                     element the site has restyled since is read again
+                     is what made websites look broken: text that
+                     already reads (4.5:1 against what is really behind
+                     it -- the ancestors' backgrounds, or on screen the
+                     picture or layer lying under it) is left as the
+                     site drew it, and text that does not is given a
+                     colour that does; an element it has already
+                     painted is recognised as its own work and never
+                     remapped twice, while an element the site has
+                     restyled since -- however late -- is read again
                      from scratch; and no picture is ever recoloured.
+                     One run at a time: a live re-theme replaces the
+                     last run instead of fighting it.
   3. identity      — the twelve character themes bring their own face:
                      Terminal Green gets phosphor glow, scanlines and a
                      sweeping refresh band; Game Boy pixelates images
@@ -152,6 +157,20 @@ def toggle_host(browser, host):
 def _base_css(p, dark):
     """The palette, and nothing that decides what a page looks like.
 
+    Nor any transition. Every site element used to ease between
+    colours over .35s (html.__st-live), which read as a soft theme
+    switch and was in fact the fault behind most of what the matrix
+    found: the pass reads an element's colours back right after it
+    writes them, and during a transition the computed style is the
+    colour the element is coming FROM. So "what the page looks like
+    now that I am done" was recorded as the old colour, every later
+    look saw the new one and took it for the site's doing, restored,
+    judged a mid-fade grey, wrote again, and the observer saw the
+    write -- a loop that kept the Outlook landing page's main thread
+    busy for as long as the tab was open and left text black where
+    the fade had been grey. The chrome switches theme in one frame;
+    so do the sites now.
+
     What is *not* here any more is as important as what is. Pictures
     carried a brightness filter on every dark theme, which is exactly
     the "washed out, too dark" he sees; headings, links, buttons and
@@ -163,7 +182,18 @@ def _base_css(p, dark):
     return f"""
 html {{ background-color: {p['bg']} !important; }}
 body {{ background-color: {p['bg']} !important; color: {p['text']} !important; }}
-::placeholder {{ color: {p['overlay']} !important; }}
+/* A placeholder is text too, and the one most often lost: the site
+   picked its grey for the site's white field, and on the dark card
+   this pass makes of that field it is nothing (the Microsoft sign-in
+   page's "Email, phone, or Skype" was black at 60%% on near-black).
+   The pass measures it like any other text and, only when it fails,
+   hands the field one of these: dim first (the quietest token that
+   clears 4.5:1 on every surface of all 116 palettes), the text
+   colour, then white or black for a field on a brand colour. */
+.__st-ph-dim::placeholder {{ color: {p['dim']} !important; }}
+.__st-ph-text::placeholder {{ color: {p['text']} !important; }}
+.__st-ph-white::placeholder {{ color: #ffffff !important; }}
+.__st-ph-black::placeholder {{ color: #000000 !important; }}
 ::selection {{ background: {p['accent']} !important; color: {p['bg']} !important; }}
 input, textarea {{ caret-color: {p['accent']}; }}
 :focus-visible {{ outline: 2px solid {p['accent']} !important; outline-offset: 2px; }}
@@ -174,12 +204,6 @@ input, textarea {{ caret-color: {p['accent']}; }}
   border: 3px solid {p['bg']};
 }}
 ::-webkit-scrollbar-thumb:hover {{ background: {p['muted']}; }}
-html.__st-live :is(body, div, section, article, main, header, footer,
-nav, td, th, li, input, button, textarea, select, a, p, h1, h2, h3, h4,
-h5, h6) {{
-  transition: background-color .35s ease, color .35s ease,
-              border-color .35s ease;
-}}
 """
 
 
@@ -477,6 +501,23 @@ SITE_JS = """(function () {
   var GEN = %(gen)s;          // changes with the theme: see stale()
   var host = location.hostname.toLowerCase().replace(/^www\\./, "");
   if (/^google\\.[a-z.]+$/.test(host)) return;
+  // One run at a time. A live re-theme runs this whole script again
+  // in a page the last run is still watching, and the last run's
+  // MutationObserver, its queue and its timers all survived in their
+  // own closure with the OLD palette and the OLD generation. Every
+  // write of the new run looked stale to the old one and vice versa,
+  // and the two repainted each other's work for as long as the page
+  // was open: a card in the last theme's surface with this theme's
+  // text on it (the Microsoft sign-in page, Latte after Mocha), and a
+  // main thread that never came back on a page that mutates a lot
+  // (the Outlook landing page). So the run that starts switches the
+  // old observer off and every leftover slice of the old run asks
+  // whether it is still the current run before it touches anything.
+  var RUN = (window.__stRun = (window.__stRun || 0) + 1);
+  window.__stGen = GEN;
+  if (window.__stStats) window.__stStats.why = [];   // this run's reasons, not the last's
+  function current() { return window.__stRun === RUN; }
+  if (window.__stObs) { window.__stObs.disconnect(); window.__stObs = null; }
   for (var k = 0; k < SKIP.length; k++)
     if (host === SKIP[k] || host.slice(-SKIP[k].length - 1) === "." + SKIP[k]) {
       // excluded while open (another tab's right-click, a live re-theme):
@@ -558,7 +599,7 @@ SITE_JS = """(function () {
 
   var TOKC = {};                     // the palette, parsed once
   ["bg", "surface", "surfaceAlt", "hover", "sunken", "text",
-   "accent", "accentLt"].forEach(function (k) {
+   "accent", "accentLt", "dim"].forEach(function (k) {
     TOKC[k] = parseColor(TOK[k]) || { r: 128, g: 128, b: 128, a: 1 };
   });
   var PAGE = TOKC.bg;                // what html is painted with
@@ -579,6 +620,19 @@ SITE_JS = """(function () {
       if (soon) { hit = soon; break; }
       var known = bgcache.get(node);
       if (known !== undefined) { hit = known; break; }
+      // An ancestor that was just restored and is fading back to the
+      // site's colour (see later): what it looks like now is neither
+      // ours nor the site's, so nothing on it can be judged yet. The
+      // Outlook calendar's month panel fades over .2s; the dates in it
+      // were judged against the dark it was leaving and painted white
+      // for a panel that ended up light, and since the panel itself
+      // needed no repaint, nothing ever came back to them.
+      var rec = orig.get(node);
+      if (rec && rec.pending) {
+        for (var w = 0; w < chain.length; w++) bgcache.set(chain[w][0], "pending");
+        bgcache.set(node, "pending");
+        return "pending";
+      }
       var cs = computed(node);
       if (!cs) break;
       var bgi = cs.backgroundImage;
@@ -597,6 +651,10 @@ SITE_JS = """(function () {
       }
       node = node.parentElement;
     }
+    if (hit === "pending") {
+      for (var y = 0; y < chain.length; y++) bgcache.set(chain[y][0], "pending");
+      return "pending";
+    }
     if (hit === null) {
       // a cached null is "there is a picture behind this", and that
       // answer travels down to the children: they are left alone too
@@ -609,6 +667,76 @@ SITE_JS = """(function () {
       bgcache.set(chain[i][0], hit);
     }
     return hit;
+  }
+
+  // The ancestors are not always what is behind the text. A hero
+  // section draws its photo as an <img> or a <picture> positioned
+  // under the words, not as a background of their parent, so the
+  // walk up finds nothing and answers "the page" -- and the pass then
+  // paints a headline that sat readably on a light photo in the
+  // theme's light text, which on that photo is nothing at all (the
+  // Outlook landing page). So for an element on screen the stack of
+  // elements under one point of its text is asked as well: a picture
+  // in it beneath the element means "a picture is behind this"; an
+  // opaque element beneath it that is not an ancestor is the real
+  // backdrop and its colour is the answer. Off screen the stack
+  // cannot be asked (elementsFromPoint only knows the viewport), and
+  // the ancestors have to do. Cached per flush, like bgcache.
+  var undercache = new Map();
+  function underneath(el) {
+    if (undercache.has(el)) return undercache.get(el);
+    var out = undefined;              // undefined: nothing to add
+    var r;
+    try { r = el.getBoundingClientRect(); } catch (e) { r = null; }
+    if (r && r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0
+        && r.top < window.innerHeight && r.left < window.innerWidth
+        && document.elementsFromPoint) {
+      var x = Math.min(Math.max(r.left + Math.min(r.width / 2, 12), 0),
+                       window.innerWidth - 1);
+      var y = Math.min(Math.max(r.top + Math.min(r.height / 2, 10), 0),
+                       window.innerHeight - 1);
+      var stack;
+      try { stack = document.elementsFromPoint(x, y); } catch (e) { stack = null; }
+      if (stack) {
+        var below = false;
+        for (var i = 0; i < stack.length; i++) {
+          var e = stack[i];
+          if (e === el) { below = true; continue; }
+          if (!below) continue;                 // above the text: an overlay
+          if (e.contains(el)) {
+            // an ancestor: the walk up sees its own background, and
+            // stops at the first opaque one as this does
+            var acs = computed(e);
+            if (!acs) break;
+            var abgi = acs.backgroundImage;
+            if (isPhoto(abgi) || (abgi && abgi.indexOf("gradient") >= 0)) { out = null; break; }
+            var ac = parseColor(acs.backgroundColor);
+            if (ac && ac.a > .995) break;
+            continue;
+          }
+          if (PICTURE[e.tagName] === 1) { out = null; break; }
+          var soon = planned.get(e);
+          if (soon) { out = soon; break; }
+          var srec = orig.get(e);
+          if (srec && srec.pending) { out = "pending"; break; }
+          var cs = computed(e);
+          if (!cs) continue;
+          var bgi = cs.backgroundImage;
+          if (isPhoto(bgi) || (bgi && bgi.indexOf("gradient") >= 0)) { out = null; break; }
+          var c = parseColor(cs.backgroundColor);
+          if (c && c.a > .995) { out = c; break; }
+        }
+      }
+    }
+    undercache.set(el, out);
+    return out;
+  }
+  // what the text of an element really sits on: the ancestors' answer,
+  // corrected by what lies underneath on screen
+  function ground(el) {
+    var under = underneath(el);
+    if (under !== undefined) return under;    // a sibling layer decided
+    return behind(el);
   }
 
   var csCache = new Map();
@@ -678,8 +806,59 @@ SITE_JS = """(function () {
     return pic > area * .55;
   }
 
-  function look(cs) {
-    return cs.backgroundColor + "|" + cs.color + "|" + cs.borderTopColor;
+  // What of an element's colours this pass cares about: its fill;
+  // its text colour only if it shows text (a card's colour is
+  // inherited by its children and means nothing to the card -- and
+  // it changes whenever an ancestor is painted, which made every
+  // card on the Outlook landing page look "moved" at every look and
+  // get restored and repainted, for as long as the page was open);
+  // its border colour only if it has a border.
+  function look(cs, saved) {
+    return cs.backgroundColor
+      + "|" + (saved.text ? cs.color : "")
+      + "|" + (saved.bw && saved.bw !== "0px" ? cs.borderTopColor : "");
+  }
+
+  // What the element will look like once this pass's writes have
+  // landed: the written values where they can be said in the
+  // engine's own words, the read-back for the rest. A site's own
+  // transition on the element (a card that fades on hover) makes the
+  // read-back right after a write the colour the fade STARTS from,
+  // and a record of that is a record of a lie: the next look would
+  // find the finished colour, call it the site's doing and start
+  // over. A translucent fill (a color-mix) cannot be predicted and is
+  // read back as before; it is rare, and the retry below covers it.
+  function expected(plan, done) {
+    var saved = plan.saved;
+    var bg = done.backgroundColor, col = done.color, bd = done.borderTopColor;
+    for (var i = 0; i < plan.work.length; i++) {
+      var prop = plan.work[i][0], c = parseColor(plan.work[i][1]);
+      if (!c) continue;
+      if (prop === "background-color") bg = rgb(c);
+      else if (prop === "color") col = rgb(c);
+      else if (prop === "border-color") bd = rgb(c);
+    }
+    return bg + "|" + (saved.text ? col : "")
+      + "|" + (saved.bw && saved.bw !== "0px" ? bd : "");
+  }
+
+  // Is this element mid-way through a transition of its colours? Then
+  // what it looks like now says nothing about what the site wants it
+  // to look like, and the decision has to wait for the fade to end.
+  function fading(cs) {
+    var d = cs.transitionDuration;
+    if (!d || /^(0s(, )?)+$/.test(d)) return false;
+    var props = cs.transitionProperty || "all";
+    return /\\ball\\b|color|background|border/.test(props);
+  }
+  // how long the longest of its transitions takes, in ms
+  function fadeMs(cs) {
+    var most = 0, parts = (cs.transitionDuration || "").split(",");
+    for (var i = 0; i < parts.length; i++) {
+      var m = /([\\d.]+)(m?s)/.exec(parts[i]);
+      if (m) most = Math.max(most, parseFloat(m[1]) * (m[2] === "ms" ? 1 : 1000));
+    }
+    return Math.min(most, 3000);
   }
 
   function snapshot(el, cs) {
@@ -687,7 +866,12 @@ SITE_JS = """(function () {
                   bgi: cs.backgroundImage,
                   border: cs.borderTopColor, bw: cs.borderTopWidth,
                   inl: {}, set: false, gen: GEN,
-                  seen: look(cs), after: null };
+                  seen: null, after: null,
+                  // whether it had words when it was looked at: an
+                  // element that gets them later has to be looked at
+                  // again, and nothing in its colours will say so
+                  text: showsText(el) };
+    saved.seen = look(cs, saved);
     for (var i = 0, p; i < PROPS.length; i++) {
       p = PROPS[i];
       saved.inl[p] = [el.style.getPropertyValue(p),
@@ -700,6 +884,7 @@ SITE_JS = """(function () {
   // a re-theme (dark to light) must not keep what the last theme set
   function restore(el, saved) {
     if (!saved.set) return;
+    if (saved.cls) { el.classList.remove(saved.cls); saved.cls = null; }
     for (var i = 0, p, o; i < PROPS.length; i++) {
       p = PROPS[i]; o = saved.inl[p];
       if (o[0]) el.style.setProperty(p, o[0], o[1]);
@@ -722,10 +907,17 @@ SITE_JS = """(function () {
   function reput(el) {
     var saved = orig.get(el);
     if (!saved || !saved.set || !saved.put) return;
+    // a script that writes the style attribute back on every frame
+    // would be answered on every frame: after a few rounds the
+    // element is the site's
+    if ((saved.reputs || 0) >= 5) return;
     for (var p in saved.put)
       if (el.style.getPropertyValue(p) !== saved.put[p]
-          || el.style.getPropertyPriority(p) !== "important")
+          || el.style.getPropertyPriority(p) !== "important") {
+        saved.reputs = (saved.reputs || 0) + 1;
+        stats.reputs++;
         el.style.setProperty(p, saved.put[p], "important");
+      }
   }
 
   // Has the page moved under us since we wrote?
@@ -753,10 +945,21 @@ SITE_JS = """(function () {
   // this pass's own work and is left alone, which is what stops a
   // remap being remapped.
   function stale(el, saved, cs) {
-    if (saved.gen !== GEN) return true;
+    if (saved.gen !== GEN) return 1;
+    // Words that arrived after the look. The Microsoft sign-in page
+    // builds its "Sign in" heading empty and fills it in from a
+    // script; the element's colours never change, so the record said
+    // "nothing has moved" and the heading stayed in the site's dark
+    // ink on the card this pass had just made dark.
+    if (!saved.text && showsText(el)) { note(el, "text"); return 1; }
     var was = saved.set ? saved.after : saved.seen;
-    if (!was) return false;                 // painted, not yet recorded
-    if (look(cs) !== was) return true;
+    if (!was) return 0;                     // painted, not yet recorded
+    if (look(cs, saved) !== was) {
+      if (fading(cs) && (saved.waits || 0) < 3) return 2;
+      note(el, "look " + was + " -> " + look(cs, saved));
+      return 1;
+    }
+    saved.waits = 0;                        // settled: the next fade starts afresh
     // ...and the other half of it: whether this element's text is
     // readable depends on what is *behind* it, which is another
     // element's business. A card that turns dark one pass after the
@@ -765,10 +968,35 @@ SITE_JS = """(function () {
     // have noticed. Amazon's product titles and Stack Overflow's menus
     // were exactly this.
     if (saved.under) {
-      var now = behind(el);
-      if ((now ? rgb(now) : "img") !== saved.under) return true;
+      var now = saved.sib ? ground(el) : behind(el);
+      if (now === "pending") return (saved.waits || 0) < 4 ? 2 : 1;
+      if ((now ? rgb(now) : "img") !== saved.under) {
+        note(el, "under " + saved.under + " -> " + (now ? rgb(now) : "img"));
+        return 1;
+      }
     }
-    return false;
+    return 0;
+  }
+  // the first few reasons an element was looked at again, for the
+  // diagnosis of a page that never settles
+  function note(el, why) {
+    var list = stats.why || (stats.why = []);
+    var saved = orig.get(el);
+    if (!saved || !saved.set) return;      // a re-snapshot costs nothing
+    if (list.length < 24)
+      list.push(el.tagName + "." + String(el.className || "").slice(0, 24) + ": " + why);
+  }
+
+  // come back to an element once its fade is over
+  function later(el, saved, ms) {
+    saved.waits = (saved.waits || 0) + 1;
+    saved.pending = true;
+    stats.waits++;
+    setTimeout(function () {
+      if (!current()) return;
+      push(el);
+      schedule();
+    }, ms || 450);
   }
 
   // ---- the decision for one element -------------------------------
@@ -782,19 +1010,60 @@ SITE_JS = """(function () {
   // so a child measured in the same slice already sees the dark card
   // its parent is about to become.
   var planned = new Map();
+  var deferred = [];                 // restored this chunk, read again after
 
   function measure(el) {
+    if (!el.isConnected) return null;      // taken out of the page: nothing to read
     var cs = computed(el);
     if (!cs) return null;
     var saved = orig.get(el);
-    if (saved && !stale(el, saved, cs)) return null;   // nothing has moved
-    if (saved && saved.set) {
-      restore(el, saved);            // the site moved: start from its colours
-      csCache.delete(el);
-      cs = computed(el);
-      if (!cs) return null;
+    if (saved) saved.pending = false;
+    if (saved) {
+      var ts = clock();
+      var moved = stale(el, saved, cs);
+      stats.tStale += clock() - ts;
+      if (moved === 0) return null;                    // nothing has moved
+      if (moved === 2) { later(el, saved, fadeMs(cs) + 120); return null; }   // mid-fade: wait
+      // An element this pass has restored and repainted again and
+      // again is one it cannot agree with the site about -- a script
+      // writing the colour back on every frame, a transition that
+      // never settles. After a few rounds it is left as it is, which
+      // is the worst case for that one element and keeps the page's
+      // main thread free for everything else.
+      // ...but a new theme is not a disagreement: every element is
+      // "moved" by it, and a tab in which the theme was switched six
+      // times must not stop following.
+      if (saved.gen !== GEN) saved.flips = 0;
+      else {
+        if ((saved.flips || 0) >= 6) return null;
+        saved.flips = (saved.flips || 0) + 1;
+        stats.flips++;
+      }
     }
+    if (saved && saved.set) {
+      // The site moved (or the theme did): start again from the
+      // site's colours. The restore is a write, and reading this
+      // element's computed style straight after it makes the engine
+      // recalculate the whole page's style -- once per restored
+      // element, which on a live re-theme of a 16000-element page was
+      // a minute of main thread. So the restore is done now and the
+      // reading is left to the slice, which comes back to every
+      // restored element of the chunk after one recalculation.
+      restore(el, saved);
+      if (fading(cs)) {
+        // the restore starts a fade back to the site's colours, and
+        // what is read before it ends is neither ours nor the site's:
+        // come back when it is over
+        later(el, saved, fadeMs(cs) + 120);
+        return null;
+      }
+      deferred.push(el);
+      return null;
+    }
+    var flips = saved ? saved.flips : 0;
+    var td = clock();
     saved = snapshot(el, cs);
+    saved.flips = flips;
     var work = [];
 
     var bg = parseColor(saved.bg);
@@ -823,9 +1092,10 @@ SITE_JS = """(function () {
         work.push(["background-color", bg.a > .98 ? TOK[want]
           : "color-mix(in srgb, " + TOK[want] + " "
             + Math.round(bg.a * 100) + "%%, transparent)"]);
+        var beneath = behind(el.parentElement);
         changedBg = bg.a > .98 ? TOKC[want]
           : blend({ r: TOKC[want].r, g: TOKC[want].g, b: TOKC[want].b,
-                    a: bg.a }, behind(el.parentElement) || PAGE);
+                    a: bg.a }, (beneath && beneath !== "pending") ? beneath : PAGE);
         planned.set(el, changedBg);
         if (saved.bgi && saved.bgi.indexOf("gradient") >= 0)
           work.push(["background-image", "none"]);
@@ -837,7 +1107,22 @@ SITE_JS = """(function () {
       // otherwise whatever the page has behind it. A null answer means
       // a photo or a gradient is behind it, and then the site's own
       // colour is the only one that can be trusted -- it is left alone.
-      var under = changedBg || behind(el);
+      // the stack under the text is asked once, when the element is
+      // decided: a hit test costs a millisecond or more on a big
+      // page, and a full look at that page pays it for every element
+      // on screen if the staleness check asks it too. So the record
+      // says whether the stack decided, and only those few elements
+      // are asked again (see stale)
+      var sib = changedBg ? undefined : underneath(el);
+      var under = changedBg || (sib !== undefined ? sib : behind(el));
+      saved.sib = !changedBg && sib !== undefined;
+      if (under === "pending") {
+        // judged later, once what it sits on has settled
+        saved.under = "pending";
+        later(el, saved, 500);
+        stats.tDecide += clock() - td;
+        return work.length ? { el: el, saved: saved, work: work } : null;
+      }
       var col = parseColor(saved.color);
       // what the decision below was made against, so a later pass can
       // tell that the ground has moved (see stale)
@@ -847,9 +1132,16 @@ SITE_JS = """(function () {
         var link = el.tagName === "A";
         var head = /^H[1-6]$/.test(el.tagName);
         var tries = [];
-        if (link) tries.push(TOKC.accentLt, TOKC.text);
+        // What already reads is kept, links and headings included.
+        // They used to be painted in the accent whatever their own
+        // colour measured, and a wrong guess about the background --
+        // a photo the walk up could not see -- then cost a headline
+        // that was fine as the site drew it. The theme still reaches
+        // them: a dark link on a card that has just turned dark no
+        // longer reads, and that is when it gets the accent.
+        if (contrast(col, under) >= 4.5) tries = null;         // readable: keep
+        else if (link) tries.push(TOKC.accentLt, TOKC.text);
         else if (head) tries.push(TOKC.accent, TOKC.text);
-        else if (contrast(col, under) >= 4.5) tries = null;   // readable: keep
         else tries.push(TOKC.text);
         if (tries) {
           // last resorts, in case the palette itself cannot carry this
@@ -868,6 +1160,33 @@ SITE_JS = """(function () {
       }
     }
 
+    // the placeholder of an empty field, against the same ground
+    if ((el.tagName === "INPUT" || el.tagName === "TEXTAREA") && el.placeholder
+        && !el.value) {
+      var ph = changedBg || ground(el);
+      if (ph === "pending") ph = null;
+      var pcs = null;
+      try { pcs = getComputedStyle(el, "::placeholder"); } catch (e) {}
+      var pc = pcs ? (parseColor(pcs.webkitTextFillColor) || parseColor(pcs.color)) : null;
+      if (ph && pc) {
+        if (pc.a < .995) pc = blend(pc, ph);
+        var pop = parseFloat(pcs.opacity);
+        if (pop < 1) pc = blend({ r: pc.r, g: pc.g, b: pc.b, a: pop }, ph);
+        if (contrast(pc, ph) < 4.5) {
+          var opts = [["__st-ph-dim", TOKC.dim], ["__st-ph-text", TOKC.text],
+                      ["__st-ph-white", { r: 255, g: 255, b: 255, a: 1 }],
+                      ["__st-ph-black", { r: 0, g: 0, b: 0, a: 1 }]];
+          var cls = null, bestC = 0;
+          for (var o = 0; o < opts.length; o++) {
+            var cc = contrast(opts[o][1], ph);
+            if (cc >= 4.5) { cls = opts[o][0]; break; }
+            if (cc > bestC) { bestC = cc; cls = opts[o][0]; }
+          }
+          if (cls) work.push(["class", cls]);
+        }
+      }
+    }
+
     if (saved.bw && saved.bw !== "0px") {
       var bc = parseColor(saved.border);
       if (bc && bc.a > .2) {
@@ -876,12 +1195,19 @@ SITE_JS = """(function () {
           work.push(["border-color", TOK.sunken]);
       }
     }
+    stats.tDecide += clock() - td;
     return work.length ? { el: el, saved: saved, work: work } : null;
   }
 
   function applyPlan(p) {
     var bg = false;
     for (var i = 0; i < p.work.length; i++) {
+      if (p.work[i][0] === "class") {
+        p.el.classList.add(p.work[i][1]);
+        p.saved.cls = p.work[i][1];
+        p.saved.set = true;
+        continue;
+      }
       put(p.el, p.saved, p.work[i][0], p.work[i][1]);
       if (p.work[i][0] === "background-color") bg = true;
     }
@@ -917,12 +1243,18 @@ SITE_JS = """(function () {
     if (waiting.has(el)) return;
     waiting.add(el);
     queue.push(el);
+    stats.pushes++;
   }
 
   function queueTree(root) {
     // the document itself is nodeType 9, an element 1: the first pass
     // comes in as the document, every later one as an added element
     if (!root || !root.querySelectorAll) return;
+    var tq = clock();
+    queueTree2(root);
+    stats.tQueue += clock() - tq;
+  }
+  function queueTree2(root) {
     if (root.nodeType === 1 && wanted(root)) push(root);
     var all;
     try { all = root.querySelectorAll("*"); } catch (e) { return; }
@@ -933,16 +1265,24 @@ SITE_JS = """(function () {
   // what the pass has cost, for the test that watches it (and for
   // anyone wondering where a slow page went). ApplicationWorld only.
   var stats = window.__stStats = window.__stStats
-    || { slices: 0, measured: 0, painted: 0, ms: 0 };
+    || { slices: 0, measured: 0, painted: 0, ms: 0, fulls: 0, obs: 0,
+         pushes: 0, flips: 0, waits: 0, reputs: 0 };
+  ["fulls", "obs", "pushes", "flips", "waits", "reputs", "tStale", "tDecide",
+   "tApply", "tAfter", "tQueue"].forEach(
+    function (k) { if (!(k in stats)) stats[k] = 0; });
+  var clock = (window.performance && performance.now)
+    ? function () { return performance.now(); } : function () { return 0; };
 
   function slice() {
     scheduled = false;
+    if (!current()) { queue = []; at = 0; return; }
     var t0 = (window.performance && performance.now) ? performance.now() : 0;
     stats.slices++;
     try {
       do {
         var plans = [], n = 0;
-        csCache.clear(); bgcache.clear(); planned.clear();
+        csCache.clear(); bgcache.clear(); undercache.clear(); planned.clear();
+        deferred = [];
         while (at < queue.length && n < CHUNK) {
           var el = queue[at++];
           waiting.delete(el);
@@ -950,9 +1290,23 @@ SITE_JS = """(function () {
           n++;
           if (p) plans.push(p);
         }
+        if (deferred.length) {
+          // the restored ones: one recalculation for all of them
+          csCache.clear(); bgcache.clear(); undercache.clear();
+          var again = deferred;
+          deferred = [];
+          for (var d = 0; d < again.length; d++) {
+            var pd = measure(again[d]);
+            n++;
+            if (pd) plans.push(pd);
+          }
+        }
         stats.measured += n;
         stats.painted += plans.length;
+        var ta = clock();
         for (var i = 0; i < plans.length; i++) applyPlan(plans[i]);
+        stats.tApply += clock() - ta;
+        ta = clock();
         // the third phase: with every write of this chunk made, read
         // back what the page now looks like, so the next pass over
         // these elements can tell its own work from the site's. One
@@ -960,15 +1314,17 @@ SITE_JS = """(function () {
         csCache.clear();
         for (i = 0; i < plans.length; i++) {
           var done = computed(plans[i].el);
-          if (done) plans[i].saved.after = look(done);
+          if (done) plans[i].saved.after = expected(plans[i], done);
         }
+        stats.tAfter += clock() - ta;
       } while (at < queue.length
                && (!t0 || performance.now() - t0 < BUDGET));
     } finally {
       if (t0) stats.ms += performance.now() - t0;
-      csCache.clear(); bgcache.clear(); planned.clear();
+      csCache.clear(); bgcache.clear(); undercache.clear(); planned.clear();
       if (at >= queue.length) { queue = []; at = 0; }
       else if (at > 4000) { queue = queue.slice(at); at = 0; }
+      stats.queue = queue.length - at;     // what is still to be looked at
       if (queue.length > at) schedule();
     }
   }
@@ -988,7 +1344,7 @@ SITE_JS = """(function () {
   }
 
   function schedule() {
-    if (scheduled) return;
+    if (scheduled || !current()) return;
     scheduled = true;
     if (hop) hop.port2.postMessage(0);
     else setTimeout(slice, 0);
@@ -1002,11 +1358,33 @@ SITE_JS = """(function () {
   // So: not more than one full look a second and a bit, and not more
   // than a handful in all. After that the observer's own records are
   // enough -- they name the elements that actually changed.
-  var fulls = 0, lastFull = 0;
+  // ...and the cap was four, which is how office.com kept light text
+  // on white cards: the cards were looked at while their stylesheet
+  // chunk was still on its way (a React page hydrating, section by
+  // section), the chunk landed after the fourth look, and nothing
+  // ever came back to them -- a stylesheet changing an element's
+  // colours is not a mutation the observer can see. So the looks are
+  // rate-limited rather than counted out: one every 1.5 seconds at
+  // most, a generous ceiling for a page that never settles, and a
+  // scroll asks for one as well, because what the page draws late is
+  // nearly always what is about to come into view. A look at a page
+  // that has not changed costs one comparison per element.
+  var fulls = 0, lastFull = 0, fullPending = false;
   function fullQueue() {
     var now = Date.now();
-    if (fulls >= 4 || now - lastFull < 1200) return;
+    if (!current() || fulls >= 40) return;
+    if (now - lastFull < 1500) {
+      // not dropped: a stylesheet that lands inside the quiet period
+      // still gets its look, when the period is over
+      if (!fullPending) {
+        fullPending = true;
+        setTimeout(function () { fullPending = false; fullQueue(); },
+                   1500 - (now - lastFull) + 20);
+      }
+      return;
+    }
     fulls++;
+    stats.fulls++;
     lastFull = now;
     queueTree(document);
     schedule();
@@ -1029,24 +1407,12 @@ SITE_JS = """(function () {
         function (x) { return x !== window.__stSheet; });
     if (window.__stObs) { window.__stObs.disconnect(); window.__stObs = null; }
     queue = []; at = 0;
-    if (document.documentElement)
-      document.documentElement.classList.remove("__st-live");
     var all = document.querySelectorAll("*");
     for (var i = 0; i < all.length; i++) {
       var saved = orig.get(all[i]);
       if (saved) restore(all[i], saved);
     }
   };
-
-  // colours ease between themes, but a page loading does not fade in
-  function live() {
-    setTimeout(function () {
-      if (document.documentElement)
-        document.documentElement.classList.add("__st-live");
-    }, 1200);
-  }
-  if (document.readyState === "complete") live();
-  else window.addEventListener("load", live);
 
   if (!paint()) {
     document.addEventListener("readystatechange", function once() {
@@ -1064,9 +1430,14 @@ SITE_JS = """(function () {
   // and a last one, for the pages that paint themselves a second or
   // two in (a framework hydrating, a consent banner restyling the body)
   setTimeout(fullQueue, 2500);
+  setTimeout(fullQueue, 6000);
+  setTimeout(fullQueue, 15000);
+  window.addEventListener("scroll", fullQueue, { passive: true });
 
   if (!window.__stObs && window.MutationObserver) {
     window.__stObs = new MutationObserver(function (muts) {
+      if (!current()) return;
+      stats.obs++;
       for (var i = 0; i < muts.length; i++) {
         var m = muts[i];
         if (m.type === "attributes") {
@@ -1125,7 +1496,7 @@ def _source(browser):
         "dark": bool(mod.theme_def().get("dark")),
         "bg": p["bg"], "surface": p["surface"], "surfaceAlt": p["surfaceAlt"],
         "hover": p["hover"], "sunken": p["sunken"], "text": p["text"],
-        "accent": p["accent"], "accentLt": p["accentLt"],
+        "accent": p["accent"], "accentLt": p["accentLt"], "dim": p["dim"],
     }
     css = _site_css(browser)
     # the generation: a page that is re-themed while it is open has to
