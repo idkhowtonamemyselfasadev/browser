@@ -628,7 +628,7 @@ SITE_JS = """(function () {
       // for a panel that ended up light, and since the panel itself
       // needed no repaint, nothing ever came back to them.
       var rec = orig.get(node);
-      if (rec && rec.pending) {
+      if (rec && moving(rec, node)) {
         for (var w = 0; w < chain.length; w++) bgcache.set(chain[w][0], "pending");
         bgcache.set(node, "pending");
         return "pending";
@@ -718,7 +718,7 @@ SITE_JS = """(function () {
           var soon = planned.get(e);
           if (soon) { out = soon; break; }
           var srec = orig.get(e);
-          if (srec && srec.pending) { out = "pending"; break; }
+          if (srec && moving(srec, e)) { out = "pending"; break; }
           var cs = computed(e);
           if (!cs) continue;
           var bgi = cs.backgroundImage;
@@ -731,6 +731,20 @@ SITE_JS = """(function () {
     undercache.set(el, out);
     return out;
   }
+  // Is this element's fill in flight? Either this pass is waiting on
+  // it (pending), or it has a transition and its fill is not what it
+  // was last seen to be -- the site started a fade of its own (a
+  // panel re-rendered while the page is still hydrating), and what is
+  // read now is neither the start nor the end.
+  function moving(rec, node) {
+    if (rec.pending) return true;
+    if (!rec.fade) return false;
+    var cs = computed(node);
+    if (!cs) return false;
+    var was = rec.set ? rec.after : rec.seen;
+    return !!was && was.split("|")[0] !== cs.backgroundColor;
+  }
+
   // what the text of an element really sits on: the ancestors' answer,
   // corrected by what lies underneath on screen
   function ground(el) {
@@ -870,7 +884,10 @@ SITE_JS = """(function () {
                   // whether it had words when it was looked at: an
                   // element that gets them later has to be looked at
                   // again, and nothing in its colours will say so
-                  text: showsText(el) };
+                  text: showsText(el),
+                  // how long its own transition takes, if it has one:
+                  // after a write it is mid-fade for that long
+                  fade: fading(cs) ? fadeMs(cs) : 0 };
     saved.seen = look(cs, saved);
     for (var i = 0, p; i < PROPS.length; i++) {
       p = PROPS[i];
@@ -946,6 +963,7 @@ SITE_JS = """(function () {
   // remap being remapped.
   function stale(el, saved, cs) {
     if (saved.gen !== GEN) return 1;
+    if (saved.given) return 0;              // left to the site for this theme
     // Words that arrived after the look. The Microsoft sign-in page
     // builds its "Sign in" heading empty and fills it in from a
     // script; the element's colours never change, so the record said
@@ -992,7 +1010,9 @@ SITE_JS = """(function () {
     saved.waits = (saved.waits || 0) + 1;
     saved.pending = true;
     stats.waits++;
+    stats.pendingN = (stats.pendingN || 0) + 1;   // timers still to fire
     setTimeout(function () {
+      stats.pendingN--;
       if (!current()) return;
       push(el);
       schedule();
@@ -1033,9 +1053,18 @@ SITE_JS = """(function () {
       // ...but a new theme is not a disagreement: every element is
       // "moved" by it, and a tab in which the theme was switched six
       // times must not stop following.
-      if (saved.gen !== GEN) saved.flips = 0;
+      if (saved.gen !== GEN) { saved.flips = 0; saved.given = false; }
       else {
-        if ((saved.flips || 0) >= 6) return null;
+        if (saved.given) return null;
+        if ((saved.flips || 0) >= 6) {
+          // given up: the site's own colours, all of them. Half of ours
+          // (our fill under the site's ink, which is what a React
+          // toolbar button that restyles itself on every frame ended
+          // up with) is the one state that reads worse than either.
+          if (saved.set) restore(el, saved);
+          saved.given = true;
+          return null;
+        }
         saved.flips = (saved.flips || 0) + 1;
         stats.flips++;
       }
@@ -1211,6 +1240,24 @@ SITE_JS = """(function () {
       put(p.el, p.saved, p.work[i][0], p.work[i][1]);
       if (p.work[i][0] === "background-color") bg = true;
     }
+    // An element with a transition fades to the fill just written over
+    // its own duration, and a child measured in the next chunk would
+    // read the mid-fade colour (Outlook's month panel again, on the
+    // first switch after load). So it is pending until the fade is
+    // over, and the subtree is looked at then.
+    if (bg && p.saved.fade) {
+      p.saved.pending = true;
+      stats.pendingN = (stats.pendingN || 0) + 1;
+      (function (el, saved) {
+        setTimeout(function () {
+          stats.pendingN--;
+          if (!current()) return;
+          saved.pending = false;
+          queueTree(el);
+          schedule();
+        }, saved.fade + 120);
+      })(p.el, p.saved);
+    }
     // A background that has just changed changes the answer for every
     // piece of text inside it, and those elements have not changed at
     // all themselves -- nothing else would ever come back to them. This
@@ -1268,7 +1315,7 @@ SITE_JS = """(function () {
     || { slices: 0, measured: 0, painted: 0, ms: 0, fulls: 0, obs: 0,
          pushes: 0, flips: 0, waits: 0, reputs: 0 };
   ["fulls", "obs", "pushes", "flips", "waits", "reputs", "tStale", "tDecide",
-   "tApply", "tAfter", "tQueue"].forEach(
+   "tApply", "tAfter", "tQueue", "pendingN", "queue"].forEach(
     function (k) { if (!(k in stats)) stats[k] = 0; });
   var clock = (window.performance && performance.now)
     ? function () { return performance.now(); } : function () { return 0; };
@@ -1432,6 +1479,9 @@ SITE_JS = """(function () {
   setTimeout(fullQueue, 2500);
   setTimeout(fullQueue, 6000);
   setTimeout(fullQueue, 15000);
+  // a re-theme of an open page: the page is in motion under it (fades
+  // it started, fades the site started), so two early looks back
+  if (RUN > 1) { setTimeout(fullQueue, 1500); setTimeout(fullQueue, 4000); }
   window.addEventListener("scroll", fullQueue, { passive: true });
 
   if (!window.__stObs && window.MutationObserver) {

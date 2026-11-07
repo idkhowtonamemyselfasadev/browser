@@ -173,12 +173,14 @@ def settle_pass(view, dwell, limit=12000):
         box = {}
         loop = QEventLoop()
         view.page().runJavaScript(
-            "(window.__stStats && window.__stStats.queue) || 0",
+            "(window.__stStats && (window.__stStats.queue + window.__stStats.pendingN)) || 0",
             B.APP_WORLD_ID, lambda r: (box.update({"v": r}), loop.quit()))
         QTimer.singleShot(3000, loop.quit)
         loop.exec()
         if box.get("v") == 0:
             break
+    # ...and the one slice a fired timer queues
+    spin(300)
     spin(dwell)
 
 
@@ -245,7 +247,7 @@ for url in [u for u in args.urls.split(",") if u]:
             area = [int(v) for v in args.diag_area.split(",")] if args.diag_area else None
             DIAG = r"""(function (sel, area) {
   var out = [], els = document.querySelectorAll(sel), n = 0;
-  for (var i = 0; i < els.length && n < 1; i++) {
+  for (var i = 0; i < els.length && n < 3; i++) {
     var el = els[i], r = el.getBoundingClientRect();
     if (!r.width || !r.height) continue;
     if (area && !(r.left >= area[0] && r.top >= area[1] && r.right <= area[0] + area[2] && r.bottom <= area[1] + area[3])) continue;
@@ -253,12 +255,12 @@ for url in [u for u in args.urls.split(",") if u]:
     if (!txt.trim()) continue;
     n++;
     var chain = [], node = el;
-    while (node && node.nodeType === 1 && chain.length < 16) {
+    while (node && node.nodeType === 1 && chain.length < 7) {
       var cs = getComputedStyle(node), o = window.__stOrig && window.__stOrig.get(node);
       chain.push({tag: node.tagName, cls: String(node.className || "").slice(0, 28), bg: cs.backgroundColor, color: cs.color,
         tr: cs.transitionDuration.slice(0, 12) + "/" + cs.transitionProperty.slice(0, 24),
         style: (node.getAttribute("style") || "").slice(0, 70),
-        rec: o ? {set: o.set, bg: o.bg, after: o.after, gen: o.gen.slice(0, 4), under: o.under, waits: o.waits, flips: o.flips, inl: o.inl && o.inl["background-color"]} : null});
+        rec: o ? {set: o.set, color: o.color, bg: o.bg, after: o.after, gen: o.gen.slice(0, 4), under: o.under, waits: o.waits, flips: o.flips, pending: o.pending, text: o.text} : null});
       node = node.parentElement;
     }
     out.push({len: txt.trim().length, chain: chain});

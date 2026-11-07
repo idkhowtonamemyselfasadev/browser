@@ -183,12 +183,14 @@ def settle_pass(view, dwell, limit=12000):
         box = {}
         loop = QEventLoop()
         view.page().runJavaScript(
-            "(window.__stStats && window.__stStats.queue) || 0",
+            "(window.__stStats && (window.__stStats.queue + window.__stStats.pendingN)) || 0",
             B.APP_WORLD_ID, lambda r: (box.update({"v": r}), loop.quit()))
         QTimer.singleShot(3000, loop.quit)
         loop.exec()
         if box.get("v") == 0:
             break
+    # ...and the one slice a fired timer queues
+    spin(300)
     spin(dwell)
 
 
