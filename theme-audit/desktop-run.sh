@@ -26,4 +26,17 @@ case "$1" in
   stop)
     pkill -f '[_]profileshots.py'; echo stopped
     ;;
+  after-restart)
+    # the site x theme matrix, afresh, under OUT (outside the synced tree)
+    OUTD="$2"; P="${3:-2}"
+    pkill -f "[d]rive.sh $OUTD"; pkill -f "[_]sitematrix.py --out $OUTD"; sleep 2
+    rm -rf "$OUTD"; mkdir -p "$OUTD"; echo "$P" > "$OUTD/P"
+    PFILE="$OUTD/P" nohup theme-audit/drive.sh "$OUTD" after > "$OUTD/drive.out" 2>&1 < /dev/null &
+    sleep 3; cat "$OUTD/drive.log"
+    ;;
+  after-status)
+    OUTD="$2"
+    tail -2 "$OUTD/drive.log"
+    for m in live-dark live-light fresh-dark fresh-light; do echo "$m: $(ls "$OUTD/$m" 2>/dev/null | wc -l)"; done
+    ;;
 esac

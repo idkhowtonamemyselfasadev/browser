@@ -596,6 +596,13 @@ SITE_JS = """(function () {
   function isPhoto(bgi) {
     return !!bgi && bgi !== "none" && bgi.indexOf("url(") >= 0;
   }
+  // a gradient cut into an element's own letters (background-clip:
+  // text) is ink, not a backdrop for what is inside the element
+  function inkOnly(cs) {
+    var bgi = cs.backgroundImage;
+    if (!bgi || bgi.indexOf("gradient") < 0) return false;
+    return ((cs.webkitBackgroundClip || cs.backgroundClip || "") + "").indexOf("text") >= 0;
+  }
 
   var TOKC = {};                     // the palette, parsed once
   ["bg", "surface", "surfaceAlt", "hover", "sunken", "text",
@@ -636,7 +643,7 @@ SITE_JS = """(function () {
       var cs = computed(node);
       if (!cs) break;
       var bgi = cs.backgroundImage;
-      if (isPhoto(bgi) || (bgi && bgi.indexOf("gradient") >= 0)) {
+      if ((isPhoto(bgi) || (bgi && bgi.indexOf("gradient") >= 0)) && !inkOnly(cs)) {
         hit = null;
         for (var q = 0; q < chain.length; q++) bgcache.set(chain[q][0], null);
         bgcache.set(node, null);
@@ -709,7 +716,9 @@ SITE_JS = """(function () {
             var acs = computed(e);
             if (!acs) break;
             var abgi = acs.backgroundImage;
-            if (isPhoto(abgi) || (abgi && abgi.indexOf("gradient") >= 0)) { out = null; break; }
+            if ((isPhoto(abgi) || (abgi && abgi.indexOf("gradient") >= 0)) && !inkOnly(acs)) {
+              out = null; break;
+            }
             var ac = parseColor(acs.backgroundColor);
             if (ac && ac.a > .995) break;
             continue;
@@ -745,6 +754,12 @@ SITE_JS = """(function () {
     return !!was && was.split("|")[0] !== cs.backgroundColor;
   }
 
+  // for _sitediag.py: what this pass thinks is behind an element now
+  window.__stGround = function (el) {
+    bgcache.clear(); undercache.clear();
+    var g = ground(el);
+    return g && g !== "pending" ? rgb(g) : String(g);
+  };
   // what the text of an element really sits on: the ancestors' answer,
   // corrected by what lies underneath on screen
   function ground(el) {
@@ -781,13 +796,61 @@ SITE_JS = """(function () {
   }
 
   var PROPS = ["background-color", "background-image", "color",
-               "border-color"];
+               "-webkit-text-fill-color", "border-color"];
   var FIELD = { INPUT: 1, TEXTAREA: 1, SELECT: 1, BUTTON: 1 };
 
   // Only an element that shows text of its own needs a colour. A
   // wrapper gets none: its children inherit the site's colour and are
   // measured on their own backgrounds, which is the right answer and
   // thousands of writes fewer on a page like YouTube.
+  // Letters cut out of a gradient: background-clip: text over a
+  // transparent text fill (office.com's "Work smarter" headline, a
+  // black-to-grey gradient on a white page). The gradient is the ink,
+  // not a picture behind the words -- so the ground is what lies
+  // behind the element, and the ink is every stop of the gradient,
+  // judged by the one that reads worst. Returns the stops, or null
+  // when this is not such an element (a photo cut into letters stays
+  // a picture and is left alone).
+  function gradientInk(cs, saved) {
+    if (!saved.bgi || saved.bgi.indexOf("gradient") < 0) return null;
+    var clip = (cs.webkitBackgroundClip || cs.backgroundClip || "") + "";
+    if (clip.indexOf("text") < 0) return null;
+    var fill = parseColor(cs.webkitTextFillColor);
+    if (fill && fill.a > .08) return null;       // the fill shows, not the gradient
+    var stops = [], m, re = /rgba?\\([^)]*\\)/g;
+    while ((m = re.exec(saved.bgi)) && stops.length < 12) {
+      var c = parseColor(m[0]);
+      if (c && c.a > .08) stops.push(c);
+    }
+    return stops.length ? stops : null;
+  }
+  // The same, for the words inside such a headline: office.com's "Work
+  // smarter" is spans in an H1, the gradient and the clip are the
+  // H1's, and the spans inherit a transparent fill. A write to their
+  // `color` shows nowhere; the ink is the ancestor's gradient and the
+  // fix is a fill of their own.
+  function inkAbove(el, cs) {
+    var fill = parseColor(cs.webkitTextFillColor);
+    if (!fill || fill.a > .08) return null;        // letters with a fill of their own
+    var n = el.parentElement, guard = 0;
+    while (n && n.nodeType === 1 && guard++ < 6) {
+      var pcs = computed(n);
+      if (!pcs) return null;
+      if (pcs.backgroundImage && pcs.backgroundImage !== "none")
+        return gradientInk(pcs, { bgi: pcs.backgroundImage });
+      n = n.parentElement;
+    }
+    return null;
+  }
+  // The colour the letters are drawn in: a text fill the site set
+  // itself wins over `color` (which the letters then only inherit),
+  // and a write to `color` alone would not show on such an element.
+  function textInk(saved) {
+    var f = saved.fill && saved.fill !== saved.color ? parseColor(saved.fill) : null;
+    if (f && f.a > .08) { saved.fillSet = true; return saved.fill; }
+    return saved.color;
+  }
+
   function showsText(el) {
     if (FIELD[el.tagName] === 1) return true;
     for (var i = 0; i < el.childNodes.length; i++) {
@@ -878,6 +941,9 @@ SITE_JS = """(function () {
   function snapshot(el, cs) {
     var saved = { bg: cs.backgroundColor, color: cs.color,
                   bgi: cs.backgroundImage,
+                  // what the letters are really drawn in, when the
+                  // site says so (-webkit-text-fill-color)
+                  fill: cs.webkitTextFillColor,
                   border: cs.borderTopColor, bw: cs.borderTopWidth,
                   inl: {}, set: false, gen: GEN,
                   seen: null, after: null,
@@ -969,7 +1035,7 @@ SITE_JS = """(function () {
     // script; the element's colours never change, so the record said
     // "nothing has moved" and the heading stayed in the site's dark
     // ink on the card this pass had just made dark.
-    if (!saved.text && showsText(el)) { note(el, "text"); return 1; }
+    if (!saved.text && showsText(el)) { note(el, "text"); return 3; }
     var was = saved.set ? saved.after : saved.seen;
     if (!was) return 0;                     // painted, not yet recorded
     if (look(cs, saved) !== was) {
@@ -990,7 +1056,7 @@ SITE_JS = """(function () {
       if (now === "pending") return (saved.waits || 0) < 4 ? 2 : 1;
       if ((now ? rgb(now) : "img") !== saved.under) {
         note(el, "under " + saved.under + " -> " + (now ? rgb(now) : "img"));
-        return 1;
+        return 3;
       }
     }
     return 0;
@@ -1053,7 +1119,15 @@ SITE_JS = """(function () {
       // ...but a new theme is not a disagreement: every element is
       // "moved" by it, and a tab in which the theme was switched six
       // times must not stop following.
+      // ...nor is a change of ground: the element itself did not move,
+      // what it sits on did. The Outlook landing page re-renders its
+      // sections a dozen times while it hydrates, and the footnotes in
+      // them, judged afresh each time, hit the cap and were left in
+      // the site's navy on the page this pass had made dark. Only the
+      // element's own colours moving (the site writing them back) is
+      // a disagreement.
       if (saved.gen !== GEN) { saved.flips = 0; saved.given = false; }
+      else if (moved === 3) { if (saved.given) return null; }
       else {
         if (saved.given) return null;
         if ((saved.flips || 0) >= 6) {
@@ -1078,6 +1152,15 @@ SITE_JS = """(function () {
       // a minute of main thread. So the restore is done now and the
       // reading is left to the slice, which comes back to every
       // restored element of the chunk after one recalculation.
+      // A fill this pass gave the element was what everything inside
+      // it was judged against. The Outlook landing page's footnotes in
+      // Aero (dark page, light cards): the section was a card when the
+      // footnotes were judged, dark on light; the site then dropped the
+      // section's fill while hydrating, the pass restored it, and the
+      // dark footnotes sat on the dark page with nothing coming back to
+      // them -- their own colours had not moved. So the subtree is
+      // queued; what still sits right costs one comparison.
+      var hadFill = !!(saved.put && saved.put["background-color"]);
       restore(el, saved);
       if (fading(cs)) {
         // the restore starts a fade back to the site's colours, and
@@ -1087,6 +1170,7 @@ SITE_JS = """(function () {
         return null;
       }
       deferred.push(el);
+      if (hadFill) queueTree(el);
       return null;
     }
     var flips = saved ? saved.flips : 0;
@@ -1142,8 +1226,12 @@ SITE_JS = """(function () {
       // on screen if the staleness check asks it too. So the record
       // says whether the stack decided, and only those few elements
       // are asked again (see stale)
+      var stops = gradientInk(cs, saved), inherited = false;
+      if (!stops) { stops = inkAbove(el, cs); inherited = !!stops; }
       var sib = changedBg ? undefined : underneath(el);
-      var under = changedBg || (sib !== undefined ? sib : behind(el));
+      var under = changedBg || (sib !== undefined ? sib
+                                : behind(stops && !inherited && el.parentElement
+                                         ? el.parentElement : el));
       saved.sib = !changedBg && sib !== undefined;
       if (under === "pending") {
         // judged later, once what it sits on has settled
@@ -1152,12 +1240,22 @@ SITE_JS = """(function () {
         stats.tDecide += clock() - td;
         return work.length ? { el: el, saved: saved, work: work } : null;
       }
-      var col = parseColor(saved.color);
+      var col = stops ? stops[0] : parseColor(textInk(saved));
       // what the decision below was made against, so a later pass can
       // tell that the ground has moved (see stale)
       saved.under = under ? rgb(under) : "img";
       if (under && col) {
-        if (col.a < .995) col = blend(col, under);
+        var had;
+        if (stops) {
+          had = 99;
+          for (var si = 0; si < stops.length; si++) {
+            var sc = stops[si].a < .995 ? blend(stops[si], under) : stops[si];
+            had = Math.min(had, contrast(sc, under));
+          }
+        } else {
+          if (col.a < .995) col = blend(col, under);
+          had = contrast(col, under);
+        }
         var link = el.tagName === "A";
         var head = /^H[1-6]$/.test(el.tagName);
         var tries = [];
@@ -1168,7 +1266,7 @@ SITE_JS = """(function () {
         // that was fine as the site drew it. The theme still reaches
         // them: a dark link on a card that has just turned dark no
         // longer reads, and that is when it gets the accent.
-        if (contrast(col, under) >= 4.5) tries = null;         // readable: keep
+        if (had >= 4.5) tries = null;                          // readable: keep
         else if (link) tries.push(TOKC.accentLt, TOKC.text);
         else if (head) tries.push(TOKC.accent, TOKC.text);
         else tries.push(TOKC.text);
@@ -1177,14 +1275,22 @@ SITE_JS = """(function () {
           // background -- a brand-coloured panel, a near-black card
           tries.push({ r: 255, g: 255, b: 255, a: 1 },
                      { r: 0, g: 0, b: 0, a: 1 });
-          var pick = null, had = contrast(col, under), best = had, bestCol = null;
+          var pick = null, best = had, bestCol = null;
           for (var i = 0; i < tries.length; i++) {
             var c = contrast(tries[i], under);
             if (c >= 4.5) { pick = tries[i]; break; }
             if (c > best) { best = c; bestCol = tries[i]; }
           }
           if (!pick && bestCol && had < 4.5) pick = bestCol;
-          if (pick) work.push(["color", rgb(pick)]);
+          if (pick) {
+            work.push(["color", rgb(pick)]);
+            // the gradient was the ink: it goes, and the fill it hid
+            // behind carries the colour. A fill the site set itself
+            // is rewritten too, or the write to `color` shows nowhere
+            if (stops && !inherited) work.push(["background-image", "none"]);
+            if (stops || saved.fillSet)
+              work.push(["-webkit-text-fill-color", rgb(pick)]);
+          }
         }
       }
     }
@@ -1479,6 +1585,10 @@ SITE_JS = """(function () {
   setTimeout(fullQueue, 2500);
   setTimeout(fullQueue, 6000);
   setTimeout(fullQueue, 15000);
+  // a marketing page hydrates for half a minute and more: two late
+  // looks, each one comparison per element that has not moved
+  setTimeout(fullQueue, 30000);
+  setTimeout(fullQueue, 60000);
   // a re-theme of an open page: the page is in motion under it (fades
   // it started, fades the site started), so two early looks back
   if (RUN > 1) { setTimeout(fullQueue, 1500); setTimeout(fullQueue, 4000); }
@@ -1492,6 +1602,13 @@ SITE_JS = """(function () {
         var m = muts[i];
         if (m.type === "attributes") {
           if (m.attributeName === "style") reput(m.target);
+          // a class or style landing on <html> or <body> is the page
+          // switching its colour scheme (a site answering the dark
+          // theme's prefers-color-scheme late, after its scripts load):
+          // every ground on the page may have moved. One full look,
+          // rate-limited like the others
+          if (m.target === document.documentElement || m.target === document.body)
+            fullQueue();
           // a class change restyles the element itself (a menu opening,
           // a row going "selected"); its subtree follows by inheritance
           // and is queued only when the DOM below it actually changes

@@ -60,6 +60,7 @@ theme-audit/*
 !theme-audit/drive.sh
 !theme-audit/run-matrix.sh
 !theme-audit/desktop-run.sh
+!theme-audit/memprobe.sh
 !theme-audit/chrome/
 theme-audit/chrome/*
 !theme-audit/chrome/*.png

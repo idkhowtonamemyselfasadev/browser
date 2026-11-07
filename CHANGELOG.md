@@ -28,6 +28,14 @@ with the before/after matrix, is in `THEME-FIX.md`.
 - **Placeholders are measured like text** and recoloured only when they fail
   (`dim`, the quietest token that clears 4.5:1 on every surface of all 116 palettes).
 - **A heading filled in by a script** after the first look is looked at again.
+- **Letters cut out of a gradient** (`background-clip: text`, office.com's "Work
+  smarter") are judged by the gradient's stops and get a fill of their own when those
+  fail on the surface the pass made; the gradient used to count as "a picture, leave
+  it" and the headline stayed black on dark.
+- **A page that switches to its own dark mode late** (the Outlook landing page, 15–30 s
+  after load) is looked at again: a change of what an element sits on no longer counts
+  towards the six "disagreements" after which the pass leaves an element alone, and a
+  full look is taken at 30 s, 60 s and when a class lands on `<html>` or `<body>`.
 - A live re-theme of a 16000-element page takes under two seconds instead of a
   style recalculation per element.
 - **The chrome, calmer and rounder:** a 12 px address bar with no hairline until it

@@ -5,7 +5,7 @@ Fifty-four real sites in every one of the 116 themes, measured in the
 page and looked at, and each of these pages is the shape of one thing
 that was wrong. Run against the theme_web.py of commit dc74e63 (the
 tree before the fixes; theme-audit/check/rules_on_head.py does it),
-15 of the 30 checks are red, in sections 1, 3, 4, 5, 6, 7 and 9.
+23 of the 45 checks are red, in sections 1, 3, 4, 5, 6, 7, 9, 10 and 11.
 Sections 2 and 8 are green on it: the placeholder page and the big
 page are the shape of what the Microsoft sign-in page and the Outlook
 landing page did on the old code, and this file pins the rule that
@@ -26,6 +26,13 @@ fixed them rather than reproducing the exact page.
   a link that already reads                 -- keeps its own colour
   a card whose colour is inherited          -- not "moved" when an
                                                ancestor is painted
+  a headline cut out of a gradient          -- the gradient is the ink,
+                                               not a picture behind it;
+                                               the words inside get a
+                                               fill of their own
+  a section re-rendered around its text     -- a changed ground is not a
+                                               disagreement: no cap on
+                                               judging it afresh
   a big page re-themed live                 -- finishes in seconds, not
                                                a recalculation per
                                                element
@@ -155,8 +162,48 @@ BIG = (HEAD + "<title>big</title><style>.row{background:#fff;color:#2b2b2b}"
        + "".join("<div class=row id=r%d><span>Zeile %d</span></div>" % (i, i)
                  for i in range(8000)))
 
+GRAD = HEAD + """<title>grad</title>
+<style>
+h1 { margin: 24px; font-size: 40px; display: inline-block;
+     -webkit-background-clip: text; background-clip: text;
+     -webkit-text-fill-color: transparent; }
+#ink, #split { background-image: linear-gradient(90deg, #000, #2a2a2a); }
+#keep { background-image: linear-gradient(90deg, #8fd3ff, #ffb3dc); }
+#filled { -webkit-text-fill-color: #1b1b1b; color: #fff; display: block; }
+</style>
+<h1 id=ink>Work smarter across the suite</h1><br>
+<h1 id=keep>Pastel on dark reads</h1><br>
+<h1 id=split><span id=part>Words in spans,</span> <span>gradient on the headline</span></h1>
+<h2 id=filled>A fill the site set itself</h2>
+<p id=body>Ordinary text under the headlines.</p>
+"""
+
+# a page that re-renders the section around a footnote again and again
+# while it hydrates (the Outlook landing page): the footnote itself
+# never changes, only what it sits on
+HYDRATE = HEAD + """<title>hydrate</title>
+<style>
+.card { background: #fff; padding: 24px; }
+#note { color: #17253d; font-size: 13px; }
+</style>
+<div id=host><div class=card><p id=note>Footnote text, dark navy, the site's own.</p></div></div>
+<p id=body>Ordinary text under it.</p>
+<script>
+var n = 0;
+var t = setInterval(function () {
+  var fresh = document.createElement("div");
+  fresh.className = "card";
+  fresh.appendChild(document.getElementById("note"));
+  var host = document.getElementById("host");
+  host.replaceChild(fresh, host.firstElementChild);
+  if (++n >= 9) { clearInterval(t); window.__rerendered = true; }
+}, 220);
+</script>
+"""
+
 PAGES = {"/signin": SIGNIN, "/hero": HERO, "/late": LATE, "/fade": FADE,
-         "/links": LINKS, "/big": BIG, "/panel": PANEL}
+         "/links": LINKS, "/big": BIG, "/panel": PANEL, "/grad": GRAD,
+         "/hydrate": HYDRATE}
 
 AUDIT = (HERE / "_siteaudit.js").read_text(encoding="utf-8")
 
@@ -351,6 +398,52 @@ check("and the date was not judged against the dark the panel was fading "
       ratio(rgb(dc), rgb(pb)) >= 4.5, "%.2f %s on %s" % (ratio(rgb(dc), rgb(pb)), dc, pb))
 win.apply_theme("mocha", save=False)
 H.spin(1200)
+
+print("\n(10) a headline cut out of a gradient: the gradient is the ink, not a picture")
+load("/grad", settle=1500)
+bb = css_of(view, "body", "backgroundColor")
+check("on Mocha the white page is dark", rgb(bb)[0] < 60, bb)
+fill = css_of(view, "#ink", "webkitTextFillColor")
+check("the black-gradient headline is no longer cut out of its gradient (was "
+      "black letters on the dark page, and 'a picture, leave it' to the pass)",
+      css_of(view, "#ink", "backgroundImage") == "none"
+      and ratio(rgb(fill), rgb(bb)) >= 4.5, (fill, bb))
+check("the pastel gradient, which reads on dark, is kept",
+      "gradient" in (css_of(view, "#keep", "backgroundImage") or ""))
+pf = css_of(view, "#part", "webkitTextFillColor")
+check("the words inside such a headline (spans with an inherited transparent "
+      "fill) get a fill of their own that reads", ratio(rgb(pf), rgb(bb)) >= 4.5, (pf, bb))
+ff = css_of(view, "#filled", "webkitTextFillColor")
+check("a heading whose fill the site set itself is repainted in its fill, not "
+      "only in `color`", ratio(rgb(ff), rgb(bb)) >= 4.5, (ff, bb))
+a = audit(view)
+check("the audit sees gradient letters too, and finds nothing unreadable",
+      a["bad"] == 0 and a["judged"] > 0, a["worst"][:3])
+win.apply_theme("latte", save=False)
+H.spin(2000)
+bb = css_of(view, "body", "backgroundColor")
+check("on Latte the black gradient is the site's own again (it reads on light)",
+      "gradient" in (css_of(view, "#ink", "backgroundImage") or ""),
+      css_of(view, "#ink", "backgroundImage"))
+kf = css_of(view, "#keep", "webkitTextFillColor")
+check("and the pastel one, unreadable on light, is now letters in a colour that reads",
+      css_of(view, "#keep", "backgroundImage") == "none"
+      and ratio(rgb(kf), rgb(bb)) >= 4.5, (kf, bb))
+a = audit(view)
+check("nothing unreadable on Latte either", a["bad"] == 0, a["worst"][:3])
+win.apply_theme("mocha", save=False)
+H.spin(1200)
+
+print("\n(11) a section re-rendered nine times around its footnote: not a disagreement")
+load("/hydrate", settle=3800)
+check("the page did re-render the section nine times",
+      H.js(view, "!!window.__rerendered", B.MAIN_WORLD_ID))
+cb = css_of(view, "#host .card", "backgroundColor")
+nc = css_of(view, "#note", "color")
+check("the last card is dark", rgb(cb)[0] < 60, cb)
+check("and the footnote reads on it (was given up after six re-looks and left in the "
+      "site's navy on the dark card)", ratio(rgb(nc), rgb(cb)) >= 4.5,
+      "%.2f %s on %s" % (ratio(rgb(nc), rgb(cb)), nc, cb))
 
 print("")
 if fails:

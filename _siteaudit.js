@@ -59,7 +59,10 @@
       var s = cs(n);
       if (!s) break;
       var bgi = s.backgroundImage;
-      if (bgi && bgi !== "none" && (bgi.indexOf("url(") >= 0 || bgi.indexOf("gradient") >= 0)) {
+      // a gradient cut into an element's own letters (background-clip:
+      // text) is ink, not a backdrop for what is inside it
+      if (bgi && bgi !== "none" && (bgi.indexOf("url(") >= 0 || bgi.indexOf("gradient") >= 0)
+          && !clipped(s)) {
         hit = null; break;
       }
       var c = p(s.backgroundColor);
@@ -88,6 +91,9 @@
   }
   var vw = window.innerWidth, vh = window.innerHeight;
 
+  var clipped = function (st) {
+    return ((st.webkitBackgroundClip || st.backgroundClip || "") + "").indexOf("text") >= 0;
+  };
   var out = { chars: 0, judged: 0, bad: 0, weak: 0, unjudged: 0,
               elements: 0, badElements: 0, inputs: 0, badInputs: 0,
               iframes: 0, worst: [], boxes: [], themed: !!document.getElementById("__sitetheme"),
@@ -129,13 +135,42 @@
     if (op < .08) continue;
     var fg = p(s.webkitTextFillColor) || p(s.color);
     if (!fg) continue;
-    if (fg.a < .08 && !isField) continue;                   // gradient text
+    // letters cut out of a gradient (background-clip: text over a
+    // transparent fill): the gradient's stops are the ink, and the
+    // worst of them is what is judged; a photo cut into letters
+    // cannot be judged and is skipped
+    var stops = null, inherited = false;
+    if (fg.a < .08 && !isField) {
+      // the gradient may be the element's own, or an ancestor's (the
+      // words of such a headline are spans with an inherited
+      // transparent fill)
+      var g = el, gs = s, guardG = 0;
+      while (g && guardG++ < 7) {
+        var bgiT = gs.backgroundImage;
+        var clipT = (gs.webkitBackgroundClip || gs.backgroundClip || "") + "";
+        if (bgiT && bgiT !== "none") {
+          if (bgiT.indexOf("gradient") >= 0 && clipT.indexOf("text") >= 0) {
+            stops = [];
+            var mm, reT = /rgba?\([^)]*\)/g;
+            while ((mm = reT.exec(bgiT)) && stops.length < 12) {
+              var sc = p(mm[0]);
+              if (sc && sc.a > .08) stops.push(sc);
+            }
+            inherited = g !== el;
+          }
+          break;
+        }
+        g = g.parentElement; gs = g ? cs(g) : null;
+        if (!gs) break;
+      }
+      if (!stops || !stops.length) continue;
+    }
     var chars = isField ? Math.max(text.length, 8) : text.length;
     // a field's own fill is what its text sits on; and on screen the
     // stack under one point of the text is asked as well, the same
     // way the pass asks it: a picture lying under the element that
     // is not an ancestor is still what the text sits on
-    var bg = behind(el);
+    var bg = behind(stops && !inherited && el.parentElement ? el.parentElement : el);
     var inView0 = r.top < vh && r.left < vw && r.bottom > 0 && r.right > 0;
     if (inView0 && document.elementsFromPoint) {
       var px = Math.min(Math.max(r.left + Math.min(r.width / 2, 12), 0), vw - 1);
@@ -151,7 +186,8 @@
           var s2 = cs(e2);
           if (!s2) continue;
           var bgi2 = s2.backgroundImage;
-          var pic2 = bgi2 && bgi2 !== "none" && (bgi2.indexOf("url(") >= 0 || bgi2.indexOf("gradient") >= 0);
+          var pic2 = bgi2 && bgi2 !== "none" && (bgi2.indexOf("url(") >= 0 || bgi2.indexOf("gradient") >= 0)
+                     && !clipped(s2);
           if (e2.contains(el)) {
             if (pic2) { bg = null; break; }
             var ac = p(s2.backgroundColor);
@@ -168,6 +204,14 @@
     out.elements++;
     out.chars += chars;
     if (!bg) { out.unjudged += chars; continue; }
+    if (stops) {
+      var worstC = 99;
+      for (var si = 0; si < stops.length; si++) {
+        var sb = stops[si].a < .995 ? over(stops[si], bg) : stops[si];
+        var rc = ratio(sb, bg);
+        if (rc < worstC) { worstC = rc; fg = sb; }
+      }
+    }
     if (fg.a < .995) fg = over(fg, bg);
     if (op < 1) fg = over({ r: fg.r, g: fg.g, b: fg.b, a: op }, bg);
     var c = ratio(fg, bg);
