@@ -293,6 +293,15 @@ check("the ending is put back even if the pattern forgets it",
 win.config["dlTemplate"] = "{title}.{ext}"
 check("a very long title is cut to something a filesystem takes",
       len(win.apply_template("a.jpg", title="x" * 400)) <= 180)
+got = win.apply_template("a.pdf", title="\u4e2d" * 170)
+check("...counted in bytes, so a Chinese title still saves",
+      len(got.encode("utf-8")) <= 255 and got.endswith(".pdf"), len(got.encode()))
+got = win.apply_template("a.pdf", title="x" * 172 + ".desktop")
+check("...and the cut keeps the file's real ending, not the title's",
+      got.endswith(".pdf"), got[-24:])
+check("a title of dots makes no hidden file",
+      not win.apply_template("a.pdf", title="..").startswith("."),
+      win.apply_template("a.pdf", title=".."))
 win.config["dlTemplate"] = ""
 
 print("\n(10) kinds he does not want, and sizes he does not want")

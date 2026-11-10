@@ -509,17 +509,26 @@ check("...and says which step it was",
       rows and rows[-1].get("ok") is False, rows[-1:])
 
 print("\n(14) the http mirror, and the headless instance")
-mirror = agent_bridge.RestMirror(bridge, port=8911, token="secret")
+TOKEN = "a-long-enough-secret"
+try:
+    agent_bridge.RestMirror(bridge, port=8912, token="").start()
+    opened = True
+except OSError:
+    opened = False
+check("with no token the mirror does not start at all", opened is False)
+mirror = agent_bridge.RestMirror(bridge, port=8911, token=TOKEN)
 check("the mirror starts", mirror.start() is True)
 got = {}
 
 
-def post(body, token="secret"):
+def post(body, token=TOKEN, extra=None):
     import urllib.request
     import urllib.error
+    headers = {"X-Token": token, "Content-Type": "application/json"}
+    headers.update(extra or {})
     req = urllib.request.Request(
         "http://127.0.0.1:8911/", data=json.dumps(body).encode(),
-        headers={"X-Token": token, "Content-Type": "application/json"})
+        headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=20) as answer:
             got["answer"] = json.loads(answer.read().decode())
@@ -541,6 +550,17 @@ thread.start()
 H.wait_for(lambda: "answer" in got, 25000)
 check("...and a wrong token is refused",
       (got.get("answer") or {}).get("error") == "bad-token", got)
+for label, extra in (("a request a web page sent (it has an Origin)",
+                      {"Origin": "https://evil.example"}),
+                     ("a request for another Host (DNS rebinding)",
+                      {"Host": "evil.example:8911"})):
+    got.clear()
+    thread = threading.Thread(
+        target=lambda: post({"op": "ping"}, extra=extra), daemon=True)
+    thread.start()
+    H.wait_for(lambda: "answer" in got, 25000)
+    check("...and %s is refused even with the token" % label,
+          (got.get("answer") or {}).get("error") == "not-local", got)
 mirror.stop()
 source = Path("browser.py").read_text()
 check("the headless instance is a launch flag",

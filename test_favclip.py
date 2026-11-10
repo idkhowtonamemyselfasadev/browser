@@ -100,6 +100,9 @@ def fits(name, widget, height, pad=0):
           height >= need, "row is %dpx, needs %dpx" % (height, need))
 
 
+CORNER = 10   # px of rounded border to skip at each side of a box
+
+
 def ink_reaches_edge(widget, rect=None, inset=0):
     """True when something drawn inside `rect` touches its bottom row of
     pixels, which is what a cut-off descender looks like. The border a
@@ -111,7 +114,13 @@ def ink_reaches_edge(widget, rect=None, inset=0):
                      int(rect.width() * scale), int(rect.height() * scale))
     box = rect if rect is not None else QRect(0, 0, img.width(), img.height())
     if inset:
-        box = box.adjusted(inset, inset, -inset, -inset)
+        # a bordered box has rounded corners now, and the curve of the
+        # border dips into the bottom rows a few pixels in from each
+        # side: that is the frame, not a descender. Text never starts
+        # inside the corner (the sheet pads it further in), so the
+        # sides are skipped by the corner's width as well.
+        side = inset + CORNER
+        box = box.adjusted(side, inset, -side, -inset)
     box = box.intersected(QRect(0, 0, img.width(), img.height()))
     lowest = None
     for y in range(box.top(), box.bottom() + 1):

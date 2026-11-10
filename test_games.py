@@ -22,6 +22,11 @@ from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["BROWSER_NO_LIB_CHECK"] = "1"
+# section 1 is about a machine with no session bus. It used to read
+# that off the box itself, so it went red the moment the server's user
+# manager (and its D-Bus) was running. The suite makes the condition
+# instead: a bus address that points at nothing.
+os.environ["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/nonexistent/no-bus"
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "tests"))

@@ -99,7 +99,7 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_libs.py test_looks.py test_navguard.py test_external.py \
          test_lifecycle.py test_deadtab.py test_libguard.py test_clicks.py \
          test_bpgame.py test_permreload.py test_callguard.py test_agent.py \
-         test_saveimage.py test_screenshare.py test_sitetheme_render.py \
+         test_saveimage.py test_screenshare.py test_sitetheme_render.py test_sitetheme_rules.py \
          test_tabwork.py test_tabwork2.py test_bookmarks2.py \
          test_addressbar.py test_barsuggest.py test_agentsock.py \
          test_pagetools.py test_media.py \
@@ -113,7 +113,7 @@ for t in test_page.py test_newtab.py test_panes.py test_paneload.py \
          test_histrender.py test_histicon.py test_sidebar.py \
          test_daystep.py test_paintcontrast.py test_palette.py \
          test_sleep.py test_panecache.py test_barmargins.py \
-         test_httpsfallback.py; do
+         test_httpsfallback.py test_bughunt.py; do
   [ -f "$t" ] || { skip "$t"; continue; }
   run "$t" "$t"
 done

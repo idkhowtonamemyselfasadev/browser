@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026-11-08 — a bug hunt: lint, an action fuzzer and a bridge fuzzer
+
+Found by reading the modules with a linter and by driving every keyboard action
+and every Bridge slot in a scratch browser, not by a report. `test_bughunt.py`
+guards all of it, and is red on the old code for every item.
+
+- **Closing the last private tab in one window no longer crashes the browser.** The
+  private cookie jar is shared by every window, but it was dropped as soon as *this*
+  window had no private tab left. A private window, or a private tab popped out
+  into a mini window, was left on a deleted jar, and the next script run on it
+  (the gesture timer does that several times a second) segfaulted the whole
+  browser. The jar now goes only when no view anywhere still uses it.
+- **A closed second window stops.** Nothing ever deleted it, so its tabs kept
+  running hidden: a video kept playing in a window you had closed, and a private
+  one kept the jar, and its logins, alive for the next private tab.
+- **Passkeys and security keys work.** The handler named a class it never
+  imported, so every request raised and the site waited forever. A finished or
+  cancelled request no longer asks you to touch your key.
+- **Volume and boost are remembered per site.** Their flash said `"%d%"`, an
+  incomplete format, which raised before the level was saved.
+- **Alt over a link with "resolve short links" on** called a helper that was never
+  written; every hover raised.
+- **The internal pages' calls are checked for shape**: a proxy profile or history
+  selection that arrives as the wrong JSON is refused instead of raising, and the
+  history chart clamps its day count (a huge one took all the memory).
+- **The agent bridge's http mirror needs its token.** It said "token required" but
+  started open when the config named none, and it never looked at `Origin`: any web
+  page in any browser on the machine could send it a plain-text POST and run `js`
+  in your tabs or read cookies, blind but enough. It now refuses to start without a
+  token of 16+ characters, refuses any request a browser sent (it carries an
+  `Origin`) or one for another `Host` (DNS rebinding), and compares the token in
+  constant time.
+- **A download naming pattern with `{title}` in it** cut the name to 180
+  *characters*, so a Chinese or emoji title made a name past the filesystem's 255
+  bytes and the save failed; the cut also dropped the real ending, leaving whatever
+  ending the page's title put at that spot (`….desktop`). It now cuts by bytes,
+  keeps the file's own ending, and a title made of dots makes no hidden file.
+- **A hand-edited `config.json` with a value of the wrong kind** (`"minFont":
+  "big"`) stopped the browser before any window, on every launch. The first window
+  now comes up on the defaults, saying so, and the file is kept as
+  `config.json.broken-<time>`. If the defaults fail too it was not the config: the
+  file is put back untouched and the error raised as before.
+- `test_favclip.py` skips the rounded corner of a bordered box: the new rounder
+  chrome put border pixels on the bottom rows it reads as cut-off text. Looked at
+  by eye before and after; no text is cut.
+
 ## 2026-11-07 — websites stay readable in every theme, and the chrome calms down
 
 Fifty-four real sites in all 116 themes, measured in the page (`_sitematrix.py`,

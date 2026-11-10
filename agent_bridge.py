@@ -2085,9 +2085,23 @@ class RestMirror:
         self.thread = None
 
     def start(self):
+        """Serve, or refuse to: with no token there is no door at all.
+
+        It used to start open when the config named no token, and with
+        no Origin check a page in any browser on this machine could
+        send a plain-text POST here (a "simple" request, no preflight)
+        and run ``js`` or read cookies in his tabs without ever seeing
+        the answer. Now an empty token means it does not start, a
+        request a browser sent (it carries an Origin) or one for another
+        Host (DNS rebinding) is refused, and the token is compared in
+        constant time."""
+        import hmac
         import http.server
         import threading
+        if len(self.token) < 16:
+            raise OSError("bridgeRestToken must be set (16+ characters)")
         mirror = self
+        hosts = {"127.0.0.1:%d" % self.port, "localhost:%d" % self.port}
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def _answer(self, code, payload):
@@ -2099,17 +2113,33 @@ class RestMirror:
                 self.wfile.write(raw)
 
             def do_POST(self):
-                if mirror.token and self.headers.get("X-Token") \
-                        != mirror.token:
+                if self.headers.get("Origin") is not None \
+                        or self.headers.get("Host") not in hosts:
+                    self._answer(403, {"ok": False, "error": "not-local"})
+                    return
+                given = str(self.headers.get("X-Token") or "")
+                if not hmac.compare_digest(given.encode(),
+                                           mirror.token.encode()):
                     self._answer(403, {"ok": False, "error": "bad-token"})
                     return
-                length = int(self.headers.get("Content-Length") or 0)
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 <= length <= 8 << 20:
+                    self._answer(400, {"ok": False, "error": "bad-length"})
+                    return
                 try:
                     req = json.loads(self.rfile.read(length) or b"{}")
                 except ValueError:
                     self._answer(400, {"ok": False, "error": "bad-json"})
                     return
+                if not isinstance(req, dict):
+                    self._answer(400, {"ok": False, "error": "not-an-object"})
+                    return
                 answer = mirror.run(req)
+                if not isinstance(answer, dict):
+                    answer = {"ok": False, "error": "bad-reply"}
                 self._answer(200 if answer.get("ok") else 400, answer)
 
             def log_message(self, *args):
