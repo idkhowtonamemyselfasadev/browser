@@ -2121,6 +2121,21 @@ check("a muted tab's to-do is called by its page title",
       "tw" in _todo_texts and not any(str(t).startswith(br.MUTE_MARK)
                                       for t in _todo_texts), str(_todo_texts))
 
+# zooming in a private tab writes no site into the zoom table
+_zs_was = dict(br.config.get("zoomSites") or {})
+br.config["zoomSites"] = {}
+_pz = br.new_tab(private=True); H.spin(300)
+H.load(_pz, srv.url("/twhome")); H.spin(400)
+br.tabs.setCurrentWidget(_pz); H.spin(100)
+br.zoom_by(1); H.spin(100)
+_zoom_rows = dict(br.config.get("zoomSites") or {})
+br.config["zoomSites"] = _zs_was
+_ix = br.tabs.indexOf(_pz)
+if _ix >= 0:
+    br.close_tab(_ix, ask=False)
+check("zooming a private tab leaves no site in the zoom table",
+      not _zoom_rows, str(_zoom_rows))
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:

@@ -2,6 +2,9 @@
 
 ## 2026-11-12 — line-by-line review, day 2 (part eighteen)
 
+- **Zooming a private tab leaves no trace.** "Remember the zoom per site" wrote
+  the site into config.json from private tabs too, so zooming in or out there
+  recorded that you had been on that site.
 - **The page's title, not the tab's label, in the rest of the places too.** The
   earlier fix covered bookmarks and sessions; 18 more took the tab strip's
   label (empty for a pinned tab, "⊘ " in front for a muted one): to-dos and

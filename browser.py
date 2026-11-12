@@ -24395,7 +24395,10 @@ class Browser(QMainWindow):
         view._zoom = want
         self._apply_zoom(view, adopt=False)
         self._show_zoom(view)
-        if self.config.get("zoomPerSite", True) and self._is_web(view.url()):
+        # never from a private tab: the zoom table is a list of sites
+        # in config.json, and a private tab's site is not written down
+        if self.config.get("zoomPerSite", True) and self._is_web(view.url()) \
+                and not getattr(view, "private", False):
             self.site_zoom(view.url().host(), want)
 
     def zoom_reset(self):
@@ -24404,7 +24407,8 @@ class Browser(QMainWindow):
         if view is None:
             return
         view._zoom = None
-        if self.config.get("zoomPerSite", True) and self._is_web(view.url()):
+        if self.config.get("zoomPerSite", True) and self._is_web(view.url()) \
+                and not getattr(view, "private", False):
             self.site_zoom(view.url().host(), 0)
         self._apply_zoom(view, adopt=False)
         self._show_zoom(view)
