@@ -32,13 +32,14 @@ FORMATS = {"png": "PNG", "jpeg": "JPEG", "jpg": "JPEG", "webp": "WEBP"}
 CLEAN_JS = """(function (on) {
   var s = document.getElementById("__shotclean");
   if (s) s.remove();
-  if (!on) {
-    (window.__shotPinned || []).forEach(function (el) {
-      el.style.removeProperty("position");
-    });
-    window.__shotPinned = [];
-    return "off";
-  }
+  // back as each one was: an inline position:fixed of the site's own
+  // was taken away for good, and its header stopped being pinned
+  (window.__shotPinned || []).forEach(function (one) {
+    if (one.v) one.el.style.setProperty("position", one.v, one.p);
+    else one.el.style.removeProperty("position");
+  });
+  window.__shotPinned = [];
+  if (!on) return "off";
   s = document.createElement("style");
   s.id = "__shotclean";
   s.textContent =
@@ -49,12 +50,14 @@ CLEAN_JS = """(function (on) {
   document.documentElement.appendChild(s);
   // what is fixed to the window would otherwise be in every screen of a
   // long capture; each one is put back where it belongs in the page
-  window.__shotPinned = [];
   var all = document.querySelectorAll("body *");
   for (var i = 0; i < all.length && i < 6000; i++) {
     var cs = getComputedStyle(all[i]);
     if (cs.position === "fixed" || cs.position === "sticky") {
-      window.__shotPinned.push(all[i]);
+      window.__shotPinned.push({
+        el: all[i],
+        v: all[i].style.getPropertyValue("position"),
+        p: all[i].style.getPropertyPriority("position")});
       all[i].style.setProperty("position", "absolute", "important");
     }
   }

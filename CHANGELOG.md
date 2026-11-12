@@ -1,5 +1,63 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twenty-seven)
+
+- **No DevTools port unless you turn it on.** Every start opened the DevTools
+  protocol on a random local port. Any program on this computer could find it,
+  list your tabs (private ones too) and run script in them. It's now only open
+  when you switch "debugging port" on in Settings. The inspector still works
+  without it, through Qt's own built-in DevTools.
+- **Launch-starting flags can't sneak through with quotes.** The guard that
+  keeps "run this program" switches out of your own Chromium flags could be
+  dodged by quoting the switch name or giving it a single dash. Those are
+  caught now.
+- **Everything opened from a private tab is private.** Links, pictures and
+  frames from a page's menus, a dragged link, a selection's links, a search,
+  an image search, middle-clicking Back/Forward/Reload, the archive and
+  link-preview buttons, a QR code's address and the Twitch chat all opened
+  normal tabs (or the side panel) with your cookies, saved in your history.
+  They now open private tabs. A private tab is also no longer signed in with a
+  saved login by itself (HTTP sign-in boxes), and a permission or "open mailto
+  links" answer given there isn't written into your settings.
+- **Block lists block the whole site.** A blocked site's subdomains still
+  loaded (www., static.hotjar.com and so on), because the list only blocked
+  the exact name. Subdomains are blocked too now.
+- **Timer limits and the hidden-tab animation pause really apply.** Both
+  wrapped a copy of the page's functions that the page never calls, so sites
+  ran at full speed while the menu said they were slowed. They now work on the
+  page itself, without the page being able to read your list of sites.
+- **Per-site text size is per site.** A size set for one site was applied to
+  every tab and every page loaded afterwards.
+- **The night dimmer follows the clock.** If the browser started before the
+  evening, pages stayed undimmed all night. Pages now check the time when they
+  load, and open tabs are updated when the evening starts and ends.
+- **Smaller fixes:**
+  - A font file from the fonts menu opens on the page's own site (relative
+    addresses went nowhere) and never as a file:// address.
+  - A refused popup's row only opens web addresses.
+  - Start-page "just added" bookmarks only link web addresses.
+  - The media player no longer hands your file paths to the next page opened
+    in its tab.
+  - OCR and captions work on temporary files that are deleted afterwards. They
+    used to stay in the synced config folder, and a failed caption run reused
+    the previous video's sound.
+  - Only one fullscreen-bar check runs at a time, and it stops when the bar
+    times out.
+  - "Translate" on a background tab translates that tab, not the one in front.
+  - Restoring a bookmark backup first saves what you have now.
+  - A full-page screenshot gives a pinned header back its own position.
+  - Pressing Start twice on the microphone/camera test no longer leaves the
+    first stream (and the camera light) on.
+  - The wheel-volume tag is centred and reads "50%", not "50%%".
+  - Ticking two curated engine flags keeps both.
+  - A saved auto-hide toolbar is hidden from the start.
+  - A second "reset appearance" keeps your themes in the undo backup.
+  - A download's server-chosen name can't restyle the size warning.
+  - Switching to a saved tab set, or putting every tab aside, in a one-tab
+    window no longer quits the browser.
+  - Copy on the passwords page copies a password like the fill bar does:
+    marked secret for clipboard managers, logged, and cleared after 30 s.
+
 ## 2026-11-12 — line-by-line review, day 2 (part twenty-six)
 
 - **A new master passphrase keeps 1Password connected.** Changing the master

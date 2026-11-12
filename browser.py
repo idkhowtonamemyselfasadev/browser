@@ -170,11 +170,19 @@ def _startup_flags():
         # text in a config file becomes code run at the next start, so
         # a page of ours that could write this setting -- Settings, if
         # anything ever got script into it -- could not make it that.
-        names = {tok.split("=", 1)[0].lower() for tok in line.split()
-                 if tok.startswith("--")}
-        if names & _LAUNCHING_SWITCHES:
+        # Looked for anywhere in the line, quotes and backslashes taken
+        # out first: Qt drops quotes when it splits the variable, so
+        # --"renderer-cmd-prefix"=x or "--renderer-cmd-prefix=x" reached
+        # the engine as the switch itself, and Chromium takes one dash
+        # as readily as two.
+        bare = line.lower()
+        for mark in ('"', "'", "\\"):
+            bare = bare.replace(mark, "")
+        names = {name for name in _LAUNCHING_SWITCHES
+                 if name.lstrip("-") in bare}
+        if names:
             print("chromiumFlags: left out %s (it starts a program)"
-                  % ", ".join(sorted(names & _LAUNCHING_SWITCHES)),
+                  % ", ".join(sorted(names)),
                   file=sys.stderr)
             continue
         parts.append(line)
@@ -395,13 +403,14 @@ if (_WIDEVINE_CDM and " " not in _WIDEVINE_CDM
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
         os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
         + " --widevine-path=" + _WIDEVINE_CDM)
-# the embedded inspector (DevTools) only serves its frontend resources
-# when remote debugging is enabled. Qt can only turn this on before the
-# web engine starts, so it cannot be made fully lazy -- but a FIXED,
-# well-known port (9222) let any other local process drive the browser
-# over the DevTools protocol. Bind a free, unpredictable port instead, so
-# the surface is there for the one who opened the inspector and awkward
-# for anyone else. REMOTE_DEBUG_PORT carries the choice to toggle_inspector.
+# The DevTools protocol port: only when he switched it on in Settings
+# (the --remote-debugging-port flag _startup_flags adds), or when whoever
+# started the browser set QTWEBENGINE_REMOTE_DEBUGGING. It used to be
+# opened on a random port at every start, for the inspector -- and with
+# it any program on this machine could list the tabs, private ones too,
+# and run script in them. The inspector does not need it: Qt's own
+# devtools page (setDevToolsPage) works on this build, measured, and
+# toggle_inspector uses that when there is no port. 0 means no port.
 def _pick_debug_port():
     existing = os.environ.get("QTWEBENGINE_REMOTE_DEBUGGING", "")
     if existing:
@@ -411,17 +420,10 @@ def _pick_debug_port():
             return int(tail)
         except ValueError:
             return 0
-    import socket as _socket
-    try:
-        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-        s.close()
-    except OSError:
-        port = 0
-    if port:
-        os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "127.0.0.1:%d" % port
-    return port
+    import re as _re
+    asked = _re.findall(r"--remote-debugging-port=(\d+)",
+                        os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""))
+    return int(asked[-1]) if asked else 0
 
 
 REMOTE_DEBUG_PORT = _pick_debug_port()
@@ -3525,6 +3527,9 @@ MEDIA_TOOLS = {
 })()""",
 
 "wheelvolume": r"""(function () {
+  /* run as written (media_tool formats only a tool it hands
+     arguments): "%%" reached the page, the tag lost its place
+     and read "50%%" */
   if (window.__wheelVol) return "already";
   window.__wheelVol = true;
   document.addEventListener("wheel", function (e) {
@@ -3535,19 +3540,60 @@ MEDIA_TOOLS = {
     var tag = document.getElementById("__volmark") || (function () {
       var d = document.createElement("div");
       d.id = "__volmark";
-      d.setAttribute("style", "position:fixed;left:50%%;top:10%%;transform:translateX(-50%%);"
+      d.setAttribute("style", "position:fixed;left:50%;top:10%;transform:translateX(-50%);"
         + "z-index:2147483646;background:#000000;color:#ffffff;font:14px monospace;"
         + "padding:6px 10px;pointer-events:none;opacity:.85");
       document.documentElement.appendChild(d);
       return d;
     })();
-    tag.textContent = Math.round(m.volume * 100) + "%%";
+    tag.textContent = Math.round(m.volume * 100) + "%";
     clearTimeout(window.__volTimer);
     window.__volTimer = setTimeout(function () { tag.remove(); }, 900);
   }, {passive: false, capture: true});
   return "on";
 })()""",
 }
+
+# The two savings that have to reach the page's own functions, so they
+# run in its world (the rest of PERF_JS stays isolated). The table of
+# floors is a closure variable: the page can call the wrapped
+# setInterval, and cannot read which other sites he slows down. Only put
+# in at all when a floor or the hidden-tab pause is on.
+PERF_MAIN_JS = r"""(function (floors, pauseHidden) {
+  var host = (location.hostname || "").toLowerCase().replace(/^www\./, "");
+  var floor = 0;
+  for (var one in floors) {
+    if (host === one || host.slice(-one.length - 1) === "." + one) {
+      floor = Math.max(floor, floors[one] | 0);
+    }
+  }
+  if (floor) {
+    var realInterval = window.setInterval;
+    window.setInterval = function (fn, ms) {
+      if (!ms || ms < floor) ms = floor;
+      var rest = Array.prototype.slice.call(arguments, 2);
+      return realInterval.apply(window, [fn, ms].concat(rest));
+    };
+  }
+  if (pauseHidden) {
+    var realRaf = window.requestAnimationFrame;
+    var held = [];
+    window.requestAnimationFrame = function (fn) {
+      if (document.hidden) { held.push(fn); return -1; }
+      return realRaf.call(window, fn);
+    };
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) {
+        document.documentElement.style.setProperty(
+          "animation-play-state", "paused");
+        return;
+      }
+      document.documentElement.style.removeProperty("animation-play-state");
+      var waiting = held.splice(0, held.length);
+      for (var i = 0; i < waiting.length; i++) realRaf.call(window, waiting[i]);
+    });
+  }
+})(PERFFLOORS, PERFPAUSE)"""
 
 # ---------------------------------------------------------------------------
 # Developer tools — the small ones, the ones that are missing when the
@@ -7266,8 +7312,12 @@ PAGE_LOOK_JS = r"""(function (want) {
     css.push("html:not([style*=background]) body:not([style*=background])" +
              " { color: " + want.text + "; }");
   }
-  if (want.fontSize) {
-    css.push("html { font-size: " + want.fontSize + "px !important; }");
+  /* this site's own size, looked up here: the payload used to carry
+     ONE size, the one for whichever tab was in front when it was
+     built, and every page in every tab got it */
+  var size = (want.fontSizes || {})[host] | 0;
+  if (size) {
+    css.push("html { font-size: " + size + "px !important; }");
   }
   /* a file opened on its own: Chromium shows a .txt or a .json as one
      <pre> and an image as one <img>, both on engine-white. The theme's
@@ -7306,8 +7356,18 @@ PAGE_LOOK_JS = r"""(function (want) {
     if (pdf) pdf.style.filter = "invert(1) hue-rotate(180deg)";
   }
   var filters = [];
-  if (want.dim) filters.push("brightness(" + (1 - want.dim / 100) + ")");
-  if (want.warm) filters.push("sepia(" + (want.warm / 100 * 0.6) + ")");
+  /* the evening, by the clock now: the script is built once and kept,
+     so a payload that said "not evening" at 18:00 kept every page
+     undimmed all night (evening_now, the same wraparound) */
+  var minutes = new Date().getHours() * 60 + new Date().getMinutes();
+  var from = want.eveFrom | 0, to = want.eveTo | 0;
+  var evening = from === to ? false
+    : (from < to ? (minutes >= from && minutes < to)
+                 : (minutes >= from || minutes < to));
+  if (want.dim && evening)
+    filters.push("brightness(" + (1 - want.dim / 100) + ")");
+  if (want.warm && evening)
+    filters.push("sepia(" + (want.warm / 100 * 0.6) + ")");
   if (want.grey || has(want.greyHosts)) filters.push("grayscale(1)");
   var el = document.getElementById("__pagelook");
   if (!css.length && !filters.length) {
@@ -7391,32 +7451,12 @@ PERF_JS = r"""(function (want) {
     return done;
   };
 
-  /* ---- the animations nobody is watching -------------------- */
-  if (want.pauseHidden && !window.__perfRaf) {
-    window.__perfRaf = true;
-    var realRaf = window.requestAnimationFrame;
-    var held = [];
-    window.requestAnimationFrame = function (fn) {
-      if (document.hidden) {
-        held.push(fn);
-        return -1;
-      }
-      return realRaf.call(window, fn);
-    };
-    document.addEventListener("visibilitychange", function () {
-      if (document.hidden) {
-        document.documentElement.style.setProperty(
-          "animation-play-state", "paused");
-        return;
-      }
-      document.documentElement.style.removeProperty("animation-play-state");
-      var waiting = held.splice(0, held.length);
-      for (var i = 0; i < waiting.length; i++) {
-        realRaf.call(window, waiting[i]);
-      }
-    });
-    window.__perfHeld = function () { return held.length; };
-  }
+  /* the animations nobody is watching, and a site that polls too
+     often: both wrap the PAGE's own functions, so they live in
+     PERF_MAIN_JS, in the page's world. Here, in the isolated world,
+     they wrapped a copy of setInterval and requestAnimationFrame that
+     no page script ever calls, and the page ran at full rate while
+     the menu said it was slowed. */
 
   /* ---- the video it plays where he cannot see it ------------- */
   if (want.stopHiddenVideo && !window.__perfVideo) {
@@ -7450,38 +7490,6 @@ PERF_JS = r"""(function (want) {
       }
     });
     window.__perfCheckVideo = check;
-  }
-
-  /* ---- a site that polls too often ---------------------------
-     Wrapped always and asked at call time: the script is injected
-     before the browser can know which host this page is, so the floor
-     is looked up here out of the table it was given, and a floor set
-     later needs no reload to take effect. */
-  window.__perfFloor = function () {
-    var W = window.__perfWant || {};
-    if (W.timerFloor) return W.timerFloor;
-    var rows = W.timerFloors || {};
-    var host = (location.hostname || "").toLowerCase()
-      .replace(/^www\./, "");
-    for (var one in rows) {
-      if (host === one || host.slice(-one.length - 1) === "." + one) {
-        return rows[one] | 0;
-      }
-    }
-    return 0;
-  };
-  if (!window.__perfTimers) {
-    window.__perfTimers = true;
-    var realInterval = window.setInterval;
-    window.__perfSlowed = 0;
-    window.setInterval = function (fn, ms) {
-      var floor = window.__perfFloor();
-      if (floor && (!ms || ms < floor)) {
-        window.__perfSlowed++;
-        ms = floor;
-      }
-      return realInterval.call(window, fn, ms);
-    };
   }
 
   /* ---- what he clicked and typed, for a recording ------------
@@ -14919,6 +14927,14 @@ _SETTINGS_EXTRA = (
 )
 
 
+def _autocap_tidy(folder):
+    """A caption run's own folder, gone -- and only one of those."""
+    folder = Path(str(folder))
+    if folder.name.startswith("browser-autocap-") \
+            and folder.parent == Path(tempfile.gettempdir()):
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 #: a fake place / user agent set from a private tab, by host: one private
 #: jar per process, so one table, kept in memory and dropped with the jar
 _PRIVATE_PLACES = {}
@@ -16214,10 +16230,24 @@ class Bridge(QObject):
         if not self._vault_page(key):
             return "{}"
         vault = self.browser.vault
+        browser = self.browser
 
         def copy(text):
             if text:
-                QGuiApplication.clipboard().setText(text)
+                if str(field) in ("username", "url", "host", "title"):
+                    QGuiApplication.clipboard().setText(text)
+                else:
+                    # a secret the way copy_secret copies one: marked
+                    # for the desktop's clipboard managers, written in
+                    # the access log, and taken back out after clipClear
+                    # -- plain setText left the password in Klipper's
+                    # history and on the clipboard for good
+                    browser._copy_secret_text(text)
+                    try:
+                        vault.note_access(item_id, field, "copied")
+                    except (AttributeError, OSError, ValueError):
+                        pass
+                    browser.clear_clipboard_later()
             # three outcomes, not two: copied, nothing there to copy,
             # and the store would not answer
             return {"ok": bool(text), "failed": text is None}
@@ -17640,7 +17670,8 @@ class WebView(QWebEngineView):
         # Refused unless he says yes, and written down either way.
         try:
             page.registerProtocolHandlerRequested.connect(
-                self.browser.protocol_handler_asked)
+                lambda request, v=self:
+                self.browser.protocol_handler_asked(request, view=v))
         except AttributeError:
             pass
         # what the link under the mouse really points at, said quietly
@@ -18098,7 +18129,8 @@ class WebView(QWebEngineView):
         menu.addSeparator()
         if real != link.toString():
             menu.addAction(ui("linkReal")).triggered.connect(
-                lambda: browser.new_tab(url=real))
+                lambda: browser.new_tab(url=real,
+                                        private=bool(self.private)))
         menu.addAction(ui("linkPrivate")).triggered.connect(
             lambda: browser.new_tab(url=real, private=True))
         others = [e for e in browser.sessions
@@ -23423,6 +23455,14 @@ class Browser(QMainWindow):
         if self._all_private:
             self.setWindowTitle(self._ui_str("privateWindowTitle"))
         self._sync_window_title()
+        # a saved "hide the toolbar" is his choice from last time: it was
+        # only ever applied from the menu, so every start showed the
+        # chrome while the menu said hidden, and the first click "hid"
+        # it by switching the setting off
+        if self.config.get("autoHideChrome", False) and not self._app_url:
+            self.set_auto_hide_chrome(True)
+        # the dimmer's next edge, for the tabs that are open then
+        self._arm_evening_timer()
         # after an unclean exit, what was open — offered rather than
         # restored, and only when the tabs were not brought back
         # automatically, where the offer would be a second copy of
@@ -25110,11 +25150,14 @@ class Browser(QMainWindow):
         self._tmenu = menu  # kept for tests
         menu.exec(self._menu_anchor(self._translate_btn))
 
-    def _translate_page(self, lang):
+    def _translate_page(self, lang, view=None):
         self.config["translateLang"] = lang
         self.save_config()
         self.apply_language()
-        view = self.current()
+        # the tab asked about, not whichever is in front: a background
+        # tab's "always" rule sent the FRONT tab to Google, a private
+        # one included, and left its own page as it was
+        view = self.current() if view is None else view
         if view is None:
             return
         url = view.url()
@@ -25497,9 +25540,12 @@ class Browser(QMainWindow):
             if granted and storable and not once:
                 self.config.setdefault("permissions", {})[key] = True
                 self.save_config()
-            self.note_permission(key, granted,
-                                 "once" if once else
-                                 ("allowed" if granted else "denied"))
+            # the log and its times go to config.json: a private tab's
+            # answer stays in _private_perms, and goes with the jar
+            if not private:
+                self.note_permission(key, granted,
+                                     "once" if once else
+                                     ("allowed" if granted else "denied"))
             # hide first: deleteLater runs a turn later, and the next
             # card goes up in the same corner right now
             card.hide()
@@ -27100,11 +27146,18 @@ class Browser(QMainWindow):
         entry = self.tabsets().get(str(name))
         if not entry:
             return []
-        if replace:
-            for i, view in reversed(self._real_tabs(
-                    session=self.active_session)):
-                self.close_tab(i, ask=False)
-        return self.open_tab_state(entry.get("tabs"), switch=True)
+        # the set first, then what it replaces: closing first closed the
+        # last tab, and the last tab closing closes the window -- with
+        # one window open, the browser quit instead of switching sets
+        old = ([view for _i, view in self._real_tabs(
+            session=self.active_session)] if replace else [])
+        opened = self.open_tab_state(entry.get("tabs"), switch=True)
+        if opened:
+            for view in old:
+                index = self.tabs.indexOf(view)
+                if index >= 0:
+                    self.close_tab(index, ask=False)
+        return opened
 
     def delete_tabset(self, name):
         if str(name) in self.tabsets():
@@ -27167,13 +27220,23 @@ class Browser(QMainWindow):
             return []
         self.aside_sets().append({"t": int(time.time()),
                                   "name": group or "", "tabs": state})
+        going = []
         for i in sorted(indices, reverse=True):
             widget = self.tabs.widget(i)
             # a private tab is never written into the set, so closing it
             # here would not put it away -- it would simply lose it
             if (widget is not None and not self._is_header(widget)
                     and not getattr(widget, "private", False)):
-                self.close_tab(i, ask=False)
+                going.append(widget)
+        # putting EVERY tab away left none, and closing the last tab
+        # closes the window: a fresh tab first, so the window stays
+        staying = [w for _i, w in self._real_tabs() if w not in going]
+        if going and not staying:
+            self.new_tab(group=None)
+        for widget in going:
+            index = self.tabs.indexOf(widget)
+            if index >= 0:
+                self.close_tab(index, ask=False)
         self.save_config(quiet=True)
         return state
 
@@ -29759,7 +29822,8 @@ class Browser(QMainWindow):
             text = str(found.get("text") or "")
             done = ""
             if which == "openlinktab" and link:
-                self.new_tab(url=QUrl(link), switch=False)
+                self.new_tab(url=QUrl(link), switch=False,
+                             private=self._private_of(view))
                 done = link
             elif which == "copylink" and link:
                 QGuiApplication.clipboard().setText(link)
@@ -29774,7 +29838,7 @@ class Browser(QMainWindow):
                 QGuiApplication.clipboard().setText(image)
                 done = image
             elif which == "openimage" and image:
-                self.new_tab(url=QUrl(image))
+                self.new_tab(url=QUrl(image), private=self._private_of(view))
                 done = image
             elif which == "searchselection" and text:
                 done = str(self.search_for(text) or "")
@@ -30139,7 +30203,8 @@ class Browser(QMainWindow):
         if not what:
             return ""
         if kind == "link" or re.match(r"^https?://", what):
-            self.new_tab(url=QUrl(what), switch=not background)
+            self.new_tab(url=QUrl(what), switch=not background,
+                         private=self._private_of())
             return what
         return str(self.search_for(what, new_tab=True) or "")
 
@@ -31177,8 +31242,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not ok or not channel.strip():
                 return False
             channel = channel.strip()
-        return self.open_panel(
-            "https://www.twitch.tv/popout/%s/chat?popout=" % channel)
+        # from a private tab, a private tab: the panel is the normal jar
+        # (logged in) and keeps its address in config.json
+        return self._panel_or_private(
+            "https://www.twitch.tv/popout/%s/chat?popout=" % channel,
+            self.current())
 
     # ------------------------------------------------------------------
     # Game mode, and tabs that go to sleep
@@ -32544,9 +32612,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             full = QUrl(url)
             if full.isRelative() and view is not None:
                 full = view.url().resolved(full)
+            # the page's own window.open() argument: a file:, data: or
+            # javascript: one is something Chromium would not have opened
+            # for it, and one click here opened it top-level
+            if full.scheme() not in ("http", "https"):
+                continue
             menu.addAction(self._elide(full.toString(), 60)
                            ).triggered.connect(
-                lambda _c=False, u=full.toString(): self.new_tab(url=u))
+                lambda _c=False, u=full.toString(),
+                p=self._private_of(view): self.new_tab(url=u, private=p))
         if not rows:
             menu.addAction(self._ui_str("popupNone")).setEnabled(False)
         if host:
@@ -33629,15 +33703,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.config["protocolHandlers"] = table
         return table
 
-    def protocol_handler_asked(self, request):
+    def protocol_handler_asked(self, request, view=None):
         """A site asking to become what opens mailto: (or another
         scheme). Refused unless he says yes, and written down either
-        way so there is a list to take it off."""
+        way so there is a list to take it off -- except from a private
+        tab, where the answer is for now and config.json never hears
+        the site's name."""
         try:
             scheme = str(request.scheme())
             origin = request.origin().toString()
         except (AttributeError, RuntimeError):
             return False
+        private = bool(view is not None and getattr(view, "private", False))
         table = self.protocol_handlers()
         key = "%s|%s" % (scheme, origin)
         if table.get(key) is True:
@@ -33646,12 +33723,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             except RuntimeError:
                 pass
             return True
+        if table.get(key) is False:
+            # a no is a no: it was written down and then asked again
+            try:
+                request.reject()
+            except RuntimeError:
+                pass
+            return False
         answer = QMessageBox.question(
             self, self._ui_str("protoAskT"),
             literal(self._ui_str("protoAskB") % (origin, scheme)))
         allowed = answer == QMessageBox.StandardButton.Yes
-        table[key] = bool(allowed)
-        self.save_config()
+        if not private:
+            table[key] = bool(allowed)
+            self.save_config()
         try:
             request.accept() if allowed else request.reject()
         except RuntimeError:
@@ -35023,7 +35108,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 action.setToolTip(text)
                 if kind == "links":
                     action.triggered.connect(
-                        lambda _c=False, u=row["url"]: self.new_tab(url=u))
+                        lambda _c=False, u=row["url"],
+                        p=self._private_of(): self.new_tab(url=u, private=p))
             if not rows:
                 menu.addAction(self._ui_str("linksNone")).setEnabled(False)
                 return
@@ -35840,6 +35926,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return True
 
     # ---- the two that leave the machine, and say so ----
+    def _private_of(self, view=None):
+        """Whether a tab opened FROM this one (the one in front when
+        none is named) has to be private as well: a link, a search, a
+        picture taken out of a private tab and opened in a normal one
+        went to the site with his cookies and into his history."""
+        view = self.current() if view is None else view
+        try:
+            return bool(getattr(view, "private", False))
+        except RuntimeError:
+            return False
+
     def _panel_or_private(self, url, view):
         """Where a look-up from this tab opens. The side panel is one
         view in the ordinary cookie jar, and open_panel writes its
@@ -37367,7 +37464,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not url:
                 self.flash(self._ui_str("embedNone"))
                 return
-            self.new_tab(url=url)
+            self.new_tab(url=url, private=self._private_of(view))
 
         return self.media_tool2("embedurl", view=view, then=done,
                                 arg={"x": int(pos.x() / zoom),
@@ -37672,8 +37769,23 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         wanted = [str(path) for path in paths if path]
         if wanted and view is not None:
             def when_ready(ok=True):
+                # only while the tab is still on the player: the hook
+                # stayed for the life of the tab, so every page he went
+                # on to in it was handed his file paths (his user name
+                # and folders) if it had a function of that name
+                try:
+                    here = view.url()
+                except RuntimeError:
+                    return
+                if (here.scheme() != "file"
+                        or not here.path().endswith("/player.html")):
+                    try:
+                        view.loadFinished.disconnect(when_ready)
+                    except (TypeError, RuntimeError):
+                        pass
+                    return
                 self.media_tool2("playlist", view=view, arg=wanted)
-            view.loadFinished.connect(lambda ok=True: when_ready(ok))
+            view.loadFinished.connect(when_ready)
         return view
 
     def pick_media_files(self):
@@ -40183,8 +40295,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if tried is None:
             tried = self._auth_tried = {}
         asked_before = tried.get(str(url))
+        # A private tab is not signed in behind his back with a saved
+        # login -- that tells the site who he is, which is what the tab
+        # is for not doing -- and what he types there is not offered to
+        # the vault. He is asked, as on a site with nothing saved.
+        private = self._private_of(view)
         entry = None
-        if (not asked_before and self.vault is not None
+        if (not asked_before and not private and self.vault is not None
                 and not self.vault_locked() and self.vault_password_on()):
             entry = self.vault.best_for(host, QUrl(url).scheme())
         if entry is not None and entry.get("username"):
@@ -40213,7 +40330,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         authenticator.setUser(name)
         authenticator.setPassword(word)
-        if (self.vault is not None and not self.vault_locked()
+        if (not private and self.vault is not None
+                and not self.vault_locked()
                 and self.config.get("savePasswords", True)
                 and not self.vault.is_never(host)):
             self._pw_pending = {"host": host, "scheme": QUrl(url).scheme(),
@@ -43823,7 +43941,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not text:
             return False
         url = self._resolve_typed(text)
-        self.new_tab(url=url, switch=False)
+        self.new_tab(url=url, switch=False, private=self._private_of())
         self.flash(self._ui_str("barBackground"))
         return True
 
@@ -44189,11 +44307,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not url:
             return False
         if background:
-            self.new_tab(url=url, switch=False)
+            self.new_tab(url=url, switch=False, private=self._private_of())
         else:
             view = self.current()
             if view is None or self._is_header(view):
-                self.new_tab(url=url)
+                self.new_tab(url=url, private=self._private_of())
             else:
                 view.load(QUrl(url))
         return True
@@ -44497,13 +44615,34 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     label = "%s %s" % (face.get("family", ""),
                                        face.get("weight", ""))
                     row = loaded.addAction(label.strip() or "?")
-                    row.setToolTip(face.get("url", ""))
+                    row.setToolTip(str(face.get("url", ""))[:300])
                     row.triggered.connect(
                         lambda _c=False, url=face.get("url", ""):
-                        self.new_tab(QUrl(url)) if url else None)
+                        self._open_font_file(url, view))
 
         self.page_fonts(view=view, then=fill)
         return menu
+
+    def _open_font_file(self, url, view=None):
+        """A font file the page loaded, in a tab of its own.
+
+        The address is the page's own CSS text: resolved against the
+        page (a relative url() opened as a bare path went nowhere), and
+        only a web one -- a stylesheet saying url(file:///...) put a
+        file of his into the menu, one click from opening. From a
+        private tab, in a private tab."""
+        view = self.current() if view is None else view
+        url = str(url or "").strip()
+        if not url or view is None:
+            return None
+        try:
+            target = view.url().resolved(QUrl(url))
+        except RuntimeError:
+            return None
+        if target.scheme() not in ("http", "https"):
+            return None
+        return self.new_tab(target,
+                            private=bool(getattr(view, "private", False)))
 
     def page_palette(self, view=None, then=None):
         def got(raw):
@@ -47544,7 +47683,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return
         url = self._resolve_typed(text)
         if new_tab:
-            self.new_tab(url=url)
+            self.new_tab(url=url, private=self._private_of())
         else:
             view = self.current()
             if view is None or self._is_header(view):
@@ -47595,7 +47734,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._typed_at = len(self.typed_history())
         url = self._resolve_typed(text)
         if new_tab:
-            self.new_tab(url=url)
+            self.new_tab(url=url, private=self._private_of())
             return
         view = self.current()
         if view is None or self._is_header(view):
@@ -47860,7 +47999,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                        SEARCH_ENGINES["google"])
             url = entry[1].format(QUrl.toPercentEncoding(text).data().decode())
         if new_tab:
-            self.new_tab(url=url)
+            self.new_tab(url=url, private=self._private_of())
         else:
             self.open_typed(url, new_tab=False)
         return url
@@ -47878,7 +48017,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return None
         url = ("https://lens.google.com/uploadbyurl?url="
                + QUrl.toPercentEncoding(image_url).data().decode())
-        self.new_tab(url=url)
+        self.new_tab(url=url, private=self._private_of())
         return url
 
     def _urlbar_menu(self, pos):
@@ -49605,6 +49744,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         profile.scripts().insert(self._a11y_script())
         profile.scripts().insert(self._nav_script())
         profile.scripts().insert(self._perf_script())
+        if self._perf_main_script() is not None:
+            profile.scripts().insert(self._perf_main_script())
         profile.scripts().insert(self._media_script())
         # and what notices a call: every jar, including a private
         # one and a virtual browser made later. A microphone held
@@ -49805,11 +49946,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         items = (hist.forwardItems(1) if name == "forward"
                  else hist.backItems(1))
         if name == "reload":
-            self.new_tab(url=view.url().toString())
+            self.new_tab(url=view.url().toString(),
+                         private=self._private_of(view))
             return
         if not items:
             return
-        self.new_tab(url=items[0].url().toString())
+        self.new_tab(url=items[0].url().toString(),
+                     private=self._private_of(view))
 
     def _tb_back(self):
         view = self.current()
@@ -51469,12 +51612,35 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return
         existing = getattr(view, "_devtools", None)
         if existing is not None:
+            page = self._live_page(view)
+            try:
+                if page is not None and getattr(existing, "_embedded",
+                                                False):
+                    page.setDevToolsPage(None)
+            except RuntimeError:
+                pass
             existing.close()
             view._devtools = None
             return
-        # the embedded devtools:// frontend fails to load on some Qt
-        # builds; the remote-debugging server serves the same DevTools
-        # over http, which works everywhere
+        if not REMOTE_DEBUG_PORT:
+            # no port open (the default): Qt's own devtools page, wired
+            # straight to this tab, with nothing listening for anyone
+            page = self._live_page(view)
+            if page is None:
+                return
+            dt = QWebEngineView()
+            dt._embedded = True
+            dt.setWindowTitle("Inspector")
+            dt.resize(1000, 640)
+            dt.setWindowIcon(self.windowIcon())
+            page.setDevToolsPage(dt.page())
+            dt.destroyed.connect(lambda: setattr(view, "_devtools", None))
+            dt.show()
+            view._devtools = dt
+            return
+        # with the port he switched on: the remote-debugging server's
+        # DevTools over http (the embedded frontend failed on some
+        # older Qt builds)
         cur = view.url().toString()
         reply = self._nam.get(QNetworkRequest(QUrl(
             "http://127.0.0.1:%d/json/list" % REMOTE_DEBUG_PORT)))
@@ -52343,12 +52509,33 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         script.setRunsOnSubFrames(False)
         return script
 
+    def _perf_main_script(self):
+        """PERF_MAIN_JS for every jar, or None when nothing in it is on."""
+        want = self.perf_payload()
+        floors = {k: v for k, v in want["timerFloors"].items() if v > 0}
+        if not floors and not want["pauseHidden"]:
+            return None
+        script = QWebEngineScript()
+        script.setSourceCode(PERF_MAIN_JS
+                             .replace("PERFFLOORS", json.dumps(floors))
+                             .replace("PERFPAUSE", "true" if want["pauseHidden"]
+                                      else "false"))
+        script.setName("perf-main")
+        script.setInjectionPoint(
+            QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        script.setRunsOnSubFrames(False)
+        return script
+
     def refresh_perf(self, live=True):
+        main = self._perf_main_script()
         for profile in self._all_profiles():
             scripts = profile.scripts()
-            for old in scripts.find("perf"):
+            for old in scripts.find("perf") + scripts.find("perf-main"):
                 scripts.remove(old)
             scripts.insert(self._perf_script())
+            if main is not None:
+                scripts.insert(main)
         if not live:
             return True
         for index in range(self.tabs.count()):
@@ -54012,12 +54199,26 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if then:
                 then("")
             return False
-        where = CONFIG_FILE.parent / "ocr-input.png"
-        image.save(str(where), "PNG")
+        # a file of its own in the temporary folder, taken away once it is
+        # read: it was ocr-input.png in the config folder (synced, backed
+        # up) for good, a picture of whatever page was read last
+        try:
+            handle, name = tempfile.mkstemp(prefix="browser-ocr-",
+                                            suffix=".png")
+            os.close(handle)
+        except OSError:
+            return False
+        where = Path(name)
+        if not image.save(str(where), "PNG"):
+            where.unlink(missing_ok=True)
+            return False
         proc = QProcess(self)
         self._ocr_proc = proc
+        proc.errorOccurred.connect(
+            lambda _e: where.unlink(missing_ok=True))
 
         def done(_code=0, _status=None):
+            where.unlink(missing_ok=True)
             text = bytes(proc.readAllStandardOutput()).decode(
                 "utf-8", "replace").strip()
             if text:
@@ -55307,8 +55508,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return self.video_caption_state(view=view, then=with_state)
 
     def _caption_job(self, src, maker, transcriber, view=None, then=None):
-        """ffmpeg, then the transcriber, then the track in the page."""
-        sound = CONFIG_FILE.parent / "autocap.wav"
+        """ffmpeg, then the transcriber, then the track in the page.
+
+        In a folder of its own, made for this run and taken away after
+        it. They used to sit in the config folder under fixed names, so
+        a run whose download failed found the last video's sound and
+        words and put those on this one -- and every captioned video's
+        sound, a private tab's too, stayed in a folder that is synced."""
+        try:
+            work = Path(tempfile.mkdtemp(prefix="browser-autocap-"))
+        except OSError:
+            self.flash(self._ui_str("autocapNoSound"))
+            if then:
+                then({})
+            return False
+        sound = work / "autocap.wav"
         self.flash(self._ui_str("autocapWorking"))
         pull = QProcess(self)
         self._autocap_pull = pull
@@ -55317,7 +55531,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                            "-ac", "1", str(sound)])
 
         def pulled(_code=0, _status=None):
-            if not sound.is_file() or sound.stat().st_size < 1000:
+            if (_code != 0 or not sound.is_file()
+                    or sound.stat().st_size < 1000):
+                _autocap_tidy(work)
                 self.flash(self._ui_str("autocapNoSound"))
                 if then:
                     then({})
@@ -55331,7 +55547,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def _caption_words_job(self, sound, transcriber, view=None, then=None):
         """The whole file in words, with its times, as WebVTT."""
-        out = CONFIG_FILE.parent / "autocap"
+        out = sound.parent / "autocap"
         args = transcriber.split()
         name = Path(args[0]).name
         model = str(self.config.get("captionModel") or "")
@@ -55368,6 +55584,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if said:
                     vtt = ("WEBVTT\n\n00:00:00.000 --> 00:10:00.000\n%s\n"
                            % " ".join(said.split()))
+            _autocap_tidy(sound.parent)
             if not vtt:
                 self.flash(self._ui_str("autocapNoWords"))
                 if then:
@@ -56328,7 +56545,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """The archive's copy of this page, in a tab."""
         def got(found):
             if found.get("url"):
-                self.new_tab(url=QUrl(found["url"]))
+                self.new_tab(url=QUrl(found["url"]),
+                             private=self._private_of(view))
                 self.flash(self._ui_str("wbFound") % found.get("when", "?"))
 
         url = url or self._tab_url(self.current() if view is None else view)
@@ -57488,8 +57706,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             page.runJavaScript(code, APP_WORLD_ID, lambda _r: None)
         except RuntimeError:
             return False
+        # one poll at a time: the one before belonged to a bar that is
+        # gone, and left running it read the next bar's answer and kept
+        # it for the wrong site. And not past the bar's own 12 s.
+        old = getattr(self, "_fsbar_timer", None)
+        if old is not None:
+            try:
+                old.stop()
+                old.deleteLater()
+            except RuntimeError:
+                pass
         timer = QTimer(self)
         timer.setInterval(300)
+        timer._until = time.monotonic() + 13
         self._fsbar_timer = timer
         timer.timeout.connect(lambda: self._fsbar_tick(host, view, timer))
         timer.start()
@@ -57498,8 +57727,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def _fsbar_tick(self, host, view, timer):
         """What he pressed on that bar."""
         page = self._live_page(view)
-        if page is None:
+        if page is None or time.monotonic() > getattr(timer, "_until", 1e18):
             timer.stop()
+            if getattr(self, "_fsbar_timer", None) is timer:
+                self._fsbar_timer = None
+            timer.deleteLater()
             return False
 
         def got(answer):
@@ -58232,7 +58464,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         tool = self.caption_tools().get("captionTranslator") or ""
         if tool:
             return self.translate_in_place(view=view, lang=lang)
-        self._translate_page(lang)
+        self._translate_page(lang, view=view)
         return "google"
 
     def translate_in_place(self, view=None, lang="de", limit=120):
@@ -58346,7 +58578,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         if not url.startswith(("http://", "https://")):
             return False
-        other = self.new_tab(url=QUrl(url), switch=False)
+        other = self.new_tab(url=QUrl(url), switch=False,
+                             private=self._private_of(view))
         if other is None:
             return False
         self.split_view(index=self.tabs.indexOf(other))
@@ -59410,7 +59643,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             for row in (rows or [])[:limit]:
                 url = str(row.get("url") or "")
                 if url.startswith(("http://", "https://")):
-                    self.new_tab(url=QUrl(url), switch=False)
+                    self.new_tab(url=QUrl(url), switch=False,
+                                 private=self._private_of(view))
                     opened.append(url)
             if opened:
                 self.flash(self._ui_str("navOpenedLinks") % len(opened))
@@ -59439,7 +59673,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return
             if url.startswith("www."):
                 url = "https://" + url
-            self.new_tab(url=QUrl(url), switch=not background)
+            self.new_tab(url=QUrl(url), switch=not background,
+                         private=self._private_of(view))
         return self.selection_url(view=view, then=got)
 
     def box_links(self, view=None, then=None):
@@ -59483,7 +59718,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                              or url.rsplit("/", 1)[-1])[:46])
                 sub = menu.addMenu(label)
                 sub.addAction(ui("navImgOpen")).triggered.connect(
-                    lambda _c=False, u=url: self.new_tab(url=QUrl(u)))
+                    lambda _c=False, u=url, p=self._private_of(view):
+                    self.new_tab(url=QUrl(u), private=p))
                 sub.addAction(ui("navImgCopy")).triggered.connect(
                     lambda _c=False, u=url: (
                         QGuiApplication.clipboard().setText(u),
@@ -59548,7 +59784,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     "blocked") else ""
                 action = menu.addAction(url[:70] + mark)
                 action.triggered.connect(
-                    lambda _c=False, u=url: self.new_tab(url=QUrl(u)))
+                    lambda _c=False, u=url, p=self._private_of(view):
+                    self.new_tab(url=QUrl(u), private=p))
 
         self.page_frames(view=view, then=fill)
         return menu
@@ -59997,7 +60234,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 literal(self._ui_str("navArchiveAsk") % (url[:80])))
             if answer != QMessageBox.StandardButton.Yes:
                 return False
-        self.new_tab(url=QUrl(where))
+        self.new_tab(url=QUrl(where), private=self._private_of(view))
         return where
 
     def open_in_other_browser(self, url="", view=None):
@@ -60373,8 +60610,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         set_plain(label, url[:90], url)       # the link a page offered
         barlay.addWidget(label, 1)
         keep = QPushButton(self._ui_str("navPreviewKeep"), bar)
+        keep_private = self._private_of(view)
         keep.clicked.connect(
-            lambda: (self.new_tab(url=QUrl(url)), holder.close()))
+            lambda: (self.new_tab(url=QUrl(url), private=keep_private),
+                     holder.close()))
         barlay.addWidget(keep)
         shut = QPushButton(self._ui_str("navPreviewClose"), bar)
         shut.clicked.connect(holder.close)
@@ -60426,8 +60665,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     url = row.get("url") if isinstance(row, dict) else str(row)
                     action = sub.addAction(str(url)[:70])
                     action.triggered.connect(
-                        lambda _c=False, u=str(url): self.new_tab(
-                            url=QUrl(u)))
+                        lambda _c=False, u=str(url),
+                        p=self._private_of(view): self.new_tab(
+                            url=QUrl(u), private=p))
                 if not sub.actions():
                     sub.addAction(ui("navNoLinks")).setEnabled(False)
             self.page_links(view=view, then=got)
@@ -60440,8 +60680,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         "%d×%d  %s" % (row.get("w", 0), row.get("h", 0),
                                             str(row.get("url", ""))[-40:]))
                     action.triggered.connect(
-                        lambda _c=False, u=str(row.get("url", "")):
-                        self.new_tab(url=QUrl(u)))
+                        lambda _c=False, u=str(row.get("url", "")),
+                        p=self._private_of(view):
+                        self.new_tab(url=QUrl(u), private=p))
                 if not sub.actions():
                     sub.addAction(ui("navNoImages")).setEnabled(False)
             self.gallery_images(view=view, then=got)
@@ -60566,8 +60807,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """What the dragged box caught, opened in the background."""
         rows = [str(one) for one in (rows or [])
                 if str(one).startswith(("http://", "https://"))]
+        private = self._private_of()
         for url in rows[:20]:
-            self.new_tab(url=QUrl(url), switch=False)
+            self.new_tab(url=QUrl(url), switch=False, private=private)
         self.flash(self._ui_str("navOpenedLinks" if rows else "navNoLinks")
                    % len(rows) if rows else self._ui_str("navNoLinks"))
         return rows
@@ -60704,7 +60946,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 QGuiApplication.clipboard().setText(text)
                 self.flash(self._ui_str("barCopied"))
             elif go is not None and button is go:
-                self.new_tab(url=QUrl(text))
+                self.new_tab(url=QUrl(text), private=self._private_of())
 
         # shown, not exec()'d: a modal box in a browser is a browser
         # that has stopped, and this one has nothing to wait for
@@ -61779,15 +62021,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         dim = int(dim) if isinstance(dim, (int, float)) else 0
         warm = config.get("warmStrength")
         warm = int(warm) if isinstance(warm, (int, float)) else 0
-        evening = evening_now(config)
-        host = ""
-        try:
-            view = self.current()
-            host = self._host_of(view.url()) if view is not None else ""
-        except (AttributeError, RuntimeError):
-            host = ""
         sizes = config.get("siteFontSize")
         sizes = sizes if isinstance(sizes, dict) else {}
+        font_sizes = {}
+        for one, value in sizes.items():
+            try:
+                px = int(value)
+            except (TypeError, ValueError):
+                continue
+            if px > 0:
+                font_sizes[str(one).lower().removeprefix("www.")] = px
         return {
             "bg": palette["bg"], "surface": palette["surface"],
             "text": palette["text"], "accent": palette["accent"],
@@ -61796,9 +62039,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                               if isinstance(h, str)],
             "selection": bool(config.get("themedSelection", False)),
             "unstyled": bool(config.get("unstyledBackground", False)),
-            "fontSize": int(sizes.get(host) or 0) if host else 0,
-            "dim": dim if (dim and evening) else 0,
-            "warm": warm if (config.get("warmNight") and evening) else 0,
+            "fontSizes": font_sizes,
+            # the strengths and the hours; whether it is evening is
+            # worked out in the page when it loads, and _evening_timer
+            # runs it again in the open tabs when the hour comes
+            "dim": dim,
+            "warm": warm if config.get("warmNight") else 0,
+            "eveFrom": _hhmm(config.get("nightDimFrom"), 21 * 60),
+            "eveTo": _hhmm(config.get("nightDimTo"), 7 * 60),
             "grey": bool(config.get("greyscale", False)),
             "greyHosts": [h for h in (config.get("greyscaleSites") or [])
                           if isinstance(h, str)],
@@ -61826,6 +62074,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             for old in scripts.find("page-look"):
                 scripts.remove(old)
             scripts.insert(self._page_look_script())
+        self._arm_evening_timer()
         if not live:
             return True
         source = PAGE_LOOK_JS.replace(
@@ -61842,6 +62091,30 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             except RuntimeError:
                 continue
         return True
+
+    def _arm_evening_timer(self):
+        """Run the page look again in the open tabs when the evening
+        starts or ends -- only while a dimmer or the warm filter is on,
+        and once per edge rather than polling."""
+        timer = getattr(self, "_evening_timer", None)
+        if timer is not None:
+            timer.stop()
+        config = self.config
+        if not (config.get("nightDim") or (config.get("warmNight")
+                                           and config.get("warmStrength"))):
+            return None
+        now = time.localtime()
+        minutes = now.tm_hour * 60 + now.tm_min
+        edges = [_hhmm(config.get("nightDimFrom"), 21 * 60),
+                 _hhmm(config.get("nightDimTo"), 7 * 60)]
+        wait = min(((edge - minutes) % 1440) or 1440 for edge in edges)
+        if timer is None:
+            timer = self._evening_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: self.refresh_page_look())
+        # to the minute, plus a few seconds so the page's clock is past it
+        timer.start(max(1000, (wait * 60 - now.tm_sec + 5) * 1000))
+        return wait
 
     def set_night_dim(self, percent=None, start=None, end=None):
         """Lower the brightness of pages in the evening, by a set
@@ -62990,8 +63263,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         would be a loss."""
         was = {k: self.config[k] for k in self.APPEARANCE_KEYS
                if k in self.config}
-        if keep_backup:
-            self.config["appearanceBackup"] = was
+        if keep_backup and was:
+            # on top of the one there is, not over it: a second press
+            # (or one changed setting and a reset) wrote {} or one key
+            # over the backup that held his own themes
+            old = self.config.get("appearanceBackup")
+            keep = dict(old) if isinstance(old, dict) else {}
+            keep.update(was)
+            self.config["appearanceBackup"] = keep
         for key in self.APPEARANCE_KEYS:
             self.config.pop(key, None)
         self.save_config(quiet=True)
@@ -63527,9 +63806,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if trouble:
             if QMessageBox.question(
                     self, self._ui_str("dlBigTitle"),
-                    self._ui_str("dlNoSpaceAsk" if trouble == "space"
-                                 else "dlBigAsk")
-                    % (name, _pretty_size(request.totalBytes()))) \
+                    literal(self._ui_str("dlNoSpaceAsk"
+                                         if trouble == "space"
+                                         else "dlBigAsk")
+                            % (name, _pretty_size(request.totalBytes())))) \
                     != QMessageBox.StandardButton.Yes:
                 request.cancel()
                 return
@@ -64722,6 +65002,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return 0
         if not isinstance(raw, list):
             return 0
+        # what is there now, under a name of its own: today's dated
+        # copy is the morning's, so bookmarks added since were in no
+        # file at all and a restore threw them away
+        if self.bookmarks:
+            before = self.bookmark_backup_dir() / time.strftime(
+                "bookmarks-%Y-%m-%d-%H%M%S.json")
+            try:
+                before.parent.mkdir(parents=True, exist_ok=True)
+                if not _write_atomic(before, json.dumps(
+                        self.bookmarks, indent=1).encode("utf-8")):
+                    return 0
+            except OSError:
+                return 0
         self._bookmark_undo = list(self.bookmarks)
         kept = []
         used = set()
@@ -67975,16 +68268,27 @@ def _privacy_flags(config):
             blocked.append(host)
     if config.get("blockReplay", False):
         blocked.extend(REPLAY_HOSTS)
+    # his own and the replay list first, so a long phishing list is the
+    # part the length cap cuts, never them
+    blocked = sorted(set(blocked))
     if config.get("phishingList", False):
-        blocked.extend(_phishing_hosts())
+        mine = set(blocked)
+        blocked += sorted({h for h in _phishing_hosts() if h not in mine})
     if blocked:
         # the engine's own resolver, told that these names are nowhere.
         # This is what a block list can be in this build: there is no
         # request interceptor to be had (see privacy.check_request).
-        rules = ",".join("MAP %s 0.0.0.0" % h for h in sorted(set(blocked)))
-        if len(rules) > 60000:
-            rules = rules[:60000].rsplit(",", 1)[0]  # whole rules only
-        flags.append(_flag("--host-resolver-rules", rules))
+        # Every name under each one as well: MAP matches a name exactly,
+        # so www.site, static.hotjar.com and in.hotjar.com still loaded
+        # while the list said the site was blocked.
+        pairs, size = [], 0
+        for h in blocked:
+            pair = "MAP %s 0.0.0.0,MAP *.%s 0.0.0.0" % (h, h)
+            if size + len(pair) + 1 > 60000:
+                break                      # whole pairs only
+            pairs.append(pair)
+            size += len(pair) + 1
+        flags.append(_flag("--host-resolver-rules", ",".join(pairs)))
     return tuple(flags)
 
 

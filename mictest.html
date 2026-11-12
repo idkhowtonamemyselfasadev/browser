@@ -71,6 +71,10 @@
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
   let bridge = null, micStream = null, camStream = null;
+  // which ask is the live one: a Start pressed twice, or a Stop while
+  // the first was still asking, left a stream (and the camera light)
+  // on that no button reached any more
+  let micAsk = 0, camAsk = 0, micSource = null;
   let ctx = null, analyser = null, raf = null, peak = 0;
   let recorder = null, chunks = [], recorded = null;
   let STR = {};
@@ -122,10 +126,16 @@
   document.getElementById("micstart").onclick = async () => {
     try {
       const id = document.getElementById("mics").value;
-      micStream = await navigator.mediaDevices.getUserMedia(
+      const ask = ++micAsk;
+      const fresh = await navigator.mediaDevices.getUserMedia(
         {audio: id ? {deviceId: {exact: id}} : true});
+      if (ask !== micAsk) { fresh.getTracks().forEach((t) => t.stop());
+                            return; }
+      if (micStream) micStream.getTracks().forEach((t) => t.stop());
+      if (micSource) { try { micSource.disconnect(); } catch (e) {} }
+      micStream = fresh;
       ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
-      const source = ctx.createMediaStreamSource(micStream);
+      const source = micSource = ctx.createMediaStreamSource(micStream);
       analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
       source.connect(analyser);
@@ -144,6 +154,9 @@
     if (raf) cancelAnimationFrame(raf);
     raf = null;
     analyser = null;
+    micAsk++;
+    if (micSource) { try { micSource.disconnect(); } catch (e) {} }
+    micSource = null;
     if (micStream) micStream.getTracks().forEach((t) => t.stop());
     micStream = null;
     document.getElementById("level").style.width = "0";
@@ -179,8 +192,13 @@
   document.getElementById("camstart").onclick = async () => {
     try {
       const id = document.getElementById("cams").value;
-      camStream = await navigator.mediaDevices.getUserMedia(
+      const ask = ++camAsk;
+      const fresh = await navigator.mediaDevices.getUserMedia(
         {video: id ? {deviceId: {exact: id}} : true});
+      if (ask !== camAsk) { fresh.getTracks().forEach((t) => t.stop());
+                            return; }
+      if (camStream) camStream.getTracks().forEach((t) => t.stop());
+      camStream = fresh;
       document.getElementById("preview").srcObject = camStream;
       await devices();
       const track = camStream.getVideoTracks()[0];
@@ -195,6 +213,7 @@
   };
 
   document.getElementById("camstop").onclick = () => {
+    camAsk++;
     if (camStream) camStream.getTracks().forEach((t) => t.stop());
     camStream = null;
     document.getElementById("preview").srcObject = null;

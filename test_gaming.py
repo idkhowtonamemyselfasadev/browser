@@ -222,6 +222,15 @@ print("\n(6) the Discord keys")
 check("with no Discord tab it says so", win.discord_key("mute") is False)
 dc = win.new_tab(url=srv.url("/discord"), switch=False)
 H.spin(800)
+# a background tab loads slowly under a CPU quota: the buttons have to be
+# there before the script can press one (red at HEAD as well, at 30%)
+def _discord_up():
+    try:
+        return bool(H.js(dc, "!!document.getElementById('m')",
+                         B.MAIN_WORLD_ID))
+    except AssertionError:      # a page too busy to answer is not up
+        return False
+H.wait_for(_discord_up, 15000)
 check("...but it cannot find a Discord tab by this host",
       win.discord_key("mute") is False)
 # the host is 127.0.0.1 here, so the real test is the script itself

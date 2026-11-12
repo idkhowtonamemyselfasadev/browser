@@ -1098,6 +1098,10 @@ print("\n(35) the change-password page, and the weak ones")
 tabs_before = win.tabs.count()
 win.open_change_password("example.com")
 H.spin(300)
+# the address is set once the navigation starts, which under a CPU quota
+# is after the 300 ms above: read too early it was "", and that is not
+# a wrong address
+H.wait_for(lambda: win.current().url().toString(), 8000)
 check("it opens a tab", win.tabs.count() == tabs_before + 1)
 check("...at the well-known address",
       ".well-known/change-password" in win.current().url().toString(),

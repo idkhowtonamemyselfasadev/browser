@@ -234,8 +234,11 @@ check("animations can be paused when nobody is looking",
       win.set_perf("pauseHidden", True) is True)
 H.load(view, srv.url("/p"))
 H.spin(800)
+# in the page's own world: the isolated world's copy is one no page
+# script ever calls, which is how this passed while the page ran free
 check("...and the page's own frame callback is wrapped",
-      js("!!window.__perfRaf", APP) is True)
+      js("requestAnimationFrame.toString().indexOf('native code') < 0",
+         MAIN) is True)
 check("silent video in a hidden tab can be stopped",
       win.set_perf("stopHiddenVideo", True) is True)
 H.load(view, srv.url("/p"))
@@ -256,12 +259,13 @@ check("a site's timers can be given a floor",
 H.load(view, srv.url("/p"))
 H.spin(800)
 check("...and the page's setInterval is wrapped",
-      js("!!window.__perfTimers", APP) is True)
-check("...and a faster timer is slowed",
-      (js("(function(){var id=setInterval(function(){}, 10);"
-          "clearInterval(id); return window.__perfSlowed|0;})()", APP)
-       or 0) >= 1,
-      js("window.__perfSlowed|0", APP))
+      js("setInterval.toString().indexOf('native code') < 0", MAIN) is True)
+js("(function(){window.__ticks=0; var id=setInterval(function(){"
+   "window.__ticks++}, 10); setTimeout(function(){clearInterval(id)}, 400);"
+   " return 1;})()", MAIN)
+H.spin(700)
+check("...and a faster timer of the page's own is slowed",
+      js("window.__ticks|0", MAIN) == 0, js("window.__ticks|0", MAIN))
 check("a floor out of range is clamped",
       win.set_timer_floor("127.0.0.1", 999999) == 60000)
 check("...and zero takes it off",

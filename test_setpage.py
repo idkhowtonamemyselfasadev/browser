@@ -311,6 +311,19 @@ if view is not None:
     check("changing one shortcut keeps the ones he set before",
           all(_now.get(k) == v for k, v in _keep.items()) and len(_now) >= 3,
           _now)
+    # two curated flags ticked one after the other are both kept
+    win.config["safeFlags"] = []
+    _nflags = H.js(view, """(function () {
+      var boxes = document.querySelectorAll('#safeflags input[type=checkbox]');
+      if (boxes.length < 2) return boxes.length;
+      boxes[0].checked = true; boxes[0].dispatchEvent(new Event('change'));
+      boxes[1].checked = true; boxes[1].dispatchEvent(new Event('change'));
+      return 2; })()""")
+    H.spin(400)
+    check("ticking two curated flags keeps both",
+          _nflags == 2 and len(win.config.get("safeFlags") or []) == 2,
+          (_nflags, win.config.get("safeFlags")))
+    win.config["safeFlags"] = []
 check("the browser no longer works out where he left off",
       not hasattr(win, "continue_where"))
 extras = json.loads(win.bridge.startExtras())

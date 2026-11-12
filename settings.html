@@ -4209,7 +4209,17 @@
           const at = rows.indexOf(row.flag);
           if (box.checked && at < 0) rows.push(row.flag);
           else if (!box.checked && at >= 0) rows.splice(at, 1);
-          saveSetting("safeFlags", rows);
+          // not through saveSetting: that wrote the bare list over
+          // _settings.safeFlags (the rows this list is drawn from) and
+          // left safeFlagsOn as it was at load, so the second tick
+          // started from the load-time list and dropped the first
+          if (bridge) bridge.setSetting("safeFlags", JSON.stringify(rows));
+          if (window._settings) {
+            window._settings.safeFlagsOn = rows.slice();
+            for (const one of (window._settings.safeFlags || [])) {
+              if (one && one.flag) one.on = rows.indexOf(one.flag) >= 0;
+            }
+          }
         };
         label.appendChild(box);
         const sw = document.createElement("span");

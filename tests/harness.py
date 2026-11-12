@@ -329,6 +329,13 @@ class Server:
         Handler.pages = dict(pages)
         socketserver.TCPServer.allow_reuse_address = True
         self.httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        # A handler thread waits on a keep-alive connection the engine
+        # holds open, and ThreadingTCPServer joins every one of them in
+        # server_close(): test_dev printed "all good" and then sat in
+        # srv.stop() until the 900 s timeout killed it. Daemon threads,
+        # not joined -- the process is ending anyway.
+        self.httpd.daemon_threads = True
+        self.httpd.block_on_close = False
         self.port = self.httpd.server_address[1]
         self.t = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.t.start()

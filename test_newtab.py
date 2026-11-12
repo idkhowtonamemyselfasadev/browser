@@ -102,6 +102,8 @@ class Server:
         Handler.pages = dict(pages)
         socketserver.TCPServer.allow_reuse_address = True
         self.httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        self.httpd.daemon_threads = True
+        self.httpd.block_on_close = False
         self.port = self.httpd.server_address[1]
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 

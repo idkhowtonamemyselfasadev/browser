@@ -76,6 +76,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 socketserver.TCPServer.allow_reuse_address = True
 HTTPD = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+HTTPD.daemon_threads = True
+HTTPD.block_on_close = False
 PORT = HTTPD.server_address[1]
 threading.Thread(target=HTTPD.serve_forever, daemon=True).start()
 URL = "http://127.0.0.1:%d/cake" % PORT

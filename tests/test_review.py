@@ -257,6 +257,11 @@ srv = H.Server({
     "/twhome": "<title>tw</title><p>home</p>",
     "/pwform": "<title>pw</title><input id=u><input id=p type=password>",
     "/vid": "<title>v</title><video id=v></video>",
+    "/pinned": "<title>pin</title><div id=h style='position:fixed;top:0'>x</div>"
+               "<div style='height:3000px'></div>",
+    "/links": "<title>l</title><p><a href=/twhome>a</a> <a href=/timers>b</a></p>",
+    "/fakeplayer": "<title>fp</title><script>window.__playerLoad = function (x)"
+                   " { window.__got = x; return 1; };</script>",
     "/chatpage": "<title>c</title><div class=chat-line id=c1>a spoiler here</div>"
                  "<div class=chat-line id=c2>hello</div>",
     "/adpage": "<title>ad</title><p class=good id=g>ad</p><p id=n>text</p>",
@@ -2212,10 +2217,16 @@ check("a site rule whose proxy is gone refuses the site instead of going direct"
 # his chat filter rules stay out of the page's reach
 v34 = br.new_tab(); H.spin(300)
 H.load(v34, srv.url("/chatpage")); H.spin(500)
+# the start page's own loadFinished can end H.load before this page has
+# even started under a CPU quota: wait for THIS document
+H.wait_for(lambda: "/chatpage" in v34.url().toString()
+           and H.js(v34, "document.readyState", B.MAIN_WORLD_ID) == "complete"
+           and H.js(v34, "!!document.getElementById('c1')", B.MAIN_WORLD_ID),
+           20000)
 br.play_tool("chatfilter", view=v34,
              arg={"hide": ["spoiler"], "me": ["qwmyname"]})
 H.wait_for(lambda: H.js(v34, "getComputedStyle(document.getElementById('c1'))"
-                             ".display", B.MAIN_WORLD_ID) == "none", 5000)
+                             ".display", B.MAIN_WORLD_ID) == "none", 20000)
 _rules_seen = H.js(v34, "typeof window.__chatRules", B.MAIN_WORLD_ID)
 _c1 = H.js(v34, "getComputedStyle(document.getElementById('c1')).display",
            B.MAIN_WORLD_ID)
@@ -2434,6 +2445,565 @@ for _t in (_cv, _pv):
     if br.tabs.indexOf(_t) >= 0:
         br.close_tab(br.tabs.indexOf(_t), ask=False)
 H.spin(300)
+
+# ===== batch 32 =======================================================
+# a font file from the menu: resolved against the page, web only, and
+# private from a private tab
+_fv = br.new_tab(url=None); H.spin(200)
+H.load(_fv, srv.url("/twhome"))
+_ft = br._open_font_file("/fonts/f.woff2", _fv)
+H.wait_for(lambda: _ft is not None and _ft.url().toString(), 8000)
+_ft_url = _ft.url().toString() if _ft is not None else ""
+_ff = br._open_font_file("file:///etc/hostname", _fv)
+_fj = br._open_font_file("javascript:alert(1)", _fv)
+check("a font file's relative address opens on the page's own site",
+      _ft_url == srv.url("/fonts/f.woff2"), _ft_url)
+check("...and a file:// or javascript: one opens nothing",
+      _ff is None and _fj is None, str((_ff, _fj)))
+for _t in (_ft,):
+    if _t is not None and br.tabs.indexOf(_t) >= 0:
+        br.close_tab(br.tabs.indexOf(_t), ask=False)
+_pfv = br.new_tab(private=True); H.spin(200)
+H.load(_pfv, srv.url("/twhome"))
+_pft = br._open_font_file("/fonts/g.woff2", _pfv); H.spin(300)
+check("...from a private tab, in a private tab",
+      _pft is not None and getattr(_pft, "private", False) is True)
+for _t in (_pft, _pfv):
+    if _t is not None and br.tabs.indexOf(_t) >= 0:
+        br.close_tab(br.tabs.indexOf(_t), ask=False)
+
+# a caption run whose download fails does not reuse the last run's files
+import os as _os, stat as _stat
+_cd = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(B.CONFIG_FILE.parent / "autocap.wav").write_bytes(b"\0" * 4000)
+(B.CONFIG_FILE.parent / "autocap.vtt").write_text(
+    "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nlast video's words\n")
+_mk = _cd / "maker.sh"
+_mk.write_text("#!/bin/sh\nexit 1\n")
+_tr = _cd / "words.sh"
+_tr.write_text("#!/bin/sh\ntouch '%s'\n" % (_cd / "ran"))
+for _f in (_mk, _tr):
+    _f.chmod(_f.stat().st_mode | _stat.S_IEXEC)
+_tmp_before = set(_Path(_tempfile.gettempdir()).glob("browser-autocap-*"))
+_cj = {}
+br._caption_job("http://127.0.0.1:9/x.mp4", str(_mk), str(_tr), view=_fv,
+                then=lambda r: _cj.update(done=r))
+H.wait_for(lambda: "done" in _cj, 15000)
+H.spin(500)
+_tmp_after = set(_Path(_tempfile.gettempdir()).glob("browser-autocap-*"))
+check("a caption run whose download failed transcribes nothing",
+      _cj.get("done") == {} and not (_cd / "ran").exists(), str(_cj))
+check("...and leaves no folder of its own behind",
+      not (_tmp_after - _tmp_before), str(_tmp_after - _tmp_before))
+for _n in ("autocap.wav", "autocap.vtt"):
+    try:
+        (B.CONFIG_FILE.parent / _n).unlink()
+    except OSError:
+        pass
+
+# one fullscreen-bar poll at a time, ending with the bar
+br.offer_fullscreen_rule("a.test", view=_fv)
+_t1 = br._fsbar_timer
+br.offer_fullscreen_rule("b.test", view=_fv)
+_t2 = br._fsbar_timer
+try:
+    _t1_live = _t1.isActive()
+except RuntimeError:
+    _t1_live = False
+check("a second fullscreen bar stops the first one's poll",
+      _t2 is not _t1 and not _t1_live and _t2.isActive())
+_t2._until = B.time.monotonic() - 1
+H.wait_for(lambda: br._fsbar_timer is None, 3000)
+check("...and the poll ends once the bar has timed out",
+      br._fsbar_timer is None)
+
+# translating a background tab translates that tab, not the one in front
+_ta = br.new_tab(url=None, switch=False); H.spin(200)
+H.load(_ta, srv.url("/twhome"))
+_tb = br.new_tab(url=None); H.spin(200)
+H.load(_tb, srv.url("/twhome"))
+_loads = []
+_ta.load = lambda u: _loads.append(("A", u.toString()))
+_tb.load = lambda u: _loads.append(("B", u.toString()))
+_tl_was = (br.config.get("translateLang"), br.config.get("captionTranslator"))
+br.config["captionTranslator"] = ""
+try:
+    br.translate_page_now(view=_ta, lang=_tl_was[0] or "en")
+finally:
+    if _tl_was[0] is None:
+        br.config.pop("translateLang", None)
+    else:
+        br.config["translateLang"] = _tl_was[0]
+    if _tl_was[1] is None:
+        br.config.pop("captionTranslator", None)
+    else:
+        br.config["captionTranslator"] = _tl_was[1]
+check("translating a tab sends that tab, not the one in front",
+      [w for w, _u in _loads] == ["A"], str(_loads))
+for _t in (_ta, _tb):
+    if br.tabs.indexOf(_t) >= 0:
+        br.close_tab(br.tabs.indexOf(_t), ask=False)
+
+# a bookmark restore keeps what was there in a backup first
+_bk_was = list(br.bookmarks)
+_bdir = br.bookmark_backup_dir()
+_bdir.mkdir(parents=True, exist_ok=True)
+(_bdir / "bookmarks-2001-01-01.json").write_text(json.dumps(
+    [{"id": 1, "type": "link", "title": "old", "url": "https://old.example/",
+      "parent": 0}]))
+br.bookmarks = [{"id": 7, "type": "link", "title": "added today",
+                 "url": "https://new.example/", "parent": 0}]
+_before_names = set(br.bookmark_backups())
+_rn = br.restore_bookmark_backup("bookmarks-2001-01-01.json")
+_new_names = set(br.bookmark_backups()) - _before_names
+_kept = any("new.example" in (_bdir / n).read_text() for n in _new_names)
+br.bookmarks = _bk_was
+br.save_bookmarks()
+for _n in _new_names | {"bookmarks-2001-01-01.json"}:
+    try:
+        (_bdir / _n).unlink()
+    except OSError:
+        pass
+check("restoring a bookmark backup first backs up what is there",
+      _rn == 1 and _kept, str((_rn, sorted(_new_names))))
+
+# a full-page capture gives a pinned element its own inline position back
+_cpv = br.new_tab(url=None); H.spin(200)
+H.load(_cpv, srv.url("/pinned"))
+H.js(_cpv, B.capture.CLEAN_JS % "true", B.APP_WORLD_ID)
+_mid = H.js(_cpv, "getComputedStyle(document.getElementById('h')).position",
+            B.MAIN_WORLD_ID)
+H.js(_cpv, B.capture.CLEAN_JS % "false", B.APP_WORLD_ID)
+_aft = H.js(_cpv, "getComputedStyle(document.getElementById('h')).position",
+            B.MAIN_WORLD_ID)
+check("a capture pins a fixed header and gives back its inline fixed",
+      _mid == "absolute" and _aft == "fixed", str((_mid, _aft)))
+if br.tabs.indexOf(_cpv) >= 0:
+    br.close_tab(br.tabs.indexOf(_cpv), ask=False)
+
+# the mic test: a second Start stops the first stream
+_mv = br.open_mic_test(); H.spin(800)
+H.wait_for(lambda: H.js(_mv, "document.readyState", B.MAIN_WORLD_ID)
+           == "complete", 8000)
+H.js(_mv, """(function () {
+  window.__made = [];
+  navigator.mediaDevices.getUserMedia = function (want) {
+    var s;
+    if (want.video) {
+      var c = document.createElement('canvas'); c.width = 8; c.height = 8;
+      c.getContext('2d').fillRect(0, 0, 8, 8);
+      s = c.captureStream(1);
+    } else {
+      s = new AudioContext().createMediaStreamDestination().stream;
+    }
+    window.__made.push(s);
+    return Promise.resolve(s);
+  };
+  return 1; })()""", B.MAIN_WORLD_ID)
+# the page's own handler, called and awaited, twice: what is measured is
+# what the second Start does to the first stream, not how a click lands
+H.js(_mv, "window.__cs = []; window.__ce = [];"
+          " document.getElementById('camstart').onclick().then("
+          "function () { __cs.push(1); }, function (e) { __ce.push(String(e)); });"
+          " 1", B.MAIN_WORLD_ID)
+H.wait_for(lambda: H.js(_mv, "window.__cs.length + window.__ce.length",
+                        B.MAIN_WORLD_ID) >= 1, 15000)
+H.js(_mv, "document.getElementById('camstart').onclick().then("
+          "function () { __cs.push(2); }, function (e) { __ce.push(String(e)); });"
+          " 1", B.MAIN_WORLD_ID)
+H.wait_for(lambda: H.js(_mv, "window.__cs.length + window.__ce.length",
+                        B.MAIN_WORLD_ID) >= 2, 15000)
+_cam1 = H.js(_mv, "window.__made[0] && window.__made[0].getTracks()[0].readyState",
+             B.MAIN_WORLD_ID)
+H.js(_mv, "document.getElementById('camstop').click(); 1", B.MAIN_WORLD_ID)
+H.spin(300)
+_cam2 = H.js(_mv, "window.__made[1] && window.__made[1].getTracks()[0].readyState",
+             B.MAIN_WORLD_ID)
+_cdiag = H.js(_mv, "JSON.stringify([__made.length, __cs, __ce])", B.MAIN_WORLD_ID)
+check("a second camera Start stops the first camera stream",
+      _cam1 == "ended" and _cam2 == "ended", str((_cam1, _cam2, _cdiag)))
+if _mv is not None and br.tabs.indexOf(_mv) >= 0:
+    br.close_tab(br.tabs.indexOf(_mv), ask=False)
+for _t in (_fv,):
+    if br.tabs.indexOf(_t) >= 0:
+        br.close_tab(br.tabs.indexOf(_t), ask=False)
+H.spin(300)
+
+# ===== batch 33 =======================================================
+# a launching switch in his flags is left out however it is quoted
+for _line in ('--"renderer-cmd-prefix"=/tmp/x.sh',
+              '"--renderer-cmd-prefix=/tmp/x.sh"',
+              "-renderer-cmd-prefix=/tmp/x.sh",
+              "--gpu-launcher='/tmp/x.sh'"):
+    B.CONFIG_FILE.write_text(json.dumps({"chromiumFlags": _line}))
+    _fl = B._startup_flags()
+    check("a launching switch written as %s is left out" % _line,
+          "cmd-prefix" not in _fl and "launcher" not in _fl, _fl)
+B.CONFIG_FILE.write_text(json.dumps({"chromiumFlags": "--force-dark-mode"}))
+check("...and an ordinary flag still goes through",
+      "--force-dark-mode" in B._startup_flags())
+B.CONFIG_FILE.write_text(json.dumps(br.config))
+
+# no DevTools port unless he switched it on
+check("no DevTools port is opened by default",
+      B.REMOTE_DEBUG_PORT == 0
+      and not B.os.environ.get("QTWEBENGINE_REMOTE_DEBUGGING"),
+      str((B.REMOTE_DEBUG_PORT,
+           B.os.environ.get("QTWEBENGINE_REMOTE_DEBUGGING"))))
+_iv = br.new_tab(url=None); H.spin(200)
+H.load(_iv, srv.url("/twhome"))
+br.toggle_inspector()
+_dt = getattr(_iv, "_devtools", None)
+H.wait_for(lambda: _dt is not None and "devtools" in _dt.url().toString(), 10000)
+check("...and the inspector still opens, on Qt's own devtools page",
+      _dt is not None and _dt.url().toString().startswith("devtools://"),
+      _dt.url().toString() if _dt is not None else None)
+br.toggle_inspector()
+check("...and closes again", getattr(_iv, "_devtools", None) is None)
+
+# the wheel-volume tag is centred and says one percent sign
+H.load(_iv, srv.url("/vid"))
+br.media_tool("wheelvolume", view=_iv); H.spin(300)
+H.js(_iv, "var v = document.getElementById('v'); v.style.cssText = "
+          "'display:block;width:300px;height:200px'; v.dispatchEvent("
+          "new WheelEvent('wheel', {deltaY: 100, bubbles: true,"
+          " cancelable: true})); 1", B.MAIN_WORLD_ID)
+H.spin(200)
+_vm = H.js(_iv, "(function () { var t = document.getElementById('__volmark');"
+                " return t ? JSON.stringify([t.style.left, t.textContent])"
+                " : ''; })()", B.MAIN_WORLD_ID)
+check("the wheel-volume tag is centred and reads like 95%",
+      _vm and json.loads(_vm)[0] == "50%" and json.loads(_vm)[1].endswith("%")
+      and not json.loads(_vm)[1].endswith("%%"), _vm)
+if br.tabs.indexOf(_iv) >= 0:
+    br.close_tab(br.tabs.indexOf(_iv), ask=False)
+H.spin(300)
+
+# ===== batch 35: what is opened from a private tab stays private ======
+_sp = br.new_tab(private=True); H.spin(300)
+H.load(_sp, srv.url("/links"))
+br.tabs.setCurrentWidget(_sp); H.spin(200)
+_n0 = br.tabs.count()
+br.super_drag(srv.url("/twhome"), kind="link", background=False); H.spin(400)
+_dr = br.current()
+check("a link dragged out of a private tab opens in a private tab",
+      _dr is not _sp and getattr(_dr, "private", False) is True,
+      str(getattr(_dr, "private", None)))
+if _dr is not _sp and br.tabs.indexOf(_dr) >= 0:
+    br.close_tab(br.tabs.indexOf(_dr), ask=False)
+br.tabs.setCurrentWidget(_sp); H.spin(200)
+_before = set(id(br.tabs.widget(i)) for i in range(br.tabs.count()))
+br._nav_button_middle("reload"); H.spin(400)
+_mid_new = [br.tabs.widget(i) for i in range(br.tabs.count())
+            if id(br.tabs.widget(i)) not in _before]
+check("a middle-click on Reload in a private tab opens a private tab",
+      _mid_new and all(getattr(w, "private", False) for w in _mid_new),
+      str([getattr(w, "private", None) for w in _mid_new]))
+for _w in _mid_new:
+    if br.tabs.indexOf(_w) >= 0:
+        br.close_tab(br.tabs.indexOf(_w), ask=False)
+br.tabs.setCurrentWidget(_sp); H.spin(200)
+H.js(_sp, "getSelection().selectAllChildren(document.body); 1", B.MAIN_WORLD_ID)
+_before = set(id(br.tabs.widget(i)) for i in range(br.tabs.count()))
+_sel = {}
+br.open_selection_links(view=_sp, then=lambda r: _sel.update(v=r))
+H.wait_for(lambda: "v" in _sel, 5000); H.spin(400)
+_sel_new = [br.tabs.widget(i) for i in range(br.tabs.count())
+            if id(br.tabs.widget(i)) not in _before]
+check("links opened from a private tab's selection are private tabs",
+      _sel_new and all(getattr(w, "private", False) for w in _sel_new),
+      str([getattr(w, "private", None) for w in _sel_new]))
+for _w in _sel_new:
+    if br.tabs.indexOf(_w) >= 0:
+        br.close_tab(br.tabs.indexOf(_w), ask=False)
+# searches and the Twitch chat: where they would go, not loaded
+br.tabs.setCurrentWidget(_sp); H.spin(200)
+_asked = []
+_real_nt = br.new_tab
+br.new_tab = lambda *a, **k: _asked.append(bool(k.get("private"))) or None
+_real_panel = br.open_panel
+br.open_panel = lambda *a, **k: _asked.append("panel") or True
+# search_image asks first, modally: answered here, or offscreen it waits
+# for ever (this hung the whole suite)
+_real_q35 = B.QMessageBox.question
+B.QMessageBox.question = staticmethod(
+    lambda *a, **k: B.QMessageBox.StandardButton.Yes)
+try:
+    br.search_for("hello review", new_tab=True)
+    br.search_image("https://img.example/a.png")
+    br.open_twitch_chat("somechannel")
+finally:
+    br.new_tab = _real_nt
+    br.open_panel = _real_panel
+    B.QMessageBox.question = _real_q35
+check("a search, an image search and a Twitch chat from a private tab "
+      "open private", _asked == [True, True, True], str(_asked))
+# HTTP auth in a private tab: no saved login goes out by itself
+class _Auth35:
+    user = None
+
+    def setUser(self, u):
+        _Auth35.user = u
+
+    def setPassword(self, p):
+        pass
+_vault_ok = br.vault is not None and not br.vault_locked()
+if _vault_ok:
+    br.vault.set_entry("127.0.0.1", "http", "ada35", "pw35")
+_real_gt = B.QInputDialog.getText
+B.QInputDialog.getText = staticmethod(lambda *a, **k: ("", False))
+# the same login in a NORMAL tab on the same page is filled -- without
+# that, "nothing was filled in the private tab" proves nothing
+br.tabs.setCurrentWidget(view); H.spin(200)    # opened from a normal tab
+_nt35 = br.new_tab(url=None); H.spin(200)
+H.load(_nt35, srv.url("/links"))
+H.wait_for(lambda: "/links" in _nt35.url().toString(), 10000)
+br._auth_tried = {}
+# an earlier section leaves Vault Password off, and with it off nothing
+# is ever filled -- which made the private check below pass for nothing
+_vpw_was = br.config.get(B.VAULT_PASSWORD_KEY, "__absent__")
+br.config[B.VAULT_PASSWORD_KEY] = True
+try:
+    _au_n = br._http_auth(srv.url("/links"), _Auth35(), view=_nt35)
+    _user_n, _Auth35.user = _Auth35.user, None
+    br._auth_tried = {}
+    br.tabs.setCurrentWidget(_sp); H.spin(200)
+    _au = br._http_auth(srv.url("/links"), _Auth35(), view=_sp)
+finally:
+    B.QInputDialog.getText = _real_gt
+    if _vpw_was == "__absent__":
+        br.config.pop(B.VAULT_PASSWORD_KEY, None)
+    else:
+        br.config[B.VAULT_PASSWORD_KEY] = _vpw_was
+check("a normal tab is signed in with the saved login (the control)",
+      _vault_ok and _au_n is True and _user_n == "ada35",
+      str((_vault_ok, _au_n, _user_n)))
+check("...and a private tab on the same page is not",
+      _vault_ok and _Auth35.user is None and _au is False,
+      str((_vault_ok, _Auth35.user, _au)))
+if br.tabs.indexOf(_nt35) >= 0:
+    br.close_tab(br.tabs.indexOf(_nt35), ask=False)
+# a permission answered in a private tab leaves no trace in config.json
+class _Req35:
+    def __init__(self, origin):
+        self._o = B.QUrl(origin)
+        self.answer = None
+
+    def permissionType(self):
+        return _QWP.PermissionType.MediaAudioCapture
+
+    def origin(self):
+        return self._o
+
+    def grant(self):
+        self.answer = True
+
+    def deny(self):
+        self.answer = False
+_pt_was = json.dumps(br.config.get("permissionTimes") or {}, sort_keys=True)
+_pl_was = len(br.config.get("permissionLog") or [])
+br._perm_widget = None
+_rq = _Req35(srv.url("/"))
+_real_qwp = B.QWebEnginePermission
+B.QWebEnginePermission = lambda p: p
+try:
+    br._permission_requested(_rq, _sp.page())
+finally:
+    B.QWebEnginePermission = _real_qwp
+H.spin(300)
+_pc = getattr(br, "_perm_widget", None)
+_pa = _pc.findChild(B.QToolButton, "permallow") if _pc is not None else None
+if _pa is not None:
+    _pa.click(); H.spin(500)
+check("a private tab's permission answer is not logged in config.json",
+      _pa is not None and _rq.answer is True
+      and json.dumps(br.config.get("permissionTimes") or {}, sort_keys=True) == _pt_was
+      and len(br.config.get("permissionLog") or []) == _pl_was,
+      str((_pa is not None, _rq.answer, len(br.config.get("permissionLog") or []), _pl_was)))
+br._perm_widget = None
+if br.tabs.indexOf(_sp) >= 0:
+    br.close_tab(br.tabs.indexOf(_sp), ask=False)
+H.spin(300)
+
+# ===== batch 36: a block list blocks the names under each site too =====
+_bf = " ".join(B._privacy_flags({"blockHosts": ["www.example.test"],
+                                 "blockReplay": True}))
+check("a blocked site's subdomains are blocked as well",
+      "MAP example.test 0.0.0.0" in _bf and "MAP *.example.test 0.0.0.0" in _bf
+      and "MAP *.hotjar.com 0.0.0.0" in _bf, _bf[:200])
+_big = B._privacy_flags({"blockHosts": ["h%05d.example" % i for i in range(5000)]})
+_bigr = [f for f in _big if f.startswith("--host-resolver-rules")][0]
+check("...and a long list is cut at whole pairs, under the cap",
+      len(_bigr) < 60100 and _bigr.rstrip('"').endswith(" 0.0.0.0")
+      and _bigr.count("MAP *.") == _bigr.count("MAP ") // 2, len(_bigr))
+
+# a saved auto-hide is applied when a window starts
+br.config["autoHideChrome"] = True
+_ah = br.new_private_window(); H.spin(600)
+_ah_shown = getattr(_ah, "_chrome_shown", True)
+br.config["autoHideChrome"] = False
+try:
+    _t = getattr(_ah, "_peek_timer", None)
+    if _t is not None:
+        _t.stop()
+    _ah.close()
+except RuntimeError:
+    pass
+H.spin(300)
+check("a saved auto-hide toolbar is hidden when a window starts",
+      _ah_shown is False, str(_ah_shown))
+
+# a second appearance reset keeps the first one's backup
+_ap_was = {k: br.config.get(k, "__absent__")
+           for k in ("customThemes", "theme", "appearanceBackup")}
+br.config["customThemes"] = {"review-own": {"bg": "#101010"}}
+br.reset_appearance()
+br.reset_appearance()
+_ap_bk = br.config.get("appearanceBackup") or {}
+for _k, _v in _ap_was.items():
+    if _v == "__absent__":
+        br.config.pop(_k, None)
+    else:
+        br.config[_k] = _v
+br.load_custom_themes()
+br.apply_theme(br.config.get("theme", B.DEFAULT_THEME), save=False)
+check("a second appearance reset keeps his own themes in the backup",
+      "review-own" in (_ap_bk.get("customThemes") or {}), str(_ap_bk)[:200])
+
+# ===== batch 37: page look per site, and by the clock ==================
+_la = br.new_tab(url=None); H.spin(200)
+H.load(_la, srv.url("/twhome"))
+_lb = br.new_tab(url=None); H.spin(200)
+H.load(_lb, srv.url("/twhome").replace("127.0.0.1", "localhost"))
+br.tabs.setCurrentWidget(_la); H.spin(200)
+br.set_site_font_size("127.0.0.1", 23); H.spin(600)
+_fa = H.js(_la, "getComputedStyle(document.documentElement).fontSize",
+           B.MAIN_WORLD_ID)
+_fb = H.js(_lb, "getComputedStyle(document.documentElement).fontSize",
+           B.MAIN_WORLD_ID)
+br.set_site_font_size("127.0.0.1", None); H.spin(300)
+check("a site's own text size is used on that site only",
+      _fa == "23px" and _fb != "23px", str((_fa, _fb)))
+_now_m = B.time.localtime().tm_hour * 60 + B.time.localtime().tm_min
+def _look_filter(frm, to):
+    pay = dict(br.page_look_payload(), dim=30, warm=0,
+               eveFrom=frm % 1440, eveTo=to % 1440)
+    H.js(_la, B.PAGE_LOOK_JS.replace("PAYLOAD", json.dumps(pay)),
+         B.APP_WORLD_ID)
+    return H.js(_la, "document.documentElement.style.filter", B.MAIN_WORLD_ID)
+_in = _look_filter(_now_m - 5, _now_m + 5)
+_out = _look_filter(_now_m + 10, _now_m + 20)
+H.js(_la, B.PAGE_LOOK_JS.replace("PAYLOAD", json.dumps(br.page_look_payload())),
+     B.APP_WORLD_ID)
+check("the night dimmer is decided by the clock when the page loads",
+      "brightness(0.7)" in (_in or "") and "brightness" not in (_out or ""),
+      str((_in, _out)))
+for _t in (_la, _lb):
+    if br.tabs.indexOf(_t) >= 0:
+        br.close_tab(br.tabs.indexOf(_t), ask=False)
+H.spin(300)
+
+# ===== batch 38: the lows that touch security and privacy ==============
+# a refused popup's row opens web addresses only
+_pp = br.new_tab(url=None); H.spin(200)
+H.load(_pp, srv.url("/twhome"))
+_pop_was = list(getattr(br, "_blocked_popups", []) or [])
+br._blocked_popups = [{"url": "file:///etc/hostname"},
+                      {"url": "data:text/html,<p>x"},
+                      {"url": srv.url("/timers")}]
+_pm = br.popup_menu()
+_ptexts = [a.text() for a in _pm.actions()]
+br._blocked_popups = _pop_was
+check("a refused popup's menu offers web addresses only",
+      any("/timers" in x for x in _ptexts)
+      and not any(x.startswith(("file:", "data:")) for x in _ptexts),
+      str(_ptexts))
+# the start page links a recent bookmark only when it is a web address
+_st = br.new_tab(); H.spin(1200)
+H.wait_for(lambda: H.js(_st, "typeof loadExtras", B.MAIN_WORLD_ID)
+           == "function", 8000)
+_links = H.js(_st, """(function () {
+  bridge.startExtras = function (cb) { cb(JSON.stringify({recent: [
+    {url: "javascript:window.__ran=1", title: "x"},
+    {url: "https://a.example/", title: "a"}]})); };
+  loadExtras();
+  return JSON.stringify([].map.call(
+    document.querySelectorAll('#extras a'), function (a) { return a.href; }));
+})()""", B.MAIN_WORLD_ID)
+check("the start page links a recent bookmark only if it is a web address",
+      _links and json.loads(_links) == ["https://a.example/"], str(_links))
+# the player's playlist does not follow the tab to the next page
+_pl = br.open_player(["/tmp/review-a.mp4"]); H.spin(1200)
+H.load(_pl, srv.url("/fakeplayer")); H.spin(800)
+_got = H.js(_pl, "JSON.stringify(window.__got || null)", B.MAIN_WORLD_ID)
+check("a page opened after the player is not handed his file paths",
+      _got == "null", str(_got))
+for _t in (_pp, _st, _pl):
+    if _t is not None and br.tabs.indexOf(_t) >= 0:
+        br.close_tab(br.tabs.indexOf(_t), ask=False)
+# OCR reads a temporary picture and leaves nothing in the config folder
+_od = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_ostub = _od / "tess.sh"
+_ostub.write_text('#!/bin/sh\n[ -f "$1" ] && echo "seen $1"\n')
+_ostub.chmod(_ostub.stat().st_mode | _stat.S_IEXEC)
+_real_rt = br.record_tools
+br.record_tools = lambda: {"tesseract": str(_ostub)}
+_ocr = {}
+_img = B.QImage(40, 20, B.QImage.Format.Format_RGB32); _img.fill(0)
+try:
+    br.read_text_from_image(image=_img, then=lambda s: _ocr.update(v=s))
+    H.wait_for(lambda: "v" in _ocr, 8000)
+finally:
+    br.record_tools = _real_rt
+_opath = str(_ocr.get("v", "")).replace("seen ", "").strip()
+check("OCR reads a temporary picture and removes it",
+      _opath.startswith(_tempfile.gettempdir()) and not _Path(_opath).exists()
+      and not (B.CONFIG_FILE.parent / "ocr-input.png").exists(), str(_ocr))
+
+# ===== batch 39: switching sets / putting all away keeps the window ====
+_tw = br.new_window(); H.spin(900)
+H.load(_tw.current(), srv.url("/timers")); H.spin(300)
+_tw.save_tabset("review-set")
+_tw.restore_tabset("review-set", replace=True); H.spin(600)
+_tw_ok = False
+try:
+    _tw_ok = _tw.isVisible() and len(_tw._real_tabs()) >= 1
+except RuntimeError:
+    _tw_ok = False
+check("switching to a saved set in a one-tab window keeps the window",
+      _tw_ok)
+_aside_n = len(br.aside_sets())
+try:
+    _tw.set_aside(); H.spin(600)
+    _tw_ok2 = _tw.isVisible() and len(_tw._real_tabs()) == 1
+except RuntimeError:
+    _tw_ok2 = False
+check("...and so does putting every tab aside",
+      _tw_ok2 and len(br.aside_sets()) == _aside_n + 1)
+br.delete_tabset("review-set")
+del br.aside_sets()[_aside_n:]
+try:
+    _tw.close()
+except RuntimeError:
+    pass
+H.spin(400)
+
+# ===== batch 40: Copy on the passwords page copies like a secret =======
+if br.vault is not None and not br.vault_locked():
+    _ce = br.vault.set_entry("review40.example", "https", "u40", "pw-review-40")
+    _cid = (_ce or {}).get("id", "")
+    _copied = json.loads(br.bridge.copyField(br._page_key, _cid, "password")
+                         or "{}")
+    _md = B.QGuiApplication.clipboard().mimeData()
+    check("Copy on the passwords page marks the password secret and clears it",
+          _copied.get("ok") is True and _md is not None
+          and _md.hasFormat("x-kde-passwordManagerHint")
+          and getattr(br, "_clip_mine", None) == "pw-review-40",
+          str((_copied, _md is not None and list(_md.formats()))))
+    B.QGuiApplication.clipboard().clear()
+else:
+    check("Copy on the passwords page marks the password secret and clears it",
+          False, "vault not open in this run")
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

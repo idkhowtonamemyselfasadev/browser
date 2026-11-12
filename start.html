@@ -2607,7 +2607,8 @@
       const box = document.getElementById("extras");
       if (!box) return;
       box.innerHTML = "";
-      const S = window.STR || {};
+      // STR is a let at the top of this page, so it is not window.STR
+      const S = (typeof STR !== "undefined" && STR) || {};
       for (const [key, label] of [["recent", S.startRecent || "Just added"]]) {
         const rows = data[key] || [];
         if (!rows.length) continue;
@@ -2618,6 +2619,10 @@
         what.textContent = label;
         row.appendChild(what);
         for (const item of rows) {
+          // a web address or no link: a javascript: bookmark (one that
+          // carries "js" skips the check at load) ran in this page, and
+          // this page holds the whole bridge
+          if (!/^https?:\/\//i.test(String(item.url || ""))) continue;
           const a = document.createElement("a");
           a.href = item.url;
           a.textContent = item.title || item.url;
