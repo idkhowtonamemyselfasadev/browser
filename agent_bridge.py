@@ -595,13 +595,23 @@ class AgentBridge:
     #: level: reading his history is not the same kind of thing as
     #: reading a page.
     GUARDED_OPS = frozenset({"history"})
+    #: the ops that act on a tab that is already open -- the one named
+    #: by "tab", or the current one. His list of sites is about those
+    #: tabs as much as about where one is sent.
+    TAB_OPS = frozenset({
+        "close", "select", "nav", "reload", "info", "js", "text", "html",
+        "wait", "click", "type", "key", "scroll", "shot", "markdown", "box",
+        "fill", "idle", "links", "tables", "find", "console", "dialog",
+        "pdf", "tree", "network", "download", "watch", "refresh", "macro",
+        "viewport", "upload", "pointer",
+    })
 
     def level(self):
         """off, read or full -- full unless he has said otherwise."""
         want = str((self.config or {}).get("bridgeLevel") or "full")
         return want if want in ("off", "read", "full") else "full"
 
-    def allowed(self, op, url=""):
+    def allowed(self, op, url="", tab_url=""):
         """Whether this op may run at all, and on this page.
 
         Three gates, in order: the level, his list of ops, and his list
@@ -626,11 +636,18 @@ class AgentBridge:
         if isinstance(rows, list) and rows and op not in rows:
             return False, "op-not-allowed"
         sites = (self.config or {}).get("bridgeSites")
-        if isinstance(sites, list) and sites and url:
-            host = QUrl(url).host().lower().removeprefix("www.")
-            if host and not any(host == one or host.endswith("." + one)
-                                for one in sites):
-                return False, "site-not-allowed"
+        if isinstance(sites, list) and sites:
+            # where a tab is being sent AND the tab it is done to. Only
+            # the first was checked, and only ops that carry a "url" do:
+            # js, text, click, type and the rest name a tab, so a client
+            # held to one site ran script in every other tab he had open
+            for one_url in (url, tab_url):
+                if not one_url:
+                    continue
+                host = QUrl(one_url).host().lower().removeprefix("www.")
+                if not any(host and (host == one or host.endswith("." + one))
+                           for one in sites):
+                    return False, "site-not-allowed"
         return True, ""
 
     def note(self, op, target="", answer=""):
@@ -664,7 +681,12 @@ class AgentBridge:
                 raise ValueError("unknown op: " + op)
             target = str(req.get("url") or req.get("selector")
                          or req.get("tab") or "")
-            ok, why = self.allowed(op, str(req.get("url") or ""))
+            tab_url = ""
+            if op in self.TAB_OPS:
+                v = self._find(req.get("tab"))
+                if v is not None and not self._gone(v):
+                    tab_url = self._view_url(v)
+            ok, why = self.allowed(op, str(req.get("url") or ""), tab_url)
             if not ok:
                 self.note(op, target, why)
                 self._reply(conn, {"ok": False, "error": why})
@@ -729,8 +751,12 @@ class AgentBridge:
         if held is None:
             held = self._hooked = set()
         for _i, v in self._views():
-            if id(v) in held:
+            # marked on the tab itself: an id() is only unique while its
+            # object lives, and a new tab handed a closed one's id was
+            # taken for hooked and streamed no events at all
+            if getattr(v, "_agent_hooked", False):
                 continue
+            v._agent_hooked = True
             held.add(id(v))
             try:
                 v.loadFinished.connect(
@@ -1778,18 +1804,38 @@ class AgentBridge:
         """What this bridge is allowed to do, and setting it.
 
         Asking is always allowed: a client that cannot find out it is
-        read-only cannot tell him why an op was refused."""
+        read-only cannot tell him why an op was refused.
+
+        Setting is one way only: a client may narrow what it is allowed
+        (full to read, read to off, a shorter list of ops or sites) and
+        never widen it. It used to take any value, so a bridge he had
+        set to read-only -- for an agent he did not want opening tabs or
+        running script -- was one {"level": "full", "ops": []} away from
+        doing everything, asked for by that same agent. Widening is his,
+        in config.json, where bridgeHistory, bridgeRest and agentBridge
+        already are; nothing a client sends can undo his choice."""
+        refused = []
+        rank = {"off": 0, "read": 1, "full": 2}
         if "level" in req and self.config is not None:
             want = str(req.get("level") or "")
-            if want in ("off", "read", "full"):
-                self.config["bridgeLevel"] = want
-        if "ops" in req and self.config is not None:
-            self.config["bridgeOps"] = [str(one) for one
-                                        in (req.get("ops") or [])]
-        if "sites" in req and self.config is not None:
-            self.config["bridgeSites"] = [str(one) for one
-                                          in (req.get("sites") or [])]
+            if want in rank:
+                if rank[want] <= rank[self.level()]:
+                    self.config["bridgeLevel"] = want
+                else:
+                    refused.append("level")
+        for key, name in (("ops", "bridgeOps"), ("sites", "bridgeSites")):
+            if key not in req or self.config is None:
+                continue
+            want = [str(one) for one in (req.get(key) or [])]
+            have = [str(one) for one in (self.config.get(name) or [])]
+            # an empty list is "everything": asking for it, or for
+            # anything not already on a list he wrote, is a widening
+            if want and (not have or set(want) <= set(have)):
+                self.config[name] = want
+            else:
+                refused.append(key)
         self._reply(conn, {"ok": True, "level": self.level(),
+                           "refused": refused,
                            "ops": (self.config or {}).get("bridgeOps") or [],
                            "sites": (self.config or {}).get("bridgeSites")
                            or [],
@@ -1870,15 +1916,27 @@ class AgentBridge:
             raise ValueError("unknown assistant: " + which)
         if hasattr(self, "op_chatgpt") and which == "chatgpt":
             return self.op_chatgpt(conn, req)
+        # his list of sites holds here too: this op names no tab and no
+        # url, so the gate in _dispatch never saw where it was going
+        ok, why = self.allowed("ask", plan["url"])
+        if not ok:
+            self._reply(conn, {"ok": False, "error": why})
+            return
         v = None
         for _i, one in self._views():
-            if plan["host"] in self._view_url(one):
+            # the tab ON that site, not one whose address mentions it:
+            # "https://elsewhere.example/?claude.ai" had the question
+            # typed into its box and its "answer" read back
+            host = QUrl(self._view_url(one)).host().lower()
+            if host == plan["host"] or host.endswith("." + plan["host"]):
                 v = one
                 break
         if v is None:
-            self.win.new_tab(url=plan["url"], switch=False)
-            rows2 = [(i, one) for i, one in self._views()]
-            v = rows2[-1][1] if rows2 else None
+            # the tab it opens, not the last one on the strip: a new tab
+            # goes in beside the current one, so "the last" was some
+            # other tab -- and the question was typed straight into
+            # whatever editable box that page had (a chat composer)
+            v = self.win.new_tab(url=plan["url"], switch=False)
             if v is None:
                 self._reply(conn, {"ok": False, "error": "no-tab"})
                 return

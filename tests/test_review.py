@@ -311,6 +311,8 @@ srv = H.Server({
               "window.asked=r})</script>",
     "/setck": "<title>ck</title><script>document.cookie='srv=1; path=/'"
               "</script>",
+    "/privck": "<title>pk</title><script>document.cookie="
+               "'privonly_review=1; path=/'</script>",
     "/imgauth": "<title>i</title><p>a page with a frame</p><script>"
                 "var i=document.createElement('iframe');"
                 "i.src=location.protocol+'//localhost:'"
@@ -1938,6 +1940,31 @@ check("the stream-safe words never pass through the page's own functions",
       '"Qwsecretname"' not in _seen and _blurred == "1",
       str((_seen[:200], _blurred)))
 br.play_tool("blurprivate", view=v28, arg=False)
+
+# a private tab's cookies stay out of the browser-wide lists
+_pk = br.new_tab(private=True); H.spin(300)
+H.load(_pk, srv.url("/privck")); H.spin(1200)
+_names = [n for n, _d, _e in br.known_cookies()]
+_rows = [r["host"] for r in br.site_data_rows()
+         if "privonly_review" in r.get("names", [])]
+_seen_priv = [k for k in (getattr(br, "_cookie_seen", None) or {})
+              if "privonly_review" in str(k)]
+check("a private tab's cookie is not in the site data or the bridge's list",
+      "privonly_review" not in _names and not _rows and _seen_priv,
+      str((_names[-5:], _rows, _seen_priv)))
+_pjar = br.session_profiles.get(B.PRIVATE_SESSION)
+for _t in (br._live_views_on(_pjar) if _pjar is not None else []):
+    _ix = br.tabs.indexOf(_t)
+    if _ix >= 0:
+        br.close_tab(_ix, ask=False)
+    else:
+        _t._closed = True       # a private view outside this strip
+H.spin(600)
+br._drop_private_profile(); H.spin(300)
+check("...and the cookie editor forgets that jar's rows when it goes",
+      not any(str(k).startswith("private|")
+              for k in (getattr(br, "_cookie_seen", None) or {})), str([k for k in (getattr(br, "_cookie_seen", None) or {})
+                           if str(k).startswith("private|")][:3]))
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

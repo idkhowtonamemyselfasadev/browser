@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part ten)
+
+- **The agent bridge's limits hold against the agent.** You can set the bridge
+  to read-only or off, or limit it to some ops or sites, so a script or AI agent
+  driving the browser can only do so much. But the same client could just ask
+  the bridge to set itself back to full access, or clear the lists. A client
+  can now only narrow its own limits. Widening is done in config.json, like the
+  other bridge settings.
+- **The bridge's site list covers the tabs an op is done to.** It was only
+  checked for ops that carry an address (open, navigate). Running script,
+  reading text, clicking or typing name a tab instead, so a client limited to
+  one site could do all of that in every other tab.
+- **The bridge's "ask an assistant" op asks the assistant.** It picked the tab
+  by "the address contains claude.ai", so a page like `elsewhere.example/?claude.ai`
+  got the question typed into it. When it had to open a new tab it then took the
+  *last* tab on the strip, which (with new tabs opening beside the current one)
+  was usually some other page, and typed the question into whatever editable box
+  that page had, like a chat composer. It now matches the site itself, uses the
+  tab it opened, and respects the site list.
+- **Private-tab cookies stay out of Settings.** The list behind Settings' "site
+  data" and "signed in to" views (and the bridge's cookie list) took cookies
+  from private tabs too, and since a private session ending doesn't remove them
+  one by one, those sites stayed listed until a restart. The cookie editor now
+  forgets a private jar's rows when it goes.
+- **Bridge event streams don't miss new tabs.** Tabs were remembered by Python
+  object id, which gets reused after a tab closes, so a new tab could be taken
+  for one already hooked and never report its events.
+
 ## 2026-11-12 — line-by-line review, day 2 (part nine)
 
 - **Feeds render.** A real RSS/Atom feed is shown through the engine's XML

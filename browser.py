@@ -50870,8 +50870,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             key = (bytes(cookie.name()).decode("utf-8", "replace"),
                    cookie.domain())
             when = cookie.expirationDate()
-            self._cookies[key] = (when.toString(Qt.DateFormat.ISODate)
-                                  if when.isValid() else "")
+            # not a private tab's: this list is one for the whole
+            # browser, and it is what Settings' site data and "signed in
+            # to" lists and the bridge's cookies op read. The private jar
+            # going away removes no cookie one by one, so a private
+            # session's sites stayed on all three until a restart.
+            if getattr(store, "_jar", "") != "private":
+                self._cookies[key] = (when.toString(Qt.DateFormat.ISODate)
+                                      if when.isValid() else "")
             # and the whole row, for the cookie editor and the
             # cookies.txt export (see site_cookies)
             self._note_cookie(cookie, jar=getattr(store, "_jar", ""))
@@ -50884,8 +50890,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 seen.pop("%s|%s|%s|%s" % (
                     store._jar, cookie.domain(), cookie.path(),
                     bytes(cookie.name()).decode("utf-8", "replace")), None)
-            self._cookies.pop((bytes(cookie.name()).decode("utf-8", "replace"),
-                               cookie.domain()), None)
+            if getattr(store, "_jar", "") != "private":
+                self._cookies.pop((bytes(cookie.name()).decode(
+                    "utf-8", "replace"), cookie.domain()), None)
         try:
             store.cookieAdded.connect(added)
             store.cookieRemoved.connect(removed)
@@ -62845,6 +62852,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # half-written. Tried again as each one ends.
             return
         self._private_perms.clear()
+        # ...and the cookie editor's rows for that jar: its cookies go
+        # with it, all at once, and no cookieRemoved says so
+        seen = getattr(self, "_cookie_seen", None)
+        if seen:
+            for key in [k for k in seen if str(k).startswith("private|")]:
+                seen.pop(key, None)
         profile = self.session_profiles.pop(PRIVATE_SESSION, None)
         if profile is not None:
             # a turn later: the tab's own page is on the deferred-delete

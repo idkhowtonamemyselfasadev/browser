@@ -64,6 +64,8 @@ PAGE = """<!doctype html><title>Agent page</title>
 </script>"""
 INNER = "<!doctype html><title>Inner</title><p id=deepframe>inside a frame</p>"
 PAGES = {"/page": PAGE, "/other": "<title>Other</title><p>other</p>",
+         "/askdecoy": "<title>d</title><div contenteditable=true id=d></div>",
+         "/askbox": "<title>b</title><div contenteditable=true id=b></div>",
          "/inner": INNER, "/thing.txt": "the bytes in the file"}
 
 app = H.app()
@@ -381,7 +383,9 @@ check("a read-only bridge refuses to open a tab",
 r = ask("textread", {"op": "tabs"})
 check("...but still answers a read op", r.get("ok"), r)
 r = ask("permfull", {"op": "permissions", "level": "full"})
-check("...and full is full again", r.get("level") == "full", r)
+check("...and a client cannot widen it again itself",
+      r.get("level") == "read" and "level" in (r.get("refused") or []), r)
+win.config["bridgeLevel"] = "full"     # his to widen, in config.json
 r = ask("permops", {"op": "permissions", "ops": ["tabs", "permissions"]})
 check("an allow list of ops can be set", r.get("ops") == ["tabs",
                                                           "permissions"], r)
@@ -389,8 +393,60 @@ r = ask("opsrefuse", {"op": "ping"})
 check("...and an op not on it is refused",
       r.get("ok") is False and "not-allowed" in str(r.get("error")), r)
 r = ask("permops2", {"op": "permissions", "ops": []})
-check("...and clearing the list lets everything through again",
-      r.get("ok") and ask("ping2", {"op": "ping"}).get("ok"), r)
+check("...and a client cannot clear the list to let everything through",
+      "ops" in (r.get("refused") or [])
+      and ask("ping2", {"op": "ping"}).get("ok") is False, r)
+r = ask("permops3", {"op": "permissions", "ops": ["permissions"]})
+check("...though it can narrow it further",
+      r.get("ops") == ["permissions"], r)
+win.config["bridgeOps"] = []           # his to widen, in config.json
+check("...and with the list cleared by him, everything goes through",
+      ask("ping3", {"op": "ping"}).get("ok"))
+# his list of sites holds for the tabs an op is done to, not only for
+# where a tab is sent
+other_tab = win.new_tab(url=srv.url("/page", host="localhost"))
+H.spin(800)
+other_id = [t["id"] for t in ask("tabsx", {"op": "tabs"})["tabs"]
+            if "localhost" in t["url"]]
+mine_tab = ask("openmine", {"op": "open", "url": srv.url("/page")})["tab"]["id"]
+ask("waitmine", {"op": "wait", "tab": mine_tab, "selector": "#h",
+                 "timeout": 10000})
+win.config["bridgeSites"] = ["127.0.0.1"]
+r_other = ask("jsother", {"op": "js", "tab": other_id[0] if other_id else -1,
+                          "code": "1+1"})
+r_mine = ask("jsmine", {"op": "js", "tab": mine_tab, "code": "1+1"})
+check("a client held to one site cannot run script in another site's tab",
+      bool(other_id) and r_other.get("ok") is False
+      and r_other.get("error") == "site-not-allowed", (other_id, r_other))
+check("...and still can in a tab of that site", r_mine.get("ok"), r_mine)
+win.config["bridgeSites"] = []
+win.close_tab(win.tabs.indexOf(other_tab))
+# the assistant op goes to the assistant's own site and the tab it opened
+win.config["bridgeSites"] = ["127.0.0.1"]
+r = ask("askoff", {"op": "ask", "text": "hello"})
+check("the ask op keeps to his list of sites",
+      r.get("ok") is False and r.get("error") == "site-not-allowed", r)
+win.config["bridgeSites"] = []
+decoy = win.new_tab(url=srv.url("/askdecoy?claude.ai", host="localhost"))
+H.spin(300)
+win.tabs.setCurrentIndex(0)             # new tabs go in beside this one
+target = win.new_tab(url=srv.url("/askbox"))
+H.spin(800)
+_real_new_tab = win.new_tab
+win.new_tab = lambda *a, **k: target    # no trip to the real site
+try:
+    r = ask("askq", {"op": "ask", "text": "hello there"})
+finally:
+    win.new_tab = _real_new_tab
+H.spin(400)
+typed_decoy = H.js(decoy, "document.getElementById('d').textContent")
+typed_target = H.js(target, "document.getElementById('b').textContent")
+check("...asks in the tab it opened, never a page that only names the site",
+      typed_decoy == "" and typed_target == "hello there",
+      (typed_decoy, typed_target, r))
+for one in (decoy, target):
+    if win.tabs.indexOf(one) >= 0:
+        win.close_tab(win.tabs.indexOf(one))
 r = ask("hist", {"op": "history", "text": "other"})
 check("his history is off even at full permission",
       r.get("ok") is False, r)
