@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part eight)
+
+- **Site blocking really blocks now.** "Block these sites", "block session-replay
+  recorders", your phishing list, the developer host overrides and the Tor window's
+  "resolve nothing locally" guard all turn into a Chromium resolver rule like
+  `MAP host 0.0.0.0`. Qt splits the engine's flag variable at spaces unless the value
+  is quoted, so every one of those rules reached the engine as a bare `MAP` and
+  did nothing. Measured: a mapped name now loads and an unquoted one does not. They
+  are quoted now.
+- **Encrypted DNS no longer switches off HEVC and hardware video, and "no
+  speculative loading" no longer brings back the microphone creeping quieter in
+  calls.** Chromium only keeps the *last* `--enable-features` and
+  `--disable-features` on its command line (measured on this build), and the
+  browser added them from four places. They're folded into one of each just
+  before the engine starts.
+- **The performance flags in Settings do something.** They were saved and the
+  menu said "after a restart", but nothing read them at start-up. They are put on
+  the engine now (only the ones on the list, whatever the config file says).
+- **Switching a launch setting off and using the in-app restart actually switches
+  it off.** The restarted browser inherited the flags of the run before it, so,
+  for example, encrypted DNS in strict mode stayed on after you turned it off.
+  It now works its flags out fresh from the settings.
+- **Text you insert isn't recoloured by the theme.** On themes other than the
+  default, a colour code like `#cdd6f4` inside a snippet, translation or form fill
+  was swapped for the theme's colour on its way into the field.
+
 ## 2026-11-12 — line-by-line review, day 2 (part seven)
 
 - **A page cannot slip options to the translator.** Text to translate goes to the

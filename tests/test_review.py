@@ -1749,6 +1749,147 @@ check("...nor a private tab's link, while his own link still goes there",
       _r_priv is False and _r_link is True, str((_r_priv, _r_link)))
 br.config["discordRoute"] = False
 
+# the engine's launch flags: one of each repeated switch, and resolver
+# rules that survive Qt splitting the variable at spaces
+_mf = getattr(B, "_merge_engine_flags", lambda t: t)
+_fl = getattr(B, "_flag", lambda n, v: "%s=%s" % (n, v))
+_merged = _mf('--x --enable-features=A --disable-features=C '
+              '--enable-features=B,A --host-resolver-rules="MAP a 0.0.0.0" '
+              '--disable-features=D --host-resolver-rules="MAP b 1.2.3.4" --y')
+check("repeated feature and resolver switches are folded into one each",
+      _merged.count("--enable-features=") == 1
+      and "--enable-features=A,B" in _merged
+      and "--disable-features=C,D" in _merged
+      and _merged.count("--host-resolver-rules=") == 1
+      and '--host-resolver-rules="MAP a 0.0.0.0,MAP b 1.2.3.4"' in _merged
+      and "--x" in _merged and "--y" in _merged, _merged)
+check("a blocked site's resolver rule is quoted",
+      any(f.startswith('--host-resolver-rules="MAP ads.example 0.0.0.0')
+          for f in B._privacy_flags({"blockHosts": ["ads.example"]})),
+      str(B._privacy_flags({"blockHosts": ["ads.example"]})))
+# ...and measured in an engine of its own: a name mapped by one rule
+# still loads with a block list and encrypted DNS beside it, and the
+# renderer is told about both features, not only the last one
+_child_py = _xdir / "flagchild.py"
+_child_py.write_text(r"""
+import os, sys, glob
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PyQt6.QtCore import QTimer, QUrl
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+app = QApplication(["x"])
+v = QWebEngineView(); v.resize(200, 200); v.show()
+me = os.getpid()
+def anc(pid):
+    for _ in range(8):
+        try:
+            pp = [l for l in open("/proc/%d/status" % pid) if l.startswith("PPid:")]
+        except OSError:
+            return False
+        pid = int(pp[0].split()[1])
+        if pid == me:
+            return True
+        if pid <= 1:
+            return False
+    return False
+def done(ok):
+    feats = ""
+    for d in glob.glob("/proc/[0-9]*"):
+        try:
+            text = open(d + "/cmdline", "rb").read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            continue
+        if "--type=renderer" in text and anc(int(d.split("/")[-1])):
+            feats = " ".join(t for t in text.split() if t.startswith("--enable-features"))
+            break
+    print("RESULT", v.title(), feats)
+    app.quit()
+v.loadFinished.connect(done)
+v.load(QUrl(sys.argv[1]))
+QTimer.singleShot(20000, app.quit)
+app.exec()
+""")
+_port = B.QUrl(srv.url("/twhome")).port()
+_env_flags = _mf(" ".join([
+    _fl("--host-resolver-rules", "MAP mapped-review.test 127.0.0.1"),
+    " ".join(B._privacy_flags({"blockHosts": ["blocked-review.test"],
+                               "doh": True,
+                               "dohUrl": "https://dns.example/dns-query"})),
+    "--enable-features=PlatformHEVCDecoderSupport"]))
+_res = _sp.run([B.sys.executable, str(_child_py),
+                "http://mapped-review.test:%d/twhome" % _port],
+               env=dict(_os.environ, QTWEBENGINE_CHROMIUM_FLAGS=_env_flags),
+               capture_output=True, text=True, timeout=90)
+_line = ([l for l in _res.stdout.splitlines() if l.startswith("RESULT")]
+         or [""])[0]
+check("a mapped name loads beside a block list in a real engine",
+      _line.startswith("RESULT tw "), _line or _res.stderr[-300:])
+check("...and the renderer gets every feature asked for",
+      "PlatformHEVCDecoderSupport" in _line and "DnsOverHttps" in _line,
+      _line[-300:])
+# the curated flags in Settings reach the next start
+_sf_was = br.config.get("safeFlags")
+br.config["safeFlags"] = ["--enable-zero-copy", "--evil-flag"]
+br.save_config()
+_sf = B._startup_flags()
+check("a curated flag he switched on is put on the engine at start",
+      "--enable-zero-copy" in _sf and "--evil-flag" not in _sf, _sf)
+if _sf_was is None:
+    br.config.pop("safeFlags", None)
+else:
+    br.config["safeFlags"] = _sf_was
+br.save_config()
+# an in-app restart hands the next run the flags this one was given
+_seen_flags = []
+_sd, _inst = B.QProcess.startDetached, B.QApplication.instance
+_flags_was = _os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
+_wait_was = _os.environ.get("BROWSER_RESTART_WAIT")
+_srv_was = getattr(br, "_instance_server", None)
+class _NoQuit:
+    def quit(self):
+        pass
+try:
+    br._instance_server = None
+    B.QProcess.startDetached = staticmethod(
+        lambda *a, **k: _seen_flags.append(
+            _os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS") or "") or True)
+    B.QApplication.instance = staticmethod(lambda: _NoQuit())
+    _os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        (_flags_was or "") + " --dns-over-https-mode=secure")
+    br.restart()
+finally:
+    B.QProcess.startDetached, B.QApplication.instance = _sd, _inst
+    br._instance_server = _srv_was
+    if _flags_was is None:
+        _os.environ.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
+    else:
+        _os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _flags_was
+    if _wait_was is None:
+        _os.environ.pop("BROWSER_RESTART_WAIT", None)
+    else:
+        _os.environ["BROWSER_RESTART_WAIT"] = _wait_was
+check("an in-app restart does not carry a switched-off flag into the next run",
+      _seen_flags and "dns-over-https-mode" not in _seen_flags[0],
+      str(_seen_flags))
+
+# a page tool's paint follows the theme, the text he inserts does not
+v26 = br.new_tab(); H.spin(300)
+H.load(v26, srv.url("/twhome")); H.spin(500)
+H.js(v26, "var i=document.createElement('input');i.id='tq';"
+          "document.body.appendChild(i);i.focus();true")
+_theme_was = B.ACTIVE_THEME
+_other = [k for k in B.THEME_INDEX if k != B.DEFAULT_THEME][0]
+_text = "#0d0d12 and rgb(205, 214, 244)"
+try:
+    B.ACTIVE_THEME = _other
+    _changed = B.tint_js("x='#0d0d12'") != "x='#0d0d12'"
+    br.desk_tool("insert", view=v26, arg=_text); H.spin(400)
+finally:
+    B.ACTIVE_THEME = _theme_was
+_val = H.js(v26, "document.getElementById('tq').value")
+check("text inserted into a field is not recoloured by the theme",
+      _changed and _val == _text, str((_changed, _val)))
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:

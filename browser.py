@@ -50,6 +50,87 @@ BROWSER_HOME = Path(
         else Path.home() / ".local/share/browser"))
 CONFIG_FILE = BROWSER_HOME / "config.json"
 
+#: QTWEBENGINE_CHROMIUM_FLAGS as it came in, before this file added a
+#: single flag to it. An in-app restart hands its successor THIS, not
+#: the flags this run was started with: those are worked out again from
+#: the config, and a switch he turned off (encrypted DNS, a blocked
+#: site, hardware decode) would otherwise have ridden along into the
+#: next run with Settings saying it was off. See Browser.restart.
+_FLAGS_FROM_OUTSIDE = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
+
+#: the curated Chromium flags Settings offers, with what each one does.
+#: A curated list, because the real list is two thousand flags long and
+#: most of them are a way to break the browser. Read at start-up by
+#: _startup_flags; it used to be read by nothing at all, and every one
+#: of them said "after a restart" and then did not happen.
+SAFE_FLAGS = (
+    ("--enable-gpu-rasterization", "flagGpuRaster"),
+    ("--enable-zero-copy", "flagZeroCopy"),
+    ("--enable-smooth-scrolling", "flagSmooth"),
+    ("--disable-features=UseChromeOSDirectVideoDecoder", "flagNoDirect"),
+    ("--ignore-gpu-blocklist", "flagIgnoreBlock"),
+    ("--enable-features=VaapiVideoDecoder,VaapiVideoEncoder",
+     "flagVaapi"),
+    ("--disable-gpu-driver-bug-workarounds", "flagNoWorkarounds"),
+    ("--renderer-process-limit=4", "flagProcLimit"),
+    ("--process-per-site", "flagPerSite"),
+    ("--disable-background-timer-throttling", "flagNoThrottle"),
+)
+
+#: a switch's value as QTWEBENGINE_CHROMIUM_FLAGS holds it: a word, or
+#: a quoted run with spaces in it
+_FLAG_VALUE = r'(?:"[^"]*"|\S+)'
+
+
+def _flag(name, value):
+    """One switch for QTWEBENGINE_CHROMIUM_FLAGS, quoted when its value
+    has a space in it.
+
+    Qt splits that variable at spaces and only keeps a quoted run
+    together. A resolver rule is "MAP host 0.0.0.0": written bare it
+    reached the engine as `--host-resolver-rules=MAP` and three stray
+    words, which is no rule at all -- measured, a mapped name did not
+    load until the value was quoted. Every site on his block list, the
+    session recorders, the phishing list and the Tor window's "resolve
+    nothing here" all went out that way and blocked nothing."""
+    value = str(value)
+    if re.search(r"\s", value):
+        value = '"%s"' % value.replace('"', "")
+    return "%s=%s" % (name, value)
+
+
+def _merge_engine_flags(text):
+    """One --enable-features, one --disable-features and one
+    --host-resolver-rules, each holding everything asked for.
+
+    Chromium keeps only the LAST of a repeated switch. Measured on this
+    build: --enable-features=PlatformHEVCDecoderSupport followed by
+    --enable-features=DnsOverHttps reaches the renderer as DnsOverHttps
+    alone, and --disable-features=PreconnectToSearch after the line that
+    stops WebRTC turning the microphone down left the microphone being
+    turned down. This file adds each of the three from more than one
+    place (the flags at the top, the proxy, the privacy switches, the
+    curated flags, his own), so they are folded together once, last,
+    just before the engine starts."""
+    lists = {"--enable-features": [], "--disable-features": [],
+             "--host-resolver-rules": []}
+
+    def take(match):
+        items = lists[match.group(1)]
+        for item in match.group(2).strip('"').split(","):
+            item = item.strip()
+            if item and item not in items:
+                items.append(item)
+        return ""
+    text = re.sub(r"\s*(--enable-features|--disable-features"
+                  r"|--host-resolver-rules)=(" + _FLAG_VALUE + ")",
+                  take, str(text or ""))
+    for name, items in lists.items():
+        if items:
+            text += " " + _flag(name, ",".join(items))
+    return text.strip()
+
+
 def _startup_flags():
     """His own Chromium flags, from the config, before the engine
     starts.
@@ -81,10 +162,16 @@ def _startup_flags():
         if not line or line.startswith("#"):
             continue
         bits = line.split()
-        if len(bits) == 2:
+        if len(bits) == 2 and not any(c in line for c in ',"'):
             rules.append("MAP %s %s" % (bits[0], bits[1]))
     if rules:
-        parts.append("--host-resolver-rules=" + ",".join(rules))
+        parts.append(_flag("--host-resolver-rules", ",".join(rules)))
+    # the curated ones he switched on in Settings, and only those: the
+    # list is the allow-list, whatever the config file says
+    known = {flag for flag, _why in SAFE_FLAGS}
+    for flag in data.get("safeFlags") or []:
+        if isinstance(flag, str) and flag in known and flag not in parts:
+            parts.append(flag)
     # the remote debugging port: off unless he asked, and the engine
     # binds it to this machine
     if data.get("debugPort"):
@@ -34380,8 +34467,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = DESK_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = tint_js(source.replace("ARG", json.dumps(arg)
-                                        if arg is not None else "null"))
+        # tinted first, filled in after: his text (a snippet, a
+        # translation, an address) is not the browser's paint, and a
+        # "#cdd6f4" or "rgb(205, 214, 244)" in it was being recoloured
+        source = tint_js(source).replace(
+            "ARG", json.dumps(arg) if arg is not None else "null")
         view.page().runJavaScript(source, MAIN_WORLD_ID,
                                   then if then is not None else (lambda _r: None))
         return True
@@ -35141,8 +35231,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = READ_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = tint_js(source.replace("ARG", json.dumps(arg)
-                                        if arg is not None else "null"))
+        # tinted first, filled in after: his text (a snippet, a
+        # translation, an address) is not the browser's paint, and a
+        # "#cdd6f4" or "rgb(205, 214, 244)" in it was being recoloured
+        source = tint_js(source).replace(
+            "ARG", json.dumps(arg) if arg is not None else "null")
         # the selection bar and the note of what was pressed on it live
         # where the page cannot write: in the page's own world a site
         # could leave {what: "copy", text: ...} there itself and have
@@ -36147,8 +36240,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = MEDIA_TOOLS2.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = tint_js(source.replace("ARG", json.dumps(arg)
-                                        if arg is not None else "null"))
+        # tinted first, filled in after: his text (a snippet, a
+        # translation, an address) is not the browser's paint, and a
+        # "#cdd6f4" or "rgb(205, 214, 244)" in it was being recoloured
+        source = tint_js(source).replace(
+            "ARG", json.dumps(arg) if arg is not None else "null")
         try:
             view.page().runJavaScript(
                 source, MAIN_WORLD_ID,
@@ -37683,8 +37779,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = PLAY_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = tint_js(source.replace("ARG", json.dumps(arg)
-                                        if arg is not None else "null"))
+        # tinted first, filled in after: his text (a snippet, a
+        # translation, an address) is not the browser's paint, and a
+        # "#cdd6f4" or "rgb(205, 214, 244)" in it was being recoloured
+        source = tint_js(source).replace(
+            "ARG", json.dumps(arg) if arg is not None else "null")
         world = (APP_WORLD_ID if name in self._ISOLATED_PLAY_TOOLS
                  else MAIN_WORLD_ID)
         try:
@@ -38844,8 +38943,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = FORM_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = tint_js(source.replace("ARG", json.dumps(arg)
-                                        if arg is not None else "null"))
+        # tinted first, filled in after: his text (a snippet, a
+        # translation, an address) is not the browser's paint, and a
+        # "#cdd6f4" or "rgb(205, 214, 244)" in it was being recoloured
+        source = tint_js(source).replace(
+            "ARG", json.dumps(arg) if arg is not None else "null")
         try:
             view.page().runJavaScript(
                 source, MAIN_WORLD_ID,
@@ -42023,8 +42125,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         source = FILE_TOOLS.get(name)
         if view is None or self._is_header(view) or source is None:
             return False
-        source = tint_js(source.replace("ARG", json.dumps(arg)
-                                        if arg is not None else "null"))
+        # tinted first, filled in after: his text (a snippet, a
+        # translation, an address) is not the browser's paint, and a
+        # "#cdd6f4" or "rgb(205, 214, 244)" in it was being recoloured
+        source = tint_js(source).replace(
+            "ARG", json.dumps(arg) if arg is not None else "null")
         try:
             view.page().runJavaScript(
                 source, MAIN_WORLD_ID,
@@ -44515,7 +44620,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not line or line.startswith("#"):
                 continue
             parts = line.split()
-            if len(parts) == 2:
+            # a comma or a quote would end the rule, or the flag, early
+            # (see _flag): the same refusal _startup_flags makes
+            if len(parts) == 2 and not any(c in line for c in ',"'):
                 rows.append((parts[0], parts[1]))
         return rows
 
@@ -44526,8 +44633,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         rows = self.host_overrides()
         if not rows:
             return ""
-        return "--host-resolver-rules=" + ",".join(
-            "MAP %s %s" % (name, where) for name, where in rows)
+        return _flag("--host-resolver-rules", ",".join(
+            "MAP %s %s" % (name, where) for name, where in rows))
 
     def localhost_certs(self, on=None):
         """Accept a self-signed certificate on localhost and the home
@@ -52284,19 +52391,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     #: the Chromium flags worth offering, with what each one does. A
     #: curated list, because the real list is two thousand flags long
     #: and most of them are a way to break the browser.
-    SAFE_FLAGS = (
-        ("--enable-gpu-rasterization", "flagGpuRaster"),
-        ("--enable-zero-copy", "flagZeroCopy"),
-        ("--enable-smooth-scrolling", "flagSmooth"),
-        ("--disable-features=UseChromeOSDirectVideoDecoder", "flagNoDirect"),
-        ("--ignore-gpu-blocklist", "flagIgnoreBlock"),
-        ("--enable-features=VaapiVideoDecoder,VaapiVideoEncoder",
-         "flagVaapi"),
-        ("--disable-gpu-driver-bug-workarounds", "flagNoWorkarounds"),
-        ("--renderer-process-limit=4", "flagProcLimit"),
-        ("--process-per-site", "flagPerSite"),
-        ("--disable-background-timer-throttling", "flagNoThrottle"),
-    )
+    SAFE_FLAGS = SAFE_FLAGS     # the module's list (see there)
 
     def safe_flags_on(self):
         rows = self.config.get("safeFlags")
@@ -56698,9 +56793,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return {"args": args,
                 "env": {"BROWSER_HOME": str(where),
                         "QTWEBENGINE_CHROMIUM_FLAGS":
-                        "--proxy-server=socks5://127.0.0.1:9050"
-                        " --host-resolver-rules="
-                        "MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"},
+                        "--proxy-server=socks5://127.0.0.1:9050 "
+                        + _flag("--host-resolver-rules",
+                                "MAP * ~NOTFOUND , EXCLUDE 127.0.0.1")},
                 "where": str(where)}
 
     def _prepare_tor_profile(self, where=None):
@@ -66317,6 +66412,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             QLocalServer.removeServer(SINGLE_INSTANCE_SOCKET)
         # successor waits for this process to exit before starting
         os.environ["BROWSER_RESTART_WAIT"] = str(os.getpid())
+        # ...and starts from the flags this run was given, not the ones
+        # it added: it works those out again from the config as it is
+        # now (see _FLAGS_FROM_OUTSIDE)
+        if _FLAGS_FROM_OUTSIDE is None:
+            os.environ.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
+        else:
+            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _FLAGS_FROM_OUTSIDE
         QProcess.startDetached(sys.executable, [str(APP_DIR / "browser.py")])
         QApplication.instance().quit()
 
@@ -67090,7 +67192,7 @@ def _install_proxy_flags():
     env = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     env = re.sub(r"\s*--(?:proxy-server|proxy-pac-url)=\S+", "", env)
     env = re.sub(r"\s*--no-proxy-server\b", "", env)
-    env = re.sub(r"\s*--widevine-path=\S+", "", env)
+    env = re.sub(r"\s*--widevine-path=" + _FLAG_VALUE, "", env)
     # HEVC is patent-encumbered, so Chromium keeps it behind a switch and
     # only ever uses a decoder the platform already provides — Windows
     # with the HEVC extension installed, or hardware that offers it.
@@ -67274,7 +67376,9 @@ def _privacy_flags(config):
         # This is what a block list can be in this build: there is no
         # request interceptor to be had (see privacy.check_request).
         rules = ",".join("MAP %s 0.0.0.0" % h for h in sorted(set(blocked)))
-        flags.append("--host-resolver-rules=" + rules[:60000])
+        if len(rules) > 60000:
+            rules = rules[:60000].rsplit(",", 1)[0]  # whole rules only
+        flags.append(_flag("--host-resolver-rules", rules))
     return tuple(flags)
 
 
@@ -71062,6 +71166,8 @@ def main():
     _install_proxy_flags()
     _install_theme_flags()
     _install_privacy_flags()
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _merge_engine_flags(
+        os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""))
     app = QApplication(sys.argv)
     app.setApplicationName("browser")
     # an .ico is what Windows wants for the taskbar and the title bar;

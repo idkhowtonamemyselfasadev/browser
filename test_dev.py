@@ -516,7 +516,7 @@ check("a host override is read",
       win.host_overrides())
 check("...and becomes the flag the engine takes",
       win.host_override_flag()
-      == "--host-resolver-rules=MAP example.com 192.0.2.10",
+      == '--host-resolver-rules="MAP example.com 192.0.2.10"',
       win.host_override_flag())
 check("the debugging port is off until he asks",
       win.config.get("debugPort") in (None, False))
