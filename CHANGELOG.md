@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twenty-three)
+
+- **Choosing a graphics card can't wipe your settings.** When the start-up card
+  picker remembered your choice, it wrote config.json from what it had read,
+  and for a config it couldn't read (cut short by a crash, say) that was
+  nothing: the whole config became two keys. A broken config is now left alone
+  (start-up sets it aside for you as before), and a good one is updated in one
+  swap. Userscripts are saved the same safe way.
+
 ## 2026-11-12 — line-by-line review, day 2 (part twenty-two)
 
 - **A note survives a crash in the middle of saving it.** Notes, the to-do list

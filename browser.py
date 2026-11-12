@@ -1261,6 +1261,29 @@ def _gpu_quiet():
         gpu_apply(choice)
 
 
+def _gpu_remember(choice, remember):
+    """Write the card he picked into config.json -- into the config as
+    it is on the disk now, swapped in whole (see _write_json), and never
+    over one that does not read. This used to write what _gpu_config
+    had answered, which for an unreadable file is {}: a config cut short
+    by a crash, which start-up would have set aside for him, was
+    replaced by one holding these two keys and nothing else."""
+    try:
+        current = (json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                   if CONFIG_FILE.exists() else {})
+    except (OSError, ValueError):
+        return False
+    if not isinstance(current, dict):
+        return False
+    current["gpuCard"] = choice
+    current["gpuAsk"] = not remember
+    try:
+        _write_json(CONFIG_FILE, current)
+    except OSError:
+        return False
+    return True
+
+
 def _gpu_startup(release=None):
     """Ask which card, if he has asked to be asked, and apply it.
 
@@ -1299,14 +1322,7 @@ def _gpu_startup(release=None):
         return
     choice, remember = picked
     if remember is not None:
-        data["gpuCard"] = choice
-        data["gpuAsk"] = not remember
-        try:
-            CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            import json as _json
-            CONFIG_FILE.write_text(_json.dumps(data, indent=2))
-        except OSError:
-            pass
+        _gpu_remember(choice, remember)
     env = dict(os.environ)
     gpu_apply(choice, cards, env)
     env[_GPU_MARK] = "1"
@@ -62958,8 +62974,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """Write a userscript into the plugins folder and activate it."""
         try:
             self.plugins_dir.mkdir(parents=True, exist_ok=True)
-            (self.plugins_dir / self._safe_plugin_name(filename)).write_text(
-                source, encoding="utf-8")
+            # beside it and swapped in: a script cut short by a crash is
+            # a broken script on every page it matches
+            target = self.plugins_dir / self._safe_plugin_name(filename)
+            tmp = target.with_name(target.name + ".new")
+            tmp.write_text(source, encoding="utf-8")
+            os.replace(tmp, target)
         except OSError:
             return False
         self.reload_plugins()

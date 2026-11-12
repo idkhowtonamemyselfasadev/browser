@@ -6,14 +6,16 @@
 # niced. The cap is in MB (default 3500); the scope also stops at
 # CAPPED_TASKS threads+processes (default 1500), so a rig that keeps
 # relaunching itself hits a wall instead of the whole machine.
-#   theme-audit/capped.sh [-m MB] <cmd...>
+#   [CAPPED_CPU=40%] theme-audit/capped.sh [-m MB] <cmd...>
 CAP=3500
 if [ "$1" = "-m" ]; then CAP="$2"; shift 2; fi
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 if systemd-run --user --scope -p MemoryMax=1M --quiet true >/dev/null 2>&1; then
+  # CAPPED_CPU (e.g. 40%) caps the CPU too: nice yields to other work
+  # but still runs a core flat out, and a quiet evening wants less heat
   exec systemd-run --user --scope -p MemoryMax="${CAP}M" -p MemorySwapMax=0 -p TasksMax="${CAPPED_TASKS:-1500}" \
-    --quiet nice -n 10 "$@"
+    ${CAPPED_CPU:+-p CPUQuota=$CAPPED_CPU} --quiet nice -n 10 "$@"
 fi
 nice -n 10 "$@" &
 PID=$!

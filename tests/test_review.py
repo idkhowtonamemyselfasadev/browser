@@ -2163,6 +2163,24 @@ check("with a proxy in use, WebRTC sends no UDP past it",
       and any("default_public_interface_only" in f for f in _without),
       str((_with, _without)))
 
+# remembering a graphics card never writes over a config that does not
+# read, and keeps everything else in one that does
+_gr = getattr(B, "_gpu_remember", None)
+br.save_config()
+_cfg_text = B.CONFIG_FILE.read_text(encoding="utf-8")
+B.CONFIG_FILE.write_text('{"theme": "mocha", "cut short', encoding="utf-8")
+_bad_ok = _gr("cardX", True) if _gr else "missing"
+_bad_after = B.CONFIG_FILE.read_text(encoding="utf-8")
+B.CONFIG_FILE.write_text(_cfg_text, encoding="utf-8")
+_good_ok = _gr("cardY", True) if _gr else "missing"
+_good_after = B.json.loads(B.CONFIG_FILE.read_text(encoding="utf-8"))
+br.save_config()
+check("a graphics card choice leaves an unreadable config as it is",
+      _bad_ok is False and _bad_after.endswith("cut short"), str(_bad_ok))
+check("...and adds itself to a readable one without losing the rest",
+      _good_ok is True and _good_after.get("gpuCard") == "cardY"
+      and len(_good_after) > 3, str((_good_ok, len(_good_after))))
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:
