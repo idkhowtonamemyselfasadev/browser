@@ -2070,6 +2070,36 @@ finally:
 check("housekeeping clears the cache once per stretch of idleness",
       len(_hk_cleared) == 1, str(len(_hk_cleared)))
 
+# "cache in memory only" holds on a jar made later, and comes back after
+# the developer's cache switch
+_ck = B.QWebEngineProfile.HttpCacheType
+_cs_was = (br.config.get("cacheSize"), br.config.get("cacheMemoryOnly"))
+br.set_cache_size(0, memory_only=True)
+_later = br._session_profile("cachelater")
+_later_kind = _later.httpCacheType()
+v31 = br.new_tab(); H.spin(300)
+H.load(v31, srv.url("/twhome")); H.spin(300)
+br.cache_off(view=v31, on=True)
+br.cache_off(view=v31, on=False)
+_back_kind = v31.page().profile().httpCacheType()
+br.set_cache_size(_cs_was[0] or 0, memory_only=bool(_cs_was[1]))
+check("memory-only cache holds on a virtual browser made afterwards",
+      _later_kind == _ck.MemoryHttpCache, str(_later_kind))
+check("...and comes back after the developer's no-cache switch",
+      _back_kind == _ck.MemoryHttpCache, str(_back_kind))
+
+# lite mode's "no images" holds past the next page
+_lite_was = br.config.get("liteMode", False)
+v32 = br.new_tab(); H.spin(300)
+H.load(v32, srv.url("/twhome")); H.spin(300)
+br.lite_mode(on=True)
+H.load(v32, srv.url("/twother")); H.spin(500)
+_img_on = v32.page().settings().testAttribute(
+    B.QWebEngineSettings.WebAttribute.AutoLoadImages)
+br.lite_mode(on=_lite_was)
+check("lite mode keeps images off after the tab goes to another page",
+      _img_on is False, str(_img_on))
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:

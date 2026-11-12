@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part sixteen)
+
+- **Lite mode keeps images off.** Its "no images" switch was undone in every tab
+  at the next page you opened there (the per-site image rule is applied at each
+  navigation and only knew about its own list), so lite mode mostly just stopped
+  autoplay. It holds now.
+- **"Cache in memory only" means memory only.** It was applied at start-up
+  only when a cache size was also set, so with no size limit the cache went to
+  disk at every start. Virtual browsers made after start-up never got the
+  setting at all. And the developer's "no cache for this tab" switch, once
+  turned back off, put every jar on a disk cache whatever you'd chosen. All
+  three now follow your setting.
+
 ## 2026-11-12 — line-by-line review, day 2 (part fifteen)
 
 - **Looking something up from a private tab stays private.** "Translate the

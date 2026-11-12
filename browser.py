@@ -23110,9 +23110,8 @@ class Browser(QMainWindow):
             QTimer.singleShot(2000, lambda: self.renice_background())
         if self.config.get("preconnect", False):
             QTimer.singleShot(1500, lambda: self.preconnect_frequent())
-        if self.config.get("cacheSize"):
-            self.set_cache_size(self.config.get("cacheSize"),
-                                self.config.get("cacheMemoryOnly", False))
+        if self.config.get("cacheSize") or self.config.get("cacheMemoryOnly"):
+            self.apply_cache_settings()
         self._starting = True
         QTimer.singleShot(0, lambda: setattr(self, "_starting", False))
         # the bookmarks he asked to be reminded of, once, now
@@ -28128,8 +28127,12 @@ class Browser(QMainWindow):
         settings = view.page().settings()
         settings.setAttribute(attr.JavascriptEnabled,
                               not self.site_rule_on("noScriptSites", host))
+        # ...and none anywhere in lite mode: this runs at every
+        # navigation and the page's own setting beats the jar's, so lite
+        # mode's "no images" lasted until the next page he opened
         settings.setAttribute(attr.AutoLoadImages,
-                              not self.site_rule_on("noImageSites", host))
+                              not (self.site_rule_on("noImageSites", host)
+                                   or self.config.get("liteMode", False)))
         # the smallest text this site may use, if he set one for it
         own = self.site_min_font(host)
         settings.setFontSize(QWebEngineSettings.FontSize.MinimumFontSize,
@@ -44539,9 +44542,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             else bool(on)
         view._nocache = want
         try:
-            view.page().profile().setHttpCacheType(
-                QWebEngineProfile.HttpCacheType.NoCache if want
-                else QWebEngineProfile.HttpCacheType.DiskHttpCache)
+            profile = view.page().profile()
+            if want:
+                profile.setHttpCacheType(
+                    QWebEngineProfile.HttpCacheType.NoCache)
+            else:
+                # back to HIS setting, not to a disk cache: switching
+                # this off and on again made a memory-only jar write
+                # its cache to the disk
+                self.apply_cache_settings(profile)
         except (AttributeError, RuntimeError):
             return False
         self.flash(self._ui_str("devCacheOff" if want else "devCacheOn"))
@@ -49173,6 +49182,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # had no interceptor at all.)
         self._attach_watch(profile)
         self.watch_cookies(profile)
+        # his cache settings, on a jar made after start-up as well
+        if self.config.get("cacheSize") or self.config.get("cacheMemoryOnly"):
+            self.apply_cache_settings(profile)
         if self.config.get("blockThirdCookies", False):
             self.apply_cookie_filter(profile)
         profile.scripts().insert(self._google_script())
@@ -52481,17 +52493,34 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.config["cacheSize"] = value
         self.config["cacheMemoryOnly"] = bool(memory_only)
         self.save_config(quiet=True)
+        self.apply_cache_settings()
+        return value
+
+    def apply_cache_settings(self, profile=None):
+        """His cache settings on every cookie jar, or on the one given.
+
+        From _make_profile too, so a virtual browser made after start-up
+        is not a disk cache he switched off; and at start-up whatever
+        the size -- "memory only" with no size limit (0) used to be
+        skipped there, so the cache went to the disk at every start.
+        The private jar is memory by nature and left as it is."""
+        try:
+            size = max(0, min(8192, int(self.config.get("cacheSize") or 0)))
+        except (TypeError, ValueError):
+            size = 0
         kinds = QWebEngineProfile.HttpCacheType
-        for profile in self._all_profiles():
+        kind = (kinds.MemoryHttpCache
+                if self.config.get("cacheMemoryOnly", False)
+                else kinds.DiskHttpCache)
+        for one in self._all_profiles(profile):
             try:
-                if memory_only:
-                    profile.setHttpCacheType(kinds.MemoryHttpCache)
-                else:
-                    profile.setHttpCacheType(kinds.DiskHttpCache)
-                profile.setHttpCacheMaximumSize(value * 1024 * 1024)
+                if one.isOffTheRecord():
+                    continue
+                one.setHttpCacheType(kind)
+                one.setHttpCacheMaximumSize(size * 1024 * 1024)
             except (AttributeError, RuntimeError):
                 continue
-        return value
+        return kind
 
     def startup_report(self):
         """Where the start-up time went, in the order it was spent.
