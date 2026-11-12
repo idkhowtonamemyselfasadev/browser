@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part two)
+
+- **Form drafts no longer keep card numbers.** Drafts are on by default and are
+  written to config.json every minute; they kept everything typed except password
+  boxes, so a card number, its security code, an IBAN or a one-time code sat on
+  disk for good and was typed back in on the next visit. Those boxes are left out
+  now (in the form history too), and what older drafts kept of them is removed on
+  start. A box with no name also gets its own draft back instead of its neighbour's.
+- **An address fill only goes into boxes you can see.** Boxes moved off the edge,
+  made see-through, a pixel wide or clipped away by a wrapper counted as visible,
+  so a form showing only name and e-mail could collect street, phone and postcode.
+  A card is not filled into a plain-http page at all.
+- **A page cannot start the torrent client or TeamSpeak by itself.** A script, a
+  meta refresh or a server redirect to a `.torrent` used to hand it straight to the
+  torrent client, which then downloads and seeds with your address. Now the page
+  asks, and you can allow a site for good. A typed address or a bookmark goes
+  through as before.
+- **A saved http login goes only to the page in the tab.** A frame another site
+  embedded was signed in with the saved login without a word, which made e.g. a
+  saved router login usable by any web page.
+- **The gamepad's tab switching cannot be faked** by the page (it used to read the
+  wish out of the page's own world).
+- **"Strip metadata" strips it.** The cleaned copy kept the picture's comment and
+  its XMP block, GPS position included, and wrote them into a JPEG as well. A PNG
+  or WebP whose only metadata is a text or XMP chunk now counts as having some,
+  so "strip before upload" no longer lets it through, and the upload's clean copy
+  is made in a temp folder instead of piling up in Downloads.
+- **The address bar's "whole address" tooltip shows the address.** Decoded, a
+  long link's `%3Ch1%3E` became real markup there, so it could display any text
+  in big letters; it is plain text now, like the bookmark and tab tooltips.
+- **Saving a video with yt-dlp finishes.** Its progress went into a pipe nobody
+  read; past 64 KB yt-dlp stopped and waited for ever. A private tab's video, saved
+  page or Markdown copy no longer leaves a row in the downloads list.
+- **Opening a downloaded .jar or .desktop asks first**, like an AppImage did, and
+  the downloads page's own Open button now asks too (it never did).
+- **Nothing writes over a file that is already there**: extracting one file or a
+  whole archive (a second unpack gets its own folder instead of overwriting your
+  edits), converting a picture, and saving a page as .mhtml or Markdown.
+- "Save all pictures" only fetches web addresses; the page's list cannot name a
+  `file://` path. "Add this site's search" only takes an http(s) description and
+  an http(s) template (a `javascript:` template would have run on every search).
+- The lock menu lists this site's permissions, not those of every site whose name
+  contains it.
+- The history and downloads exports cannot carry a spreadsheet formula: a page
+  title or a file name starting with `=`, `+`, `-` or `@` is written as text.
+- The Twitch grid is built once, not over every later page opened in that tab,
+  and tells the player the page it really sits on; a look-alike host such as
+  `notdiscord.com` is no longer taken for Discord.
+
 ## 2026-11-12 — line-by-line review, day 2 (part one)
 
 - **"Clear site data" really deletes the cookies.** It asked the engine to delete

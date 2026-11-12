@@ -242,8 +242,15 @@ subprocess.Popen = lambda *a, **k: (opened.append(a[0]),
 check("a file is opened with the desktop's opener",
       win.open_download_file(one["id"]) is True)
 check("...by xdg-open", opened and "xdg-open" in opened[0][0], opened)
+# the newest row left is sodium.jar, and opening a jar runs it (Java
+# takes it from xdg-open), so it asks first now
+asked_last = []
+QMessageBox.question = lambda *a, **k: (asked_last.append(1),
+                                        QMessageBox.StandardButton.Yes)[1]
 check("the last download is the one that opens",
       win.open_last_download() is True)
+check("...and, being a .jar, it asked first", asked_last == [1], asked_last)
+QMessageBox.question = real_question
 win.set_open_with("pdf", "nautilus")
 opened[:] = []
 win.open_download_file(one["id"])
@@ -710,6 +717,9 @@ check("...and the camera data was taken out on the way",
       js(gallery, "document.getElementById('up').files[0].name")
       == "with-exif-clean.jpg",
       js(gallery, "document.getElementById('up').files[0].name"))
+check("...and the upload's clean copy is not left in the downloads",
+      not any(p.name.startswith("with-exif-clean (") for p in dl.iterdir()),
+      sorted(p.name for p in dl.iterdir() if "clean" in p.name))
 win.config["stripUploadExif"] = False
 check("a site can be excepted",
       win.keep_exif_here("photos.example", True) is True

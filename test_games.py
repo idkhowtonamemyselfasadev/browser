@@ -974,16 +974,22 @@ check("what it answers says whether this engine has the API",
 check("turning the gamepad on started the collection",
       win._pad_timer.isActive() is True)
 win._pad_timer.stop()
+# the wish lives in the isolated world, where the controller loop runs:
+# the page's own script writing the same name is not a shoulder button
 js(spare, "window.__padWant = 'nexttab'")
 H.spin(200)
-check("the page holds the wish until it is collected",
-      js(spare, "window.__padWant") == "nexttab",
-      js(spare, "window.__padWant"))
+check("a wish the page's script writes is not collected",
+      ask("padwant", spare) == "", ask("padwant", spare))
+H.js(spare, "window.__padWant = 'nexttab'", APP)
+H.spin(200)
+check("the loop's wish waits until it is collected",
+      H.js(spare, "window.__padWant", APP) == "nexttab",
+      H.js(spare, "window.__padWant", APP))
 want = ask("padwant", spare)
 check("the browser collects it", want == "nexttab", want)
 check("...and it is not collected twice",
       ask("padwant", spare) == "", ask("padwant", spare))
-js(spare, "window.__padWant = 'nexttab'")
+H.js(spare, "window.__padWant = 'nexttab'", APP)
 H.spin(200)
 win.tabs.setCurrentIndex(0)
 before = win.tabs.currentIndex()
