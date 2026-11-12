@@ -146,6 +146,47 @@ check("a path that is not a socket is not ours",
       not A.is_ours(str(HERE / "agent.py")))
 check("a directory is not ours either", not A.is_ours("/tmp"))
 
+# ...and acts on it: a stranger's socket at the very path it falls back
+# to is refused, not dialled
+import socket as _socket, tempfile as _tf, importlib as _il
+_here = _tf.mkdtemp(prefix="agsock")
+_env_was = {k: os.environ.get(k) for k in (A.DIR_ENV, A.PATH_ENV)}
+os.environ[A.DIR_ENV] = _here
+os.environ.pop(A.PATH_ENV, None)
+_squat = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+_squat.bind(A.socket_path(False))
+_squat.listen(1)
+_squat.settimeout(0.5)
+_ours_was = A.is_ours
+A.is_ours = lambda path: False          # as a stranger's socket looks
+try:
+    import agent as _client
+    _il.reload(_client)
+    try:
+        _client.call({"op": "ping"}, timeout=1)
+        _said = "connected"
+    except ConnectionError as e:
+        _said = str(e)
+    except Exception as e:  # a timeout on a socket that never answers
+        _said = "dialled: %s" % type(e).__name__
+    try:
+        _squat.accept()
+        _reached = True
+    except OSError:
+        _reached = False
+finally:
+    A.is_ours = _ours_was
+    _squat.close()
+    import shutil as _sh
+    _sh.rmtree(_here, ignore_errors=True)
+    for _k, _v in _env_was.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
+check("the client refuses a socket at its own path that is not ours",
+      "not this user's socket" in _said and not _reached, (_said, _reached))
+
 print("\n(6) the failure is loud")
 check("the bridge explains a refusal instead of returning in silence",
       "_why_not" in src and "cannot listen on" in src)

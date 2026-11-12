@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part fourteen)
+
+- **The agent client never talks to someone else's socket.** `agent.py` checks
+  that the bridge socket it finds belongs to you, but when none did it fell
+  back to the default path and dialled whatever was there, which is exactly the
+  stranger's socket the check is there to avoid (on a machine without a
+  per-user runtime folder, where it lives in the shared /tmp). It refuses now,
+  and says why.
+
 ## 2026-11-12 — line-by-line review, day 2 (part thirteen)
 
 - **QR codes scan.** The built-in QR encoder wrote one of the two copies of the

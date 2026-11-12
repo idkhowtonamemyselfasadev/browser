@@ -102,13 +102,32 @@ def socket_path():
     return agent_socket.socket_path(False)
 
 
+def _dial(sock, path):
+    """Connect, but never to somebody else's socket.
+
+    socket_path() falls back to the primary path when nothing of ours
+    answers -- and if what is there is a stranger's socket (a shared
+    /tmp, no runtime directory), dialling it anyway handed our commands
+    to them: the one case the ownership test above exists for. An
+    explicit BROWSER_AGENT_SOCKET is his own choice and is taken as
+    given."""
+    if (not os.environ.get(agent_socket.PATH_ENV)
+            and os.path.exists(path) and not agent_socket.is_ours(path)):
+        raise ConnectionError("%s is not this user's socket; not dialling it"
+                              % path)
+    sock.connect(path)
+
+
 def call(req, timeout=60.0):
     """One request, one reply. Raises ConnectionError when nobody
     listens (browser not running, or started before the bridge existed)."""
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
-        s.connect(socket_path())
+        _dial(s, socket_path())
+    except ConnectionError:
+        s.close()
+        raise
     except OSError as e:
         raise ConnectionError("browser not running (or bridge off): %s" % e)
     with s:
@@ -282,7 +301,7 @@ def stream(kinds=None, tab=None, on_event=None, timeout=None):
     the subscription: hanging up ends it."""
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout or 3600)
-    s.connect(socket_path())
+    _dial(s, socket_path())
     req = {"op": "events"}
     if kinds:
         req["kinds"] = list(kinds)
