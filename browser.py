@@ -4365,6 +4365,52 @@ PASSWORD_WATCH_JS = r"""
       username: user, password: pw.value}));
   }, true);
 
+  // ---- a sign-in without a form submit -----------------------------
+  // Most big sites sign in with fetch() from a plain button and then
+  // navigate or redraw: no submit event ever fires. A real press on a
+  // button (or Enter in a box) while a password box holds something is
+  // the attempt; the browser only offers to save once the page has
+  // actually moved on, so a wrong password that stays put is dropped.
+  function attempt(e) {
+    if (!e.isTrusted || !pwObj) return;
+    if (e.type === "keydown") {
+      if (e.key !== "Enter" || !e.target || e.target.nodeName !== "INPUT")
+        return;
+    } else {
+      var hit = e.target && e.target.closest && e.target.closest(
+          'button, input[type=submit], input[type=button], ' +
+          'input[type=image], [role=button], a');
+      if (!hit) return;
+      var href = hit.nodeName === "A" ? (hit.getAttribute("href") || "") : "";
+      if (href && !/^\s*(#|javascript:)/i.test(href) &&
+          hit.getAttribute("role") !== "button") {
+        // a real link: he is going somewhere, not signing in, so
+        // whatever was held for this page is let go
+        pwObj.loginAttempt(JSON.stringify({cancel: true}));
+        return;
+      }
+    }
+    var boxes = document.querySelectorAll('input[type="password"]');
+    var pw = null;
+    for (var i = 0; i < boxes.length; i++)
+      if (boxes[i].value) { pw = boxes[i]; break; }
+    if (!pw) return;
+    var scope = pw.form || document;
+    var user = "", inputs = scope.querySelectorAll("input");
+    for (var j = 0; j < inputs.length; j++) {
+      if (inputs[j] === pw) break;
+      var t = (inputs[j].type || "text").toLowerCase();
+      if ((t === "text" || t === "email" || t === "tel") && inputs[j].value)
+        user = inputs[j].value;
+    }
+    pwObj.loginAttempt(JSON.stringify({
+      host: location.hostname,
+      scheme: location.protocol.slice(0, -1),
+      username: user, password: pw.value}));
+  }
+  document.addEventListener("pointerdown", attempt, true);
+  document.addEventListener("keydown", attempt, true);
+
   // ---- what is the page asking for? -------------------------------
   var IDENT = /user|e-?mail|login|logon|account|ident|signin|phone|mobile/i;
   var NOT_IDENT = /search|query|coupon|promo|captcha|postal|postcode/i;
@@ -14355,7 +14401,24 @@ class PasswordBridge(QObject):
         except ValueError:
             return
         if isinstance(data, dict):
+            # a real submit settles it: drop the press held for the
+            # same sign-in, or he would be asked twice
+            held = getattr(self.browser, "_pw_attempts", None)
+            if isinstance(held, dict):
+                held.pop(id(self.page), None)
             self.browser._password_submitted(self.page, data)
+
+    @pyqtSlot(str)
+    def loginAttempt(self, payload_json):
+        """A real press that may be a sign-in with no form submit.
+        Only remembered here; nothing is offered until the page has
+        moved on (see Browser._login_attempt)."""
+        try:
+            data = json.loads(payload_json)
+        except ValueError:
+            return
+        if isinstance(data, dict):
+            self.browser._login_attempt(self.page, data)
 
     @pyqtSlot(str)
     def loginFormSeen(self, payload_json):
@@ -16705,6 +16768,19 @@ class WebPage(QWebEnginePage):
         # runs before the new document exists, so the channel is always
         # settled before any of that document's scripts can look
         if is_main_frame:
+            # he went somewhere himself: a sign-in press held on this
+            # page did not lead here, so it must not be offered on
+            # the way out (a wrong password followed by a link)
+            NT = QWebEnginePage.NavigationType
+            # (not LinkClicked: a script's location.href after the
+            # sign-in press is reported as a link click too; a real
+            # link he presses cancels the hold from the page instead)
+            if nav_type in (NT.NavigationTypeTyped,
+                            NT.NavigationTypeBackForward,
+                            NT.NavigationTypeReload):
+                held = getattr(self.browser, "_pw_attempts", None)
+                if isinstance(held, dict):
+                    held.pop(id(self), None)
             # a site that only works in a real browser is handed off
             # before anything else happens to it: not counted as a page
             # this tab ever visited, not bounced through the channel,
@@ -23747,6 +23823,8 @@ class Browser(QMainWindow):
         # a sign-in that changed the address without loading anything:
         # the moment to ask the page what was in the login boxes, since
         # there was no form submit for the watcher to see
+        view.urlChanged.connect(
+            lambda _u, v=view: self._login_attempt_landed(v.page()))
         view.urlChanged.connect(
             lambda _u, v=view: QTimer.singleShot(
                 400, lambda: self._maybe_catch_login(v)))
@@ -48464,6 +48542,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         if not self.config.get("catchScriptLogins", True):
             return False
+        if self._pw_pending is not None:
+            return False      # already offering this sign-in
         return self.catch_script_login(view=view)
 
     def _autofill(self, view, ok=True):
@@ -49151,7 +49231,43 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         else:
             self._pw_push(page, "", "")       # no login on screen yet
 
-    def _password_submitted(self, page, data):
+    def _login_attempt(self, page, data):
+        """Hold a sign-in attempt that came without a form submit,
+        keyed by page, together with the address it was typed on."""
+        held = getattr(self, "_pw_attempts", None)
+        if data.get("cancel"):
+            if isinstance(held, dict):
+                held.pop(id(page), None)
+            return
+        if not self.vault_password_on() or self._page_is_private(page):
+            return
+        url = QUrl(page.url())
+        if url.scheme() not in ("http", "https"):
+            return
+        if not isinstance(getattr(self, "_pw_attempts", None), dict):
+            self._pw_attempts = {}
+        self._pw_attempts[id(page)] = {
+            "page": page, "url": url, "at": time.monotonic(),
+            "data": {k: str(data.get(k, ""))[:500]
+                     for k in ("host", "scheme", "username", "password")}}
+
+    def _login_attempt_landed(self, page):
+        """The page moved on (a new address, same document or not)
+        after a held attempt: that is the sign-in working, so offer it
+        through the normal save path, judged against the address it
+        was typed on rather than wherever the site sent him after."""
+        held = getattr(self, "_pw_attempts", None)
+        if not held:
+            return False
+        a = held.pop(id(page), None)
+        if a is None or a["page"] is not page:
+            return False
+        if time.monotonic() - a["at"] > 30:
+            return False          # stale: not this navigation's doing
+        self._password_submitted(page, a["data"], typed_on=a["url"])
+        return True
+
+    def _password_submitted(self, page, data, typed_on=None):
         """A login form was submitted. The page's real URL is
         authoritative — the host the content script reports only has
         to agree, it is never trusted on its own."""
@@ -49165,7 +49281,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # has just typed a password into a page.
         if self.vault_locked():
             return
-        url = page.url()
+        # a held attempt is judged on the address the browser itself read
+        # when it was typed, never on the page's word
+        url = QUrl(typed_on) if typed_on is not None else page.url()
         if url.scheme() not in ("http", "https"):
             return
         host = PasswordVault.normalize_host(url.host())

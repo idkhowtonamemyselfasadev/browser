@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-12 — the browser asks to save a password on real sites
+
+- **Signing in on most big sites now offers to save the password.** The watcher
+  only saw form submits, and most sites sign in with fetch() from a plain button
+  and then redirect or redraw, so nothing was ever offered (and nothing could be
+  filled next time). A real press on a sign-in button, or Enter in a box, while a
+  password box holds something is now held, and the offer comes once the page
+  has actually moved on. A wrong password that leaves you on the page is not
+  offered, and neither is one followed by a link you click, a typed address,
+  back/forward or a reload. It is judged on the address it was typed on, private
+  tabs never offer, and a real submit still offers exactly once.
+  `tests/test_pwsave.py` covers each case and is red on the old code.
+
 ## 2026-11-08 — a bug hunt: lint, an action fuzzer and a bridge fuzzer
 
 Found by reading the modules with a linter and by driving every keyboard action
