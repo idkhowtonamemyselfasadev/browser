@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part eleven)
+
+- **One odd line in a filter list no longer switches off all element hiding.**
+  The hiding rules went into the page as one long selector list, and in CSS a
+  single selector the engine doesn't understand (uBlock's `:style()`,
+  `:upward()`, `:remove()` and friends are common) makes the whole list invalid.
+  Each selector is its own rule now, and uBlock/AdGuard-only operators and HTML
+  filters are skipped and counted like the other extended syntax.
+- **A filter list can't put its own CSS on every page.** A "selector" with braces
+  in it (`x{}#field{...}y`) closed the hiding rule and added a stylesheet of its
+  own to every site, which is enough to read what you type into some boxes.
+  Selectors with braces are refused.
+- **Filter rules match everything they're meant to.** The fast index filed each
+  rule under one word and only looked at rules whose word appeared whole in the
+  address. A rule's word at the edge of its pattern can be part of a longer word
+  in the address (`adserver.example` vs `myadserver.example`), so those rules were
+  never even tried: on a synthetic mix, 7.7% of matching requests went through.
+  Edge words are now indexed by prefix/suffix; checked against a brute-force scan
+  with zero differences, and still ~0.01 ms per request.
+
 ## 2026-11-12 — line-by-line review, day 2 (part ten)
 
 - **The agent bridge's limits hold against the agent.** You can set the bridge

@@ -56536,7 +56536,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         rows = rules.hide_for(host)[:4000]
         if not rows:
             return ""
-        return ", ".join(rows) + " { display: none !important; }"
+        # one rule per selector: in a selector LIST one the engine does
+        # not understand makes the whole rule invalid, so a single
+        # unusual line in any of his lists switched every hiding rule
+        # off at once. Each on its own, a bad one costs only itself.
+        return "\n".join(one + " { display: none !important; }"
+                         for one in rows)
 
     def apply_ad_css(self, view=None):
         """The hiding rules into the page in front of him."""

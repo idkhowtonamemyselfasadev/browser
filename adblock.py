@@ -87,15 +87,49 @@ def _tokens(text):
     return _TOKEN.findall(str(text or "").lower())
 
 
-def _rule_token(parts):
-    """The word a rule is filed under: its longest, which is the one
-    least likely to be in every address."""
-    best = ""
+#: how much of an edge word the prefix and suffix tables keep
+_EDGE = 12
+
+
+def _rule_index(parts):
+    """Where a rule is filed: (word, how), how being "word", "prefix",
+    "suffix" -- or ("", None) for the few looked at for every address.
+
+    A word with something that is not a letter or digit on both sides
+    of it, inside the pattern, is a whole word of any address the rule
+    matches. One at the edge of a pattern is not: `adserver.example`
+    matches https://myadserver.example/, whose word there is
+    "myadserver". Filed under "adserver" as a whole word, that rule was
+    never even looked at for it -- the index answered for the matcher.
+    So an edge word is filed by what the address's word must start or
+    end with, and only a pattern with no usable word at all is loose.
+    """
+    best = {"word": "", "prefix": "", "suffix": ""}
     for part in parts:
-        for one in _TOKEN.findall(part.lower()):
-            if len(one) > len(best):
-                best = one
-    return best
+        low = part.lower()
+        for m in _TOKEN.finditer(low):
+            one = m.group(0)
+            left = m.start() > 0
+            right = m.end() < len(low)
+            how = ("word" if left and right else "prefix" if left
+                   else "suffix" if right else None)
+            if how and len(one) > len(best[how]):
+                best[how] = one
+    for how in ("word", "prefix", "suffix"):
+        if best[how]:
+            one = best[how]
+            if how == "prefix":
+                one = one[:_EDGE]
+            elif how == "suffix":
+                one = one[-_EDGE:]
+            return one, how
+    return "", None
+
+
+def _rule_token(parts):
+    """The whole word a rule is filed under, or "" (see _rule_index)."""
+    word, how = _rule_index(parts)
+    return word if how == "word" else ""
 
 
 def _host_parents(host):
@@ -162,6 +196,16 @@ class Rule:
         return True
 
 
+#: the cosmetic operators uBlock Origin and AdGuard add to CSS. None of
+#: them is CSS; one of them in a selector list made the whole list
+#: invalid (see Browser.ad_css_for).
+_PROCEDURAL = re.compile(
+    r":(?:style|remove|remove-attr|remove-class|upward|xpath|"
+    r"matches-css(?:-before|-after)?|matches-path|matches-attr|"
+    r"matches-media|matches-prop|min-text-length|watch-attr|others|"
+    r"if|if-not|nth-ancestor|contains|properties|spath)\(")
+
+
 def parse_line(line):
     """One line of a list: a Rule, a hide rule, or why it was dropped.
 
@@ -186,6 +230,14 @@ def parse_line(line):
                 return "skip", "empty selector"
             if sep == "#?#" or ":has-text(" in selector \
                     or ":-abp-" in selector or selector.startswith("+js"):
+                return "skip", "extended selector"
+            # uBlock's own operators and HTML filters are not CSS, and a
+            # brace is not a selector at all: "div } body { ... }" from a
+            # list would close the hiding rule and put a stylesheet of
+            # its own on every page (an attribute selector with a
+            # background url() reads what is typed into a box)
+            if selector.startswith("^") or "{" in selector \
+                    or "}" in selector or _PROCEDURAL.search(selector):
                 return "skip", "extended selector"
             hosts = [one.strip().lower().removeprefix("www.")
                      for one in left.split(",") if one.strip()]
@@ -274,9 +326,13 @@ class Rules:
         #: generic rules by the word they must contain, and the few
         #: with no word long enough to file them under
         self.by_word = {}
+        self.by_prefix = {}
+        self.by_suffix = {}
         self.generic = []
         self.by_host_allow = {}
         self.by_word_allow = {}
+        self.by_prefix_allow = {}
+        self.by_suffix_allow = {}
         self.generic_allow = []
         self.hide_global = []
         self.hide_host = {}
@@ -318,9 +374,15 @@ class Rules:
             if rule.host:
                 where.setdefault(rule.host, []).append(rule)
             else:
-                token = _rule_token(rule.parts)
-                if token:
+                token, how = _rule_index(rule.parts)
+                if how == "word":
                     words.setdefault(token, []).append(rule)
+                elif how == "prefix":
+                    (self.by_prefix_allow if rule.exception
+                     else self.by_prefix).setdefault(token, []).append(rule)
+                elif how == "suffix":
+                    (self.by_suffix_allow if rule.exception
+                     else self.by_suffix).setdefault(token, []).append(rule)
                 else:
                     loose.append(rule)
             self.counts["allow" if rule.exception else "rules"] += 1
@@ -347,17 +409,26 @@ class Rules:
     def ready(self):
         return bool(self.counts["rules"] or self.counts["hide"])
 
-    def _candidates(self, host, url, table, words, loose):
+    def _candidates(self, host, url, table, words, loose,
+                    prefixes=None, suffixes=None):
         """The handful of rules that could possibly match one address:
         those filed under its host or a parent of it, those filed
-        under a word it contains, and the few filed under nothing."""
+        under a word it contains -- or the start or the end of one --
+        and the few filed under nothing."""
         rows = list(loose)
         for one in _host_parents(host):
             rows.extend(table.get(one, ()))
-        if words:
+        if words or prefixes or suffixes:
             for word in set(_tokens(url)):
                 rows.extend(words.get(word, ()))
-        return rows
+                top = min(len(word), _EDGE)
+                for size in range(4, top + 1):
+                    if prefixes:
+                        rows.extend(prefixes.get(word[:size], ()))
+                    if suffixes:
+                        rows.extend(suffixes.get(word[-size:], ()))
+        # a rule can be reached by more than one word; asked once
+        return list(dict.fromkeys(rows))
 
     def blocks(self, url, page_host="", kind="other"):
         """Whether this request is blocked, and by which rule.
@@ -376,11 +447,14 @@ class Rules:
             and not host.endswith("." + page_host)
         for rule in self._candidates(host, url, self.by_host_allow,
                                      self.by_word_allow,
-                                     self.generic_allow):
+                                     self.generic_allow,
+                                     self.by_prefix_allow,
+                                     self.by_suffix_allow):
             if rule.matches(url, page_host, kind, third):
                 return None
         for rule in self._candidates(host, url, self.by_host,
-                                     self.by_word, self.generic):
+                                     self.by_word, self.generic,
+                                     self.by_prefix, self.by_suffix):
             if rule.matches(url, page_host, kind, third):
                 return rule.raw
         return None

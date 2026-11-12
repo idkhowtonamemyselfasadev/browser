@@ -255,6 +255,7 @@ srv = H.Server({
     "/drive-meta": "<title>dm</title><meta http-equiv=refresh "
                    "content='0;url=/files/meta.torrent'>",
     "/twhome": "<title>tw</title><p>home</p>",
+    "/adpage": "<title>ad</title><p class=good id=g>ad</p><p id=n>text</p>",
     "/hooked": "<title>h</title><script>window.__seen=[];"
                "var o=String.prototype.toLowerCase;"
                "String.prototype.toLowerCase=function(){"
@@ -1965,6 +1966,37 @@ check("...and the cookie editor forgets that jar's rows when it goes",
       not any(str(k).startswith("private|")
               for k in (getattr(br, "_cookie_seen", None) or {})), str([k for k in (getattr(br, "_cookie_seen", None) or {})
                            if str(k).startswith("private|")][:3]))
+
+# one odd line in a filter list no longer switches all hiding off, and a
+# brace in a list cannot put a stylesheet of its own on the page
+_lists = B.adblock.Rules()
+_lists.load_text("##.good\n##.bad:style(color: red)\n"
+                 "##x{}#n{display: none}y\n")
+_ar, _ao = br.ad_rules, br.ad_block_on
+br.ad_rules = lambda: _lists
+br.ad_block_on = lambda host=None: True
+try:
+    v29 = br.new_tab(); H.spin(300)
+    H.load(v29, srv.url("/adpage")); H.spin(500)
+    br.apply_ad_css(v29); H.spin(400)
+    _hid = H.js(v29, "getComputedStyle(document.getElementById('g')).display")
+    _col = H.js(v29, "getComputedStyle(document.getElementById('n')).display")
+finally:
+    br.ad_rules, br.ad_block_on = _ar, _ao
+check("a list's hiding rules still hide beside one the engine cannot read",
+      _hid == "none", str(_hid))
+check("...and a list cannot slip its own CSS onto the page",
+      _col != "none", str(_col))
+
+# a filter rule is found for every address it matches, not only for
+# those whose words happen to line up with the rule's
+_net = B.adblock.Rules()
+_net.load_text("adserver.example\n/promoimg\n")
+check("a rule whose word sits at its edge still blocks a longer word",
+      bool(_net.blocks("https://myadserver.example/x"))
+      and bool(_net.blocks("https://x.test/promoimgs/a.png")),
+      str((_net.blocks("https://myadserver.example/x"),
+           _net.blocks("https://x.test/promoimgs/a.png"))))
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
