@@ -7500,6 +7500,13 @@ PERF_JS = r"""(function (want) {
       note({t: Date.now(), x: e.clientX, y: e.clientY, key: ""});
     }, true);
     document.addEventListener("keydown", function (e) {
+      /* never a key typed into a password field: these are painted
+         onto the saved frames, so it would be the password, on video */
+      var at = e.target;
+      try { at = (e.composedPath && e.composedPath()[0]) || at; }
+      catch (x) {}
+      if (at && at.tagName === "INPUT"
+          && String(at.type || "").toLowerCase() === "password") return;
       var name = e.key;
       if (name === " ") name = "Space";
       if (e.ctrlKey && name.length === 1) name = "Ctrl+" + name;
@@ -12368,11 +12375,19 @@ class VaultLock:
             return False
         if not isinstance(data, dict):
             return False
+        # the token is sealed under the key that is going away: read it
+        # with that key now, or it is ciphertext nothing opens any more
+        # and 1Password silently asks for it again
+        was = self._vault_key
+        self._vault_key = key
+        token = self._token_plain()
+        self._vault_key = was
         fresh = self._install(data, new)
         if fresh is None:
             return False
         self._vault_key = fresh
         self.touch()
+        self._token_store(token)
         return True
 
     # ---- the 1Password token, which is a secret on this computer ----
@@ -14904,6 +14919,12 @@ _SETTINGS_EXTRA = (
 )
 
 
+#: a fake place / user agent set from a private tab, by host: one private
+#: jar per process, so one table, kept in memory and dropped with the jar
+_PRIVATE_PLACES = {}
+_PRIVATE_AGENTS = {}
+
+
 class Bridge(QObject):
     """Exposed to the start/history pages via QWebChannel."""
 
@@ -15687,6 +15708,9 @@ class Bridge(QObject):
             return
         browser = self.browser
         browser.config[key] = value
+        if key == "blockAutoplay":
+            # his own answer, the one lite mode puts back when it goes off
+            browser.config["blockAutoplayOwn"] = bool(value)
         browser.save_config()
         if key == "googleLight":
             browser.refresh_google_scripts()
@@ -31797,17 +31821,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def lite_mode(self, on=None):
         """Images off, nothing playing by itself, no web fonts: the
         switch for a phone tether or a hotel's wifi."""
-        want = (not bool(self.config.get("liteMode", False))
-                if on is None else bool(on))
+        was = bool(self.config.get("liteMode", False))
+        want = (not was) if on is None else bool(on)
+        if want and not was:
+            # his own answer, so switching lite off gives it back: the
+            # key was read here and written nowhere, so lite on and off
+            # turned his "block autoplay" off
+            self.config["blockAutoplayOwn"] = bool(
+                self.config.get("blockAutoplay", False))
         self.config["liteMode"] = want
-        self.config["blockAutoplay"] = want or bool(
-            self.config.get("blockAutoplayOwn", False))
+        own = bool(self.config.get("blockAutoplayOwn", False))
+        self.config["blockAutoplay"] = want or own
         self.save_config()
         attr = QWebEngineSettings.WebAttribute
         for profile in self._all_profiles():
             settings = profile.settings()
             settings.setAttribute(attr.AutoLoadImages, not want)
-            settings.setAttribute(attr.PlaybackRequiresUserGesture, want)
+            settings.setAttribute(attr.PlaybackRequiresUserGesture,
+                                  want or own)
         for _, view in self._real_tabs():
             view.page().settings().setAttribute(attr.AutoLoadImages, not want)
         self.flash(self._ui_str("liteOn" if want else "liteOff"))
@@ -32279,7 +32310,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             "JSON.stringify(window.__guardWs || [])", MAIN_WORLD_ID, done)
         return True
 
-    def guard_script(self):
+    def _guard_config(self, profile=None):
+        """The settings the guard is built from for one jar: the private
+        jar also gets the places set from a private tab, which are kept
+        in memory and never in config.json."""
+        try:
+            private = bool(profile is not None and profile.isOffTheRecord())
+        except (AttributeError, RuntimeError):
+            private = False
+        if not (private and _PRIVATE_PLACES):
+            return self.config
+        cfg = dict(self.config)
+        places = cfg.get("fakePlaces")
+        places = dict(places) if isinstance(places, dict) else {}
+        places.update(_PRIVATE_PLACES)
+        cfg["fakePlaces"] = places
+        return cfg
+
+    def guard_script(self, config=None):
         """The guard, as a script for every cookie jar. MainWorld at
         document creation: a fingerprint read by an inline script at the
         top of the document is read before anything injected later could
@@ -32290,7 +32338,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         script.setRunsOnSubFrames(True)
-        script.setSourceCode(page_guard.source(self.config))
+        script.setSourceCode(page_guard.source(
+            self.config if config is None else config))
         return script
 
     def refresh_guard_scripts(self, profile=None):
@@ -32305,8 +32354,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             scripts = prof.scripts()
             for old in scripts.find(page_guard.GUARD_SCRIPT_NAME):
                 scripts.remove(old)
-            if want:
-                scripts.insert(self.guard_script())
+            cfg = self._guard_config(prof)
+            if page_guard.wanted(cfg):
+                scripts.insert(self.guard_script(cfg))
         return want
 
     def guard_menu(self, menu=None):
@@ -36020,7 +36070,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                    "body{hyphens:auto;text-align:justify}"
                    if options["hyphens"] else "",
                    html.escape(out.get("title") or ""), out["html"]))
-            tab = self.new_tab(blank=True)
+            # the selection's pictures load in the new tab: from a
+            # private tab, in the private jar, not with his cookies
+            tab = self.new_tab(blank=True,
+                               private=bool(getattr(view, "private", False)))
             tab.setHtml(page, QUrl("about:reader"))
 
         return self.read_page_tool("readerselection", view=view, then=done)
@@ -44716,10 +44769,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def set_cookie(self, name, value, host=None, path="/", days=30,
                    secure=True):
         """Add or change a cookie by hand — the thing a cookie editor
-        is for: trying a flag, a locale, a feature switch."""
-        host = PasswordVault.normalize_host(
-            host or (self._host_of(self.current().url())
-                     if self.current() is not None else ""))
+        is for: trying a flag, a locale, a feature switch.
+
+        Into the jar of the tab in front, the one site_cookies lists
+        and delete_cookie takes from: it went into the main jar every
+        time, so a cookie set in a private tab was kept on disk with
+        his own and never reached the tab. And for the host as it is,
+        www. and all, so the cookie is scoped to the site he is on."""
+        view = self.current()
+        page = self._live_page(view) if view is not None else None
+        if host:
+            text = str(host).strip()
+            host = (as_qurl(text if "://" in text else "https://" + text)
+                    .host() or text).lower().strip(".")
+        else:
+            host = ((as_qurl(view.url()).host() or "").lower()
+                    if view is not None else "")
         if not host or not str(name):
             return False
         cookie = QNetworkCookie(str(name).encode(), str(value).encode())
@@ -44730,9 +44795,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             cookie.setExpirationDate(
                 QDateTime.currentDateTime().addDays(int(days)))
         scheme = "https" if secure else "http"
-        self.profile.cookieStore().setCookie(
+        profile = self.profile
+        try:
+            if page is not None:
+                profile = page.profile()
+        except (AttributeError, RuntimeError):
+            profile = self.profile
+        profile.cookieStore().setCookie(
             cookie, QUrl("%s://%s%s" % (scheme, host, path or "/")))
-        self._note_cookie(cookie, jar=self._jar_name(self.profile))
+        self._note_cookie(cookie, jar=self._jar_name(profile))
         return True
 
     def delete_cookie(self, name, host=None, path="/"):
@@ -45446,12 +45517,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         host = self._host_of(view.url())
         if lat is not None and lon is not None and host:
-            table = self.config.setdefault("fakePlaces", {})
-            if isinstance(table, dict):
-                table[host] = {"lat": float(lat), "lon": float(lon)}
-                self.save_config(quiet=True)
+            where = {"lat": float(lat), "lon": float(lon)}
+            if getattr(view, "private", False):
+                # in memory, for the private jar only, and gone with
+                # it: written to config.json the site stayed on the
+                # disk after the window closed, and normal tabs got
+                # the place too
+                _PRIVATE_PLACES[host] = where
                 if page_guard is not None:
                     self.refresh_guard_scripts()
+            else:
+                table = self.config.setdefault("fakePlaces", {})
+                if isinstance(table, dict):
+                    table[host] = where
+                    self.save_config(quiet=True)
+                    if page_guard is not None:
+                        self.refresh_guard_scripts()
         code = """(function (zone, locale) {
           if (zone) {
             var Original = Intl.DateTimeFormat;
@@ -45523,10 +45604,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         wait = rows.get(str(profile), 0)
         view._throttle = wait
         if wait < 0:
-            self.work_offline(True) if hasattr(self, "work_offline") \
-                else None
+            if not self.offline_now():
+                # marked, so "off" knows the offline was this menu's
+                # and not his own Settings switch
+                self.config["offlineByThrottle"] = True
+                self.work_offline(True)
             self.flash(self._ui_str("devOffline"))
             return "offline"
+        if self.config.pop("offlineByThrottle", False) \
+                and self.offline_now():
+            # "Off" left every tab refused, and it survived a restart
+            self.work_offline(False)
         self.flash(self._ui_str("devThrottle") % profile)
         return str(profile)
 
@@ -46452,6 +46540,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             quiet = getattr(self, "_req_watch_quiet", None)
             if quiet is None:
                 quiet = self._req_watch_quiet = RequestWatch(self)
+                quiet.private = True
             watch = quiet
         try:
             profile.setUrlRequestInterceptor(watch)
@@ -46675,17 +46764,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             table = self.config["agentSites"] = {}
         return table
 
-    def agent_for(self, host):
+    def agent_for(self, host, private=False):
         """Which user agent this site is told about, if any.
 
         Per site rather than everywhere: a browser that lies to every
         site about what it is breaks the ones that serve the right
         thing, and tells every one of them something that makes it
-        easier to recognise."""
+        easier to recognise. The private jar also hears the ones set
+        from a private tab ("" there means "none here")."""
         host = str(host or "").lower().removeprefix("www.")
         if not host:
             return ""
         table = self.agent_sites()
+        if private and _PRIVATE_AGENTS:
+            table = dict(table)
+            table.update(_PRIVATE_AGENTS)
         want = str(table.get(host) or "")
         if not want:
             for name, agent in table.items():
@@ -46704,12 +46797,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         host = str(host or "").lower().removeprefix("www.")
         if not host:
             return False
-        table = self.agent_sites()
-        if name:
-            table[host] = str(name)
+        if view is not None and getattr(view, "private", False):
+            # the private jar's own, in memory: config.json kept the
+            # site after the private window closed
+            _PRIVATE_AGENTS[host] = str(name or "")
         else:
-            table.pop(host, None)
-        self.save_config(quiet=True)
+            table = self.agent_sites()
+            if name:
+                table[host] = str(name)
+            else:
+                table.pop(host, None)
+            self.save_config(quiet=True)
         self.flash(self._ui_str("devAgentSet") % (name or "?", host)
                    if name else self._ui_str("devAgentOff") % host)
         return True
@@ -46722,18 +46820,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not host:
             menu.addAction(ui("barNoPage")).setEnabled(False)
             return menu
-        now = str(self.agent_sites().get(host) or "")
+        private = bool(getattr(view, "private", False))
+        now = str((_PRIVATE_AGENTS if private and host in _PRIVATE_AGENTS
+                   else self.agent_sites()).get(host) or "")
         for name in self.AGENTS:
             action = menu.addAction(name)
             action.setCheckable(True)
             action.setChecked(now == name)
             action.triggered.connect(
-                lambda _c=False, n=name: (self.set_agent(host, n),
-                                          self.current().reload()))
+                lambda _c=False, n=name: (self.set_agent(host, n, view=view),
+                                          view.reload()))
         menu.addSeparator()
         off = menu.addAction(ui("devAgentOffRow"))
         off.triggered.connect(
-            lambda: (self.set_agent(host, ""), self.current().reload()))
+            lambda: (self.set_agent(host, "", view=view), view.reload()))
         return menu
 
     # ---- headers of his own ----
@@ -48624,7 +48724,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self._tab_url(view)):
             self.sponsor_check(view=view, then=lambda _rows: None)
             did.append("sponsor")
-        agent = self.agent_for(host)
+        agent = self.agent_for(host,
+                               private=bool(getattr(view, "private", False)))
         if agent:
             # the header the interceptor writes is what the server
             # sees; this is what the page sees, so the two agree
@@ -49490,8 +49591,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # virtual browser made later, so a look and a play button work
         # the same in all of them.
         profile.scripts().insert(self._look_script())
-        if page_guard is not None and page_guard.wanted(self.config):
-            profile.scripts().insert(self.guard_script())
+        if page_guard is not None:
+            cfg = self._guard_config(profile)
+            if page_guard.wanted(cfg):
+                profile.scripts().insert(self.guard_script(cfg))
         if notes is not None and self.config.get("snippets", True):
             drawer = self.desk()
             if drawer is not None and drawer.snippets():
@@ -54890,11 +54993,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return
             lines = []
             for row in rows[:2000]:
-                at = int(float(row.get("at") or row.get("start") or 0))
+                if not isinstance(row, dict):
+                    continue
+                # the cue reader's rows say "t": reading only "at" and
+                # "start" stamped every line [0:00]
+                try:
+                    at = int(float(row.get("t") or row.get("at")
+                                   or row.get("start") or 0))
+                except (TypeError, ValueError):
+                    at = 0
                 said = " ".join(str(row.get("text") or "").split())
                 if not said:
                     continue
-                lines.append("[%d:%02d] %s" % (at // 60, at % 60, said))
+                stamp = ("%d:%02d:%02d" % (at // 3600, at // 60 % 60, at % 60)
+                         if at >= 3600 else "%d:%02d" % (at // 60, at % 60))
+                lines.append("[%s] %s" % (stamp, said))
             title = self._view_title(view) or "Transcript"
             note = desk.save_note(title=title[:120],
                                   body="\n".join(lines),
@@ -55279,10 +55392,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 then({})
             return False
         cues = []
-        for block in str(vtt or "").split("\n\n"):
-            found = re.search(r"(\d\d:\d\d:\d\d[.,]\d+)\s*-->\s*"
-                              r"(\d\d:\d\d:\d\d[.,]\d+)(.*)",
-                              block, re.S)
+        # hours are optional in WebVTT, and openai-whisper leaves them
+        # out under an hour (00:03.000 --> 00:06.500): those matched
+        # nothing and the job ended with no captions and no word. The
+        # rest of the timing line is cue settings, not text.
+        stamp_re = r"((?:\d+:)?\d\d:\d\d[.,]\d+)"
+        text_in = str(vtt or "").replace("\r\n", "\n").replace("\r", "\n")
+        for block in re.split(r"\n\s*\n", text_in):
+            found = re.search(stamp_re + r"\s*-->\s*" + stamp_re
+                              + r"[^\n]*(.*)", block, re.S)
             if not found:
                 continue
             text = " ".join(found.group(3).split())
@@ -55290,9 +55408,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 continue
 
             def secs(stamp):
-                hours, mins, rest = stamp.split(":")
-                return (int(hours) * 3600 + int(mins) * 60
-                        + float(rest.replace(",", ".")))
+                parts = stamp.replace(",", ".").split(":")
+                hours = int(parts[0]) if len(parts) == 3 else 0
+                return (hours * 3600 + int(parts[-2]) * 60
+                        + float(parts[-1]))
 
             cues.append({"a": secs(found.group(1)),
                          "b": secs(found.group(2)),
@@ -63283,6 +63402,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # half-written. Tried again as each one ends.
             return
         self._private_perms.clear()
+        # the places and agents set from private tabs go with the jar
+        _PRIVATE_PLACES.clear()
+        _PRIVATE_AGENTS.clear()
         # ...and the cookie editor's rows for that jar: its cookies go
         # with it, all at once, and no cookieRemoved says so
         seen = getattr(self, "_cookie_seen", None)
@@ -67344,6 +67466,8 @@ class RequestWatch(QWebEngineUrlRequestInterceptor):
         self.log = []
         self.on = False
         self.limit = 600
+        #: the off-the-record jar's instance (see _attach_watch)
+        self.private = False
 
     def interceptRequest(self, info):
         try:
@@ -67380,8 +67504,9 @@ class RequestWatch(QWebEngineUrlRequestInterceptor):
             info.block(True)
             return
 
-        # 3. the user agent this site is told about
-        agent = browser.agent_for(host)
+        # 3. the user agent this site is told about (the private jar's
+        # instance also hears the ones set from a private tab)
+        agent = browser.agent_for(host, private=self.private)
         if agent:
             info.setHttpHeader(b"User-Agent", agent.encode("utf-8"))
 

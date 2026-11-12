@@ -255,6 +255,8 @@ srv = H.Server({
     "/drive-meta": "<title>dm</title><meta http-equiv=refresh "
                    "content='0;url=/files/meta.torrent'>",
     "/twhome": "<title>tw</title><p>home</p>",
+    "/pwform": "<title>pw</title><input id=u><input id=p type=password>",
+    "/vid": "<title>v</title><video id=v></video>",
     "/chatpage": "<title>c</title><div class=chat-line id=c1>a spoiler here</div>"
                  "<div class=chat-line id=c2>hello</div>",
     "/adpage": "<title>ad</title><p class=good id=g>ad</p><p id=n>text</p>",
@@ -2262,6 +2264,176 @@ check("Settings is sent the switches and fields it shows, as saved",
       str({k: _sset.get(k) for k in _set_keys}))
 check("...and an unsaved one with the browser's own default",
       _sset.get("formDraftsOn") is True, str(_sset.get("formDraftsOn")))
+
+# ===== batch 31: the second pass's mediums ===========================
+# the 1Password token still opens after the master passphrase changes
+_tdir = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_tl = B.VaultLock(_tdir)
+_tl.write({"items": [{"host": "x", "password": "p"}]})
+_tl.enable("first pass phrase")
+_tl._token_store(b"op-token-xyz")
+_tok_before = _tl._token_plain()
+_changed = _tl.change("first pass phrase", "second pass phrase")
+_tl2 = B.VaultLock(_tdir)
+_tl2.unlock("second pass phrase")
+check("a new master passphrase keeps the 1Password token readable",
+      _tok_before == b"op-token-xyz" and _changed
+      and _tl2._token_plain() == b"op-token-xyz",
+      str((_tok_before, _changed, _tl2._token_plain())))
+
+# lite mode on and off gives his own "block autoplay" back
+_attr = B.QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture
+_lite_keys = ("liteMode", "blockAutoplay", "blockAutoplayOwn")
+_lite_was = {k: br.config.get(k, "__absent__") for k in _lite_keys}
+br.config.update(liteMode=False, blockAutoplay=True)
+br.config.pop("blockAutoplayOwn", None)
+br.lite_mode(True); br.lite_mode(False)
+_lite_on = (br.config.get("blockAutoplay"),
+            br.profile.settings().testAttribute(_attr))
+br.bridge.setSetting("blockAutoplay", "false")
+br.lite_mode(True); br.lite_mode(False)
+_lite_off = (br.config.get("blockAutoplay"),
+             br.profile.settings().testAttribute(_attr))
+for _k, _v in _lite_was.items():
+    if _v == "__absent__":
+        br.config.pop(_k, None)
+    else:
+        br.config[_k] = _v
+br.apply_web_attributes()
+check("lite mode on and off keeps 'block autoplay' on when he had it on",
+      _lite_on == (True, True), str(_lite_on))
+check("...and off when he had it off", _lite_off == (False, False),
+      str(_lite_off))
+
+# a reader made from a private tab's selection opens in a private tab
+_pv = br.new_tab(private=True); H.spin(300)
+H.load(_pv, srv.url("/twhome"))
+_real_rpt = br.read_page_tool
+br.read_page_tool = (lambda name, view=None, then=None, **k:
+                     then(json.dumps({"html": "<p>x</p>", "title": "t"})))
+try:
+    br.reader_from_selection(view=_pv)
+finally:
+    br.read_page_tool = _real_rpt
+H.spin(300)
+_rd = br.current()
+check("a reader from a private selection opens in a private tab",
+      _rd is not _pv and getattr(_rd, "private", False) is True,
+      str(getattr(_rd, "private", None)))
+if _rd is not _pv and br.tabs.indexOf(_rd) >= 0:
+    br.close_tab(br.tabs.indexOf(_rd), ask=False)
+
+# a cookie set by hand in a private tab goes into the private jar
+br.tabs.setCurrentWidget(_pv); H.spin(200)
+br.set_cookie("k31", "v31", secure=False)
+H.wait_for(lambda: "k31=v31" in (H.js(_pv, "document.cookie",
+                                      B.MAIN_WORLD_ID) or ""), 5000)
+_pc = H.js(_pv, "document.cookie", B.MAIN_WORLD_ID) or ""
+_nv = br.new_tab(url=None); H.spin(200)
+H.load(_nv, srv.url("/twhome"))
+_nc = H.js(_nv, "document.cookie", B.MAIN_WORLD_ID) or ""
+br.tabs.setCurrentWidget(_pv); H.spin(200)
+_rows = [r for r in br.site_cookies() if r.get("name") == "k31"]
+check("a cookie set in a private tab reaches that tab",
+      "k31=v31" in _pc, _pc)
+check("...is listed for it, and stays out of the normal jar",
+      _rows and "k31" not in _nc, str((len(_rows), _nc)))
+if br.tabs.indexOf(_nv) >= 0:
+    br.close_tab(br.tabs.indexOf(_nv), ask=False)
+
+# a private tab's fake place and user agent stay out of config.json
+br.tabs.setCurrentWidget(_pv); H.spin(200)
+_ph = _pv.url().host()
+br.override_place(view=_pv, lat=1.5, lon=2.5)
+br.set_agent(name="firefox", view=_pv)
+_disk = json.loads(B.CONFIG_FILE.read_text() or "{}")
+_gname = B.page_guard.GUARD_SCRIPT_NAME
+_pscr = [s.sourceCode() for s in _pv.page().profile().scripts().find(_gname)]
+_mscr = [s.sourceCode() for s in br.profile.scripts().find(_gname)]
+check("a private tab's fake place is not written to config.json",
+      _ph not in (br.config.get("fakePlaces") or {})
+      and _ph not in (_disk.get("fakePlaces") or {}),
+      str(br.config.get("fakePlaces")))
+check("...but the private jar's guard has it, and the normal one not",
+      any("1.5" in s and _ph in s for s in _pscr)
+      and not any("1.5" in s and _ph in s for s in _mscr))
+check("a private tab's user agent is not written to config.json",
+      _ph not in br.agent_sites() and _ph not in (_disk.get("agentSites") or {}),
+      str(br.agent_sites()))
+check("...but the private jar is told it, and the normal jar not",
+      "Firefox" in br.agent_for(_ph, private=True)
+      and "Firefox" not in br.agent_for(_ph))
+
+# "Off" in the slow-connection menu takes back the offline it switched on
+_off_was = br.config.get("offline", False)
+br.config["offline"] = False
+br.throttle(view=_pv, profile="offline"); _o1 = br.config.get("offline")
+br.throttle(view=_pv, profile="off"); _o2 = br.config.get("offline")
+br.config["offline"] = True
+br.throttle(view=_pv, profile="offline"); br.throttle(view=_pv, profile="off")
+_o3 = br.config.get("offline")
+br.config["offline"] = _off_was
+br.config.pop("offlineByThrottle", None)
+check("throttle Offline then Off leaves the browser online",
+      _o1 is True and _o2 is False, str((_o1, _o2)))
+check("...and his own offline switch is left alone", _o3 is True, str(_o3))
+
+# nothing typed into a password field is kept for the recording
+_rv = br.new_tab(url=None); H.spin(200)
+H.load(_rv, srv.url("/pwform"))
+H.js(_rv, B.PERF_JS.replace("PERFWANT", json.dumps({"recordClicks": True})),
+     B.APP_WORLD_ID)
+H.js(_rv, "['u','p'].forEach(function (id) { var el = document.getElementById(id);"
+          " el.focus(); ['s','e','c'].forEach(function (k) {"
+          " el.dispatchEvent(new KeyboardEvent('keydown', {key: k + id,"
+          " bubbles: true})); }); }); 1", B.APP_WORLD_ID)
+_keys = [r.get("key") for r in json.loads(
+    H.js(_rv, "window.__recInputTake ? window.__recInputTake() : '[]'",
+         B.APP_WORLD_ID) or "[]")]
+check("keys typed in a password field are not kept for the recording",
+      "su" in _keys and not any(str(k).endswith("p") for k in _keys),
+      str(_keys))
+if br.tabs.indexOf(_rv) >= 0:
+    br.close_tab(br.tabs.indexOf(_rv), ask=False)
+
+# the transcript note keeps each line's time
+class _Desk31:
+    body = None
+
+    def save_note(self, title="", body="", link="", tags=()):
+        _Desk31.body = body
+        return {"title": title}
+_real_desk, _real_tr = br.desk, br.transcript
+br.desk = lambda: _Desk31()
+br.transcript = lambda view=None, then=None: then(
+    [{"t": 75, "e": 80, "text": "hi"}, {"t": 3725, "text": "later"}])
+try:
+    br.transcript_to_note(view=_pv)
+finally:
+    br.desk, br.transcript = _real_desk, _real_tr
+check("a transcript note stamps each line with its own time",
+      _Desk31.body == "[1:15] hi\n[1:02:05] later", repr(_Desk31.body))
+
+# captions without hours (openai-whisper) and with CRLF still go on
+_cv = br.new_tab(url=None); H.spin(200)
+H.load(_cv, srv.url("/vid"))
+_cap = {}
+br.put_captions_on_video(
+    "WEBVTT\r\n\r\n00:03.000 --> 00:06.500 align:start\r\nhello there\r\n"
+    "\r\n01:00:01.000 --> 01:00:02.000\r\nlater on\r\n",
+    view=_cv, then=lambda r: _cap.update(r))
+H.wait_for(lambda: _cap, 5000)
+_cues = json.loads(H.js(_cv, "JSON.stringify([].slice.call("
+                         "document.getElementById('v').textTracks[0].cues)"
+                         ".map(function (c) { return [c.startTime, c.text]; }))",
+                         B.MAIN_WORLD_ID) or "[]")
+check("captions with mm:ss cue times and CRLF lines are put on the video",
+      _cap.get("cues") == 2 and _cues == [[3, "hello there"], [3601, "later on"]],
+      str((_cap, _cues)))
+for _t in (_cv, _pv):
+    if br.tabs.indexOf(_t) >= 0:
+        br.close_tab(br.tabs.indexOf(_t), ask=False)
+H.spin(300)
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

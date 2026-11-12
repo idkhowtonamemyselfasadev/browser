@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twenty-six)
+
+- **A new master passphrase keeps 1Password connected.** Changing the master
+  passphrase resealed the vault under a new key but left the 1Password token
+  sealed under the old one, so 1Password quietly asked for the token again.
+  The token is now carried over to the new key.
+- **Lite mode gives "block autoplay" back.** Turning lite mode on and off
+  again switched your own "block videos from playing on their own" off. It now
+  returns to whatever you had.
+- **Private stays private, part two.** From a private tab: "reader from
+  selection" opens in a private tab. A cookie set by hand goes into the private
+  jar (it went into your normal one), keeps its full host name, and shows up in
+  that tab's list. A fake location or user agent set for a site is kept in
+  memory for the private window only and is forgotten with it; it was written
+  into config.json and applied to normal tabs too.
+- **"Off" in the slow-connection menu turns offline off.** Choosing Offline
+  there switched the whole browser offline (saved, so it survived a restart),
+  and Off never switched it back. Off now undoes it, and leaves your own
+  offline switch alone.
+- **Recordings never show keys typed into a password field.** With "show
+  clicks and keys" on, the keys you typed were painted onto the video,
+  password fields included. Keys in a password field are no longer collected.
+- **Transcript notes have the right times.** Every line of a "transcript to
+  note" was stamped [0:00]. Each line now has its own time (h:mm:ss past an
+  hour).
+- **Captions from openai-whisper work.** Its cue times leave out the hours
+  under an hour (00:03.000), which matched nothing, so the job ended with no
+  captions and no message. Those, Windows line ends and cue settings are all
+  read now.
+
 ## 2026-11-12 — line-by-line review, day 2 (part twenty-five)
 
 - **The chat filter keeps your word list to itself.** It ran inside the page,
