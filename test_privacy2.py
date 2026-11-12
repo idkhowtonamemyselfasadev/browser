@@ -302,10 +302,25 @@ check("and it can be forgotten",
       and not win.certificate_excepted("printer.test"))
 
 
+class FakeCert:
+    def __init__(self, der):
+        self._der = der
+
+    def toDer(self):
+        return self._der
+
+
 class FakeCertError:
-    def __init__(self, host, overridable=True):
+    # a real error always carries the chain it turned down: the browser
+    # keeps an exception against that exact certificate, and one with
+    # nothing to pin trusts the single load, never the host
+    def __init__(self, host, overridable=True, der=b"printer-cert"):
         self._url = QUrl("https://%s/x" % host)
         self._over = overridable
+        self._chain = [FakeCert(der)]
+
+    def certificateChain(self):
+        return self._chain
 
     def url(self):
         return self._url

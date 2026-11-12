@@ -1112,6 +1112,124 @@ if _gkey and B.page_guard is not None:
           "sec-gpc: 1" in _hdrs.lower(), _hdrs[:300])
     br.config[_gkey] = _gpc_was
 
+# "allow this time" is this time: the engine does not write it down
+# behind the browser's back, and the next visit asks again
+from PyQt6.QtWebEngineCore import QWebEnginePermission as _QWP
+v19 = br.new_tab(); H.spin(300)
+H.load(v19, srv.url("/notif")); H.spin(1500)
+_card = getattr(br, "_perm_widget", None)
+_once = _card.findChild(B.QToolButton, "permonce") if _card is not None \
+    else None
+check("a site asking for notifications gets a card with 'this time'",
+      _once is not None)
+if _once is not None:
+    _once.click(); H.spin(800)
+check("...and 'this time' answers it", H.js(v19, "window.asked") == "granted",
+      str(H.js(v19, "window.asked")))
+_st = br.profile.queryPermission(
+    B.QUrl(srv.url("/")), _QWP.PermissionType.Notifications).state()
+check("the engine keeps no grant of its own after 'this time'",
+      _st != _QWP.State.Granted, str(_st))
+br._perm_widget = None
+br.close_tab(br.tabs.indexOf(v19), ask=False); H.spin(500)
+v19 = br.new_tab(); H.spin(300)
+H.load(v19, srv.url("/notif")); H.spin(1500)
+_card2 = getattr(br, "_perm_widget", None)
+check("...so the next visit, in a new tab, asks again",
+      _card2 is not None and H.js(v19, "window.asked") == "",
+      str((H.js(v19, "window.asked"), _card2)))
+if _card2 is not None:
+    _deny = _card2.findChild(B.QToolButton, "permdeny")
+    if _deny is not None:
+        _deny.click(); H.spin(400)
+
+# the status line shows where a link goes as text, never as markup
+br.show_hovered_link("https://www.google.com/url?q=https://x.example/"
+                     "%3Ch1%3Ehttps://bank.example%3C/h1%3E")
+_hl = getattr(br, "_hoverlbl", None)
+check("the status line is plain text",
+      _hl is not None and _hl.textFormat() == B.Qt.TextFormat.PlainText
+      and "<h1>" in _hl.text(), _hl.text() if _hl is not None else None)
+
+# a certificate exception is that certificate, or nothing
+br.config["certExceptions"] = {"legacy.lan": True}
+check("an old catch-all exception no longer passes any certificate",
+      br.certificate_excepted("legacy.lan", "ab" * 32) is False)
+check("...though the host still shows as having one",
+      br.certificate_excepted("legacy.lan") is True)
+check("a yes with no certificate to pin is not kept",
+      br.trust_certificate("nofp.lan", "") is False
+      and "nofp.lan" not in br.certificate_exceptions())
+br.config["certExceptions"] = {}
+
+# menu entries whose lambda took the "checked" flag as their argument
+br.tabs.setCurrentWidget(v15); H.spin(200)
+_got = []
+_sc, _scn = br.show_certificate, br.show_connection
+br.show_certificate = lambda h=None: _got.append(("cert", h))
+br.show_connection = lambda h=None: _got.append(("conn", h))
+for _a in br.certificate_menu().actions():
+    if _a.text() in (br._ui_str("certShow") % "127.0.0.1",
+                     br._ui_str("connDetails")):
+        _a.trigger()
+br.show_certificate, br.show_connection = _sc, _scn
+check("the lock menu's certificate and connection entries get the host",
+      _got == [("cert", "127.0.0.1"), ("conn", "127.0.0.1")], str(_got))
+
+# a locked window's title says nothing about the page behind the cover
+br.set_browser_lock("review-lock")
+br._sync_window_title()
+_was_title = br.windowTitle()
+br.lock_browser()
+check("a locked window's title hides the page's",
+      "other" in _was_title and "other" not in br.windowTitle(),
+      str((_was_title, br.windowTitle())))
+br.unlock_browser()
+check("...and unlocking brings it back", "other" in br.windowTitle(),
+      br.windowTitle())
+br.set_browser_lock("")
+
+# a secret the browser copies stays out of clip histories, its own and
+# the desktop's
+br.watch_clipboard(True)
+br._copy_secret_text("hunter2-review")
+H.spin(300)
+_md = B.QGuiApplication.clipboard().mimeData()
+check("a copied secret carries the desktop's 'do not keep' hint",
+      _md is not None and bytes(_md.data("x-kde-passwordManagerHint"))
+      == b"secret")
+_clips = [c["text"] for c in (br.desk().clips() if br.desk() else [])]
+check("...and is not in the browser's clip history",
+      "hunter2-review" not in _clips, str(_clips[:3]))
+br.watch_clipboard(False)
+
+# a page cannot make the snippet expander type out a snippet for it
+_drawer = br.desk()
+if _drawer is not None:
+    _drawer.set_snippet("zqsnip", "SECRET-SNIPPET-TEXT")
+    br.config["snippets"] = True
+    br.refresh_snippet_script()
+    v20 = br.new_tab(); H.spin(300)
+    H.load(v20, srv.url("/drafts")); H.spin(800)
+    H.js(v20, "var f=document.getElementById('n'); f.focus();"
+              "f.value='zqsnip '; f.setSelectionRange(7,7);"
+              "f.dispatchEvent(new KeyboardEvent('keyup',"
+              "{key:' ',bubbles:true})); 1")
+    H.spin(300)
+    check("a page's own fake key press does not expand a snippet",
+          "SECRET" not in str(H.js(v20, "document.getElementById('n').value")),
+          str(H.js(v20, "document.getElementById('n').value")))
+    H.js(v20, "var f=document.getElementById('n'); f.value=''; f.focus(); 1")
+    v20.setFocus(); H.spin(100)
+    H.type_text(v20, "zqsnip ")
+    H.spin(300)
+    check("...while real typing still does",
+          "SECRET-SNIPPET-TEXT" in str(H.js(v20,
+                                           "document.getElementById('n').value")),
+          str(H.js(v20, "document.getElementById('n').value")))
+    _drawer.set_snippet("zqsnip", "")
+    br.refresh_snippet_script()
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:

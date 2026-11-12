@@ -248,9 +248,21 @@ names = [s.name() for s in win.profile.scripts().toList()]
 check("the expander is in the jar", "snippets" in names, names[-3:])
 field = page("/field")
 H.spin(300)
+# a key press the page makes up is not his typing: a site could put a
+# snippet's key in a box, fake the space and read the snippet back
 js(field, """(function(){var t=document.getElementById('t');
  t.focus(); t.value=';ip '; t.setSelectionRange(4,4);
  t.dispatchEvent(new KeyboardEvent('keyup',{key:' ',bubbles:true}));})()""")
+H.spin(300)
+check("a key press the page makes up expands nothing",
+      "192.0.2.10" not in str(js(field, "document.getElementById('t').value")),
+      js(field, "document.getElementById('t').value"))
+# his own typing, through the window like real keys
+js(field, """(function(){var t=document.getElementById('t');
+ t.value=''; t.focus();})()""")
+field.setFocus()
+H.spin(100)
+H.type_text(field, ";ip ")
 H.spin(300)
 check("typing the key puts the text in",
       "192.0.2.10" in str(js(field, "document.getElementById('t').value")),

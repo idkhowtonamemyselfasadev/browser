@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part four)
+
+- **"Allow this time" is this time, and taking a permission back takes it back.**
+  The engine kept its own record of permissions on disk next to the browser's and
+  answered from it without asking: "this time" for the camera, the microphone or
+  notifications was really "from now on", and removing a site from the permission
+  list removed nothing. The engine now asks every time and the browser's own book
+  answers; what the engine had stored from earlier runs is forgotten at start.
+- **The link line at the bottom shows the link as text.** A redirect link's real
+  target is decoded for display, and markup in it was drawn: a link could show
+  `https://bank.example` in big letters as its destination.
+- **A certificate exception holds for exactly that certificate.** Exceptions saved
+  before fingerprints were kept, and a "yes" when no fingerprint could be read,
+  let any certificate for that host through. They are asked about once more and
+  then pinned; a "yes" with nothing to pin trusts that one load only.
+- **Five menu entries that never did anything now do:** "show certificate" and
+  "connection details" in the lock menu, "pretend to be somewhere else", "move group
+  to a new window" and "save group". Each passed Qt's "checked" flag where the site
+  or group was meant to go.
+- **A copied vault password stays out of clipboard histories.** It is marked the
+  way Klipper and cliphist recognise and skip, so it is not kept in a history file,
+  and the browser's own clip history leaves it out too (it had the switch for that
+  but never read it).
+- **A page cannot read your text snippets.** The expander answered made-up key
+  presses, so a page could put a snippet's key in a box, fake a space and read
+  back what the snippet stands for (your address, your phone number). It answers
+  your own typing only.
+- **A locked window's title no longer shows the page behind the cover.**
+- **The certificate panel shows the certificate.** It read the site's certificate
+  without verifying it, and Python hands back no fields at all that way, so name,
+  issuer and dates were always empty; a certificate that does not verify is still
+  shown, marked unverified.
+
 ## 2026-11-12 — line-by-line review, day 2 (part three)
 
 - **Private tabs and virtual browsers get the request rules.** The interceptor that
