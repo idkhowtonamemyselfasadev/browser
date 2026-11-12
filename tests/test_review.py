@@ -3,6 +3,7 @@
 Plain functions of browser.py where possible, so most of this needs no
 window. Nothing here touches your data (see harness.boot)."""
 import json, sys
+import time as _time
 import harness as H
 
 B = H.boot()
@@ -277,6 +278,12 @@ srv = H.Server({
                   "<textarea class=t1></textarea>"
                   "<textarea class=t2></textarea></form>",
     "/auth/panel": "<title>panel</title><p>you are in</p>",
+    "/blockme": "<title>bm</title><p id=b>served</p>",
+    "/notif": "<title>n</title><script>window.asked='';"
+              "Notification.requestPermission().then(function(r){"
+              "window.asked=r})</script>",
+    "/setck": "<title>ck</title><script>document.cookie='srv=1; path=/'"
+              "</script>",
     "/imgauth": "<title>i</title><p>a page with a frame</p><script>"
                 "var i=document.createElement('iframe');"
                 "i.src=location.protocol+'//localhost:'"
@@ -286,6 +293,13 @@ br = B.Browser()
 br.show()
 H.spin(300)
 view = br.current()
+
+# the request interceptor is there from the start, ad blocking or not:
+# blocked addresses, his headers, the per-site agent and Sec-GPC all
+# live in it
+H.spin(300)
+check("the request interceptor is in place at start-up",
+      getattr(br, "_req_watch", None) is not None)
 
 # a local .html cannot read the files beside it
 _fdir = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
@@ -962,6 +976,141 @@ check("an https one is kept",
       br.note_opensearch("good.example", "g",
                          "https://good.example/?q={searchTerms}") is True)
 br.opensearch_table().pop("good.example", None)
+
+# the cookie editor: one site's cookies, one jar, and a delete that
+# reaches the engine
+def _ck(name, value, domain):
+    c = B.QNetworkCookie(name.encode(), value.encode())
+    c.setDomain(domain)
+    c.setPath("/")
+    return c
+v16 = br.new_tab(); H.spin(300)
+H.load(v16, srv.url("/twhome")); H.spin(400)
+_jar = br._view_jar(v16)
+br._note_cookie(_ck("sess", "netflix-session", ".netflix.com"), jar=_jar)
+br._note_cookie(_ck("xs", "x-own", ".x.com"), jar=_jar)
+br._note_cookie(_ck("priv", "private-one", ".x.com"), jar="private")
+_names = sorted(r["name"] for r in br.site_cookies("x.com"))
+check("x.com's cookies are x.com's, from this jar only", _names == ["xs"],
+      str(_names))
+_txt = br.cookies_txt("x.com", str(_xdir / "cookies.txt"))
+_body = open(_txt).read() if _txt else ""
+check("...and so is its cookies.txt",
+      "x-own" in _body and "netflix-session" not in _body
+      and "private-one" not in _body, _body[-200:])
+H.load(v16, srv.url("/setck")); H.spin(1200)
+check("a page cookie is there to delete",
+      "srv=1" in str(H.js(v16, "document.cookie")))
+check("deleting it from the editor says so",
+      br.delete_cookie("srv", "127.0.0.1", "/") is True)
+H.spin(800)
+check("...and the page no longer has it",
+      "srv=1" not in str(H.js(v16, "document.cookie")),
+      str(H.js(v16, "document.cookie")))
+
+# a jar made after start-up (the private one here) has the same
+# interceptor: blocked addresses stay blocked, and its requests stay
+# out of the request log. (An earlier block closed this window's last
+# tab, which closes the window and runs the exit clean-up that hands the
+# interceptor back; asking again puts it back on every jar.)
+br.request_watch()
+br.config["urlRules"] = "/blockme"
+v17 = br.new_tab(); H.spin(300)
+H.load(v17, srv.url("/blockme")); H.spin(800)
+check("a blocked address is blocked in a normal tab",
+      H.js(v17, "!!document.getElementById('b')") is not True)
+H.load(_pv, srv.url("/blockme")); H.spin(800)
+check("...and in a private tab, whose jar came later",
+      H.js(_pv, "!!document.getElementById('b')") is not True)
+_vb = br.new_tab(session="reviewvb"); H.spin(300)
+H.load(_vb, srv.url("/blockme")); H.spin(800)
+check("...and in a virtual browser made after that",
+      _vb.page().profile() is not br.profile
+      and H.js(_vb, "!!document.getElementById('b')") is not True)
+br.config["urlRules"] = ""
+br.log_requests(True)
+H.load(_pv, srv.url("/twother?private-visit")); H.spin(800)
+H.load(v17, srv.url("/twother?normal-visit")); H.spin(800)
+_urls = [r["url"] for r in br.request_rows()]
+br.log_requests(False)
+check("the request log has the normal tab's request",
+      any("normal-visit" in u for u in _urls), str(_urls[:4]))
+check("...and not the private one's",
+      not any("private-visit" in u for u in _urls), str(_urls[:4]))
+
+# a virus scan runs beside the window, not on it
+(_bin / "clamscan").write_text("#!/bin/sh\nsleep 1.5\nexit 1\n")
+(_bin / "clamscan").chmod(0o755)
+_os.environ["PATH"] = str(_bin) + ":" + _path_was
+(_xdir / "scanme.bin").write_bytes(b"x")
+_dl_was = list(br.downloads)
+br.downloads[:] = [{"id": 992, "name": "scanme.bin", "dir": str(_xdir),
+                    "url": "https://a/", "t": 0, "state": "done"}]
+_scan = []
+_t0 = _time.time()
+br.scan_download(992, then=_scan.append)
+_took = _time.time() - _t0
+check("starting a scan does not hold the window", _took < 0.5,
+      "%.2fs" % _took)
+H.wait_for(lambda: _scan, 8000)
+check("...and its answer still arrives", _scan == ["infected"], str(_scan))
+br.downloads[:] = _dl_was
+_os.environ["PATH"] = _path_was
+
+# pages the browser builds out of text run no script
+v18 = br.new_tab(); H.spin(300)
+br.show_html("<!doctype html><title>t</title><script>document.title="
+             "'ran'</script><a id=l href=\"javascript:document.title="
+             "'clicked'\">x</a>", view=v18)
+H.spin(600)
+H.js(v18, "document.getElementById('l').click(); 1"); H.spin(400)
+check("a built page's script and javascript: link stay dead",
+      H.js(v18, "document.title") == "t", str(H.js(v18, "document.title")))
+_mm = br.minimessage_html('<gradient:red" onmouseover="alert(1):blue>hi')
+check("a MiniMessage gradient cannot write an attribute",
+      'onmouseover="' not in _mm and "<span" not in _mm, _mm[-160:])
+check("...while a real one still draws",
+      "linear-gradient(90deg,#ff5555,#5555ff)"
+      in br.minimessage_html("<gradient:red:blue>hi"))
+H.load(v18, srv.url("/twhome")); H.spin(500)
+br.override_place(view=v18, zone="Asia/Kolkata"); H.spin(300)
+check("a half-hour time zone is told as one",
+      H.js(v18, "new Date().getTimezoneOffset()") == -330,
+      str(H.js(v18, "new Date().getTimezoneOffset()")))
+br.responsive_preview("phone", view=v18)
+def _all_actions(m):
+    for a in m.actions():
+        yield a
+        if a.menu() is not None:
+            yield from _all_actions(a.menu())
+_off = [a for a in _all_actions(br.dev_menu())
+        if a.text() == br._ui_str("devSizeOff")]
+if _off:
+    _off[0].trigger()
+check("the dev menu's size off gives the tab its size back",
+      _off and v18.maximumWidth() == 16777215, str(v18.maximumWidth()))
+br.request_watch().log[:] = [{"url": "https://a/", "host": "a",
+                              "method": "GET", "kind": 0, "t": 0}]
+_har = br.export_har(str(_xdir / "r.har"))
+check("a HAR's times are UTC, as its Z says",
+      '"1970-01-01T00:00:00Z"' in open(_har).read() if _har else False)
+br.request_watch().log[:] = []
+check("a typed javascript: address is searched for, never run",
+      not br._resolve_typed("javascript://%0aalert(1)").lower()
+      .startswith("javascript"), br._resolve_typed("javascript://%0aalert(1)"))
+
+# Sec-GPC goes out with ad blocking off, too
+br.config["adBlock"] = False
+_gkey = B.Browser.GUARD_KEY.get("gpc") if hasattr(B.Browser, "GUARD_KEY") \
+    else None
+if _gkey and B.page_guard is not None:
+    _gpc_was = br.config.get(_gkey)
+    br.config[_gkey] = True
+    H.load(v18, srv.url("/echo")); H.spin(800)
+    _hdrs = str(H.js(v18, "document.body.innerText"))
+    check("with the GPC guard on, Sec-GPC is sent (ad blocking off)",
+          "sec-gpc: 1" in _hdrs.lower(), _hdrs[:300])
+    br.config[_gkey] = _gpc_was
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

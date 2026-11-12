@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part three)
+
+- **Private tabs and virtual browsers get the request rules.** The interceptor that
+  carries the filter lists, blocked addresses, your own headers, the per-site agent
+  and Sec-GPC was put on the cookie jars that existed at start-up only; the private
+  jar and a virtual browser are made when a tab first asks for them, and had none
+  of it. Every jar gets it now, and a private one gets its own whose request log
+  never runs, so a HAR export cannot carry a private window's addresses.
+- **"Export cookies.txt" for one site exports that site.** It matched by "contains",
+  so x.com's file carried your netflix.com and dropbox.com sessions, and it mixed
+  in the private window's cookies. Its own site, on a label boundary, from the jar
+  of the tab in front. Deleting a cookie in the editor now reaches the engine (it
+  rebuilt the cookie from name and domain, which deletes nothing).
+- **A typed or pasted `javascript:` address is a search,** never script run in the
+  page you are on ("paste this in your address bar for free ..."). Bookmarklets
+  still run.
+- **The virus scan runs in the background** instead of freezing the window while
+  clamscan loads its database.
+- Pages the browser builds from text (a README, a patch, an HTTP answer, a
+  MiniMessage preview) run no script; a MiniMessage gradient only takes colours.
+- A private window's tabs are not offered in an ordinary window's drop-down.
+- Small fixes in the developer menu: "size off" gives the tab its size back, a
+  half-hour time zone is told as one, HAR times are UTC like their "Z" says, a
+  second service-worker look is a fresh one, and watching a big folder no longer
+  walks all of it first.
+
 ## 2026-11-12 — line-by-line review, day 2 (part two)
 
 - **Form drafts no longer keep card numbers.** Drafts are on by default and are

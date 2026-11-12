@@ -23,6 +23,7 @@ import struct
 import subprocess
 import sys
 import tarfile
+import itertools
 import tempfile
 import threading
 import unicodedata
@@ -41769,26 +41770,56 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if then:
                 then("noscanner")
             return False
-        try:
-            done = subprocess.run([program, "--no-summary", str(path)],
-                                  capture_output=True, timeout=300,
-                                  check=False)
-        except (OSError, subprocess.SubprocessError):
-            entry["scan"] = "failed"
+        # In the background: clamscan loads its whole signature
+        # database first (seconds, every time) and may take minutes on
+        # a big file. It used to run right here on the window's own
+        # thread, so every download with scanning on froze the browser
+        # until it was done. True now means "started"; the answer comes
+        # through then, and onto the row.
+        proc = QProcess(self)
+        proc.setProgram(program)
+        proc.setArguments(["--no-summary", str(path)])
+        proc.setStandardOutputFile(QProcess.nullDevice())
+        proc.setStandardErrorFile(QProcess.nullDevice())
+        state = {"done": False}
+
+        def answer_with(answer):
+            if state["done"]:
+                return
+            state["done"] = True
+            entry["scan"] = answer
+            self.save_downloads()
+            self.bridge.downloadsChanged.emit()
+            if answer == "infected":
+                self.flash(self._ui_str("dlInfected") % path.name, ms=8000)
+            elif answer == "clean":
+                self.flash(self._ui_str("dlClean"))
             if then:
-                then("failed")
-            return False
-        answer = {0: "clean", 1: "infected"}.get(done.returncode, "failed")
-        entry["scan"] = answer
-        self.save_downloads()
-        self.bridge.downloadsChanged.emit()
-        if answer == "infected":
-            self.flash(self._ui_str("dlInfected") % path.name, ms=8000)
-        elif answer == "clean":
-            self.flash(self._ui_str("dlClean"))
-        if then:
-            then(answer)
-        return answer == "clean"
+                then(answer)
+            proc.deleteLater()
+
+        def finished(code, status=None):
+            crashed = (status is not None and status
+                       != QProcess.ExitStatus.NormalExit)
+            answer_with("failed" if crashed else
+                        {0: "clean", 1: "infected"}.get(int(code),
+                                                        "failed"))
+
+        def errored(error):
+            if error == QProcess.ProcessError.FailedToStart:
+                answer_with("failed")
+
+        def too_long():
+            if not state["done"]:
+                proc.kill()
+                answer_with("failed")
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(errored)
+        entry["scan"] = "scanning"
+        proc.start()
+        QTimer.singleShot(300000, too_long)
+        return True
 
     def printer_url(self):
         """Where the 3D printer’s Moonraker sits, if he has said."""
@@ -43022,11 +43053,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         the tab he means is usually in the other one."""
         rows = []
         low = str(text or "").lower()
+        here = self.current()
+        private_here = bool(getattr(here, "private", False))
         for window in list(WINDOWS):
             if window is self or not low:
                 continue
             try:
                 for _index, view in window._real_tabs():
+                    # a private window's tabs are not offered in an
+                    # ordinary one's drop-down
+                    if getattr(view, "private", False) and not private_here:
+                        continue
                     url = view.url().toString()
                     title = window._tab_label(view)
                     if low not in url.lower() and low not in title.lower():
@@ -44028,7 +44065,27 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return menu
 
     # ---- developer tools: the browser’s side ----
-    def site_cookies(self, host=None, then=None):
+    @staticmethod
+    def _jar_name(profile):
+        """Which cookie jar a profile is: "private", or the name its
+        storage lives under."""
+        try:
+            if profile.isOffTheRecord():
+                return "private"
+            return str(profile.storageName() or "main")
+        except (AttributeError, RuntimeError):
+            return "main"
+
+    def _view_jar(self, view=None):
+        view = self.current() if view is None else view
+        page = self._live_page(view) if view is not None else None
+        try:
+            return self._jar_name(page.profile() if page is not None
+                                  else self.profile)
+        except (AttributeError, RuntimeError):
+            return "main"
+
+    def site_cookies(self, host=None, then=None, jar=None):
         """The cookies this site has, read out of the engine.
 
         Qt hands cookies to the embedder only as they are added, so the
@@ -44038,12 +44095,26 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         host = PasswordVault.normalize_host(
             host or (self._host_of(self.current().url())
                      if self.current() is not None else ""))
+        # one jar: the one the tab in front uses. A private window's
+        # cookies are not this window's, and cookies.txt is written to
+        # disk.
+        want = jar if jar is not None else self._view_jar()
         seen = getattr(self, "_cookie_seen", None) or {}
         rows = []
         for key, row in seen.items():
-            if not host or host in str(row.get("domain", "")) \
-                    or str(row.get("domain", "")).lstrip(".") == host:
-                rows.append(dict(row))
+            if want and str(row.get("jar") or "") != want:
+                continue
+            domain = str(row.get("domain", "")).lstrip(".").lower() \
+                .removeprefix("www.")
+            # the cookies this site is sent: its own, its subdomains',
+            # and a parent domain's -- on a label boundary, because
+            # `host in domain` made x.com's list (and its cookies.txt)
+            # carry netflix.com's session
+            if host and not (domain == host
+                             or domain.endswith("." + host)
+                             or host.endswith("." + domain)):
+                continue
+            rows.append(dict(row))
         rows.sort(key=lambda r: (r.get("domain", ""), r.get("name", "")))
         if then:
             then(rows)
@@ -44066,7 +44137,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 else 0
         except (RuntimeError, AttributeError, ValueError):
             return False
-        seen["%s|%s|%s" % (domain, path, name)] = {
+        seen["%s|%s|%s|%s" % (jar, domain, path, name)] = {
             "name": name, "value": value[:2000], "domain": domain,
             "path": path, "secure": secure, "httpOnly": http_only,
             "expires": when, "jar": str(jar or "")}
@@ -44093,7 +44164,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         scheme = "https" if secure else "http"
         self.profile.cookieStore().setCookie(
             cookie, QUrl("%s://%s%s" % (scheme, host, path or "/")))
-        self._note_cookie(cookie, jar="main")
+        self._note_cookie(cookie, jar=self._jar_name(self.profile))
         return True
 
     def delete_cookie(self, name, host=None, path="/"):
@@ -44102,15 +44173,44 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                      if self.current() is not None else ""))
         if not host:
             return False
-        cookie = QNetworkCookie(str(name).encode(), b"")
-        cookie.setDomain(host)
-        cookie.setPath(str(path or "/"))
-        self.profile.cookieStore().deleteCookie(
-            cookie, QUrl("https://%s%s" % (host, path or "/")))
+        want = str(host).lstrip(".").lower().removeprefix("www.")
+        path = str(path or "/")
+        wanted = str(name).encode()
+        # deleteCookie only takes away a cookie it is handed whole: one
+        # rebuilt from name, domain and path matches nothing (a
+        # host-only cookie never does), so it is the jar's own copy
+        # that is handed back (see watch_cookies)
+        stores = []
+        page = self._live_page(self.current()) if self.current() is not None \
+            else None
+        for store in ((page.profile().cookieStore() if page is not None
+                       else None), self.profile.cookieStore()):
+            if store is not None and all(store is not s for s in stores):
+                stores.append(store)
+        gone = 0
+        for store in stores:
+            live = getattr(store, "_live", None) or {}
+            for key, cookie in list(live.items()):
+                domain = (cookie.domain() or "").lstrip(".").lower() \
+                    .removeprefix("www.")
+                if (bytes(cookie.name()) == wanted and domain == want
+                        and (cookie.path() or "/") == path):
+                    try:
+                        store.deleteCookie(cookie)
+                    except (AttributeError, RuntimeError):
+                        continue
+                    live.pop(key, None)
+                    gone += 1
         seen = getattr(self, "_cookie_seen", None) or {}
-        seen.pop("%s|%s|%s" % (host, path or "/", name), None)
-        seen.pop(".%s|%s|%s" % (host, path or "/", name), None)
-        return True
+        dropped = 0
+        for key, row in list(seen.items()):
+            if (str(row.get("name")) == str(name)
+                    and str(row.get("path") or "/") == path
+                    and str(row.get("domain") or "").lstrip(".").lower()
+                    .removeprefix("www.") == want):
+                seen.pop(key, None)
+                dropped += 1
+        return bool(gone or dropped)
 
     def cookies_txt(self, host=None, path=None):
         """A site’s cookies as a Netscape cookies.txt, for yt-dlp and
@@ -44582,7 +44682,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     elif tag in ("strikethrough", "st"):
                         style = "text-decoration:line-through"
                     elif tag.startswith("gradient:"):
-                        parts = tag.split(":")[1:]
+                        # colours only: anything else would be pasted
+                        # text going straight into a style="" attribute
+                        parts = [self.MC_COLOURS.get(p, p) for p in
+                                 tag.split(":")[1:]]
+                        parts = [p for p in parts
+                                 if re.fullmatch(r"#[0-9a-f]{6}", p)]
                         if len(parts) >= 2:
                             style = ("background:linear-gradient(90deg,%s);"
                                      "-webkit-background-clip:text;"
@@ -44642,8 +44747,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             view = self.new_tab(QUrl("about:blank"))
         if view is None:
             return False
+        # every caller builds this out of text that is not ours (a
+        # README, a patch, a server's answer, a pasted message) and none
+        # needs script: a [x](javascript:...) link must stay a dead one
+        body = str(body)
+        if body[:15].lower() == "<!doctype html>":
+            body = body[:15] + NO_SCRIPT_META + body[15:]
+        else:
+            body = NO_SCRIPT_META + body
         try:
-            view.setHtml(str(body), QUrl())
+            view.setHtml(body, QUrl())
         except RuntimeError:
             return False
         if title:
@@ -44781,8 +44894,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                   .formatToParts(this)
                   .find(function (p) { return p.type === "timeZoneName"; });
                 var found = (here && here.value || "").match(
-                  /GMT([+-]\\d+)/);
-                if (found) return -Number(found[1]) * 60;
+                  /GMT([+-])(\\d+)(?::(\\d+))?/);
+                if (found) {
+                  /* GMT+5:30 is 330 minutes, not 300 */
+                  var minutes = Number(found[2]) * 60
+                    + Number(found[3] || 0);
+                  return found[1] === "-" ? minutes : -minutes;
+                }
               } catch (e) {}
               return getOffset.call(this);
             };
@@ -44865,7 +44983,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # the files as well as the folders: an editor saving over an
         # existing file changes the file and leaves the directory
         # listing exactly as it was
-        for child in list(root.rglob("*"))[:400]:
+        for child in itertools.islice(root.rglob("*"), 400):
             watcher.addPath(str(child))
         self._watch_view = view
         self.flash(self._ui_str("devWatching") % root.name)
@@ -45278,6 +45396,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         page.runJavaScript(
             "(function () {"
+            " window.__swList = '';"
             " if (!navigator.serviceWorker) return 'none';"
             " navigator.serviceWorker.getRegistrations().then("
             "   function (rows) {"
@@ -45300,6 +45419,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         page.runJavaScript(
             "(function () {"
+            " window.__swDropped = '';"
             " if (!navigator.serviceWorker) return 'none';"
             " navigator.serviceWorker.getRegistrations().then("
             "   function (rows) {"
@@ -45421,7 +45541,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     n, view=view))
         sizes.addSeparator()
         sizes.addAction(ui("devSizeOff")).triggered.connect(
-            lambda: self.responsive_preview("", view=view))
+            lambda: self.responsive_preview("off", view=view))
         media = pretend.addMenu(ui("devMediaMenu"))
         for label, what in (("devMediaDarkRow", "dark"),
                             ("devMediaLightRow", "light"),
@@ -45732,11 +45852,36 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return watch
         watch = self._req_watch = RequestWatch(self)
         for profile in self._all_profiles():
-            try:
-                profile.setUrlRequestInterceptor(watch)
-            except (AttributeError, RuntimeError):
-                continue
+            self._attach_watch(profile)
         return watch
+
+    def _attach_watch(self, profile):
+        """The interceptor on one jar.
+
+        Every jar, including the ones made after start-up: the private
+        jar and a virtual browser only exist once a tab asks for them,
+        long after request_watch ran, and a jar without it has no
+        filter lists, no blocked addresses, no Sec-GPC and no
+        per-site agent. An off-the-record jar gets an instance of its
+        own whose log never runs, so the request log and a HAR export
+        never carry a private window's addresses."""
+        watch = getattr(self, "_req_watch", None)
+        if watch is None:
+            return False          # request_watch attaches them all later
+        try:
+            private = bool(profile.isOffTheRecord())
+        except (AttributeError, RuntimeError):
+            private = False
+        if private:
+            quiet = getattr(self, "_req_watch_quiet", None)
+            if quiet is None:
+                quiet = self._req_watch_quiet = RequestWatch(self)
+            watch = quiet
+        try:
+            profile.setUrlRequestInterceptor(watch)
+        except (AttributeError, RuntimeError):
+            return False
+        return True
 
     def release_request_watch(self):
         """Hand it back at exit, like the notification presenter.
@@ -45751,6 +45896,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 profile.setUrlRequestInterceptor(None)
             except (AttributeError, RuntimeError, TypeError):
                 continue
+        # forgotten as well as handed back: asked for again, it is made
+        # and put on every jar afresh, rather than request_watch()
+        # answering with one no jar holds any more
+        self._req_watch = None
+        self._req_watch_quiet = None
         return True
 
     def log_requests(self, on=None):
@@ -45852,8 +46002,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return ""
         entries = []
         for row in reversed(rows):
+            # the "Z" says UTC, so the time has to be UTC
             when = time.strftime("%Y-%m-%dT%H:%M:%S",
-                                 time.localtime(row.get("t", 0)))
+                                 time.gmtime(row.get("t", 0)))
             entries.append({
                 "startedDateTime": when + "Z",
                 "time": 0,
@@ -46643,6 +46794,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if where:
                 return where
         text = tidy_typed(text)
+        if re.match(r"^\s*javascript:", text, re.I):
+            # "paste this into your address bar for free ..." is the
+            # oldest trick on a young player: what he types or pastes
+            # is never run as script in the page he is on. It is
+            # searched for like any other words. (A bookmarklet still
+            # runs: it comes through the bookmark, not through here.)
+            engine = SEARCH_ENGINES.get(
+                self.config.get("searchEngine", "google"),
+                SEARCH_ENGINES["google"])
+            return engine[1].format(
+                QUrl.toPercentEncoding(text).data().decode())
         if text.startswith(("~/", "/", "./")) or re.match(
                 r"^[A-Za-z]:[\\/]", text):
             local = Path(text).expanduser()
@@ -48679,7 +48841,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # what a page may ask of the network. One interceptor for the
         # whole browser, on every cookie jar: the rules are the same
         # wherever he is, and the per-page report is about the page in
-        # front rather than about which jar it came from.
+        # front rather than about which jar it came from. (This comment
+        # stood here with no call under it: a jar made after start-up
+        # had no interceptor at all.)
+        self._attach_watch(profile)
         self.watch_cookies(profile)
         profile.scripts().insert(self._google_script())
         # ...only if he asked for it (see _ad_skip_wanted): with this
@@ -50373,6 +50538,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # a cookie it is handed whole (name, domain and path), so this
         # is what "clear this site" has to have in hand
         store._live = {}
+        # and which jar this is, so the cookie editor and cookies.txt
+        # never mix a private window's cookies into this one's
+        store._jar = self._jar_name(profile)
 
         def added(cookie):
             store._live[(cookie.domain(), cookie.path(),
@@ -50393,6 +50561,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         def removed(cookie):
             store._live.pop((cookie.domain(), cookie.path(),
                              bytes(cookie.name())), None)
+            seen = getattr(self, "_cookie_seen", None)
+            if seen:
+                seen.pop("%s|%s|%s|%s" % (
+                    store._jar, cookie.domain(), cookie.path(),
+                    bytes(cookie.name()).decode("utf-8", "replace")), None)
             self._cookies.pop((bytes(cookie.name()).decode("utf-8", "replace"),
                                cookie.domain()), None)
         try:
