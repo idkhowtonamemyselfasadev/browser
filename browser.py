@@ -37770,7 +37770,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     #: tools whose answer the browser acts on: in the page's world a
     #: script could write window.__padWant itself and switch his tabs
     #: four times a second, so these keep their state where it cannot
-    _ISOLATED_PLAY_TOOLS = ("gamepad", "padwant")
+    #: "blurprivate" carries his own words (his name, his street, what
+    #: he never wants legible on a stream) and ran in the page's world
+    #: on every load: one `String.prototype.toLowerCase = ...` and any
+    #: site he opened while live had the list. The DOM is the same from
+    #: the isolated world; the page's prototypes are not.
+    _ISOLATED_PLAY_TOOLS = ("gamepad", "padwant", "blurprivate")
 
     def play_tool(self, name, view=None, then=None, arg=None):
         """One of the gaming tools, in the page’s own world (the ones
@@ -39602,6 +39607,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         engine’s own suggestion list."""
         view = self.current() if view is None else view
         if view is None or self._is_header(view):
+            return False
+        # nothing of his own in a private tab: the list is in the
+        # page's DOM, and a site reading back the e-mail he typed there
+        # last week knows who the private visitor is
+        if getattr(view, "private", False):
             return False
         if not self.config.get("formHistoryOn", False):
             return False
@@ -68401,12 +68411,32 @@ READ_TOOLS = {
   /* on its own, only a feed the engine is showing as XML: a page at
      /feed.xml that is really HTML stays the page it is */
   if (auto && !/xml/.test(document.contentType || "")) return "page";
-  var raw = window.__fileRaw;
-  if (raw === undefined) {
-    raw = document.body ? document.body.textContent : "";
-    window.__fileRaw = raw;
+  /* A feed the engine shows as XML is shown through its XML viewer,
+     whose text is a drawing of the tree -- "This XML file does not
+     appear to have any style information...", then the tags with
+     "..." fold marks in them -- and that never parses: measured, a
+     real application/rss+xml feed rendered nothing, which is the only
+     kind the automatic path above ever runs on. The viewer keeps the
+     feed itself, as nodes, in this element. Kept hold of, because the
+     list drawn below replaces the body it sits in. */
+  var doc = window.__feedSource
+            || document.getElementById("webkit-xml-viewer-source-xml");
+  if (doc) {
+    window.__feedSource = doc;
+  } else {
+    var raw = window.__fileRaw;
+    if (raw === undefined) {
+      raw = document.body ? document.body.textContent : "";
+      window.__fileRaw = raw;
+    }
+    doc = new DOMParser().parseFromString(raw, "text/xml");
   }
-  var doc = new DOMParser().parseFromString(raw, "text/xml");
+  /* ...and that document is still an XML one, where createElement
+     makes elements of no namespace: no style, no href, not drawn as
+     HTML. The XHTML namespace makes real ones in either kind. */
+  var make = function (tag) {
+    return document.createElementNS("http://www.w3.org/1999/xhtml", tag);
+  };
   var items = doc.querySelectorAll("item, entry");
   if (!items.length) return "0";
   var out = [];
@@ -68424,25 +68454,27 @@ READ_TOOLS = {
     });
   }
   document.body.innerHTML = "";
-  var box = document.createElement("div");
+  var box = make("div");
   box.style.cssText = "max-width:46rem;margin:0 auto;padding:2rem 1rem;"
     + "font:15px/1.6 system-ui,sans-serif";
-  var head = document.createElement("h1");
+  var head = make("h1");
   head.textContent = (doc.querySelector("channel > title, feed > title")
                       || {}).textContent || "Feed";
   box.appendChild(head);
   for (var n = 0; n < out.length; n++) {
-    var row = document.createElement("div");
+    var row = make("div");
     row.style.cssText = "margin:14px 0;padding-bottom:12px;"
       + "border-bottom:1px solid rgba(137,180,250,.2)";
-    var a = document.createElement("a");
-    a.href = out[n].url;
+    var a = make("a");
+    /* a link out of the feed's own text: a javascript: one would run
+       in this page on a click (a local feed file: in file://) */
+    if (/^https?:/i.test(String(out[n].url).trim())) a.href = out[n].url;
     a.textContent = out[n].title;
     a.style.cssText = "font-size:17px;color:#89b4fa;text-decoration:none";
-    var when = document.createElement("div");
+    var when = make("div");
     when.textContent = out[n].when;
     when.style.cssText = "color:#6c7086;font-size:12px;margin:2px 0";
-    var text = document.createElement("div");
+    var text = make("div");
     text.textContent = out[n].text;
     row.append(a, when, text);
     box.appendChild(row);

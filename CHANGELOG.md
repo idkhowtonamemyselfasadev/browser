@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part nine)
+
+- **Feeds render.** A real RSS/Atom feed is shown through the engine's XML
+  viewer, whose page text is a drawing of the tree that never parses, so "show
+  this feed as a list" rendered nothing on exactly the feeds it fires for. It
+  now reads the feed from the viewer's own copy and draws real HTML elements.
+  A feed item's `javascript:` link is no longer turned into a clickable link.
+- **Stream-safe mode no longer hands your private words to every site.** The
+  "blur private info" step runs on every page while stream-safe is on, with your
+  own list of words to hide (your name, your street...). It ran in the page's own
+  script world, where any site could catch the list with one line of code
+  (measured: a test page collected the word verbatim). It runs in the browser's
+  isolated world now, and a page can no longer switch the blur off either.
+- **A private tab isn't handed your form history.** With form history on, the
+  values you typed on a site in normal tabs were put into the page as a
+  suggestion list in private tabs too, where the site could read them back
+  (and so recognise you). Recording was already off in private tabs; offering
+  is now too.
+
 ## 2026-11-12 — line-by-line review, day 2 (part eight)
 
 - **Site blocking really blocks now.** "Block these sites", "block session-replay

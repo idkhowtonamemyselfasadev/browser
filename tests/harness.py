@@ -236,7 +236,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "jpeg": "image/jpeg", "gif": "image/gif",
                     "webp": "image/webp", "pdf": "application/pdf",
                     "zip": "application/zip",
-                    "jar": "application/java-archive"}.get(
+                    "jar": "application/java-archive",
+                    "xml": "text/xml"}.get(
                         path.rsplit(".", 1)[-1].lower(),
                         "application/octet-stream")
             self.send_response(200)

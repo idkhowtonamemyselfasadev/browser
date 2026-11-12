@@ -255,6 +255,15 @@ srv = H.Server({
     "/drive-meta": "<title>dm</title><meta http-equiv=refresh "
                    "content='0;url=/files/meta.torrent'>",
     "/twhome": "<title>tw</title><p>home</p>",
+    "/hooked": "<title>h</title><script>window.__seen=[];"
+               "var o=String.prototype.toLowerCase;"
+               "String.prototype.toLowerCase=function(){"
+               "window.__seen.push(String(this));return o.call(this)};"
+               "</script><p id=w>zz Qwsecretname zz</p><p>hello</p>",
+    "/feedjs.xml": b"<rss><channel><title>F</title>"
+                   b"<item><title>bad</title><link>javascript:alert(1)</link></item>"
+                   b"<item><title>good</title><link>https://ok.example/1</link></item>"
+                   b"</channel></rss>",
     "/twother": "<title>other</title><p id=other>somewhere else</p>",
     "/sneaky": "<title>s</title><form>"
                "<input id=full name=fullname autocomplete=name>"
@@ -1889,6 +1898,46 @@ finally:
 _val = H.js(v26, "document.getElementById('tq').value")
 check("text inserted into a field is not recoloured by the theme",
       _changed and _val == _text, str((_changed, _val)))
+
+# what he typed on a site is not offered back to it in a private tab
+_fh_on = br.config.get("formHistoryOn")
+br.config["formHistoryOn"] = True
+_fh = br.form_history()
+_fh_was = dict(_fh)
+_fh["127.0.0.1"] = {"who": ["me@example.invalid"]}
+_pv = br.new_tab(private=True); H.spin(300)
+H.load(_pv, srv.url("/twhome")); H.spin(500)
+_offered_priv = br.offer_form_history(view=_pv)
+_offered_norm = br.offer_form_history(view=v26)
+check("a private tab is not handed his form history for the site",
+      _offered_priv is False and _offered_norm is True,
+      str((_offered_priv, _offered_norm)))
+_fh.clear(); _fh.update(_fh_was)
+if _fh_on is None:
+    br.config.pop("formHistoryOn", None)
+else:
+    br.config["formHistoryOn"] = _fh_on
+
+# a feed's own links are web links or nothing
+v27 = br.new_tab(); H.spin(300)
+H.load(v27, srv.url("/feedjs.xml")); H.spin(600)
+br.read_page_tool("renderfeed", view=v27, arg=False); H.spin(500)
+_hrefs = H.js(v27, "Array.prototype.map.call(document.querySelectorAll('a'),"
+                   "function(a){return a.getAttribute('href')||''}).join('|')")
+check("a feed item's javascript: link is not made a link",
+      isinstance(_hrefs, str) and "javascript" not in _hrefs.lower()
+      and "https://ok.example/1" in _hrefs, str(_hrefs))
+
+# the words he blurs while streaming are not handed to the page
+v28 = br.new_tab(); H.spin(300)
+H.load(v28, srv.url("/hooked")); H.spin(500)
+br.play_tool("blurprivate", view=v28, arg=["Qwsecretname"]); H.spin(400)
+_seen = H.js(v28, "JSON.stringify(window.__seen || [])") or "[]"
+_blurred = H.js(v28, "document.getElementById('w').dataset.blurred || ''")
+check("the stream-safe words never pass through the page's own functions",
+      '"Qwsecretname"' not in _seen and _blurred == "1",
+      str((_seen[:200], _blurred)))
+br.play_tool("blurprivate", view=v28, arg=False)
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
