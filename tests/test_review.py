@@ -279,6 +279,23 @@ srv = H.Server({
                   "<textarea class=t2></textarea></form>",
     "/auth/panel": "<title>panel</title><p>you are in</p>",
     "/blockme": "<title>bm</title><p id=b>served</p>",
+    "/twovids": "<title>tv</title><script>"
+                "var a=document.createElement('video');a.id='same';"
+                "a.src='/clip.webm';document.documentElement.appendChild(a);"
+                "var b=document.createElement('video');b.id='other';"
+                "b.src=location.protocol+'//localhost:'+location.port"
+                "+'/clip.webm';document.documentElement.appendChild(b)"
+                "</script>",
+    "/fr": "<html lang=fr><title>fr</title><p>Bonjour tout le monde, ceci "
+           "est une page en fran\u00e7ais pour le test.</p></html>",
+    "/tpframe": "<title>tp</title><script>window.got=null;"
+                "addEventListener('message',function(e){window.got=e.data});"
+                "var f=document.createElement('iframe');f.src=location.protocol"
+                "+'//localhost:'+location.port+'/tpset';"
+                "document.body?document.body.appendChild(f):"
+                "document.documentElement.appendChild(f)</script>",
+    "/tpset": "<script>document.cookie='tp=1; path=/';"
+              "parent.postMessage(document.cookie,'*')</script>",
     "/vidfile": "<title>v</title><video src='file:///etc/hostname'></video>",
     "/notif": "<title>n</title><script>window.asked='';"
               "Notification.requestPermission().then(function(r){"
@@ -1419,6 +1436,318 @@ check("a page's file:// video is not handed to ffmpeg",
 for _n in ("caption_tools", "_caption_job"):
     br.__dict__.pop(_n, None)
 br.config["ffmpegPath"] = _ff_was
+
+# "block third-party cookies" holds in a jar made after it was switched on.
+# (Asked of the filter itself: over plain http the engine's own SameSite
+# default already refuses a cross-site frame's cookie, so the cookie alone
+# cannot show whether the filter is there.)
+_asked_tp = []
+def _rec_filter(request):
+    _asked_tp.append((request.firstPartyUrl.toString(), request.thirdParty))
+    return True
+br._cookie_wanted = _rec_filter
+br.config["blockThirdCookies"] = True
+br.apply_cookie_filter()
+_tpv = br.new_tab(session="tpcookievb"); H.spin(400)
+H.load(_tpv, srv.url("/tpframe?latejar=1")); H.spin(1500)
+check("the third-party cookie filter is asked in a jar made later",
+      any("latejar" in u and third for u, third in _asked_tp),
+      str(len(_asked_tp)))
+br.__dict__.pop("_cookie_wanted", None)
+br.config["blockThirdCookies"] = False
+br.apply_cookie_filter()
+
+# the Tor window really goes through Tor: what its own start-up makes of
+# its config is a SOCKS proxy, and WebRTC is off in it
+import subprocess as _sp
+_tor_dir = _xdir / "tor-profile"
+_tc = br._prepare_tor_profile(_tor_dir)
+check("the Tor profile names Tor as its proxy",
+      B._proxy_launch_flags(dict(_tc)) == "--proxy-server=socks5://127.0.0.1:9050",
+      B._proxy_launch_flags(dict(_tc)))
+_env = dict(_os.environ, BROWSER_HOME=str(_tor_dir),
+            QT_QPA_PLATFORM="offscreen",
+            QTWEBENGINE_CHROMIUM_FLAGS=br.tor_command()["env"]
+            ["QTWEBENGINE_CHROMIUM_FLAGS"])
+_child = _sp.run([B.sys.executable, "-c",
+                  "import os,sys; sys.argv=['x']; import browser as B; "
+                  "B._install_proxy_flags(); "
+                  "print(os.environ['QTWEBENGINE_CHROMIUM_FLAGS'])"],
+                 cwd=str(B.APP_DIR), env=_env, capture_output=True,
+                 text=True, timeout=60)
+check("...and the Tor window's own start-up keeps it",
+      "--proxy-server=socks5://127.0.0.1:9050" in _child.stdout,
+      _child.stdout[-200:] or _child.stderr[-200:])
+check("...with WebRTC switched off there",
+      _tc.get("guardNoWebRTC") is True)
+
+# the in-page answer bars answer his clicks, not the page's
+v22 = br.new_tab(); H.spin(300)
+H.load(v22, srv.url("/twhome")); H.spin(500)
+br.tabs.setCurrentWidget(v22); H.spin(100)
+br.offer_fullscreen_rule("127.0.0.1", view=v22); H.spin(400)
+H.js(v22, "var b=document.querySelector('#__fsbar button');"
+          "b && b.click(); !!b")
+H.spin(1200)
+check("a page pressing 'keep' on the fullscreen bar earns nothing",
+      br.fullscreen_rule("127.0.0.1") is None,
+      str(br.fullscreen_rule("127.0.0.1")))
+br.offer_translation_bar("fr", view=v22); H.spin(400)
+H.js(v22, "var bs=document.querySelectorAll('#__trbar button');"
+          "bs.length > 1 && bs[1].click(); bs.length")
+H.spin(1200)
+check("...nor 'always' on the translation bar",
+      "fr" not in br.translate_rules(), str(br.translate_rules()))
+
+# "always translate" does not send a private tab's page to Google by itself
+_sent_tr = []
+_tp_was = br._translate_page
+br._translate_page = lambda lang: _sent_tr.append(lang)
+_ct2 = br.caption_tools
+br.caption_tools = lambda: {"captionTranslator": ""}
+_rules_was = dict(br.translate_rules())
+br.config["translateRules"] = {"fr": "always"}
+_pv5 = br.new_private_tab(); H.spin(300)
+H.load(_pv5, srv.url("/fr")); H.spin(1500)
+br.maybe_offer_translation(_pv5); H.spin(800)
+check("a private tab's page is not sent to the translator by itself",
+      _sent_tr == [], str(_sent_tr))
+br.__dict__.pop("_translate_page", None)
+br.__dict__.pop("caption_tools", None)
+br.config["translateRules"] = _rules_was
+
+# a workspace keeps the ordinary tabs, never a private one
+_pv6 = br.new_private_tab(); H.spin(300)
+H.load(_pv6, srv.url("/twother?ws-private")); H.spin(600)
+_ws_was = dict(br.workspaces())
+_saved_ws = br.save_workspace("review-ws")
+check("saving a workspace leaves the private tab out",
+      _saved_ws is not False
+      and not any("ws-private" in r["u"] for r in _saved_ws), str(_saved_ws)[:200])
+br.config["workspaces"] = _ws_was
+br.config["workspaceNow"] = ""
+
+# "reddit.com -> old.reddit.com" means the site, once: not www.old.,
+# not notreddit.com, and never old.old.reddit.com in a loop
+_rw_was = br.config.get("urlRewrites")
+br.config["urlRewrites"] = ["reddit.com -> old.reddit.com"]
+_rw = lambda u: br.rewrite_url(B.QUrl(u)).toString()
+check("a host rule takes the site to the new host",
+      _rw("https://www.reddit.com/r/x") == "https://old.reddit.com/r/x"
+      and _rw("https://reddit.com/r/y") == "https://old.reddit.com/r/y",
+      str((_rw("https://www.reddit.com/r/x"), _rw("https://reddit.com/r/y"))))
+check("...and leaves the new host alone (no rewrite loop)",
+      _rw("https://old.reddit.com/r/x") == "https://old.reddit.com/r/x",
+      _rw("https://old.reddit.com/r/x"))
+check("...and a look-alike host alone",
+      _rw("https://notreddit.com/") == "https://notreddit.com/",
+      _rw("https://notreddit.com/"))
+br.config["urlRewrites"] = _rw_was
+
+# live captions listen to the machine's output, not the microphone, and
+# what they say is never put into the page
+_cp = br._caption_record_args("/usr/bin/parec", "/tmp/x.wav", 3)
+_cf = br._caption_record_args("/usr/bin/ffmpeg", "/tmp/x.wav", 3)
+check("live captions record the output's monitor",
+      "--device=@DEFAULT_MONITOR@" in _cp
+      and _cf[_cf.index("-i") + 1] == "@DEFAULT_MONITOR@", str((_cp, _cf)))
+br.caption_overlay("words from a call in another program", view=v15)
+H.spin(200)
+check("...and the caption line is the browser's, not the page's",
+      br.caption_text(v15) == "words from a call in another program"
+      and H.js(v15, "!!document.getElementById('__captions')") is False)
+br.caption_overlay("", view=v15, clear=True)
+
+# page text handed to a translator can never be read as one of its options
+class _FakeProc2:
+    started = []
+    def __init__(self, *a, **k): pass
+    def start(self, prog, args): _FakeProc2.started.append([prog] + list(args))
+    class _Sig:
+        def connect(self, *a): pass
+    finished = _Sig()
+_real_qp2 = B.QProcess
+B.QProcess = _FakeProc2
+for _tool in ("/usr/bin/trans", "/usr/bin/argos-translate", "/opt/mytr"):
+    br.caption_tools = lambda t=_tool: {"captionTranslator": t,
+                                        "captionRecorder": "",
+                                        "captionTranscriber": ""}
+    br.run_translator("--output=/tmp/review-pwned")
+B.QProcess = _real_qp2
+br.__dict__.pop("caption_tools", None)
+check("a paragraph that looks like an option is not one",
+      len(_FakeProc2.started) == 3
+      and all(not row[-1].startswith("-") for row in _FakeProc2.started),
+      str(_FakeProc2.started))
+
+# deleting history takes what was kept about those pages with it
+_hw = list(br.history)
+_pi_was = br.config.get("pageIndex")
+br.history[:] = [{"url": "https://gone.example/p", "title": "g", "t": 5},
+                 {"url": "https://kept.example/q", "title": "k", "t": 6}]
+br.config["pageIndex"] = {"https://gone.example/p": "secret words",
+                          "https://kept.example/q": "other words"}
+_th = br.thumbs_dir() / (br._thumb_name("https://gone.example/p") + ".png")
+_th.parent.mkdir(parents=True, exist_ok=True)
+_th.write_bytes(b"png")
+br.delete_history_entries(["https://gone.example/p"])
+check("deleting a page from the history drops its indexed words and picture",
+      list(br.config.get("pageIndex") or {}) == ["https://kept.example/q"]
+      and not _th.exists(), str(br.config.get("pageIndex")))
+br.clear_history(undoable=False)
+check("...and clearing the history drops the whole index",
+      not br.config.get("pageIndex"), str(br.config.get("pageIndex")))
+_now = int(B.time.time())
+br.history[:] = [{"url": "https://old.example/a", "title": "a", "t": _now - 90 * 86400},
+                 {"url": "https://again.example/b", "title": "b", "t": _now - 90 * 86400},
+                 {"url": "https://again.example/b", "title": "b", "t": _now}]
+br.config["pageIndex"] = {"https://old.example/a": "old words",
+                          "https://again.example/b": "read again"}
+br.prune_history(30)
+check("pruning drops the words of a page gone from the history, not of one "
+      "read again since", list(br.config["pageIndex"]) ==
+      ["https://again.example/b"], str(br.config.get("pageIndex")))
+br.history[:] = [{"url": "https://hour.example/c", "title": "c", "t": _now - 60}]
+br.config["pageIndex"]["https://hour.example/c"] = "this hour"
+br.delete_history_range(since=_now - 3600)
+check("...and 'delete the last hour' drops that hour's words",
+      "https://hour.example/c" not in br.config["pageIndex"],
+      str(br.config.get("pageIndex")))
+br.history[:] = _hw
+br.config["pageIndex"] = _pi_was or {}
+
+# mono / balance never silence a video from another origin
+v23 = br.new_tab(); H.spin(300)
+H.load(v23, srv.url("/twovids")); H.spin(800)
+_a11y_was = dict(br.config.get("a11y") or {})
+br.config.setdefault("a11y", {})["monoAudio"] = True
+br.apply_audio_shape(); H.spin(500)
+check("a same-origin video is shaped, a cross-origin one is left as it is",
+      H.js(v23, "!!document.getElementById('same').__shape") is True
+      and H.js(v23, "document.getElementById('other').__shape === undefined")
+      is True, str((H.js(v23, "!!document.getElementById('same').__shape"),
+                    H.js(v23, "!!document.getElementById('other').__shape"))))
+br.config["a11y"] = _a11y_was
+
+# a page's address cannot close the error page's script
+_eh = br.error_page_html("http://x.example/</script><script>window.__p=1"
+                         "</script>", "boom")
+check("an address with </script> in it stays inside the error page's script",
+      "</script><script>window.__p" not in _eh, _eh[-300:])
+
+# a site he never records in one virtual browser is not recorded in a tab
+# of that browser, whichever browser is in front
+v24 = br.new_tab(); H.spin(300)
+H.load(v24, srv.url("/twhome")); H.spin(500)
+_sess_was = getattr(v24, "session", None)
+v24.session = "work"
+_nh_was = br.config.get("noHistoryPerSession")
+_hist_was, _act_was = list(br.history), br.active_session
+br.config["noHistoryPerSession"] = {"work": ["127.0.0.1"]}
+br.active_session = "main"
+_n = len(br.history)
+br._title_changed(v24, "never written")
+check("never-record follows the tab's own virtual browser",
+      not any(e.get("title") == "never written" for e in br.history),
+      str(br.history[-1:]))
+br.config["noHistoryPerSession"] = {}
+br._title_changed(v24, "written with its browser")
+_last = [e for e in br.history if e.get("title") == "written with its browser"]
+check("...and the history labels the page with the tab's browser",
+      bool(_last) and _last[-1].get("s") == "work", str(_last))
+br.history[:] = _hist_was
+br.active_session = _act_was
+v24.session = _sess_was
+if _nh_was is None:
+    br.config.pop("noHistoryPerSession", None)
+else:
+    br.config["noHistoryPerSession"] = _nh_was
+
+# what is kept or copied is the page's title, not the strip's label
+v25 = br.new_tab(); H.spin(300)
+H.load(v25, srv.url("/twhome")); H.spin(600)
+br.tabs.setCurrentWidget(v25); H.spin(100)
+_i25 = br.tabs.indexOf(v25)
+v25.page().setAudioMuted(True); br._refresh_tab_label(v25); H.spin(100)
+_marked = br.tabs.tabText(_i25)
+_md = br.copy_link_as("markdown")
+_bm_was = list(br.bookmarks)
+br.add_bookmark_here(0)
+_bm = br.bookmarks[-1] if len(br.bookmarks) > len(_bm_was) else {}
+check("a muted tab is bookmarked and copied by its page title",
+      _marked.startswith(br.MUTE_MARK) and _bm.get("title") == "tw"
+      and _md.startswith("[tw]"), str((_marked, _bm.get("title"), _md)))
+br.bookmarks[:] = _bm_was
+br.save_bookmarks()
+v25.page().setAudioMuted(False); br._refresh_tab_label(v25)
+br.pin_tab(br.tabs.indexOf(v25), on=True); H.spin(200)
+_st = [e for e in br.tab_state() if e.get("u") == v25.url().toString()]
+check("...and a pinned one keeps its title in the saved session",
+      br.tabs.tabText(br.tabs.indexOf(v25)) == "" and _st
+      and _st[0].get("t") == "tw", str(_st))
+br.pin_tab(br.tabs.indexOf(v25), on=False)
+
+# the wizard's "switch it off again" only undoes the wizard's own
+# master password, never one he set before and has unlocked
+if not br.vault_lock.enabled():
+    br._master_by_wizard = False
+    _on = br.vault_lock.enable("review-pass-1234")
+    br.vault = br.make_vault()
+    _after = br.clear_setup_master()
+    check("the wizard cannot take off a master password it did not set",
+          _on and br.vault_lock.enabled(), str(_after))
+    br.vault_lock.disable(); br.vault = br.make_vault()
+    _set = br.setup_master("review-pass-5678")
+    br.clear_setup_master()
+    check("...but does take off the one it set itself",
+          _set.get("set") is True and not br.vault_lock.enabled(),
+          str((_set, br.vault_lock.enabled())))
+    if br.vault_lock.enabled() and not br.vault_lock.locked():
+        br.vault_lock.disable()
+    br.vault = br.make_vault()
+
+# handing a site to the outside browser never takes a private tab's link
+# out of private browsing
+_launched = []
+_cfg_was = {k: br.config.get(k) for k in ("externalHandoff", "externalSites")}
+br.config["externalHandoff"] = True
+br.config["externalSites"] = ["handoff.example"]
+br._external_which = lambda cmd: "/bin/true"
+br._launch_external = lambda cmd, url: _launched.append(url) or True
+class _PrivTab:
+    private = True
+_NT = B.QWebEnginePage.NavigationType
+_r_priv = br.maybe_open_external(B.QUrl("https://handoff.example/in"),
+                                 _NT.NavigationTypeLinkClicked, _PrivTab())
+_r_norm = br.maybe_open_external(B.QUrl("https://handoff.example/in"),
+                                 _NT.NavigationTypeLinkClicked, None)
+check("a private tab's link is not handed to the outside browser",
+      _r_priv is False and _r_norm is True and len(_launched) == 1,
+      str((_r_priv, _r_norm, _launched)))
+del br._external_which, br._launch_external
+for _k, _v in _cfg_was.items():
+    if _v is None:
+        br.config.pop(_k, None)
+    else:
+        br.config[_k] = _v
+
+# the Discord routing takes his links, not a page's script, and never a
+# private tab's
+def _route(**kw):
+    try:
+        return br.discord_route(srv.url("/twhome"), host="127.0.0.1", **kw)
+    except TypeError as _e:
+        return "error: %s" % _e
+br.config["discordRoute"] = True
+_r_script = _route(nav_type=_NT.NavigationTypeOther)
+_r_back = _route(nav_type=_NT.NavigationTypeBackForward)
+_r_priv = _route(from_view=_PrivTab(), nav_type=_NT.NavigationTypeLinkClicked)
+_r_link = _route(nav_type=_NT.NavigationTypeLinkClicked)
+check("a page's script cannot push an address into the Discord tab",
+      _r_script is False and _r_back is False, str((_r_script, _r_back)))
+check("...nor a private tab's link, while his own link still goes there",
+      _r_priv is False and _r_link is True, str((_r_priv, _r_link)))
+br.config["discordRoute"] = False
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

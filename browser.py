@@ -16997,7 +16997,8 @@ class WebPage(QWebEnginePage):
             if kind is not None and self.browser.page_handoff_request(
                     kind, url, self.url(), self._view, nav_type):
                 return False
-            if self.browser.discord_route(url, from_view=self._view):
+            if self.browser.discord_route(url, from_view=self._view,
+                                          nav_type=nav_type):
                 return False
             if self.browser.maybe_open_external(url, nav_type, self._view):
                 return False
@@ -18688,7 +18689,7 @@ class TabSwitcher(QWidget):
                 place += " \u00b7 " + group
             out.append({
                 "view": w,
-                "title": b.tabs.tabText(i) or QUrl(url).host() or "Tab",
+                "title": b._tab_title(i) or QUrl(url).host() or "Tab",
                 "url": "" if _same_page(QUrl(url), START_PAGE)
                        else url,
                 "place": place,
@@ -19026,7 +19027,7 @@ class TabOverview(QWidget):
             if group:
                 place += " \u00b7 " + group
             out.append({"view": view, "place": place,
-                        "title": b.tabs.tabText(i)
+                        "title": b._tab_title(i)
                         or getattr(view, "_last_title", "") or "Tab",
                         "url": b._tab_url(view)})
         return out
@@ -22351,6 +22352,7 @@ class Browser(QMainWindow):
         self.vault_lock = (share.vault_lock if share is not None
                            else VaultLock(CONFIG_FILE.parent))
         self._master_asking = False   # one box, however many pages ask
+        self._master_by_wizard = False  # see clear_setup_master
         #: bumped every time the vault is locked. Work that was already
         #: in flight is stale from that moment on — see vault_job.
         self._vault_epoch = 0
@@ -22429,6 +22431,7 @@ class Browser(QMainWindow):
         if crashed and self.config.get("clearHistoryExit"):
             self.history = []
             self.save_history()
+            self._forget_history_extras(None)
         self._exit_cleared = False
         # ...and the engine gets its Python back before the interpreter
         # goes (see _release_engine_hooks)
@@ -23139,7 +23142,7 @@ class Browser(QMainWindow):
                 u = self._tab_url(view)
                 if _is_pane_url(u):
                     continue  # a pane now: never saved as a tab again
-                urls.append({"u": u, "t": self.tabs.tabText(i)})
+                urls.append({"u": u, "t": self._tab_title(i)})
             data.append({"name": g,
                          "color": self.group_colors.get(g, "#6c7086"),
                          "collapsed": bool(self.collapsed.get(g)),
@@ -23171,7 +23174,7 @@ class Browser(QMainWindow):
                 continue      # never saved, so never restored
             sid = getattr(view, "session", "main")
             entry = {"u": u, "t": getattr(view, "_last_title", "")
-                     or self.tabs.tabText(i)}
+                     or self._tab_title(i)}
             # a promise he made about this tab, kept across a restart
             if getattr(view, "pinned", False):
                 entry["p"] = 1
@@ -24478,7 +24481,7 @@ class Browser(QMainWindow):
             answer = QMessageBox.question(
                 self, self._ui_str("tabLocked"),
                 literal(self._ui_str("tabLockedAsk")
-                % (self.tabs.tabText(index) or "")))
+                % (self._tab_title(index) or "")))
             if answer != QMessageBox.StandardButton.Yes:
                 return
         private = getattr(w, "private", False)
@@ -24554,7 +24557,7 @@ class Browser(QMainWindow):
         trail, at = self.tab_history(view)
         self._closed_tabs.append({
             "url": url,
-            "title": self.tabs.tabText(index),
+            "title": self._tab_title(index),
             "index": index,
             "group": self._group_of(view),
             "session": getattr(view, "session", "main"),
@@ -25594,6 +25597,34 @@ class Browser(QMainWindow):
             name = self.MUTE_MARK + name
         return name
 
+    #: what the strip puts in front of a title: silent, recording, loaded
+    #: while he was elsewhere (see _tab_label, mark_recording,
+    #: mark_background_loaded)
+    TAB_MARKS = ("\u2298 ", "\u25cf ", "\u2713 ")
+
+    def _tab_title(self, index):
+        """The page's own title for a tab: what is kept or copied.
+
+        Not the strip's text, which is a label: empty on a pinned tab
+        (it shows its icon), with a mark in front on a muted, recording
+        or loaded-behind one. Read as the title it put "\u2298 Recipe"
+        into the bookmark, the session and the copied Markdown link, and
+        bookmarked a pinned tab as its bare host name."""
+        view = self.tabs.widget(index)
+        title = str(getattr(view, "_last_title", "") or "") \
+            if view is not None else ""
+        if title:
+            return title
+        label = self.tabs.tabText(index) or ""
+        stripped = True
+        while stripped:
+            stripped = False
+            for mark in self.TAB_MARKS:
+                if label.startswith(mark):
+                    label = label[len(mark):]
+                    stripped = True
+        return label
+
     def _refresh_tab_label(self, view):
         i = self.tabs.indexOf(view)
         if i >= 0:
@@ -25677,7 +25708,7 @@ class Browser(QMainWindow):
             return
         name, ok = QInputDialog.getText(
             self, self._ui_str("tabRename"), self._ui_str("tabRenameAsk"),
-            text=getattr(view, "tab_name", None) or self.tabs.tabText(index))
+            text=getattr(view, "tab_name", None) or self._tab_title(index))
         if not ok:
             return
         view.tab_name = name.strip() or None
@@ -25816,7 +25847,7 @@ class Browser(QMainWindow):
             if url.scheme() not in ("http", "https"):
                 continue
             text = url.toString()
-            title = self.tabs.tabText(i).strip() or text
+            title = self._tab_title(i).strip() or text
             lines.append("[%s](%s)" % (title, text) if markdown else text)
         return "\n".join(lines)
 
@@ -26039,7 +26070,7 @@ class Browser(QMainWindow):
                 continue
             if len(self.bookmarks) >= BOOKMARKS_MAX:
                 break
-            title = (self.tabs.tabText(i) or "").strip() or url.host()
+            title = (self._tab_title(i) or "").strip() or url.host()
             self.bookmarks.append({
                 "id": max((e["id"] for e in self.bookmarks), default=0) + 1,
                 "type": "link", "title": title[:300], "url": url.toString(),
@@ -26152,7 +26183,7 @@ class Browser(QMainWindow):
                 self.pin_tab(at, True)
             elif what == "bookmark":
                 self.add_bookmark_url(view.url().toString(),
-                                      self.tabs.tabText(at))
+                                      self._tab_title(at))
             elif what == "sleep":
                 self.sleep_tab(view, True)
             elif what == "aside":
@@ -26622,7 +26653,7 @@ class Browser(QMainWindow):
             if not url or _is_pane_url(url) or _same_page(QUrl(url),
                                                           START_PAGE):
                 continue
-            entry = {"u": url, "t": self.tabs.tabText(i),
+            entry = {"u": url, "t": self._tab_title(i),
                      "s": getattr(view, "session", "main")}
             group = self._group_of(view)
             if group:
@@ -27158,7 +27189,7 @@ class Browser(QMainWindow):
         view = self.tabs.widget(index)
         if view is None or self._is_header(view):
             return None
-        title = self.tabs.tabText(index)
+        title = self._tab_title(index)
         state = {"group": self._group_of(view),
                  "session": getattr(view, "session", "main"),
                  "title": title, "index": index}
@@ -27750,7 +27781,7 @@ class Browser(QMainWindow):
         if not tabs:
             menu.addAction(self._ui_str("mediaNoSound")).setEnabled(False)
         for i, view in tabs:
-            title = self.tabs.tabText(i) or view.url().host()
+            title = self._tab_title(i) or view.url().host()
             sub = menu.addMenu(title[:50])
             sub.addAction(self._ui_str("mediaGoTo")).triggered.connect(
                 lambda _, v=view: self.focus_tab(v))
@@ -27814,7 +27845,7 @@ class Browser(QMainWindow):
             self.flash(self._ui_str("shotFailed"))
             return None
         view = self.current()
-        title = self.tabs.tabText(self.tabs.indexOf(view)) if view else ""
+        title = self._tab_title(self.tabs.indexOf(view)) if view else ""
         host = view.url().host() if view is not None and hasattr(view, "url") \
             else ""
         if copy:
@@ -28180,11 +28211,12 @@ class Browser(QMainWindow):
             # with it, and `host in key` did the same to permissions
             name = (name or "").lower().removeprefix("www.")
             return name == host or name.endswith("." + host)
-        before = len(self.history)
+        before, old = len(self.history), self.history
         self.history = [e for e in self.history
                         if not this_site(QUrl(e.get("url", "")).host())]
         if len(self.history) != before:
             self.save_history()
+            self._history_dropped(old)
         perms = dict(self.config.get("permissions") or {})
         for key in list(perms):
             origin = str(key).rpartition("|")[0] or str(key)
@@ -31132,6 +31164,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         if view is None or getattr(view, "private", False):
             return False
+        if self.history_encrypted():
+            # the index is the config, which is not encrypted: the words
+            # of every page read would sit beside a sealed history in
+            # the clear
+            return False
         if url.scheme() not in ("http", "https"):
             return False
         if self.site_rule_on("noHistorySites", url.host()):
@@ -31188,7 +31225,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current()
         if url is None and view is not None and hasattr(view, "url"):
             url = view.url().toString()
-            title = title or self.tabs.tabText(self.tabs.indexOf(view))
+            title = title or self._tab_title(self.tabs.indexOf(view))
         url = clean_url((url or "").strip())
         if not url.startswith(("http://", "https://")):
             return False
@@ -31266,7 +31303,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             seen.setdefault(pid, i)
             rows.append({
                 "index": i, "view": view,
-                "title": self.tabs.tabText(i) or view.url().host(),
+                "title": self._tab_title(i) or view.url().host(),
                 "host": view.url().host(),
                 "pid": cost.get("pid", 0),
                 "bytes": 0 if shared else cost.get("bytes", 0),
@@ -31320,7 +31357,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             url = view.url().toString()
         except RuntimeError:
             return ""
-        lines = [self.tabs.tabText(self.tabs.indexOf(view)) or url, url[:90]]
+        lines = [self._tab_title(self.tabs.indexOf(view)) or url, url[:90]]
         session = getattr(view, "session", "main")
         if session != "main":
             for entry in self.sessions:
@@ -33408,11 +33445,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 profile.clearHttpCache()
                 done += 1
             if "history" in what:
-                before = len(self.history)
+                before, old = len(self.history), self.history
                 self.history = [e for e in self.history
                                 if e.get("s", "main") != sid]
                 if len(self.history) != before:
                     self.save_history()
+                    self._history_dropped(old)
                     done += 1
             if "downloads" in what and sid == "main":
                 self.downloads = []
@@ -38288,7 +38326,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 continue
         return None
 
-    def discord_route(self, url, from_view=None, host="discord.com"):
+    def discord_route(self, url, from_view=None, host="discord.com",
+                      nav_type=None):
         """A Discord link into the Discord tab rather than a new one.
 
         Discord is a single page he is logged into; a second tab of it
@@ -38301,6 +38340,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not self.config.get("discordRoute", False):
             return False
         if not self._host_is(self._host_of(url), host):
+            return False
+        # His going there, not a page sending him: a link, a typed
+        # address, or where one of those was redirected to. A script's
+        # `location = "https://discord.com/..."` in any tab, or Back in
+        # one, otherwise loaded that address over the channel he had
+        # open in the Discord tab and pulled it to the front, as often
+        # as the page liked.
+        if nav_type is not None:
+            NT = QWebEnginePage.NavigationType
+            if nav_type not in (NT.NavigationTypeTyped,
+                                NT.NavigationTypeLinkClicked,
+                                NT.NavigationTypeRedirect):
+                return False
+        # ...and never out of a private tab into the signed-in one
+        if from_view is not None and getattr(from_view, "private", False):
             return False
         view = self.discord_tab(host)
         if view is None or (from_view is not None and view is from_view):
@@ -47190,10 +47244,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         url = action[1] if action and action[0] == "url" else None
         if not url:
             return False
-        before = len(self.history)
+        before, old = len(self.history), self.history
         self.history = [e for e in self.history if e.get("url") != url]
         if len(self.history) != before:
             self.save_history()
+            self._history_dropped(old)
             self.flash(self._ui_str("barForgot"))
         rest = [r for r in self.suggest_model.stringList() if r != label]
         self.suggest_model.setStringList(rest)
@@ -47239,7 +47294,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if view is None or not hasattr(view, "url"):
             return ""
         url = clean_url(view.url().toString())
-        title = (self.tabs.tabText(self.tabs.indexOf(view)) or "").strip() \
+        title = (self._tab_title(self.tabs.indexOf(view)) or "").strip() \
             or QUrl(url).host()
         if style == "html":
             text = '<a href="%s">%s</a>' % (html.escape(url),
@@ -47585,7 +47640,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if view is self.current():
                     continue
                 url = view.url().toString()
-                title = self.tabs.tabText(self.tabs.indexOf(view))
+                title = self._tab_title(self.tabs.indexOf(view))
                 if not url or (low not in url.lower()
                                and low not in title.lower()):
                     continue
@@ -48399,8 +48454,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return          # a private tab writes no history, ever
         if getattr(view, "no_history", False):
             return          # he paused this one tab (see pause_history)
-        if self.never_record(view.url().host()):
-            return          # ...or this site, in this virtual browser
+        if self.never_record(view.url().host(),
+                             session=getattr(view, "session", None)
+                             or self.active_session):
+            return          # ...or this site, in the tab's own browser
         self._history_view = view
         self._record_history(view.url(), title)
         self._history_view = None
@@ -48438,7 +48495,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # which virtual browser the page was read in, so the history
         # can be shown one browser at a time. "main" is left out: it is
         # most of every history and the file is big enough already.
-        sid = self.active_session
+        tab = getattr(self, "_history_view", None)
+        sid = (getattr(tab, "session", None) if tab is not None else None) \
+            or self.active_session
         if sid and sid != "main":
             entry["s"] = sid
         if self.history and self.history[-1]["url"] == entry["url"]:
@@ -48970,6 +49029,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # had no interceptor at all.)
         self._attach_watch(profile)
         self.watch_cookies(profile)
+        if self.config.get("blockThirdCookies", False):
+            self.apply_cookie_filter(profile)
         profile.scripts().insert(self._google_script())
         # ...only if he asked for it (see _ad_skip_wanted): with this
         # script in, YouTube stops playing for him altogether, and the
@@ -51828,7 +51889,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             def got(found, i=index, v=view):
                 found = found or {}
                 rows.append({"index": i,
-                             "title": self.tabs.tabText(i),
+                             "title": self._tab_title(i),
                              "host": self._host_of(v.url()),
                              "bytes": int(found.get("bytes", 0)),
                              "requests": int(found.get("requests", 0))})
@@ -52416,12 +52477,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         days = int(self.config.get("historyDays") or 0)
         if days > 0 and isinstance(self.history, list):
             cut = time.time() - days * 86400
-            before = len(self.history)
+            before, old = len(self.history), self.history
             self.history = [row for row in self.history
                             if float(row.get("t", 0) or 0) >= cut]
             out["history"] = before - len(self.history)
             if out["history"]:
                 self.save_history()
+                self._history_dropped(old)
         for profile in self._all_profiles():
             try:
                 profile.clearHttpCache()
@@ -52502,7 +52564,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             seen = float(getattr(view, "_last_seen", 0) or 0)
             if seen and seen < cut:
                 out.append({"index": index, "view": view,
-                            "title": self.tabs.tabText(index),
+                            "title": self._tab_title(index),
                             "days": round((time.time() - seen) / 86400, 1)})
         return out
 
@@ -52664,7 +52726,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return ""
         try:
             url = view.url().toString()
-            title = self.tabs.tabText(self.tabs.indexOf(view)) or url
+            title = self._tab_title(self.tabs.indexOf(view)) or url
         except RuntimeError:
             url, title = "", ""
         where = self.shot_dir()
@@ -52704,7 +52766,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         try:
             url = view.url().toString() if view is not None else ""
-            title = (self.tabs.tabText(self.tabs.indexOf(view)) or url
+            title = (self._tab_title(self.tabs.indexOf(view)) or url
                      if view is not None else "")
         except RuntimeError:
             url = title = ""
@@ -56053,18 +56115,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.apply_cookie_filter()
         return want
 
-    def apply_cookie_filter(self):
-        """The filter onto every jar, or off again."""
+    def apply_cookie_filter(self, profile=None):
+        """The filter onto every jar, or off again. Given one profile,
+        just that one: _make_profile asks for each jar it builds, so
+        the private jar and a virtual browser made after start-up are
+        covered too (they had no filter at all, and "block third-party
+        cookies" did not hold in them)."""
         if not self.third_cookies_blocked():
-            for profile in self._all_profiles():
+            for prof in self._all_profiles(profile):
                 try:
-                    profile.cookieStore().setCookieFilter(_cookie_pass)
+                    prof.cookieStore().setCookieFilter(_cookie_pass)
                 except (AttributeError, RuntimeError, TypeError):
                     continue
             return False
-        for profile in self._all_profiles():
+        for prof in self._all_profiles(profile):
             try:
-                profile.cookieStore().setCookieFilter(self._cookie_wanted)
+                prof.cookieStore().setCookieFilter(self._cookie_wanted)
             except (AttributeError, RuntimeError, TypeError):
                 continue
         return True
@@ -56637,6 +56703,44 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         "MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"},
                 "where": str(where)}
 
+    def _prepare_tor_profile(self, where=None):
+        """The Tor window's own config, made to send everything through
+        Tor.
+
+        The SOCKS flag in the child's environment was not enough: the
+        child strips every proxy flag it inherits at start-up and puts
+        in what ITS config says (see _install_proxy_flags), and a fresh
+        tor profile says "system". The "Tor window" was going out
+        directly -- hostnames failed on the resolver rule, but an IP
+        address, or a WebRTC connection, went out from his own address.
+        So the profile itself names Tor as its proxy, keeps no per-site
+        rule that could send a site "direct", and has WebRTC off."""
+        where = Path(str(where or (CONFIG_FILE.parent / "tor-profile")))
+        target = where / "config.json"
+        try:
+            config = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            config = {}
+        if not isinstance(config, dict):
+            config = {}
+        profiles = [p for p in (config.get("proxyProfiles") or [])
+                    if isinstance(p, dict) and p.get("name") != "tor"]
+        profiles.append({"name": "tor", "type": "socks5",
+                         "host": "127.0.0.1", "port": 9050})
+        config["proxyProfiles"] = profiles
+        config["activeProxy"] = "tor"
+        auto = config.get("proxyAuto")
+        if isinstance(auto, dict):
+            auto["rules"] = []
+        config["guardNoWebRTC"] = True
+        config["webrtcGuard"] = True
+        try:
+            where.mkdir(parents=True, exist_ok=True)
+            _write_json(target, config)
+        except OSError:
+            return None
+        return config
+
     def open_tor_window(self, url="", start=True):
         """A window of its own, through Tor, if Tor is there."""
         if not self.tor_running():
@@ -56645,9 +56749,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         plan = self.tor_command(url)
         if not start:
             return plan
-        try:
-            Path(plan["where"]).mkdir(parents=True, exist_ok=True)
-        except OSError:
+        if self._prepare_tor_profile(plan["where"]) is None:
             return False
         proc = QProcess(self)
         self._tor_proc = proc
@@ -56738,7 +56840,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             b.style.cssText = 'font:inherit;cursor:pointer;'
               + 'border-radius:7px;padding:3px 9px;border:1px solid '
               + accent + ';background:transparent;color:inherit';
-            b.onclick = function () {
+            b.onclick = function (e) {
+              /* his click only: the bar sits in the page's document,
+                 and a page pressing "keep" itself would have earned
+                 its site fullscreen for good */
+              if (!e || !e.isTrusted) return;
               window.__fsAnswer = pair[0];
               bar.remove();
             };
@@ -57368,9 +57474,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             rule = self.translate_rules().get(lang)
             if rule == "never":
                 return
-            if rule == "always":
+            local = bool(self.caption_tools().get("captionTranslator"))
+            if rule == "always" and (local
+                                     or not getattr(view, "private", False)):
                 self.translate_page_now(view=view)
                 return
+            # "always" without a translator of his own means the page
+            # goes to Google by itself -- never from a private tab: there
+            # the bar asks instead, and a press is his choice
             if not self.config.get("translateOffer", True):
                 return
             if getattr(view, "_offered_lang", "") == lang:
@@ -57412,7 +57523,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 "background:transparent;color:inherit;"
                 "border:1px solid ' + accent + ';border-radius:6px;"
                 "padding:3px 10px';"
-                "  b.onclick = function () {"
+                "  b.onclick = function (e) {"
+                # a page pressing "always" itself would send every
+                # later page in its language to the translator
+                "   if (!e || !e.isTrusted) return;"
                 "   window.__trAnswer = answer; bar.remove(); };"
                 "  bar.appendChild(b); };"
                 " mk(words.once, 'once');"
@@ -57883,10 +57997,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not name:
             return False
         rows = dict(self.workspaces())
+        # a private tab is not written down (and would come back from
+        # the config as an ordinary one); tab_state skips them the same
         rows[name] = [{"u": self._tab_url(view) or "",
-                       "t": self.tabs.tabText(index)}
+                       "t": self._tab_title(index)}
                       for index, view in self._real_tabs()
-                      if (self._tab_url(view) or "").startswith("http")]
+                      if (self._tab_url(view) or "").startswith("http")
+                      and not getattr(view, "private", False)]
         self.config["workspaces"] = rows
         self.config["workspaceNow"] = name
         self.save_config(quiet=True)
@@ -58152,7 +58269,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 continue
             rows.append({"index": index, "pid": pid,
                          "busy": round(busy, 2),
-                         "title": self.tabs.tabText(index),
+                         "title": self._tab_title(index),
                          "host": self._host_of(view.url())})
         return rows
 
@@ -58964,12 +59081,35 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         `reddit.com -> old.reddit.com` means; a rule that produces
         something that is not an address is ignored rather than
         loaded."""
-        text = url.toString() if hasattr(url, "toString") else str(url)
+        original = as_qurl(url)
+        target = QUrl(original)
+        host = (target.host() or "").lower()
+        text = target.toString()
+        hostish = re.compile(r"[a-z0-9.-]+\.[a-z]{2,}")
         for first, second in self.url_rewrites():
-            if first in text:
+            low_from, low_to = first.lower(), second.lower()
+            if hostish.fullmatch(low_from) and hostish.fullmatch(low_to):
+                # a host rule ("reddit.com -> old.reddit.com") is about
+                # the host: the site itself (or its www.), never a host
+                # that merely contains the name (notreddit.com), and
+                # never again once it is there -- old.reddit.com
+                # contains reddit.com, and as a text swap every rewrite
+                # was rewritten again, old.old.reddit.com without end
+                if host == low_to or host.endswith("." + low_to):
+                    continue
+                if host in (low_from, "www." + low_from):
+                    target.setHost(second)
+                    host = low_to
+                    text = target.toString()
+                continue
+            # anything else stays a plain swap on the address, once: a
+            # rule whose result already holds is not applied again
+            if first in text and second not in text:
                 text = text.replace(first, second)
+                target = QUrl(text)
+                host = (target.host() or "").lower()
         if not re.match(r"^[a-z][a-z0-9+.-]*:", text):
-            return as_qurl(url)
+            return original
         return QUrl(text)
 
     def set_url_rewrites(self, rows):
@@ -60167,10 +60307,25 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if (!window.AudioContext) return "no-audio";
             kit = window.__audioKit = {ctx: new AudioContext(), seen: []};
           }
+          if (kit.ctx.state === "suspended" && kit.ctx.resume) {
+            try { kit.ctx.resume(); } catch (e) {}
+          }
           var media = document.querySelectorAll("video, audio");
           for (var i = 0; i < media.length; i++) {
             var el = media[i];
             if (kit.seen.indexOf(el) >= 0) continue;
+            /* a media element from another origin, fetched without
+               CORS, plays SILENCE once it is routed through Web Audio
+               (the engine will not let a page hear what it may not
+               read). Left alone it keeps its sound, unshaped. */
+            var from = el.currentSrc || el.src || "";
+            if (from && from.indexOf("blob:") !== 0
+                && from.indexOf("data:") !== 0 && !el.crossOrigin) {
+              try {
+                if (new URL(from, location.href).origin !== location.origin)
+                  continue;
+              } catch (e) { continue; }
+            }
             try {
               var src = kit.ctx.createMediaElementSource(el);
               var panner = kit.ctx.createStereoPanner();
@@ -60352,46 +60507,64 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def caption_overlay(self, text, view=None, clear=False):
         """The words at the bottom of the page.
 
-        Drawn in the page rather than over it in a window of our own,
-        so it follows the video into fullscreen and gets the page's own
-        zoom."""
+        Drawn by the browser over the view, not into the page. What is
+        captioned is the machine's own sound -- a call in another
+        program included -- and a line put into the page's document is
+        a line the site's script can read (it was a div in the page).
+        A child of the view, so it stays over the video in fullscreen,
+        and plain text."""
         view = self.current() if view is None else view
-        page = self._live_page(view)
-        if page is None:
+        if view is None or self._is_header(view):
             return False
-        palette = theme_palette()
-        # substituted by name, never with %s: the sheet below is full
-        # of percentages and one of them would end the format string
-        code = """(function (text, bg, fg, accent, clear) {
-          var box = document.getElementById("__captions");
-          if (clear) { if (box) box.remove(); return "gone"; }
-          if (!box) {
-            box = document.createElement("div");
-            box.id = "__captions";
-            box.style.cssText = "position:fixed;left:50%;bottom:6vh;" +
-              "transform:translateX(-50%);z-index:2147483647;" +
-              "max-width:86vw;padding:10px 16px;border-radius:10px;" +
-              "font:600 20px/1.4 'JetBrainsMono Nerd Font',monospace;" +
-              "pointer-events:none;text-align:center;border:1px solid " +
-              accent;
-            box.style.background = bg;
-            box.style.color = fg;
-            (document.body || document.documentElement).appendChild(box);
-          }
-          box.textContent = text;
-          return box.textContent.length;
-        })(CAPTEXT, CAPBG, CAPFG, CAPACCENT, CAPCLEAR)"""
-        for mark, value in (("CAPTEXT", json.dumps(str(text or ""))),
-                            ("CAPBG", json.dumps(palette["crust"])),
-                            ("CAPFG", json.dumps(palette["text"])),
-                            ("CAPACCENT", json.dumps(palette["accent"])),
-                            ("CAPCLEAR", "true" if clear else "false")):
-            code = code.replace(mark, value)
+        label = getattr(view, "_caption_label", None)
+        if clear:
+            if label is not None:
+                try:
+                    label.hide()
+                    label.deleteLater()
+                except RuntimeError:
+                    pass
+            view._caption_label = None
+            return True
         try:
-            page.runJavaScript(code, APP_WORLD_ID, lambda _r: None)
+            if label is None:
+                label = QLabel(view, objectName="captions")
+                label.setTextFormat(Qt.TextFormat.PlainText)
+                label.setWordWrap(True)
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                label.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+                palette = theme_palette()
+                label.setStyleSheet(
+                    "background:%s;color:%s;border:1px solid %s;"
+                    "border-radius:10px;padding:10px 16px;font-size:20px;"
+                    "font-weight:600;" % (palette["crust"], palette["text"],
+                                          palette["accent"]))
+                view._caption_label = label
+            label.setText(str(text or ""))
+            label.setMaximumWidth(max(200, int(view.width() * 0.86)))
+            label.adjustSize()
+            label.move(max(0, (view.width() - label.width()) // 2),
+                       max(0, int(view.height() * 0.94) - label.height()))
+            label.show()
+            label.raise_()
         except RuntimeError:
             return False
         return True
+
+    def caption_text(self, view=None):
+        """What the caption line over this view says, or "" -- for the
+        test, now that it is not in the page to be read."""
+        view = self.current() if view is None else view
+        label = getattr(view, "_caption_label", None) \
+            if view is not None else None
+        try:
+            # hidden by us, not merely off screen (a window behind
+            # another is still showing its captions)
+            return label.text() if label is not None \
+                and not label.isHidden() else ""
+        except RuntimeError:
+            return ""
 
     def live_captions(self, on=None, view=None, seconds=4):
         """Captions for whatever the tab is playing, made on this
@@ -60440,6 +60613,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         seconds = int(getattr(self, "_caption_seconds", 4))
         proc = QProcess(self)
         self._caption_proc = proc
+        # the PulseAudio/PipeWire default source for whatever reads it
+        # without a device of its own (arecord through its pulse plugin,
+        # a command of his): the output's monitor, never the microphone
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert("PULSE_SOURCE", "@DEFAULT_MONITOR@")
+        proc.setProcessEnvironment(env)
         args = self._caption_record_args(recorder, chunk, seconds)
         proc.finished.connect(
             lambda _code=0, _st=None, f=chunk: self._caption_transcribe(f))
@@ -60451,17 +60630,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         machine is playing. Named here rather than in the config, so
         "parec" is enough for him to type."""
         name = Path(recorder).name
+        # "what the machine is playing" is the monitor of the default
+        # output; left unnamed, each of these records the default INPUT
+        # -- the microphone -- and the room was what got captioned
+        # (see also _caption_tick, which sets PULSE_SOURCE for arecord
+        # and for a command of his own)
         if name.startswith("parec"):
-            return [recorder, "--format=s16le", "--rate=16000",
+            return [recorder, "--device=@DEFAULT_MONITOR@",
+                    "--format=s16le", "--rate=16000",
                     "--channels=1", "--file-format=wav",
                     "--record-time=%d" % seconds, str(path)]
         if name.startswith("ffmpeg"):
-            return [recorder, "-y", "-f", "pulse", "-i", "default",
+            return [recorder, "-y", "-f", "pulse", "-i",
+                    "@DEFAULT_MONITOR@",
                     "-t", str(seconds), "-ar", "16000", "-ac", "1",
                     str(path)]
         if name.startswith("arecord"):
-            return [recorder, "-f", "S16_LE", "-r", "16000", "-c", "1",
-                    "-d", str(seconds), str(path)]
+            return [recorder, "-D", "pulse", "-f", "S16_LE", "-r", "16000",
+                    "-c", "1", "-d", str(seconds), str(path)]
         # a command of his own: it is handed the seconds and the file
         return recorder.split() + [str(seconds), str(path)]
 
@@ -60511,6 +60697,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if then:
                 then("")
             return False
+        # The text is the page's (a paragraph, a caption, a selected
+        # word) and goes on the command line as an argument of its own.
+        # One that starts with "-" is an option to the program:
+        # "--output=/home/<him>/.bashrc" is a perfectly valid paragraph
+        # and a perfectly valid translate-shell option, which writes its
+        # output over that file. A space in front makes it text again
+        # and changes nothing about the translation.
+        text = str(text or "")
+        if text.lstrip().startswith("-"):
+            text = " " + text.lstrip()
         name = Path(translator.split()[0]).name
         if name.startswith("trans"):
             args = translator.split() + ["-b", ":" + lang, text]
@@ -61708,7 +61904,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                    ui("errTitle"), html.escape(str(url)[:300]),
                    html.escape(str(reason or ui("errUnknown"))),
                    ui("errAgain"), self._error_extras(details),
-                   json.dumps(str(url))))
+                   json.dumps(str(url)).replace("</", "<\\/")))
 
     def _error_extras(self, details=None):
         """The two offers worth making on a failed load: the archived
@@ -63022,10 +63218,62 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 continue
             keep.append(entry)
         if gone:
-            self._history_undo = list(self.history)
+            old = self._history_undo = list(self.history)
             self.history = keep
             self.save_history()
+            self._history_dropped(old)
         return gone
+
+    def _forget_history_extras(self, urls=None):
+        """What was kept about pages that have left the history: their
+        words in the page index and their picture in the history grid.
+        urls=None means all of it. Left behind, "clear history" kept the
+        text of every page he had read, and a picture of it."""
+        index = self.config.get("pageIndex")
+        changed = False
+        if isinstance(index, dict) and index:
+            if urls is None:
+                index.clear()
+                changed = True
+            else:
+                for url in urls:
+                    if index.pop(str(url), None) is not None:
+                        changed = True
+        if changed:
+            self.save_config(quiet=True)
+        try:
+            folder = self.thumbs_dir()
+        except Exception:
+            folder = None
+        if folder is not None:
+            if urls is None:
+                for one in folder.glob("*.png"):
+                    try:
+                        one.unlink()
+                    except OSError:
+                        pass
+            else:
+                for url in urls:
+                    try:
+                        (folder / (self._thumb_name(str(url)) + ".png")) \
+                            .unlink(missing_ok=True)
+                    except OSError:
+                        pass
+        return changed
+
+    def _history_dropped(self, before):
+        """After the history was cut down from `before`: the extras of
+        every page that no entry holds any more. A page read again since
+        keeps its words and its picture though its older visit went
+        (prune, a time range); an empty history leaves none at all."""
+        if not self.history:
+            return self._forget_history_extras(None)
+        still = {str(e.get("url", "")) for e in self.history
+                 if isinstance(e, dict)}
+        gone = {str(e.get("url", "")) for e in (before or [])
+                if isinstance(e, dict)} - still
+        gone.discard("")
+        return self._forget_history_extras(gone) if gone else False
 
     def delete_history_entries(self, urls):
         """These exact pages, gone — what a row's own delete and the
@@ -63034,12 +63282,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not wanted:
             return 0
         before = len(self.history)
-        self._history_undo = list(self.history)
+        old = self._history_undo = list(self.history)
         self.history = [e for e in self.history
                         if e.get("url") not in wanted]
         gone = before - len(self.history)
         if gone:
             self.save_history()
+            self._history_dropped(old)
         return gone
 
     def forget_history_site(self, host):
@@ -63049,7 +63298,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return 0
         before = len(self.history)
         self._history_undo = list(self.history)
-        kept = []
+        kept, old = [], self.history
         for entry in self.history:
             where = _hist_host(entry.get("url", ""))
             if where == host or where.endswith("." + host):
@@ -63059,6 +63308,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         gone = before - len(self.history)
         if gone:
             self.save_history()
+            self._history_dropped(old)
         return gone
 
     def clear_history(self, undoable=True):
@@ -63069,6 +63319,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         gone = len(self.history)
         self.history = []
         self.save_history()
+        self._forget_history_extras(None)
         return gone
 
     def undo_history_delete(self):
@@ -63094,11 +63345,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if days <= 0:
             return 0
         cutoff = time.time() - days * 86400
-        before = len(self.history)
+        before, old = len(self.history), self.history
         self.history = [e for e in self.history if e.get("t", 0) >= cutoff]
         gone = before - len(self.history)
         if gone:
             self.save_history()
+            self._history_dropped(old)
         return gone
 
     def visit_info(self, url):
@@ -64049,7 +64301,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     lambda e=entry, r=retry: done(e, r))
                 reply.deleteLater()
                 return
-            elif code in (404, 410) or (code == 0 and reply.error()):
+            elif code in (404, 410) or (
+                    code == 0 and reply.error()
+                    != QNetworkReply.NetworkError.NoError):
                 results["dead"].append({"id": entry["id"],
                                         "url": entry["url"],
                                         "code": code})
@@ -64297,7 +64551,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if len(self.bookmarks) >= BOOKMARKS_MAX:
             return  # full: refuse it now rather than lose it later
         view = self.current()
-        title = (self.tabs.tabText(self.tabs.indexOf(view)) or "").strip()
+        title = (self._tab_title(self.tabs.indexOf(view)) or "").strip()
         if title in ("", "New tab"):
             title = url.host() or url.toString()
         self.bookmarks.append({
@@ -65224,6 +65478,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         ok = self.vault_lock.enable(text)
         del text
         if ok:
+            self._master_by_wizard = True
             self.vault = self.make_vault()
             self.vault_lock.touch()      # the idle clock starts now
             self._vault_changed()
@@ -65235,8 +65490,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         Only ever undoes what this wizard run did: switching off needs
         the vault open, and it is open exactly when this run is what
         opened it."""
+        # "Open" is not the same as "opened by this run": a master
+        # password set long ago and unlocked this morning is open too,
+        # and this slot took it off with no passphrase asked -- the one
+        # thing _master_disable exists to make impossible. Only the one
+        # the wizard itself switched on is the wizard's to switch off.
+        if not self._master_by_wizard:
+            return dict(self.master_state(), set=self.vault_lock.enabled())
         if self.vault_lock.enabled() and not self.vault_lock.locked():
             if self.vault_lock.disable():
+                self._master_by_wizard = False
                 self.vault = self.make_vault()
                 self._vault_changed()
         return dict(self.master_state(), set=False)
@@ -65661,6 +65924,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         in-app exactly as it does today, with a short line saying why,
         rather than being blackholed into a blank tab."""
         if not self.config.get("externalHandoff", False):
+            return False
+        if view is not None and getattr(view, "private", False):
+            # the other browser is not private: a link clicked in a
+            # private tab would land in its history and its cookie jar,
+            # signed in, for good. It loads here instead.
             return False
         NT = QWebEnginePage.NavigationType
         if nav_type not in (NT.NavigationTypeTyped,
@@ -66114,6 +66382,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if self.config.get("clearHistoryExit"):
             self.history = []
             self.save_history()
+            self._forget_history_extras(None)
         if self.config.get("clearCookiesExit"):
             for profile in self._all_profiles():
                 profile.cookieStore().deleteAllCookies()

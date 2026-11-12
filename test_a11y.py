@@ -490,20 +490,19 @@ check("one that is not there is not pretended to be",
       win.caption_tools()["captionRecorder"])
 win.config["captionRecorder"] = str(rec)
 check("captions start", win.live_captions(True, view=view, seconds=2) is True)
-H.wait_for(lambda: "hello" in (js("(document.getElementById('__captions')"
-                                  "||{}).textContent||''", APP) or ""), 9000)
-check("...and what the transcriber said is on the page",
-      "hello from the stub" in (js("(document.getElementById('__captions')"
-                                   "||{}).textContent||''", APP) or ""),
-      js("(document.getElementById('__captions')||{}).textContent||''", APP))
+# shown by the browser over the view, never put into the page's document:
+# what is captioned is the machine's sound, a call in another program too
+H.wait_for(lambda: "hello" in win.caption_text(view), 9000)
+check("...and what the transcriber said is shown over the page",
+      "hello from the stub" in win.caption_text(view), win.caption_text(view))
+check("...but not in the page, where its script could read it",
+      js("!!document.getElementById('__captions')", APP) is False
+      and "hello from the stub" not in (js("document.body.innerText") or ""))
 check("...with the timestamps stripped out",
-      "00:00" not in (js("(document.getElementById('__captions')||{})"
-                         ".textContent||''", APP) or ""),
-      js("(document.getElementById('__captions')||{}).textContent||''", APP))
+      "00:00" not in win.caption_text(view), win.caption_text(view))
 check("...and they stop again", win.live_captions(False, view=view) is False)
 H.spin(400)
-check("...taking the overlay with them",
-      js("!!document.getElementById('__captions')", APP) is False)
+check("...taking the overlay with them", win.caption_text(view) == "")
 got = []
 win.translate_caption("hello there", then=got.append)
 H.wait_for(lambda: got, 6000)
@@ -511,9 +510,7 @@ check("a line can be translated on this machine",
       got and got[0].startswith("uebersetzt:"), got)
 H.spin(400)
 check("...and it is shown",
-      "uebersetzt" in (js("(document.getElementById('__captions')||{})"
-                          ".textContent||''", APP) or ""),
-      js("(document.getElementById('__captions')||{}).textContent||''", APP))
+      "uebersetzt" in win.caption_text(view), win.caption_text(view))
 cues = []
 win.page_captions(view=view, then=cues.append)
 H.wait_for(lambda: cues, 4000)

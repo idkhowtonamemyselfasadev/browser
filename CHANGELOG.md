@@ -1,5 +1,76 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part seven)
+
+- **A page cannot slip options to the translator.** Text to translate goes to the
+  translator program as one argument. A paragraph that starts with `-` was read as
+  an option, so a page could make translate-shell write its output over a file of
+  its choosing (`--output=...`). Text that looks like an option is now text.
+- **Deleting history deletes what was kept about it too.** The page-text index
+  (for searching history by content) and the history grid's thumbnails stayed
+  behind after "delete", "forget this site", "clear history" and auto-pruning.
+  They go with the entries now. While the history is encrypted, no page text is
+  indexed at all, since the index sits in the plain config.
+- **Mono audio and balance leave cross-origin video alone.** Routing a video from
+  another site through the audio shaper turns it silent (the engine won't let a
+  page hear what it may not read). Those videos now keep their sound, unshaped.
+- **"Never record this site" in a virtual browser holds when another browser is
+  in front.** It was checked against the browser in front, not the tab's own, and
+  history entries were labelled the same wrong way.
+- **An address with `</script>` in it can't break out of the error page.**
+- **Dead-bookmark check:** a reply with no HTTP status was always counted as dead
+  (an enum compared as a truth value).
+- **Bookmarks, sessions and copied links get the page's title, not the tab's
+  label.** The tab strip shows marks for muted, recording and loaded-in-background
+  tabs, and nothing at all for a pinned one. That label was what got saved:
+  a muted tab was bookmarked as "⊘ Recipe", a pinned tab as its bare host name,
+  and the same went into saved sessions, workspaces, read-later, closed tabs and
+  copied Markdown links.
+- **Private tabs stay private when a site is handed to another browser.** With
+  "open these sites in another browser" on, a link clicked in a private tab went
+  to the other browser in normal mode, into its history and its signed-in cookies.
+  It loads in the private tab now.
+- **Pages can't push addresses into your Discord tab.** With Discord routing on,
+  any page's script (or Back in any tab) could load a discord.com address over
+  the channel you had open and pull the Discord tab to the front, as often as it
+  liked. Only your own links and typed addresses go there now, and never a private
+  tab's.
+- **The setup wizard can only undo its own master password.** Its "switch it back
+  off" call removed any master password while the vault was open, one set long
+  ago included, with no passphrase and no confirmation.
+
+## 2026-11-12 — line-by-line review, day 2 (part six)
+
+- **The Tor window goes through Tor.** It was started with Tor's SOCKS address in
+  its flags, but the new window's own start-up throws inherited proxy flags away
+  and puts in what its config says, and a fresh Tor profile said "system proxy".
+  So everything in the "Tor window" went out over your own connection. (Its
+  "resolve nothing locally" rule was broken too, so it didn't even stop names
+  from resolving.) The Tor profile now names Tor as its proxy, has no per-site
+  rule that could send a site past it, and has WebRTC switched off.
+- **Live captions listen to what is playing, not to your room, and stay out of the
+  page.** They recorded the microphone (every recorder was started on the default
+  input) and wrote the transcript into the page itself, where the site's script
+  could read it. They record the output now, and the caption line is drawn by the
+  browser over the page.
+- **"reddit.com -> old.reddit.com" works.** Address rewrites were a text swap: a
+  `www.` address went to a host that does not exist, `notreddit.com` was rewritten
+  too, and since `old.reddit.com` still contains `reddit.com` every rewrite was
+  rewritten again, with the tab loading old.old.old… without end. A host rule
+  takes the site to the new host, once.
+- **A saved workspace leaves private tabs out** (they would have come back as
+  ordinary tabs).
+- **A page cannot answer the browser's bars for you.** The "keep fullscreen?" and
+  "translate this page?" bars are drawn inside the page, and their buttons took
+  the page's own clicks: a site could give itself fullscreen for good, or set its
+  language to "always translate" so later pages went to the translator by
+  themselves. They answer real clicks only.
+- **"Always translate" never sends a private tab's page anywhere by itself** when
+  there is no translator on this machine; the bar asks there instead.
+- **"Block third-party cookies" holds in private tabs and in virtual browsers made
+  later.** The filter was put on the cookie jars that existed when the setting was
+  switched on, and those two are made when a tab first needs them.
+
 ## 2026-11-12 — line-by-line review, day 2 (part five)
 
 - **An encrypted history stays encrypted, and stays.** With history encryption on
