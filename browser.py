@@ -23813,6 +23813,12 @@ class Browser(QMainWindow):
         the class would quietly replace this one and the popovers
         would stop following the window."""
         super().resizeEvent(event)
+        cover = getattr(self, "_lock_cover", None)
+        if cover is not None:
+            # the lock covers the window at every size: maximised, it
+            # used to leave the page showing round the old rectangle
+            cover.setGeometry(self.rect())
+            cover.raise_()
         self._place_toast()
         self._place_perm()
         self._place_share()
@@ -28086,16 +28092,19 @@ class Browser(QMainWindow):
         gone = 0
         for profile in self._all_profiles():
             store = profile.cookieStore()
-            # Qt deletes a cookie by handing the store the cookie back,
-            # so this is the one way to clear a single site: ask the
-            # engine to drop the ones whose domain is this host. The
-            # engine keeps no list we can read, so the cookie is built
-            # from what we know: name-less deletion by domain.
-            for suffix in ("", "."):
-                cookie = QNetworkCookie()
-                cookie.setDomain(suffix + host)
-                cookie.setPath("/")
-                store.deleteCookie(cookie, QUrl("https://" + host + "/"))
+            # Qt only deletes a cookie it is handed whole. The old code
+            # built a nameless one per domain, which matched nothing:
+            # "clear this site", "sign out", the block rule and the
+            # bounce-tracker clean-up all left every cookie in place.
+            # The ones this run has seen go now; the ones still on disk
+            # from earlier runs are loaded, and go as they arrive.
+            self._delete_host_cookies(store, host)
+            try:
+                store.loadAllCookies()
+                QTimer.singleShot(
+                    500, lambda st=store: self._delete_host_cookies(st, host))
+            except (AttributeError, RuntimeError):
+                pass
             try:
                 profile.clearHttpCache()
             except (AttributeError, RuntimeError):
@@ -28110,6 +28119,24 @@ class Browser(QMainWindow):
                     "catch(e){}", APP_WORLD_ID)
                 view.reload()
         self.flash(self._ui_str("privCleared") % host)
+        return gone
+
+    @staticmethod
+    def _delete_host_cookies(store, host):
+        """Every cookie this jar holds for a site and its subdomains,
+        deleted. Answers how many."""
+        live = getattr(store, "_live", None) or {}
+        gone = 0
+        for key, cookie in list(live.items()):
+            domain = (cookie.domain() or "").lstrip(".").lower() \
+                .removeprefix("www.")
+            if domain == host or domain.endswith("." + host):
+                try:
+                    store.deleteCookie(cookie)
+                except (AttributeError, RuntimeError):
+                    continue
+                live.pop(key, None)
+                gone += 1
         return gone
 
     def forget_site(self, host):
@@ -29397,6 +29424,10 @@ class Browser(QMainWindow):
         is remembered so "do that again" has something to repeat."""
         def run():
             if getattr(self, "_chord_waiting", False):
+                return
+            # behind the lock nothing runs: Ctrl+H put the history up
+            # over the cover, Ctrl+Shift+P the password manager
+            if self.locked_now():
                 return
             if not self.key_allowed_here(action_id):
                 self.flash(self._ui_str("keyOffHereNow"))
@@ -34648,7 +34679,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         label = QLabel(box)
         label.setPixmap(QPixmap.fromImage(image))
         column.addWidget(label)
-        hint = QLabel(self._elide(text, 70), box)
+        hint = QLabel(box)
+        set_plain(hint, self._elide(text, 70))     # selected page text
         hint.setWordWrap(True)
         column.addWidget(hint)
         box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -34782,19 +34814,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                    html.escape(self._ui_str("limitBlocked") % host),
                    html.escape(self._ui_str("limitUsed") % (used, limit))))
 
-    def _web_notification(self, notification):
+    def _web_notification(self, notification, private=False):
         """A notification from a website.
 
-        Written down either way, so a missed ping can be found again.
-        While Do Not Disturb is on it is held: not shown, not thrown
-        away, and said afterwards as one line."""
+        Written down either way, so a missed ping can be found again --
+        unless it came out of a private tab: the log is the config, and
+        it kept the site, the title and the text of every private
+        notification for good. While Do Not Disturb is on it is held:
+        not shown, not thrown away, and said afterwards as one line."""
         try:
             origin = notification.origin().host() or ""
             title = notification.title()
             body = notification.message()
         except (AttributeError, RuntimeError):
             return False
-        self.note_notification(origin, title, body)
+        if not private:
+            self.note_notification(origin, title, body)
         if self.dnd_until() > time.time():
             self._held_notifications.append({"origin": origin,
                                              "title": title})
@@ -34988,13 +35023,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         source = tint_js(source.replace("ARG", json.dumps(arg)
                                         if arg is not None else "null"))
+        # the selection bar and the note of what was pressed on it live
+        # where the page cannot write: in the page's own world a site
+        # could leave {what: "copy", text: ...} there itself and have
+        # the browser put its text on his clipboard (or search, or send
+        # words to a translator) without a click
+        world = (APP_WORLD_ID if name in self._ISOLATED_READ_TOOLS
+                 else MAIN_WORLD_ID)
         try:
             view.page().runJavaScript(
-                source, MAIN_WORLD_ID,
+                source, world,
                 then if then is not None else (lambda _raw: None))
         except RuntimeError:
             return False      # the tab closed inside a timer's wait
         return True
+
+    _ISOLATED_READ_TOOLS = ("selbar", "selwanted")
 
     def reading_extras(self, view):
         """The reading helpers he has switched on, put on a page that
@@ -35371,7 +35415,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 head = "%s\n%s\n\n" % (out.get("title") or url, url)
             name = _slug(out.get("title") or "article") + (
                 ".txt" if as_text else ".md")
-            path = self.download_dir() / name
+            # never over a file that is already there: two articles
+            # with the same title, or the same one saved twice, used to
+            # replace the first without a word
+            path = self.download_dir() / self._unique_download_name(name)
             try:
                 path.write_text(head + body, encoding="utf-8")
             except OSError:
@@ -35482,13 +35529,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return self.read_page_tool("nextpage", view=view, then=done)
 
     # ---- a file that is only text ----
-    def render_file(self, how="markdown", view=None, then=None):
+    def render_file(self, how="markdown", view=None, then=None, auto=False):
         """A plain file made readable: a Markdown file rendered, a log
-        with line numbers, a feed as a list of entries."""
+        with line numbers, a feed as a list of entries. auto=True is the
+        after-load path, which only touches a document that really is a
+        plain file (see the tools)."""
         if how == "feed":
-            return self.read_page_tool("renderfeed", view=view, then=then)
+            return self.read_page_tool("renderfeed", view=view, then=then,
+                                       arg=bool(auto))
         return self.read_page_tool("renderfile", view=view, then=then,
-                                   arg=how)
+                                   arg=("auto:" + how) if auto else how)
 
     def file_kind(self, url):
         """What a local or plain file wants to be shown as, by its name.
@@ -35522,7 +35572,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         kind = self.file_kind(url)
         if not kind:
             return ""
-        self.render_file(kind, view=view)
+        self.render_file(kind, view=view, auto=True)
         return kind
 
     # ---- writing: find and replace, the field's own font ----
@@ -35569,12 +35619,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if text == "nofield":
                 self.flash(self._ui_str("textNoField"))
                 return
-            path = Path(tempfile.gettempdir()) / ("browser-field-%s.txt"
-                                                  % uuid.uuid4().hex[:8])
+            # mkstemp: created 0600 and never a name somebody else on
+            # the machine made first -- the shared temporary folder is
+            # everyone's, and a draft can be a private message
             try:
-                path.write_text(str(text or ""), encoding="utf-8")
+                handle, name = tempfile.mkstemp(prefix="browser-field-",
+                                                suffix=".txt")
+                with os.fdopen(handle, "w", encoding="utf-8") as out:
+                    out.write(str(text or ""))
             except OSError:
                 return
+            path = Path(name)
             proc = QProcess(self)
 
             def back(*_a):
@@ -36320,7 +36375,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current()
         name = _slug(self._tab_label(view) if view is not None
                      else "subtitles") + ".srt"
-        target = Path(str(path)) if path else (self.download_dir() / name)
+        target = Path(str(path)) if path else (
+            self.download_dir() / self._unique_download_name(name))
         lines = []
         for n, row in enumerate(rows, 1):
             start = float(row.get("t") or 0)
@@ -48198,7 +48254,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # one they are written down, held back while Do Not Disturb is
         # on, and otherwise handed to the desktop.
         try:
-            profile.setNotificationPresenter(self._web_notification)
+            # the jar says whether it is the private one: a private
+            # tab's notification is shown and never written down
+            profile.setNotificationPresenter(
+                lambda note, p=private: self._web_notification(
+                    note, private=p))
         except (AttributeError, TypeError):
             pass
         s = profile.settings()
@@ -49716,6 +49776,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
         `started` is the caller's stopwatch for BROWSER_TIMING=1 - only
         open_settings keeps one."""
+        if self.locked_now():
+            return            # a pane would sit on top of the lock cover
         if self._fs_view is not None:
             # one Esc at a time: the pane's, not the video's
             self._exit_page_fullscreen()
@@ -49949,8 +50011,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         store = profile.cookieStore()
         if getattr(self, "_cookies", None) is None:
             self._cookies = {}
+        # the cookies themselves, per jar: deleteCookie only takes away
+        # a cookie it is handed whole (name, domain and path), so this
+        # is what "clear this site" has to have in hand
+        store._live = {}
 
         def added(cookie):
+            store._live[(cookie.domain(), cookie.path(),
+                         bytes(cookie.name()))] = QNetworkCookie(cookie)
             # his own rule for that site first: a blocked site's cookie
             # is deleted again here, in the moment it arrived
             if self._cookie_arrived(store, cookie):
@@ -49965,6 +50033,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self._note_cookie(cookie, jar=getattr(store, "_jar", ""))
 
         def removed(cookie):
+            store._live.pop((cookie.domain(), cookie.path(),
+                             bytes(cookie.name())), None)
             self._cookies.pop((bytes(cookie.name()).decode("utf-8", "replace"),
                                cookie.domain()), None)
         try:
@@ -66652,6 +66722,9 @@ DESK_TOOLS = {
   if (!el || (el.tagName !== "TEXTAREA" && el.tagName !== "INPUT")) {
     return "nofield";
   }
+  /* a password box is not a text to edit elsewhere: the external
+     editor puts it in a file, the big editor on the screen */
+  if ((el.type || "").toLowerCase() === "password") return "nofield";
   if (text !== null) {
     el.value = text;
     el.dispatchEvent(new Event("input", {bubbles: true}));
@@ -67022,6 +67095,7 @@ READ_TOOLS = {
   }
   document.documentElement.appendChild(bar);
   bar.addEventListener("mousedown", function (e) {
+    if (!e.isTrusted) return;      /* a press, not a dispatched event */
     var what = e.target && e.target.dataset ? e.target.dataset.what : "";
     if (!what) return;
     e.preventDefault();
@@ -67128,6 +67202,14 @@ READ_TOOLS = {
 "renderfile": r"""(function (how) {
   var body = document.body;
   if (!body) return "";
+  /* on its own (after a load), only a document that IS a plain file:
+     an HTML page whose address happens to end in .md or .py -- a GitHub
+     file view, a docs site -- is a page, and rendering its text threw
+     the whole page away. Asked for from the menu, it does as told. */
+  var auto = /^auto:/.test(how || "");
+  how = String(how || "").replace(/^auto:/, "");
+  if (auto && !/^(text\/(plain|markdown|x-markdown)|application\/(json|x-yaml|toml))/
+        .test(document.contentType || "")) return "page";
   var raw = window.__fileRaw;
   if (raw === undefined) {
     var pre = body.querySelector("pre");
@@ -67204,7 +67286,10 @@ READ_TOOLS = {
   return "markdown";
 })(ARG)""",
 
-"renderfeed": r"""(function () {
+"renderfeed": r"""(function (auto) {
+  /* on its own, only a feed the engine is showing as XML: a page at
+     /feed.xml that is really HTML stays the page it is */
+  if (auto && !/xml/.test(document.contentType || "")) return "page";
   var raw = window.__fileRaw;
   if (raw === undefined) {
     raw = document.body ? document.body.textContent : "";
@@ -67253,7 +67338,7 @@ READ_TOOLS = {
   }
   document.body.appendChild(box);
   return String(out.length);
-})()""",
+})(ARG)""",
 }
 
 

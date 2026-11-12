@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part one)
+
+- **"Clear site data" really deletes the cookies.** It asked the engine to delete
+  cookies it had rebuilt from name and domain alone, which matches nothing, so every
+  cookie survived and came back on the next request. The live cookies are kept per
+  jar now and deleted whole.
+- **A page cannot fake the selection bar.** It ran in the page's world, so a script
+  could plant the text it wanted copied and click the bar's buttons with made-up
+  events. It runs in the isolated world and answers real clicks only.
+- **A locked window stays locked**: a timer-fired action and the side panel no
+  longer run behind the lock, and the cover follows the window when it is resized.
+- **Private tabs keep their notifications out of the notification history.**
+- **Opening a page never turns it into a reader view by itself.** The automatic
+  "render this file" step looked at the address only; a `.md` or `.json` URL that
+  served an HTML page got rewritten. It checks the type the server sent.
+- The external editor refuses password boxes from the page tools too and writes its
+  temp file private (0600); "save article" and "save subtitles" never overwrite a
+  file already in Downloads; the QR hint shows text as text.
+
 ## 2026-11-12 — line-by-line review, day 1 (part three: what a page can reach)
 
 - **A local .html can no longer read the files beside it.** The jars allowed local

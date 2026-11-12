@@ -245,6 +245,8 @@ srv = H.Server({
                "<input id=cc name=card autocomplete=cc-number>",
     "/quoteid": "<title>q</title><input id='a\"b'><label for='x'>x</label>"
                 "<input id=x>",
+    "/repo/blob/main/README.md": "<title>gh</title><nav id=site>menu</nav>"
+                                 "<article id=readme><h1>Hi</h1></article>",
     "/timers": "<title>t</title><script>window.ticks=0;"
                 "setInterval(function(){window.ticks++},20)</script>"})
 br = B.Browser()
@@ -504,6 +506,84 @@ try:
 finally:
     B.QMessageBox.question = _ask
     br.config["certExceptions"] = {}
+
+# the selection bar: a page cannot forge a press on it
+br.config["readSelBar"] = True
+v5 = br.new_tab(); H.spin(300)
+H.load(v5, srv.url("/urltext")); H.spin(600)
+br.read_page_tool("selbar", view=v5); H.spin(300)
+from PyQt6.QtGui import QGuiApplication as _QGA
+_QGA.clipboard().setText("mine")
+H.js(v5, "window.__selWanted={what:'copy',text:'attacker-text'};"
+         "var b=document.querySelector('button[data-what=copy]');"
+         "if(b)b.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}))")
+br._selection_bar_tick(); H.spin(600)
+check("selection bar: a page cannot set the clipboard through it",
+      _QGA.clipboard().text() == "mine", _QGA.clipboard().text())
+br.config["readSelBar"] = False
+
+# the window lock: nothing runs behind it, and it covers the whole window
+br.show(); br.new_tab(); H.spin(400)      # earlier blocks closed tabs
+br.set_browser_lock("open sesame")
+check("locked: the lock goes up", br.lock_browser() and br.locked_now())
+H.spin(200)
+br._guarded_run("history", br.toggle_history)()
+H.spin(500)
+check("locked: a shortcut does not open a pane over the lock",
+      not br.pane_open(), str(br.pane_open()))
+br.resize(br.width() + 200, br.height() + 120); H.spin(300)
+_cov = br._lock_cover
+check("locked: still locked after the shortcut", _cov is not None)
+check("locked: the cover follows the window size",
+      _cov is not None and _cov.geometry() == br.rect(),
+      str((_cov.geometry() if _cov else None, br.rect())))
+br.unlock_browser()
+br._guarded_run("history", br.toggle_history)()
+H.spin(500)
+check("unlocked (control): the same shortcut does open the pane",
+      br.pane_open(), str((br.isVisible(), br._pane and br._pane.name,
+                           br._pane and br._pane.isVisible())))
+br.set_browser_lock("")
+br.close_pane()
+
+# a private tab's notification is not written into the config
+class _Note:
+    def origin(self): return B.QUrl("https://chat.example/")
+    def title(self): return "secret title"
+    def message(self): return "secret body"
+    def show(self): pass
+    def close(self): pass
+br.config["notifyLog"] = []
+br.config["desktopNotify"] = False
+br._web_notification(_Note(), private=True)
+check("private notification: nothing in the log",
+      not br.config.get("notifyLog"), br.config.get("notifyLog"))
+br._web_notification(_Note())
+check("normal notification: still logged",
+      len(br.config.get("notifyLog") or []) == 1)
+br.config["notifyLog"] = []
+
+# a web page whose address ends in .md is a web page, not a file to render
+v6 = br.new_tab(); H.spin(300)
+H.load(v6, srv.url("/repo/blob/main/README.md")); H.spin(1500)
+check("an HTML page at a .md address keeps its own markup",
+      H.js(v6, "!!document.getElementById('site') && "
+               "!!document.getElementById('readme')"))
+
+# saving subtitles twice keeps both files (into a scratch folder: the
+# harness does not move the download folder, and his is not ours)
+br.config["downloadDir"] = str(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_rows = [{"t": 1, "e": 2, "text": "one"}]
+_a = br.save_subtitles(_rows)
+_b = br.save_subtitles(_rows)
+check("a second export does not replace the first",
+      _a and _b and _a != _b and _Path(_a).exists() and _Path(_b).exists(),
+      str((_a, _b)))
+for _f in (_a, _b):
+    try:
+        _Path(_f).unlink()
+    except OSError:
+        pass
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

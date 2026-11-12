@@ -427,16 +427,28 @@ bar = page("/a")
 # is the point of the setting
 check("the bar goes up", ask("selbar", bar) in ("on", "already"),
       ask("selbar", bar))
+win.tabs.setCurrentIndex(win.tabs.indexOf(bar))
 H.js(bar, """(function(){var r=document.createRange();
  r.selectNodeContents(document.getElementById('nums'));
- var s=window.getSelection();s.removeAllRanges();s.addRange(r);
- window.__selWanted = {what:'copy', text:'from the bar'};})()""", MAIN)
-H.spin(200)
-win.tabs.setCurrentIndex(win.tabs.indexOf(bar))
+ var s=window.getSelection();s.removeAllRanges();s.addRange(r);})()""", MAIN)
+H.spin(400)
+# a REAL press on the bar's button. The bar and its note live in the
+# browser's own world now, and only a trusted press counts: what this
+# used to do -- write window.__selWanted from the page -- is exactly
+# what a hostile page would do to set his clipboard, and it is refused
+H.js(bar, "window.__selWanted = {what:'copy', text:'planted'}", MAIN)
 win._selection_bar_tick()
-H.wait_for(lambda: QGuiApplication.clipboard().text() == "from the bar", 4000)
-check("pressing copy on it copies",
-      QGuiApplication.clipboard().text() == "from the bar",
+H.spin(300)
+check("a press the page planted copies nothing",
+      QGuiApplication.clipboard().text() != "planted",
+      QGuiApplication.clipboard().text())
+H.click(bar, "button[data-what=copy]")
+H.spin(200)
+win._selection_bar_tick()
+want = "It is 5 in long and 350 F outside."
+H.wait_for(lambda: QGuiApplication.clipboard().text() == want, 4000)
+check("pressing copy on it copies the selection",
+      QGuiApplication.clipboard().text() == want,
       QGuiApplication.clipboard().text())
 win.config["readSelBar"] = False
 check("and with the bar off nothing is polled",
