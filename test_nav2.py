@@ -275,10 +275,11 @@ print("\n(6) a note stuck to a page")
 check("a note can be written", win.page_note(text="remember this one")
       == "remember this one")
 H.spin(400)
-check("...and it is on the page",
-      js("(document.getElementById('__pagenote')||{}).textContent||''",
-         APP) == "remember this one",
-      js("(document.getElementById('__pagenote')||{}).textContent||''", APP))
+check("...and it is over the page",
+      win.page_note_text() == "remember this one", win.page_note_text())
+check("...drawn by the browser, not put in the page for the site to read",
+      js("!!document.getElementById('__pagenote')", APP) is False
+      and js("!!document.getElementById('__pagenote')", B.MAIN_WORLD_ID) is False)
 check("...and read back", win.page_note() == "remember this one")
 check("...against the address without its query",
       win.page_note(url=srv.url("/p") + "?x=1") == "remember this one",
@@ -286,8 +287,7 @@ check("...against the address without its query",
 check("another page has none", win.page_note(url=srv.url("/one")) == "")
 check("it can be taken away", win.page_note(text="") == "")
 H.spin(300)
-check("...and the box goes with it",
-      js("!!document.getElementById('__pagenote')", APP) is False)
+check("...and the box goes with it", win.page_note_text() == "")
 
 print("\n(7) the mobile version, and a site's cache")
 check("the mobile version is one switch", win.view_as_mobile(view=view)

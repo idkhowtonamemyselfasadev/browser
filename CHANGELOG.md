@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part fifteen)
+
+- **Looking something up from a private tab stays private.** "Translate the
+  selection", "define this word" and the Minecraft server/player/live-chat
+  look-ups open in the side panel, which uses your normal cookies, and the panel
+  saves its address in config.json to restore it next time. So a word picked in
+  a private tab went to Google with your signed-in session and was then kept on
+  disk inside the address. From a private tab they now open in a private tab,
+  and "this page in the side panel" refuses a private page.
+- **Idle housekeeping runs once while you're away, not over and over.** With
+  housekeeping on, every idle tick (as often as every few seconds) emptied all
+  caches again for as long as you were idle. Now it's once per idle stretch.
+- **Your note on a page stays yours.** "A note stuck to this page" was drawn as
+  a box inside the page's own document, which the site's scripts can read, so
+  whatever you wrote about a site was handed to that site on every visit. The
+  browser now draws it over the page itself, like the live captions.
+- **A recording's sound is kept with the recording, not hidden in your config
+  folder.** Recording a tab "with sound" or with a voice-over wrote the audio to
+  `recording-tab.wav` / `recording-mic.wav` in the config folder (the one that
+  gets synced and backed up). It never went into the video and was never
+  removed, so the saved video was silent and your microphone recording sat in
+  the config folder until the next one overwrote it. The sound is now saved
+  beside the video under the same name (`recording-….webm` + `recording-….wav`),
+  and deleted when you throw the recording away. (Muxing it into the video is
+  left out on purpose: frames are captured on a timer and written at a fixed
+  rate, so the two would drift.)
+
 ## 2026-11-12 — line-by-line review, day 2 (part fourteen)
 
 - **The agent client never talks to someone else's socket.** `agent.py` checks

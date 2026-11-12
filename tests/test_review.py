@@ -2002,6 +2002,74 @@ check("a rule whose word sits at its edge still blocks a longer word",
       str((_net.blocks("https://myadserver.example/x"),
            _net.blocks("https://x.test/promoimgs/a.png"))))
 
+# what a recording heard is kept beside it, or not at all -- never in the
+# config folder
+import glob as _glob, shutil as _shutil
+_touch = _shutil.which("touch")
+_tools_was = br.record_tools
+br.record_tools = lambda: {"recorder": _touch, "ffmpeg": ""}
+v30 = br.new_tab(); H.spin(300)
+H.load(v30, srv.url("/twhome")); H.spin(500)
+br.tabs.setCurrentWidget(v30); H.spin(100)
+br.start_recording(view=v30, fps=5, audio=True); H.spin(900)
+_out = br.stop_recording(save=True, fmt="gif"); H.spin(300)
+_cfg_wavs = _glob.glob(str(B.CONFIG_FILE.parent / "recording-*.wav"))
+_beside = bool(_out) and _Path(_out).with_suffix(".wav").exists()
+br.start_recording(view=v30, fps=5, audio=True); H.spin(600)
+_rec_wav = br.recording_now().audio_path if br.recording_now() else ""
+br.stop_recording(save=False); H.spin(300)
+br.__dict__.pop("record_tools", None)
+check("a recording's sound is kept beside it, and none in the config folder",
+      _beside and not _cfg_wavs, str((_out, _cfg_wavs)))
+check("...and a recording thrown away takes its sound with it",
+      bool(_rec_wav) and not _Path(_rec_wav).exists(), _rec_wav)
+
+# a word looked up in a private tab is looked up in a private tab: not in
+# the panel's ordinary jar, and not kept in config.json
+_pt = br.new_tab(private=True); H.spin(300)
+H.load(_pt, srv.url("/twhome")); H.spin(500)
+H.js(_pt, "var r=document.createRange();r.selectNodeContents(document.body);"
+          "var s=getSelection();s.removeAllRanges();s.addRange(r);1",
+     B.MAIN_WORLD_ID)
+_opened, _paneled = [], []
+_nt, _op = br.new_tab, br.open_panel
+_pu_was = br.config.get("panelUrl")
+br.new_tab = lambda *a, **k: _opened.append(k) or object()
+br.open_panel = lambda url: _paneled.append(url) or True
+try:
+    br.translate_selection(view=_pt); H.spin(500)
+    br.tabs.setCurrentWidget(_pt); H.spin(100)
+    _refused = getattr(br, "_page_to_panel", lambda: "missing")()
+finally:
+    br.new_tab, br.open_panel = _nt, _op
+    br.__dict__.pop("new_tab", None); br.__dict__.pop("open_panel", None)
+check("a private tab's translation opens in a private tab, not the panel",
+      _opened and _opened[0].get("private") is True and not _paneled
+      and br.config.get("panelUrl") == _pu_was, str((_opened, _paneled)))
+check("...and a private page is not put into the panel",
+      _refused is False and not _paneled, str(_paneled))
+_ix = br.tabs.indexOf(_pt)
+if _ix >= 0:
+    br.close_tab(_ix, ask=False)
+
+# housekeeping runs once while he is away, not on every idle tick
+_hk_cleared = []
+_hk_profiles = br._all_profiles
+class _CacheProbe:
+    def clearHttpCache(self):
+        _hk_cleared.append(1)
+br._all_profiles = lambda profile=None: [_CacheProbe()]
+_idle_was = getattr(br, "_idle_since", 0)
+br.__dict__.pop("_housekept", None)
+br._idle_since = B.time.time() - 600
+try:
+    br.housekeeping(); br.housekeeping(); br.housekeeping()
+finally:
+    br.__dict__.pop("_all_profiles", None)
+    br._idle_since = _idle_was
+check("housekeeping clears the cache once per stretch of idleness",
+      len(_hk_cleared) == 1, str(len(_hk_cleared)))
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:
