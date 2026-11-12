@@ -579,6 +579,22 @@ check("...and the object on it is the settings bridge",
 check("...with the drawer slot its own script calls",
       js(notes, "!!window.__hasDesk") is True,
       js(notes, "window.__objs"))
+# a note file is plain text in a folder he may sync: its link line is a
+# link to a web page or no link, never script in this page
+win.desk().save_note(title="planted", body="x",
+                     link="javascript:window.__pwned=1")
+H.load(notes, win.notes_url().toString())
+H.spin(800)
+js(notes, """(function(){var rows=document.querySelectorAll('.item');
+  for (var i=0;i<rows.length;i++) if (rows[i].textContent.indexOf('planted')>=0)
+    { rows[i].querySelector('button.act').click(); return 1; } return 0;})()""")
+H.spin(600)
+check("a note's javascript: link is shown, not made a link",
+      js(notes, """(function(){var a=Array.prototype.filter.call(
+        document.querySelectorAll('a'), function(x){
+          return x.textContent.indexOf('javascript:')===0;});
+        return a.length===1 && !a[0].hasAttribute('href');})()""") is True,
+      js(notes, "document.body.innerText.slice(0,200)"))
 site = page("/plain")
 check("an ordinary site has no channel in its own world at all",
       js(site, ASK_CHANNEL) == "nochannel", js(site, ASK_CHANNEL))

@@ -2240,6 +2240,9 @@
       const name = nameI.value.trim();
       if (!url || !name) return;
       if (url.indexOf("://") < 0) url = "https://" + url;
+      // the same refusal as the box above: "javascript:x//://" has a
+      // "://" in it and was kept, a link on a page holding the bridge
+      if (!/^https?:\/\//i.test(url)) return;
       links.push({ name: name, url: url });
       delete wizDraft.linkUrl;      // added: the form starts over
       delete wizDraft.linkName;

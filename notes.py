@@ -280,19 +280,55 @@ class Desk:
                 continue
         return 0
 
+    @staticmethod
+    def _todo_line(row):
+        text = " ".join(str(row.get("text", "")).split())
+        if row.get("due"):
+            text += " (due: %s)" % time.strftime(
+                "%Y-%m-%d %H:%M", time.localtime(row["due"]))
+        if row.get("link"):
+            text += " <%s>" % row["link"]
+        return "- [%s] %s" % ("x" if row.get("done") else " ", text.strip())
+
     def _write_todos(self, rows):
-        lines = []
-        for row in rows:
-            text = row.get("text", "")
-            if row.get("due"):
-                text += " (due: %s)" % time.strftime(
-                    "%Y-%m-%d %H:%M", time.localtime(row["due"]))
-            if row.get("link"):
-                text += " <%s>" % row["link"]
-            lines.append("- [%s] %s" % ("x" if row.get("done") else " ",
-                                        text.strip()))
+        """The list back into its file, around everything else in it.
+
+        The file is his as much as the browser's -- a heading, a note
+        under a to-do, a blank line between two groups -- and this used
+        to write the to-do lines alone, so ticking one off in the panel
+        deleted every other line he had put there. Now each to-do keeps
+        its own line (rows carry the line they came from as "id"), a
+        deleted one takes only its line with it, a moved one trades
+        places with the others among the to-do lines, a new one goes in
+        after the last to-do, and nothing else is touched."""
         try:
-            self.todo_path().write_text("\n".join(lines) + "\n",
+            lines = self.todo_path().read_text(
+                encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            lines = []
+        slots = [i for i, line in enumerate(lines) if self._TODO.match(line)]
+        old = [r for r in rows if isinstance(r.get("id"), int)]
+        new = [r for r in rows if not isinstance(r.get("id"), int)]
+        alive = {r["id"] for r in old}
+        kept = [i for i in slots if i in alive]
+        placed = dict(zip(kept, old))
+        out = []
+        last = -1
+        for i, line in enumerate(lines):
+            if i in placed:
+                out.append(self._todo_line(placed[i]))
+                last = len(out) - 1
+            elif i in slots:
+                continue                    # a deleted to-do: its line goes
+            else:
+                out.append(line)
+        # anything the old file had no line for (a fresh one, or one
+        # read before the file was there) after the last to-do
+        extra = [self._todo_line(r) for r in old[len(kept):] + new]
+        at = last + 1 if last >= 0 else len(out)
+        out[at:at] = extra
+        try:
+            self.todo_path().write_text("\n".join(out) + "\n",
                                         encoding="utf-8")
         except OSError:
             return False

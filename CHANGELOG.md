@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part thirteen)
+
+- **QR codes scan.** The built-in QR encoder wrote one of the two copies of the
+  format information transposed (row for column), and from version 7 up (about
+  120+ bytes, e.g. long links or otpauth:// codes) left out two of the alignment
+  squares. Its own reader forgave both, so its tests passed, but checked
+  against an independent decoder (OpenCV) **not one** of 15 test codes could be
+  read. Now all 15, versions 1 to 10, decode.
+- **Ticking off a to-do no longer deletes the rest of your to-do file.** The list
+  is a plain `todo.md` you can edit anywhere, but every change from the browser
+  rewrote it with only the `- [ ]` lines, so headings, notes and blank lines you
+  added were gone after one tick. It now changes only the to-do lines it means
+  to and leaves everything else where it is.
+- **A note file can't run script in the notes panel.** A note's `link:` line was
+  made a clickable link whatever it said, and the notes panel is one of the
+  browser's own pages. A note arriving in a synced folder with
+  `link: javascript:...` would have run there on a click. Only web links are
+  clickable now.
+- **The start page's setup wizard keeps to web links** like the start page's own
+  box does (`javascript:…//://` slipped through because it contains `://`; not
+  covered by a test, since it's typed by you).
+
 ## 2026-11-12 — line-by-line review, day 2 (part twelve)
 
 - **The fingerprint guard protects every site, not half of them.** Its canvas

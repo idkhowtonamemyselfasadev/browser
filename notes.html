@@ -218,7 +218,10 @@
                   bar, preview(text.value));
       if (note.link) {
         const link = el("a", "", note.link);
-        link.href = note.link;
+        // a web address or no link at all: a note is a plain file in a
+        // folder he may sync, and a "link: javascript:..." line in one
+        // ran in this page -- the one that holds the browser's bridge
+        if (/^https?:\/\//i.test(note.link)) link.href = note.link;
         body.appendChild(link);
       }
       text.oninput = () => {
@@ -270,7 +273,7 @@
           grow.appendChild(el("div", "", row.text));
           if (row.link) {
             const link = el("a", "sub", row.link);
-            link.href = row.link;
+            if (/^https?:\/\//i.test(row.link)) link.href = row.link;
             grow.appendChild(link);
           }
           if (row.due) grow.appendChild(el("div", "sub",

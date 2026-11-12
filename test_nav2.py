@@ -368,6 +368,28 @@ win._read_qr_image_object(plain, out.append)
 check("...and a picture with no code says so", out == [""], out)
 check("the decoder is the encoder's own tables, run backwards",
       qr.read_matrix(qr.matrix("round trip")) == "round trip")
+# what a phone reads, not only what qr.py reads back: the standard's
+# own layout, which this file's reader forgave and phones do not
+_g = qr.matrix("a standard layout")
+_n = len(_g)
+def _bits(cells):
+    v = 0
+    for one in cells:
+        v = (v << 1) | (one or 0)
+    return v
+_first = _bits([_g[8][c] for c in (0, 1, 2, 3, 4, 5, 7, 8)]
+               + [_g[7][8]] + [_g[r][8] for r in (5, 4, 3, 2, 1, 0)])
+_second = _bits([_g[_n - 1 - i][8] for i in range(7)]
+                + [_g[8][_n - 8 + i] for i in range(8)])
+check("both copies of the format information say the same thing",
+      _first == _second and _first in {qr.format_bits(l, m)
+                                       for l in "LM" for m in range(8)},
+      (hex(_first), hex(_second)))
+_g7 = qr.matrix("x" * 120)
+check("a version 7 code has its alignment square on the timing line",
+      len(_g7) == 45 and all(
+          _g7[6 + dr][22 + dc] == (1 if max(abs(dr), abs(dc)) != 1 else 0)
+          for dr in range(-2, 3) for dc in range(-2, 3)), len(_g7))
 check("...for an address", qr.read_matrix(qr.matrix(
     "https://example.com/a?b=c#d")) == "https://example.com/a?b=c#d")
 check("...for a long one",

@@ -197,9 +197,16 @@ def _reserve(grid, version):
     for i in range(8, size - 8):            # the timing lines
         grid[6][i] = 1 if i % 2 == 0 else 0
         grid[i][6] = 1 if i % 2 == 0 else 0
-    for row in ALIGN[version]:              # the alignment squares
-        for col in ALIGN[version]:
-            if grid[row][col] is not None:
+    spots = ALIGN[version]                  # the alignment squares
+    last = len(spots) - 1
+    for i, row in enumerate(spots):
+        for j, col in enumerate(spots):
+            # all but the three that would sit on a finder. Not "where
+            # nothing is drawn yet": from version 7 on, (6, 22) and
+            # (22, 6) lie on the timing lines drawn just above, and were
+            # left out -- every code of 7 and up was missing two of its
+            # alignment squares and no standard decoder could read it
+            if (i, j) in ((0, 0), (0, last), (last, 0)):
                 continue
             for dr in range(-2, 3):
                 for dc in range(-2, 3):
@@ -295,17 +302,21 @@ def _write_format(grid, level, mask):
     bits = format_bits(level, mask)
     for i in range(15):
         bit = (bits >> i) & 1
-        # the copy around the top-left finder
+        # the copy around the top-left finder: bits 0-5 down column 8,
+        # 6 and 7 at the corner, 8-14 back along row 8. It was written
+        # transposed (row for column), which this file's own reader got
+        # past by falling back to the second copy -- and a phone does
+        # not: no standard decoder read a single code this drew
         if i < 6:
-            grid[8][i] = bit
+            grid[i][8] = bit
         elif i == 6:
-            grid[8][7] = bit
+            grid[7][8] = bit
         elif i == 7:
             grid[8][8] = bit
         elif i == 8:
-            grid[7][8] = bit
+            grid[8][7] = bit
         else:
-            grid[14 - i][8] = bit
+            grid[8][14 - i] = bit
         # and the second copy, split across the other two corners
         if i < 8:
             grid[8][size - 1 - i] = bit

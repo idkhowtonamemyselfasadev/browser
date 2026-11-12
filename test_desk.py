@@ -103,6 +103,16 @@ check("a note called Todo is not the to-do list's file",
       and (_aside.note(_n["id"]) or {}).get("body") == "a note called todo"
       and [t.get("text") for t in _aside.todos()] == ["buy milk"],
       (_n["id"], (_aside.note(_n["id"]) or {}).get("body")))
+_aside.todo_path().write_text("# Work\n- [ ] task A\n  a note under A\n\n"
+                              "# Home\n- [ ] task B\n")
+_aside.toggle_todo(1)
+_aside.add_todo("task C")
+_aside.delete_todo([t for t in _aside.todos() if t["text"] == "task B"][0]["id"])
+_kept = _aside.todo_path().read_text()
+check("ticking, adding and deleting to-dos keeps his headings and notes",
+      "# Work" in _kept and "a note under A" in _kept and "# Home" in _kept
+      and "- [x] task A" in _kept and "task B" not in _kept
+      and "- [ ] task C" in _kept, _kept)
 desk = win.desk()
 check("the browser has one", desk is not None)
 check("in a folder of plain files",
