@@ -245,10 +245,29 @@ print("\n(6) the script, on a real page, with a real (fake) microphone")
 (PAGES / "call.html").write_text(
     "<!doctype html><html><body>outer"
     "<iframe src='inner.html'></iframe></body></html>", encoding="utf-8")
+# served over http on this machine rather than opened from disk: a local
+# file no longer reaches other local files (LocalContentCanAccessFileUrls
+# is off in every jar), so a file:// iframe is an opaque origin with no
+# secure context and no microphone API -- which is the browser being
+# right, and not what this suite is about. http://127.0.0.1 is a secure
+# context like any real call site.
+import functools as _ft, http.server as _hs, threading as _th  # noqa: E402
+
+
+class _Quiet(_hs.SimpleHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+
+_web = _hs.ThreadingHTTPServer(
+    ("127.0.0.1", 0), _ft.partial(_Quiet, directory=str(PAGES)))
+_th.Thread(target=_web.serve_forever, daemon=True).start()
+WEB = "http://127.0.0.1:%d/" % _web.server_address[1]
+
 view = win.current()
 page = view.page()
 key = win._call_page_key(page)
-ok = load(view, QUrl.fromLocalFile(str(PAGES / "call.html")))
+ok = load(view, QUrl(WEB + "call.html"))
 check("the page is up", ok)
 check("...on a secure page, so there is a microphone API at all",
       js(page, "!!(window.isSecureContext && navigator.mediaDevices)")
@@ -411,7 +430,7 @@ check("...and raises no flag", not FLAG.exists())
 print("\n(8b) a page cannot talk the browser out of a live microphone")
 # each of these is a hook the watcher used to read late, and each one
 # hid a microphone that was really running
-ok = load(view, QUrl.fromLocalFile(str(PAGES / "call.html")))
+ok = load(view, QUrl(WEB + "call.html"))
 check("a fresh document to attack from", ok)
 check("...starting at nothing",
       js(page, "window.__callLive()", B.APP_WORLD_ID) == 0)
@@ -481,7 +500,7 @@ check("the browser found it there too", FLAG.exists())
 check("...and hangs it on the page the frame is in", key in win._call_live,
       win._call_live)
 
-ok = load(view, QUrl.fromLocalFile(str(PAGES / "inner.html")))
+ok = load(view, QUrl(WEB + "inner.html"))
 check("the tab goes somewhere else", ok)
 poll()
 check("a new document is a page with no call on it", not FLAG.exists())

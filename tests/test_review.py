@@ -147,6 +147,34 @@ check("CSV round trip: a formula-looking password survives",
       ("c.example", "=SUM(1)") in got, got)
 check("CSV round trip: a plain one too", ("d.example", "plain") in got, got)
 
+# -- the updater's "set my changes aside" keeps every file ----------------
+import subprocess as _sp
+_repo = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_g = lambda *a: _sp.run(["git", *a], cwd=str(_repo), capture_output=True)
+_g("init", "-q"); _g("config", "user.email", "t@example.invalid")
+_g("config", "user.name", "t")
+(_repo / "a.txt").write_text("one")
+(_repo / "b c.txt").write_text("two")
+_g("add", "."); _g("commit", "-qm", "x")
+(_repo / "a.txt").write_text("one EDITED")          # " M a.txt", first line
+(_repo / "b c.txt").write_text("two EDITED")
+(_repo / "\u00fc.txt").write_text("untracked umlaut")
+_real_app = B.APP_DIR
+B.APP_DIR = _repo
+try:
+    sub = B.Bridge(None)._stash_uncommitted()
+finally:
+    B.APP_DIR = _real_app
+saved = _repo / (sub or "missing")
+check("updater stash: it went ahead", bool(sub), sub)
+check("updater stash: the first edited file is kept",
+      (saved / "a.txt").exists() and
+      (saved / "a.txt").read_text() == "one EDITED")
+check("updater stash: a name with a space is kept",
+      (saved / "b c.txt").exists())
+check("updater stash: an untracked umlaut name is kept",
+      (saved / "\u00fc.txt").exists())
+
 # -- the Minecraft ping never raises, whatever the server sends ---------
 import socket as _socket, threading as _threading
 
@@ -185,6 +213,24 @@ check("mc_ping still reads a real answer",
       got.get("up") and got.get("players") == 3 and got.get("motd") == "hi",
       got)
 
+# -- page-controlled text in a message box renders as itself --------------
+from PyQt6.QtGui import QTextDocument as _QTD
+_doc = _QTD()
+_raw = '<font size=1>tiny</font> & "x"\nline two.user.js'
+_doc.setHtml(B.literal(_raw))
+check("literal(): markup comes out as the characters typed",
+      _doc.toPlainText().replace("\u2029", "\n") == _raw,
+      repr(_doc.toPlainText()))
+import ast as _ast
+_tree = _ast.parse(open(B.__file__, encoding="utf-8").read())
+_plugin = [n for n in _ast.walk(_tree) if isinstance(n, _ast.Call)
+           and getattr(n.func, "attr", "") == "question"
+           and any(isinstance(a, _ast.Constant) and a.value == "Install plugin?"
+                   for a in n.args)]
+check("the install-plugin question wraps its page-made text",
+      _plugin and isinstance(_plugin[0].args[2], _ast.Call)
+      and getattr(_plugin[0].args[2].func, "id", "") == "literal")
+
 # -- window-level checks ---------------------------------------------------
 app = H.app()
 srv = H.Server({
@@ -205,6 +251,32 @@ br = B.Browser()
 br.show()
 H.spin(300)
 view = br.current()
+
+# a local .html cannot read the files beside it
+_fdir = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(_fdir / "secret.txt").write_text("TOPSECRET")
+(_fdir / "evil.html").write_text(
+    "<script>var x=new XMLHttpRequest();try{x.open('GET','secret.txt',"
+    "false);x.send();window.got=x.responseText}catch(e){"
+    "window.got='blocked'}</script>")
+H.load(view, B.QUrl.fromLocalFile(str(_fdir / "evil.html")).toString())
+H.spin(1500)
+check("a local page cannot read another local file",
+      H.js(view, "window.got") != "TOPSECRET", H.js(view, "window.got"))
+
+# an epub's chapter cannot run script in the reader
+import zipfile as _zip
+_book = _fdir / "evil.epub"
+with _zip.ZipFile(str(_book), "w") as z:
+    z.writestr("ch1.xhtml", "<html><body><h1>One</h1><p>text</p>"
+               "<details open ontoggle=\"window.pwned3=1\">x</details>"
+               "<svg onload=\"window.pwned4=1\"></svg></body></html>")
+br.open_epub(str(_book), view=view)
+H.spin(1500)
+check("epub: the chapter text is there",
+      "text" in (H.js(view, "document.body.innerText") or ""))
+check("epub: its event handlers never run",
+      H.js(view, "window.pwned3 === undefined && window.pwned4 === undefined"))
 
 # the page menu's Freeze: the page's own timers must stop
 H.load(view, srv.url("/timers"))
@@ -286,6 +358,152 @@ check("highlight: coloured something",
       (H.js(view, "document.querySelectorAll('#c span').length") or 0) > 0)
 check("highlight: the code reads exactly as before", before == after,
       repr(after)[:160])
+
+# private tabs: never bookmarked by "bookmark all", never lost by "aside"
+H.load(view, srv.url("/timers"))
+pv2 = br.new_private_tab()
+H.load(pv2, srv.url("/urltext"))
+H.spin(800)
+before = len(br.bookmarks)
+br.bookmark_all_tabs()
+check("bookmark all tabs skips the private one",
+      not any("/urltext" in (e.get("url") or "") for e in br.bookmarks),
+      [e.get("url") for e in br.bookmarks[before:]])
+br.set_aside()
+check("putting tabs aside leaves the private tab open",
+      pv2 in [v for _i, v in br._real_tabs()])
+br.close_tab(br.tabs.indexOf(pv2), ask=False)
+br.bring_back_aside(0)
+H.spin(300)
+
+# a desktop entry cannot be talked into a second Exec line
+_entry = br.write_desktop_entry("https://x.example/%F0?a=$(id)",
+                                "Evil\nExec=sh -c touch_pwned")
+_text = _Path(_entry).read_text() if _entry else ""
+_execs = [l for l in _text.splitlines() if l.startswith("Exec=")]
+check("desktop entry: one Exec line, the name's newline is gone",
+      len(_execs) == 1 and "touch_pwned" not in _execs[0], _execs)
+check("desktop entry: % doubled and $ escaped in Exec",
+      "%%F0" in _execs[0] and "\\$(id)" in _execs[0], _execs)
+
+# "forget this site" forgets that site and no other
+br.history = [{"url": "https://x.com/a", "title": "x", "t": 1},
+              {"url": "https://www.netflix.com/b", "title": "n", "t": 2},
+              {"url": "https://sub.x.com/c", "title": "s", "t": 3}]
+br.config["permissions"] = {"https://x.com:443|MediaAudioCapture": True,
+                            "https://netflix.com:443|Notifications": True}
+br.known_hosts = {"x.com", "netflix.com"}
+br.forget_site("x.com")
+left = sorted(e["url"] for e in br.history)
+check("forget x.com keeps netflix.com history",
+      left == ["https://www.netflix.com/b"], left)
+check("forget x.com keeps netflix.com permissions",
+      list(br.config["permissions"]) == ["https://netflix.com:443|Notifications"],
+      br.config["permissions"])
+check("forget x.com keeps netflix.com in the bar's memory",
+      br.known_hosts == {"netflix.com"}, br.known_hosts)
+
+# "clear site data" really takes the cookies away
+view = br.new_tab()
+H.spin(500)
+H.load(view, srv.url("/timers"))
+H.spin(500)
+H.js(view, "document.cookie='keepme=1; path=/; max-age=3600'")
+H.spin(300)
+br.clear_site_data("127.0.0.1")
+H.spin(2500)
+_jar = H.js(view, "document.cookie") or ""
+check("clear site data removes the site's cookie", "keepme" not in _jar,
+      _jar)
+
+# a page cannot drive the chrome with events it made up
+br.config["vimKeys"] = True
+br.config["mouse"] = {"superDrag": True, "swipeNav": True}
+br.refresh_nav()
+v1 = br.new_tab(); H.spin(300)
+H.load(v1, srv.url("/urltext")); H.spin(900)
+before_tabs = len(br._real_tabs())
+H.js(v1, "['g','t'].forEach(function(k){document.dispatchEvent("
+         "new KeyboardEvent('keydown',{key:k,bubbles:true}))});"
+         "var a=document.querySelector('a')||document.body;"
+         "a.dispatchEvent(new DragEvent('dragstart',{bubbles:true}));"
+         "document.dispatchEvent(new WheelEvent('wheel',{deltaX:200,"
+         "bubbles:true,cancelable:true}))")
+br._gesture_tick()
+H.spin(800)
+check("synthetic gt does not switch his tab", br.current() is v1)
+check("synthetic dragstart opens no tab",
+      len(br._real_tabs()) == before_tabs, len(br._real_tabs()))
+br.config["vimKeys"] = False
+br.config["mouse"] = {}
+br.refresh_nav()
+
+# a bookmarklet bound to a key runs
+br.bookmarks.append({"id": 99999, "type": "link", "title": "BoundOne",
+                     "url": "", "js": "window.boundRan=1", "parent": 0,
+                     "icon": "", "t": 1})
+v2 = br.new_tab(); H.spin(300)
+H.load(v2, srv.url("/timers")); H.spin(600)
+check("a bookmarklet bound to a key runs",
+      br.run_bound_script("BoundOne", view=v2) is True)
+H.spin(300)
+check("...and really ran in the page", H.js(v2, "window.boundRan") == 1)
+br.bookmarks = [b for b in br.bookmarks if b.get("id") != 99999]
+
+# a private tab leaves no places behind in the config
+pv3 = br.new_private_tab(); H.spin(300)
+H.load(pv3, srv.url("/timers")); H.spin(600)
+br.config["readResume"] = True
+check("private: no video place is noted", br.note_media_place(pv3) is False)
+check("private: no reading place is noted",
+      br.note_reading_place(pv3) is False)
+check("private: no pdf place is noted", br.note_pdf_place(pv3) is False)
+br.config["readResume"] = False
+br.close_tab(br.tabs.indexOf(pv3), ask=False)
+
+# stopping the camera on one site revokes that site's grants only
+br.config["permissions"] = {
+    "https://x.com:443|MediaAudioVideoCapture": True,
+    "https://netflix.com:443|MediaVideoCapture": True}
+v4 = br.new_tab(); H.spin(200)
+v4.url = lambda: B.QUrl("https://x.com/call")      # what the tab is on
+br.stop_media_use(v4)
+check("stop media: the site's own mic+camera grant is taken back",
+      "https://x.com:443|MediaAudioVideoCapture" not in br.config["permissions"],
+      br.config["permissions"])
+check("stop media: netflix.com keeps its grant",
+      "https://netflix.com:443|MediaVideoCapture" in br.config["permissions"])
+del v4.url
+
+# a trusted certificate is trusted exactly, not every certificate for the host
+class _Cert:
+    def __init__(self, der): self._der = der
+    def toDer(self): return self._der
+class _Err:
+    def __init__(self, der):
+        self._chain = [_Cert(der)]
+    def url(self): return B.QUrl("https://printer.lan/")
+    def description(self): return "self-signed"
+    def isOverridable(self): return True
+    def certificateChain(self): return self._chain
+_ask = B.QMessageBox.question
+_asked = []
+B.QMessageBox.question = staticmethod(
+    lambda *a, **k: (_asked.append(1), B.QMessageBox.StandardButton.Yes)[1])
+try:
+    br.config["certExceptions"] = {}
+    check("cert: first one is asked and trusted",
+          br.certificate_error(_Err(b"cert-one")) is True and len(_asked) == 1)
+    check("cert: the same one again is not asked",
+          br.certificate_error(_Err(b"cert-one")) is True and len(_asked) == 1)
+    B.QMessageBox.question = staticmethod(
+        lambda *a, **k: (_asked.append(1), B.QMessageBox.StandardButton.No)[1])
+    check("cert: a DIFFERENT one for the same host is asked again",
+          br.certificate_error(_Err(b"cert-two")) is False and len(_asked) == 2,
+          len(_asked))
+finally:
+    B.QMessageBox.question = _ask
+    br.config["certExceptions"] = {}
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

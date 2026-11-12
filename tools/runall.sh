@@ -121,7 +121,8 @@ done
 cd "$R/tests" || exit 1
 for t in test_twostep.py test_round3.py test_msaccounts.py test_identbox.py \
          test_subdomain.py test_acctpick.py test_private.py \
-         test_masterlock.py test_masterwizard.py; do
+         test_masterlock.py test_masterwizard.py test_pwsave.py \
+         test_review.py; do
   [ -f "$t" ] || { skip "tests/$t"; continue; }
   run "$t" "tests/$t"
 done

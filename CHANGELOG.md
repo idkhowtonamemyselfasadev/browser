@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 1 (part three: what a page can reach)
+
+- **A local .html can no longer read the files beside it.** The jars allowed local
+  pages to reach the web and left Chromium's "local files may read local files" on,
+  so any downloaded page opened from disk could read `~/.ssh` or the vault with one
+  XMLHttpRequest and send it out. Verified, and switched off.
+- **An epub, a selection in reader mode and a printed selection run no script.**
+  They are somebody else's HTML put into a page of ours; a regex took `<script>` out
+  and left `ontoggle=` and `onload=` standing. They carry a no-script policy now.
+- **A page cannot drive the chrome with events it made up.** A synthetic `g`,`t`
+  switched his tabs (vim keys), a synthetic dragstart opened tabs, a synthetic wheel
+  went back. Those listeners answer real input only.
+- **A trusted self-signed certificate is trusted exactly.** The check was asked
+  without a fingerprint, so once a host was trusted any certificate for it went
+  through. The fingerprint of the certificate the engine rejected is what is kept
+  and compared now.
+- **Page- and server-made text renders as text** in the permission card, the
+  save-password prompt, the download bar, the "install plugin?" and "run this file?"
+  questions, tab tooltips and a dozen other places Qt guessed rich text.
+- **Private tabs leave nothing in the config**: no video or reading or PDF place, no
+  highlight, and "bookmark all tabs" skips them; "put aside" no longer closes the
+  private tabs it cannot save.
+- **"Forget this site" forgets that site only** (x.com took netflix.com with it), and
+  so does "stop camera here", which also missed the mic-and-camera grant.
+- **The updater's "set my changes aside" keeps every file**: the first edited file and
+  any name with an umlaut in it were skipped and then deleted by the reset.
+- The external editor leaves no copy of the field on disk and refuses password boxes;
+  a bound bookmarklet runs; game mode lowers the priority once, not every time;
+  page text handed to spd-say, notify-send, qrencode and dict can no longer be read
+  as an option; a desktop entry cannot gain a second Exec line.
+- The new sign-in-without-submit offer goes through the password channel's existing
+  door instead of a new slot, so the object a website can reach is exactly what it
+  was (the invariant that pins it is green again).
+- `test_callguard` serves its pages over http (a file:// iframe is rightly no longer a
+  secure context) and `test_gpu` follows the first window into `_first_window`.
+
 ## 2026-11-12 — line-by-line review, day 1 (part two: the password manager)
 
 - **A new vault key file is written atomically**, and a key that never reached the

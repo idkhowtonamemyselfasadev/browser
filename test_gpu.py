@@ -482,8 +482,10 @@ asks_at = source.index("_gpu_startup(lambda")
 check("the question waits until this process is the browser",
       source.index("server.listen(SINGLE_INSTANCE_SOCKET)") < asks_at,
       "asked at %d" % asks_at)
+# the first window is built through _first_window now (a config that
+# will not load falls back to the defaults), so the anchor is that call
 check("...and before the first window, so no profile exists yet",
-      asks_at < source.index("win = Browser(initial_url=None if bg_launch"))
+      asks_at < source.index("win = _first_window(lambda: Browser("))
 check("the socket is given up before it restarts itself",
       "release()" in source and "QLocalServer.removeServer" in
       source[asks_at:asks_at + 300])

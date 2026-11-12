@@ -4321,6 +4321,15 @@ CHROME_STUB_JS = r"""
 })();
 """
 
+#: Put at the top of a page the browser builds out of somebody else's
+#: HTML -- an epub chapter, a selection lifted off a site. Stripping
+#: <script> with a regex leaves <details ontoggle>, <svg onload> and
+#: javascript: links standing; a policy that allows no script at all
+#: leaves nothing standing. Our own helpers run in isolated worlds,
+#: which a page's policy does not reach.
+NO_SCRIPT_META = ('<meta http-equiv="Content-Security-Policy" '
+                  'content="script-src \'none\'; object-src \'none\'">')
+
 # script worlds: 0 (MainWorld) belongs to the page's own JavaScript.
 # The password machinery lives in UserWorld — its watcher script and
 # the minimal web channel remote pages get are invisible from world 0.
@@ -4416,7 +4425,7 @@ PASSWORD_WATCH_JS = r"""
           hit.getAttribute("role") !== "button") {
         // a real link: he is going somewhere, not signing in, so
         // whatever was held for this page is let go
-        pwObj.loginAttempt(JSON.stringify({cancel: true}));
+        pwObj.formSubmitted(JSON.stringify({held: true, cancel: true}));
         return;
       }
     }
@@ -4433,7 +4442,10 @@ PASSWORD_WATCH_JS = r"""
       if ((t === "text" || t === "email" || t === "tel") && inputs[j].value)
         user = inputs[j].value;
     }
-    pwObj.loginAttempt(JSON.stringify({
+    // through the one door this object has always had: "held" says it
+    // is a press to be weighed once the page moves on, not a submit
+    pwObj.formSubmitted(JSON.stringify({
+      held: true,
       host: location.hostname,
       scheme: location.protocol.slice(0, -1),
       username: user, password: pw.value}));
@@ -7507,9 +7519,13 @@ NAV_JS = r"""(function (want) {
     /* ---- a box dragged over links ---------------------------- */
     var box = null, from = null;
     window.__navBoxLinks = null;
+    /* every listener here that ends in the browser doing something --
+       opening tabs, switching them, going back -- answers real input
+       only: a page can dispatch any event it likes at itself, and a
+       synthetic "g","t" was a page switching his tabs */
     document.addEventListener("mousedown", function (e) {
       var W = window.__navWant || {};
-      if (!W.boxLinks || !e.altKey || e.button !== 0) return;
+      if (!e.isTrusted || !W.boxLinks || !e.altKey || e.button !== 0) return;
       from = {x: e.clientX, y: e.clientY};
       box = document.createElement("div");
       box.id = "__navbox";
@@ -7781,6 +7797,7 @@ NAV_JS = r"""(function (want) {
 
     document.addEventListener("keydown", function (e) {
       var W = window.__navWant || {};
+      if (!e.isTrusted) return;
       if (window.__navKeysThrough(e)) {
         /* the site keeps it: the browser must not also act on it */
         e.stopPropagation();
@@ -7835,6 +7852,7 @@ NAV_JS = r"""(function (want) {
     /* a wheel step of his own, and the sideways swipe */
     document.addEventListener("wheel", function (e) {
       var W = window.__navWant || {};
+      if (!e.isTrusted) return;
       if (W.swipeNav && Math.abs(e.deltaX) > Math.abs(e.deltaY) * 2
           && Math.abs(e.deltaX) > 40) {
         window.__navSwipe = e.deltaX > 0 ? "forward" : "back";
@@ -7875,7 +7893,7 @@ NAV_JS = r"""(function (want) {
     /* what he dragged, for the super drag */
     document.addEventListener("dragstart", function (e) {
       var W = window.__navWant || {};
-      if (!W.superDrag) return;
+      if (!e.isTrusted || !W.superDrag) return;
       var link = e.target && e.target.closest
         ? e.target.closest("a[href]") : null;
       window.__navDragged = link
@@ -12779,7 +12797,9 @@ class OnePasswordProvider(VaultProvider):
             return fail("bad-json")
 
     def _vault_args(self):
-        return ["--vault", self.vault_name] if self.vault_name else []
+        # one argument, "--vault=NAME": as two, a name beginning with a
+        # dash would be read by op as a flag of its own
+        return ["--vault=" + self.vault_name] if self.vault_name else []
 
     def status(self):
         """Is this provider usable right now? Answered from the last
@@ -14522,6 +14542,13 @@ class PasswordBridge(QObject):
             data = json.loads(payload_json)
         except ValueError:
             return
+        if isinstance(data, dict) and data.get("held"):
+            # a press that may be a sign-in with no form submit: only
+            # remembered, and offered once the page has moved on (see
+            # Browser._login_attempt). The same one-way door as a real
+            # submit -- and less than one, which offers at once.
+            self.browser._login_attempt(self.page, data)
+            return
         if isinstance(data, dict):
             # a real submit settles it: drop the press held for the
             # same sign-in, or he would be asked twice
@@ -14529,18 +14556,6 @@ class PasswordBridge(QObject):
             if isinstance(held, dict):
                 held.pop(id(self.page), None)
             self.browser._password_submitted(self.page, data)
-
-    @pyqtSlot(str)
-    def loginAttempt(self, payload_json):
-        """A real press that may be a sign-in with no form submit.
-        Only remembered here; nothing is offered until the page has
-        moved on (see Browser._login_attempt)."""
-        try:
-            data = json.loads(payload_json)
-        except ValueError:
-            return
-        if isinstance(data, dict):
-            self.browser._login_attempt(self.page, data)
 
     @pyqtSlot(str)
     def loginFormSeen(self, payload_json):
@@ -14653,19 +14668,37 @@ class Bridge(QObject):
         are removed (never the new subfolder). Returns the subfolder name,
         "" when there was nothing to set aside, or None when it could not be
         done cleanly -- in which case the update must not go on."""
-        code, dirty = self._git_quick("status", "--porcelain")
-        if code != 0:
+        # -z, read raw: the plain listing quotes and octal-escapes any
+        # name with an umlaut in it, and _git_quick's strip() ate the
+        # leading space of " M file" on the first line -- either way
+        # the path did not exist, the file was skipped, and the reset
+        # and clean below then deleted it
+        try:
+            raw = subprocess.run(
+                ["git", "status", "--porcelain", "-z"], cwd=str(APP_DIR),
+                capture_output=True, timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.SubprocessError):
             return None
-        if not dirty:
+        if raw.returncode != 0:
+            return None
+        fields = raw.stdout.split(b"\0")
+        paths, at = [], 0
+        while at < len(fields):
+            entry = fields[at]
+            at += 1
+            if len(entry) < 4:
+                continue
+            state, name = entry[:2], entry[3:]
+            if state[:1] in (b"R", b"C"):
+                at += 1                     # the old name follows: skip it
+            paths.append(os.fsdecode(name))
+        if not paths:
             return ""
         sub = "saved-changes-" + time.strftime("%Y%m%d-%H%M%S")
         dest = APP_DIR / sub
         try:
-            for line in dirty.splitlines():
-                path = line[3:]
-                if " -> " in path:              # a rename: take the new name
-                    path = path.split(" -> ", 1)[1]
-                path = path.strip().strip('"')
+            for path in paths:
                 if not path or path == sub or path.startswith(sub + "/"):
                     continue
                 src = APP_DIR / path
@@ -19364,9 +19397,10 @@ class DownloadWidget(QWidget):
         self.setFixedWidth(360)
         name = request.downloadFileName()
         self.name = QLabel(objectName="dlname")
-        self.name.setText(self.fontMetrics().elidedText(
-            name, Qt.TextElideMode.ElideMiddle, 230))
-        self.name.setToolTip(name)
+        # the server picked this name (Content-Disposition): plain text,
+        # or "<font size=99>...</font>.pdf" renders as markup in the bar
+        set_plain(self.name, self.fontMetrics().elidedText(
+            name, Qt.TextElideMode.ElideMiddle, 230), name)
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
         self.info = QLabel("Starting…", objectName="dlinfo")
@@ -19549,6 +19583,19 @@ class LocalFileWidget(QWidget):
             self.open_btn.show()
         else:
             self.info.setText(fail_text)
+
+
+def literal(text):
+    """A string a website or a server controls, for a message box.
+
+    QMessageBox guesses rich text from the content the way a label does,
+    and the static question()/information() helpers have no plain mode:
+    a download called "<font size=1>...</font>" could restyle the "run
+    this file?" box, a userscript's name could shrink the warning on
+    "install this plugin?" to nothing. Escaped into markup that renders
+    back as the original characters, line breaks kept."""
+    return ('<p style="white-space:pre-wrap">%s</p>'
+            % html.escape(str(text)))
 
 
 def set_plain(label, text, tooltip=None):
@@ -20079,7 +20126,7 @@ class BookmarkButton(QToolButton):
         title = (entry.get("title") or "").strip()
         if entry["type"] == "link" and not title:
             title = QUrl(entry["url"]).host() or entry["url"]
-        self.setToolTip(entry.get("url") or title)
+        self.setToolTip(literal(entry.get("url") or title))   # page-made
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # a plain character budget, not fontMetrics: the stylesheet's
         # font only reaches the widget on polish, long after __init__
@@ -21152,7 +21199,10 @@ class SharePicker(QWidget):
         col = QVBoxLayout(self.panel)
         col.setContentsMargins(18, 16, 18, 16)
         col.setSpacing(10)
-        title = QLabel("%s wants to share a screen or a window." % origin)
+        title = QLabel()
+        # the origin is the page's own to name: plain text, like every
+        # other string a site gets to put in the chrome
+        set_plain(title, "%s wants to share a screen or a window." % origin)
         title.setWordWrap(True)
         col.addWidget(title)
 
@@ -21371,7 +21421,7 @@ class AccountChooser(QWidget):
             btn.setIcon(QIcon(blank))
             btn.setToolButtonStyle(
                 Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            btn.setToolTip(name)
+            btn.setToolTip(literal(name))   # what a page's box held
             btn.clicked.connect(
                 lambda _=False, chosen=name: self._choose(chosen))
             rows.addWidget(btn)
@@ -24407,8 +24457,8 @@ class Browser(QMainWindow):
         if ask and getattr(w, "locked", False):
             answer = QMessageBox.question(
                 self, self._ui_str("tabLocked"),
-                self._ui_str("tabLockedAsk")
-                % (self.tabs.tabText(index) or ""))
+                literal(self._ui_str("tabLockedAsk")
+                % (self.tabs.tabText(index) or "")))
             if answer != QMessageBox.StandardButton.Yes:
                 return
         private = getattr(w, "private", False)
@@ -24845,6 +24895,8 @@ class Browser(QMainWindow):
             w = self.tabs.widget(i)
             if getattr(w, "session", "main") == sid:
                 self._drop_share(w)
+                if not self._is_header(w):
+                    self._drop_permission_asks(w)   # as close_tab does
                 self.tabs.removeTab(i)
                 w._closed = True
                 w.deleteLater()
@@ -24991,8 +25043,13 @@ class Browser(QMainWindow):
         v = QVBoxLayout(card)
         v.setContentsMargins(14, 12, 14, 12)
         v.setSpacing(12)
-        msg = QLabel(self._ui_str("permWants")
-                     % (show, self._ui_str(label)))
+        msg = QLabel()
+        # plain: for a local page `show` is the FILE NAME, and a file
+        # can be called "<b>meet.google.com</b>.html" -- the one line
+        # that says who is asking for the microphone must not be
+        # something the asker gets to typeset
+        set_plain(msg, self._ui_str("permWants")
+                  % (show, self._ui_str(label)))
         msg.setWordWrap(True)
         v.addWidget(msg)
         if private or not storable:
@@ -25954,6 +26011,8 @@ class Browser(QMainWindow):
         made = 0
         for i, view in self._real_tabs(session=self.active_session,
                                        group=group):
+            if getattr(view, "private", False):
+                continue      # nothing a private tab was on is written down
             url = view.url()
             if url.scheme() not in ("http", "https") or _is_pane_url(
                     url.toString()):
@@ -26669,7 +26728,10 @@ class Browser(QMainWindow):
                                   "name": group or "", "tabs": state})
         for i in sorted(indices, reverse=True):
             widget = self.tabs.widget(i)
-            if widget is not None and not self._is_header(widget):
+            # a private tab is never written into the set, so closing it
+            # here would not put it away -- it would simply lose it
+            if (widget is not None and not self._is_header(widget)
+                    and not getattr(widget, "private", False)):
                 self.close_tab(i, ask=False)
         self.save_config(quiet=True)
         return state
@@ -27136,13 +27198,28 @@ class Browser(QMainWindow):
             "XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) \
             / "applications"
         target = folder / ("browser-app-%s.desktop" % _slug(host))
+        def value(text):
+            # a key's value is one line: a newline in a page title would
+            # start a key of its own -- an Exec= of the page's choosing
+            return re.sub(r"[\x00-\x1f\x7f]", " ", str(text)).strip()
+
+        def arg(text):
+            # the Exec rules: quoted, the four specials escaped, and a
+            # literal % doubled, or "%F0" in an address is a field code
+            text = value(text).replace("%", "%%")
+            # a backslash is four: the string escape runs first and
+            # halves it, then the quoting rule halves it again
+            text = text.replace("\\", "\\\\\\\\")
+            for ch in ('"', "`", "$"):
+                text = text.replace(ch, "\\" + ch)
+            return '"%s"' % text
         body = ("[Desktop Entry]\nType=Application\nName=%s\n"
-                "Comment=%s\nExec=%s %s --app=%s\nIcon=%s\n"
+                "Comment=%s\nExec=%s %s %s\nIcon=%s\n"
                 "Categories=Network;WebBrowser;\nTerminal=false\n"
                 "StartupWMClass=browser\n"
-                % (name, url, sys.executable,
-                   str(APP_DIR / "browser.py"), url,
-                   str(APP_DIR / "icon.svg")))
+                % (value(name), value(url), arg(sys.executable),
+                   arg(APP_DIR / "browser.py"), arg("--app=" + url),
+                   value(APP_DIR / "icon.svg")))
         try:
             folder.mkdir(parents=True, exist_ok=True)
             target.write_text(body, encoding="utf-8")
@@ -28043,19 +28120,25 @@ class Browser(QMainWindow):
         if not host:
             return 0
         self.clear_site_data(host)
+
+        def this_site(name):
+            # the site and its subdomains, on a label boundary: a bare
+            # endswith() made "x.com" take netflix.com and dropbox.com
+            # with it, and `host in key` did the same to permissions
+            name = (name or "").lower().removeprefix("www.")
+            return name == host or name.endswith("." + host)
         before = len(self.history)
         self.history = [e for e in self.history
-                        if not (QUrl(e.get("url", "")).host()
-                                .removeprefix("www.").endswith(host))]
+                        if not this_site(QUrl(e.get("url", "")).host())]
         if len(self.history) != before:
             self.save_history()
         perms = dict(self.config.get("permissions") or {})
         for key in list(perms):
-            if host in key:
+            origin = str(key).rpartition("|")[0] or str(key)
+            if this_site(QUrl(origin).host()):
                 perms.pop(key, None)
         self.config["permissions"] = perms
-        self.known_hosts = {h for h in self.known_hosts
-                            if not h.removeprefix("www.").endswith(host)}
+        self.known_hosts = {h for h in self.known_hosts if not this_site(h)}
         try:
             _write_json(HOSTS_FILE, sorted(self.known_hosts))
         except OSError:
@@ -29421,6 +29504,13 @@ class Browser(QMainWindow):
                     text = path.read_text(encoding="utf-8")
                 except OSError:
                     return
+                # the text was only ever on disk for the editor to read:
+                # a draft from a private tab, or anything else he typed,
+                # must not stay lying next to the config afterwards
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
                 back = self._live_page(view)
                 if back is None:
                     return
@@ -29445,6 +29535,9 @@ class Browser(QMainWindow):
         page.runJavaScript(
             "(function(){var el=document.activeElement;"
             "if(!el||!('value' in el)) return JSON.stringify({found:0});"
+            # a password box never goes into a file on the disk
+            "if((el.type||'').toLowerCase()==='password')"
+            " return JSON.stringify({found:0});"
             "window.__editTarget = el;"
             "return JSON.stringify({found:1,"
             " value: String(el.value || '')});})()", APP_WORLD_ID, got)
@@ -29648,10 +29741,11 @@ class Browser(QMainWindow):
                 return False
         else:
             for row in (self.bookmarks or []):
-                if str(row.get("title", "")) == name \
-                        and str(row.get("url", "")).startswith("javascript:"):
-                    source = QUrl.fromPercentEncoding(
-                        str(row["url"])[11:].encode())
+                # a bookmarklet is kept in its own "js" field (see
+                # load_bookmarks, which drops any javascript: url), so
+                # looking at the url found nothing, ever
+                if str(row.get("title", "")) == name and row.get("js"):
+                    source = str(row["js"])
                     break
         if not source:
             self.flash(self._ui_str("keyNoScript") % name)
@@ -30277,6 +30371,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not text:
                 self.flash(self._ui_str("hlNone"))
                 return
+            if getattr(view, "private", False):
+                # marked on the page for this visit, and kept nowhere:
+                # the store is the config, keyed by the address
+                self.flash(self._ui_str("hlAdded"))
+                return
             store = dict(self.config.get("highlights") or {})
             kept = [t for t in (store.get(key) or []) if t != text]
             kept.append(text)
@@ -30403,9 +30502,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self._say.finished.connect(
                     lambda code, _st: code and self.flash(
                         self._ui_str("sayFailed")))
+                # "--": the text is the page's, and a page that starts
+                # with "-e" or "-o" must be read out, not parsed
                 self._say.start("spd-say", ["-l", lang, "-r",
                                             str(rate),
-                                            "-w", text[:5000]])
+                                            "-w", "--", text[:5000]])
                 self.flash(self._ui_str("sayStarted"))
             except (OSError, RuntimeError):
                 self.flash(self._ui_str("sayMissing"))
@@ -30672,7 +30773,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if self.sleep_tab(view, True):
                     self._game_woke.append(view)
             self.mute_all_tabs(on=True)
-            os.nice(5) if hasattr(os, "nice") else None
+            # once per run: a process can lower its own priority but
+            # never raise it back, so a nice(5) on every switch-on left
+            # the browser at 19 after a few evenings of games
+            if hasattr(os, "nice") and not getattr(self, "_game_niced",
+                                                   False):
+                try:
+                    os.nice(5)
+                except OSError:
+                    pass
+                self._game_niced = True
         else:
             for view in getattr(self, "_game_woke", []):
                 self.sleep_tab(view, False)
@@ -30701,7 +30811,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not where:
                 continue
             host, _, port = where.partition(":")
-            out.append((name or host, host.strip(), int(port or 25565)))
+            try:
+                port = int(port or 25565)
+            except ValueError:
+                continue          # "mc.example:abc" is not a server
+            out.append((name or host, host.strip(), port))
         return out
 
     def mc_status(self):
@@ -31178,7 +31292,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def refresh_tab_tooltips(self):
         for i, view in self._real_tabs():
-            self.tabs.setTabToolTip(i, self.tab_tooltip(view))
+            tip = self.tab_tooltip(view)
+            self.tabs.setTabToolTip(i, literal(tip) if tip else "")
 
     def auto_sleep(self):
         """Tabs he has not looked at for a while, asleep. Off by
@@ -31419,7 +31534,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         for i in reversed(self._group_indices(group)):
             w = self.tabs.widget(i)
             self._drop_share(w)
+            # what close_tab does for one tab, done for each of these:
+            # a permission card left up for a closed page would still
+            # store an "always allow" for it (see _drop_permission_asks)
+            self._drop_permission_asks(w)
             self.tabs.removeTab(i)
+            w._closed = True
             w.deleteLater()
         h = self._header_index(group)
         if h is not None:
@@ -32447,11 +32567,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return 1;})()""", MAIN_WORLD_ID)
         except RuntimeError:
             return False
+        host = host.lower().removeprefix("www.")
         for row in self.permission_rows():
-            if host and host in row["origin"] and row["what"] in (
+            # the origin's own host, matched whole: "x.com" in the
+            # origin string also matched netflix.com's grants. And the
+            # one-card microphone-and-camera grant has a name of its own
+            there = (QUrl(row["origin"]).host() or "").lower() \
+                .removeprefix("www.")
+            if host and there == host and row["what"] in (
                     "use the microphone", "use the camera",
                     "share your screen", "MediaAudioCapture",
-                    "MediaVideoCapture", "DesktopVideoCapture"):
+                    "MediaVideoCapture", "MediaAudioVideoCapture",
+                    "DesktopVideoCapture", "DesktopAudioVideoCapture"):
                 self.revoke_permission(row["key"])
         return True
 
@@ -32464,8 +32591,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return None
         button.setVisible(bool(rows))
         if rows:
-            button.setToolTip(self._ui_str("mediaInUse")
-                              % ", ".join(sorted({r["kind"] for r in rows})))
+            # the kinds are the page's own words (its note of its
+            # streams), so they go in as text
+            button.setToolTip(literal(
+                self._ui_str("mediaInUse")
+                % ", ".join(sorted({r["kind"] for r in rows}))))
         return button
 
     def media_use_menu(self, menu=None):
@@ -32690,7 +32820,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         if not overridable:
             return False
-        if self.certificate_excepted(host):
+        # the certificate the engine actually turned down, as the
+        # fingerprint an exception is kept against. Asked without one,
+        # certificate_excepted said yes to ANY certificate for a host he
+        # had trusted once -- so a different one later (the very thing
+        # a stored fingerprint is for) went straight through.
+        seen = ""
+        try:
+            chain = error.certificateChain()
+            if chain:
+                seen = hashlib.sha256(bytes(chain[0].toDer())).hexdigest()
+        except (AttributeError, RuntimeError, TypeError, IndexError):
+            seen = ""
+        if not seen and host in self.certificate_exceptions():
+            # no chain to read: the certificate the site is serving now
+            # is the nearest honest thing to compare the kept one with
+            seen = self.certificate_for(
+                host, url.port(443) or 443).get("sha256", "")
+        if self.certificate_excepted(host, seen or "-"):
             return True
         # His own machine and his own network, if he has switched that
         # on: a development server\'s certificate is signed by nobody
@@ -32705,11 +32852,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return True
         answer = QMessageBox.question(
             self, self._ui_str("certErrorT") % host,
-            self._ui_str("certErrorB") % (host, text))
+            literal(self._ui_str("certErrorB") % (host, text)))
         if answer != QMessageBox.StandardButton.Yes:
             return False
-        info = self.certificate_for(host, url.port(443) or 443)
-        self.trust_certificate(host, info.get("sha256", ""))
+        # the one he was shown, not whatever a second handshake brings
+        if not seen:
+            seen = self.certificate_for(
+                host, url.port(443) or 443).get("sha256", "")
+        self.trust_certificate(host, seen)
         return True
 
     def connection_details(self, host=None):
@@ -32945,7 +33095,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return True
         answer = QMessageBox.question(
             self, self._ui_str("protoAskT"),
-            self._ui_str("protoAskB") % (origin, scheme))
+            literal(self._ui_str("protoAskB") % (origin, scheme)))
         allowed = answer == QMessageBox.StandardButton.Yes
         table[key] = bool(allowed)
         self.save_config()
@@ -33271,7 +33421,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if info.get("changed"):
             lines.insert(0, self._ui_str("certChangedLine"))
         QMessageBox.information(self, self._ui_str("certTitle") % host,
-                                "\n".join(lines))
+                                literal("\n".join(lines)))
         return info
 
     def show_connection(self, host=None):
@@ -33280,9 +33430,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return {}
         QMessageBox.information(
             self, self._ui_str("connTitle") % info["host"],
-            "%s: %s\n%s: %s" % (self._ui_str("certIp"), info["ip"] or "—",
+            literal("%s: %s\n%s: %s" % (self._ui_str("certIp"), info["ip"] or "—",
                                 self._ui_str("connProxy"),
-                                info["proxy"] or self._ui_str("connDirect")))
+                                info["proxy"] or self._ui_str("connDirect"))))
         return info
 
     def _show_mixed(self, rows):
@@ -33291,7 +33441,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return rows
         QMessageBox.information(
             self, self._ui_str("mixedTitle"),
-            self._ui_str("mixedBody") % (len(rows), "\n".join(rows[:10])))
+            literal(self._ui_str("mixedBody") % (len(rows), "\n".join(rows[:10]))))
         return rows
 
     def storage_menu(self, menu=None):
@@ -33931,7 +34081,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not program:
             return False
         try:
-            QProcess.startDetached(program, ["-a", "browser",
+            # "--": a page names its own notification, and one called
+            # "-i /some/file" or "--expire-time" must be shown, not parsed
+            QProcess.startDetached(program, ["-a", "browser", "--",
                                              title or "browser", str(text)])
         except Exception:
             return False
@@ -34441,8 +34593,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return False
             return self._show_qr(image, text, then)
         proc = QProcess(self)
+        # "--" before the text: selected words "-o/some/file" would
+        # otherwise be qrencode writing its PNG over that file
         proc.start(program, ["-o", "-", "-t", "PNG", "-s", "6", "-m", "2",
-                             text])
+                             "--", text])
         if not proc.waitForFinished(4000):
             proc.kill()
             return False
@@ -34885,6 +35039,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """Where he has read to on this page, written down. Only for
         pages worth it: a scroll of less than a screen is not a place."""
         view = self.current() if view is None else view
+        if getattr(view, "private", False):
+            return False      # nothing a private tab was on is written down
         if view is None or self._is_header(view):
             return False
         if not self.config.get("readResume", False):
@@ -35050,7 +35206,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 odd += 1 if row.get("odd") else 0
             QMessageBox.information(
                 self, self._ui_str("unicodeTitle")
-                % (len(rows), odd), "\n".join(lines[:40]))
+                % (len(rows), odd), literal("\n".join(lines[:40])))
             if then is not None:
                 then(rows)
         return self.read_page_tool("codepoints", view=view, then=done)
@@ -35073,7 +35229,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.flash(self._ui_str("diffSame"))
             else:
                 QMessageBox.information(self, self._ui_str("diffTitle"),
-                                        "\n".join(rows))
+                                        literal("\n".join(rows)))
             if then is not None:
                 then(rows)
 
@@ -35125,7 +35281,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             program = shutil.which("dict")
             if program:
                 proc = QProcess(self)
-                proc.start(program, [word])
+                proc.start(program, ["--", word])   # a word, never a flag
                 if proc.waitForFinished(4000):
                     answer = bytes(
                         proc.readAllStandardOutput()).decode("utf-8",
@@ -35133,7 +35289,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     if answer.strip():
                         QMessageBox.information(
                             self, self._ui_str("defineTitle") % word,
-                            answer.strip()[:4000])
+                            literal(answer.strip()[:4000]))
                         return
             site = str(self.config.get("dictionarySite")
                        or "https://www.dict.cc/?s={}")
@@ -35281,7 +35437,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # the text size as well -- default 19, shown at 17.
             pal = theme_palette()
             page = (
-                "<!doctype html><meta charset=utf-8><title>%s</title>"
+                "<!doctype html><meta charset=utf-8>" + NO_SCRIPT_META +
+                "<title>%s</title>"
                 "<style>body{background:%s;color:%s;"
                 "font:%s %dpx/1.7 %s;max-width:%dch;margin:0 auto;"
                 "padding:2.5rem 1.2rem}img{max-width:100%%;height:auto;"
@@ -35910,6 +36067,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         the tool answers nothing for anything under two minutes, which
         is where resuming is a nuisance rather than a help."""
         view = self.current() if view is None else view
+        if getattr(view, "private", False):
+            return False      # the table is the config, keyed by address
         if view is None or self._is_header(view):
             return False
         if not self.config.get("mediaResume", True):
@@ -37321,6 +37480,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return ""
         box = QMessageBox(self)
         box.setWindowTitle(self._ui_str("lyricsTitle"))
+        box.setTextFormat(Qt.TextFormat.PlainText)   # page-controlled
         box.setText(title)
         box.setDetailedText(words[:20000])
         box.setIcon(QMessageBox.Icon.NoIcon)
@@ -40217,7 +40377,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if from_disk and path is not None and path.exists():
             if ask and QMessageBox.question(
                     self, self._ui_str("dlDeleteTitle"),
-                    self._ui_str("dlDeleteAsk") % path.name) \
+                    literal(self._ui_str("dlDeleteAsk") % path.name)) \
                     != QMessageBox.StandardButton.Yes:
                 return False
             try:
@@ -40333,7 +40493,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if ending in ("appimage", "sh", "run", "exe", "msi", "deb", "rpm"):
             if QMessageBox.question(
                     self, self._ui_str("dlRunTitle"),
-                    self._ui_str("dlRunAsk") % path.name) \
+                    literal(self._ui_str("dlRunAsk") % path.name)) \
                     != QMessageBox.StandardButton.Yes:
                 return False
         program = self.open_with_for(path.name)
@@ -40885,8 +41045,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         folder = Path(str(into)) if into else target.parent / name
         if ask and QMessageBox.question(
                 self, self._ui_str("dlExtractTitle"),
-                self._ui_str("dlExtractAsk")
-                % (len(rows), folder.name)) \
+                literal(self._ui_str("dlExtractAsk")
+                % (len(rows), folder.name))) \
                 != QMessageBox.StandardButton.Yes:
             return ""
         try:
@@ -41015,9 +41175,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         info = self.mod_info(source)
         if ask and QMessageBox.question(
                 self, self._ui_str("dlModTitle"),
-                self._ui_str("dlModAsk")
+                literal(self._ui_str("dlModAsk")
                 % (info.get("name") or source.name,
-                   Path(instance).name)) \
+                   Path(instance).name))) \
                 != QMessageBox.StandardButton.Yes:
             return ""
         target = Path(str(instance)).expanduser() / "mods"
@@ -46466,7 +46626,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return None
         ask = QMessageBox.question(
             self, self._ui_str("searchImage"),
-            self._ui_str("searchImageAsk") % image_url[:120])
+            literal(self._ui_str("searchImageAsk") % image_url[:120]))
         if ask != QMessageBox.StandardButton.Yes:
             return None
         url = ("https://lens.google.com/uploadbyurl?url="
@@ -47565,7 +47725,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if private:
                 tip = ((title + "  \u00b7  ") if title else "") \
                     + self._ui_str("privateTip")
-            self.tabs.setTabToolTip(i, tip)
+            # literal(): a tooltip guesses rich text like a label does,
+            # and this one is the page's own title
+            self.tabs.setTabToolTip(i, literal(tip) if tip else "")
         if private:
             return          # a private tab writes no history, ever
         if getattr(view, "no_history", False):
@@ -48047,6 +48209,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # the start page is a local file; without this it may not navigate
         # to the web (search box / quick links -> ERR_NETWORK_ACCESS_DENIED)
         s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        # ...and the other half of that, which the engine leaves ON:
+        # a local document reading other local files. With both, any
+        # .html he downloads and opens could read ~/.ssh or the vault
+        # beside the config with one XMLHttpRequest and send it to the
+        # web. None of our own pages reads a file that way (they ask
+        # the bridge), and <img>/<video> from file:// still load.
+        s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, False)
         # off by default in the engine, and the failure mode is cruel:
         # the share picker and the compositor's dialogs all appear and
         # work, and only after the user has answered every one of them
@@ -49456,8 +49625,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         lay.setContentsMargins(14, 8, 8, 8)
         lay.setSpacing(10)
         ask = self._ui_str("pwUpdateAsk" if update else "pwSaveAsk")
-        self._toast_label = QLabel(
-            ask.format(host) + ((" \u2014 " + username) if username else ""))
+        self._toast_label = QLabel()
+        # the username is whatever the page's box held: plain text
+        set_plain(self._toast_label,
+                  ask.format(host) + ((" \u2014 " + username)
+                                      if username else ""))
         # The generator deliberately does not appear in this prompt: it
         # fires on submit, and a new password would not be the one the
         # site just accepted. But this is the one moment he is thinking
@@ -54608,6 +54780,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         box = QMessageBox(self)
         box.setWindowTitle(self._ui_str("movedName"))
+        box.setTextFormat(Qt.TextFormat.PlainText)   # page addresses
         box.setText(self._ui_str("movedAsk")
                     % (found["was"], found["now"]))
         yes = box.addButton(self._ui_str("movedYes"),
@@ -55917,6 +56090,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def note_pdf_place(self, view=None):
         """The page he is on in this PDF, written down."""
         view = self.current() if view is None else view
+        if getattr(view, "private", False):
+            return False      # a private tab's PDF leaves no place behind
         page = self._live_page(view)
         if page is None:
             return False
@@ -56024,7 +56199,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.flash(self._ui_str("synNone") % word)
 
         proc.finished.connect(done)
-        proc.start(program, ["-d", "moby-thesaurus", word])
+        proc.start(program, ["-d", "moby-thesaurus", "--", word])
         return True
 
     def _fill_syn(self, menu, word, rows, view=None):
@@ -56277,8 +56452,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.flash(self._ui_str("epubEmpty"))
             return False
         palette = theme_palette()
-        parts = ["<!doctype html><meta charset=utf-8><title>%s</title>"
-                 % html.escape(path.stem),
+        parts = ["<!doctype html><meta charset=utf-8>" + NO_SCRIPT_META
+                 + "<title>%s</title>" % html.escape(path.stem),
                  "<style>html,body{background:%s;color:%s;"
                  "font:18px/1.7 Georgia,serif;margin:0}"
                  "main{max-width:38rem;margin:0 auto;padding:3rem 1.5rem}"
@@ -58225,7 +58400,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if ask:
             answer = QMessageBox.question(
                 self, self._ui_str("navArchiveName"),
-                self._ui_str("navArchiveAsk") % (url[:80]))
+                literal(self._ui_str("navArchiveAsk") % (url[:80])))
             if answer != QMessageBox.StandardButton.Yes:
                 return False
         self.new_tab(url=QUrl(where))
@@ -58317,7 +58492,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             holder.resize(900, 1200)
             self._print_holder = holder
             holder.setHtml(
-                "<!doctype html><meta charset=utf-8>"
+                "<!doctype html><meta charset=utf-8>" + NO_SCRIPT_META +
                 "<style>body{font:13px/1.6 sans-serif;margin:2em}</style>"
                 + html)
 
@@ -58528,6 +58703,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if ask:
             box = QMessageBox(self)
             box.setWindowTitle(self._ui_str("navShellName"))
+            box.setTextFormat(Qt.TextFormat.PlainText)   # page-controlled
             box.setText(self._ui_str("navShellAsk") % (scheme, host or "?"))
             box.setStandardButtons(QMessageBox.StandardButton.Yes
                                    | QMessageBox.StandardButton.No)
@@ -58917,6 +59093,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         text = str(text or "")
         box = QMessageBox(self)
         box.setWindowTitle(self._ui_str("navQrName"))
+        box.setTextFormat(Qt.TextFormat.PlainText)   # page-controlled
         box.setText(text[:400])
         box.setIcon(QMessageBox.Icon.NoIcon)
         copy = box.addButton(self._ui_str("barCopyAddress"),
@@ -61658,11 +61835,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if (name.endswith(".user.js") and not self._page_is_private(page)
                 and QMessageBox.question(
                     self, "Install plugin?",
-                    "%s wants to install the plugin \u201c%s\u201d.\n\n"
+                    literal("%s wants to install the plugin \u201c%s\u201d.\n\n"
                     "A plugin runs on every website you open. Only "
                     "install plugins you trust."
                     % (request.url().host() or request.url().toString(),
-                       name)) == QMessageBox.StandardButton.Yes):
+                       name))) == QMessageBox.StandardButton.Yes):
             # ...but never out of a private tab. A userscript puts
             # itself in the plugins folder and runs on every page from
             # then on, which is about as far from "nothing is kept" as a
@@ -61677,7 +61854,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if self.download_blocked(name):
             if QMessageBox.question(
                     self, self._ui_str("dlBlockedTitle"),
-                    self._ui_str("dlBlockedAsk") % name) \
+                    literal(self._ui_str("dlBlockedAsk") % name)) \
                     != QMessageBox.StandardButton.Yes:
                 request.cancel()
                 return
@@ -61709,7 +61886,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if twin is not None and not self.config.get("askDownload"):
             if QMessageBox.question(
                     self, self._ui_str("dlTwiceTitle"),
-                    self._ui_str("dlTwiceAsk") % name) \
+                    literal(self._ui_str("dlTwiceAsk") % name)) \
                     != QMessageBox.StandardButton.Yes:
                 request.cancel()
                 self.flash(self._ui_str("dlTwiceKept"))
@@ -63850,9 +64027,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return 0
         answer = QMessageBox.question(
             self, self._ui_str("bmUnusedT"),
-            self._ui_str("bmUnusedB") % (len(rows),
+            literal(self._ui_str("bmUnusedB") % (len(rows),
                                          "\n".join(self._bm_label(e)
-                                                    for e in rows[:12])))
+                                                    for e in rows[:12]))))
         if answer != QMessageBox.StandardButton.Yes:
             return 0
         self._bookmark_undo = list(self.bookmarks)
@@ -63878,7 +64055,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def ask_restore_backup(self, name):
         answer = QMessageBox.question(
             self, self._ui_str("bmRestoreT"),
-            self._ui_str("bmRestoreB") % name)
+            literal(self._ui_str("bmRestoreB") % name))
         if answer != QMessageBox.StandardButton.Yes:
             return 0
         kept = self.restore_bookmark_backup(name)
