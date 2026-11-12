@@ -67570,9 +67570,16 @@ def _privacy_flags(config):
         # where everything is meant to go through a proxy (the Tor
         # window), the one that keeps WebRTC inside it: no UDP that is
         # not proxied, so no STUN answer with the real address in it
+        # ...which is any window with a proxy of his chosen as its way
+        # out: the ordinary policy sends STUN over UDP past it, and the
+        # answer is the address the proxy was there to hide
+        active = config.get("activeProxy", "system")
+        named = {str(p.get("name")) for p in config.get("proxyProfiles") or []
+                 if isinstance(p, dict)}
+        proxied = active in named and active not in ("direct", "system")
         flags.append("--force-webrtc-ip-handling-policy="
                      + ("disable_non_proxied_udp"
-                        if config.get("webrtcStrict", False)
+                        if config.get("webrtcStrict", False) or proxied
                         else "default_public_interface_only"))
     doh = str(config.get("dohUrl") or "").strip()
     if config.get("doh", False) and doh.startswith("https://"):

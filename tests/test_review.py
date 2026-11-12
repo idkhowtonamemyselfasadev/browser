@@ -2152,6 +2152,17 @@ check("his own flags may not start a program for every renderer",
       "--disable-gpu-vsync" in _flags_now and "cmd-prefix" not in _flags_now
       and "gpu-launcher" not in _flags_now, _flags_now)
 
+# behind a proxy of his, WebRTC stays inside it
+_wp = {"webrtcGuard": True, "activeProxy": "mine",
+       "proxyProfiles": [{"name": "mine", "type": "socks5",
+                          "host": "127.0.0.1", "port": 1080}]}
+_with = B._privacy_flags(_wp)
+_without = B._privacy_flags({"webrtcGuard": True})
+check("with a proxy in use, WebRTC sends no UDP past it",
+      any("disable_non_proxied_udp" in f for f in _with)
+      and any("default_public_interface_only" in f for f in _without),
+      str((_with, _without)))
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:

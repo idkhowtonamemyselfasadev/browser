@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twenty-one)
+
+- **Behind your proxy, WebRTC doesn't reveal your real address.** With "keep
+  WebRTC off the home network" on, the engine still let WebRTC send UDP straight
+  out past the proxy, and the answer to that (STUN) is your real public address,
+  the one the proxy is there to hide. With a proxy profile in use, WebRTC now
+  only goes through the proxy (the same policy the Tor window got earlier).
+  Calls that support TCP relays keep working; ones that need direct UDP may not.
+
 ## 2026-11-12 — line-by-line review, day 2 (part twenty)
 
 - **Start-page links and history rows are web links or no links.** The start
