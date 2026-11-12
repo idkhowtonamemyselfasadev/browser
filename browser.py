@@ -25720,6 +25720,21 @@ class Browser(QMainWindow):
                     stripped = True
         return label
 
+    def _view_title(self, view):
+        """The page's own title for this tab (see _tab_title) -- for a
+        note, a to-do, a file name, the desktop's "now playing" and
+        anything else kept or sent. _tab_label is what the strip shows:
+        empty when pinned, "\u2298 " in front when muted."""
+        if view is None:
+            return ""
+        try:
+            index = self.tabs.indexOf(view)
+        except RuntimeError:
+            return ""
+        if index >= 0:
+            return self._tab_title(index)
+        return str(getattr(view, "_last_title", "") or "")
+
     def _refresh_tab_label(self, view):
         i = self.tabs.indexOf(view)
         if i >= 0:
@@ -33827,7 +33842,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if drawer is None or view is None or self._is_header(view):
             return False
-        title = self._tab_label(view)
+        title = self._view_title(view)
         url = self._tab_url(view)
 
         def done(text):
@@ -33854,7 +33869,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if drawer is None or view is None or self._is_header(view):
             return None
-        title = self._tab_label(view)
+        title = self._view_title(view)
         url = self._tab_url(view)
         note = drawer.save_note(title=title or url,
                                 body="[%s](%s)\n" % (title or url, url),
@@ -33870,7 +33885,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.tabs.widget(index)
         if drawer is None or view is None or self._is_header(view):
             return []
-        rows = drawer.add_todo(self._tab_label(view) or self._tab_url(view),
+        rows = drawer.add_todo(self._view_title(view) or self._tab_url(view),
                                link=self._tab_url(view))
         if close:
             self.close_tab(index, ask=False)
@@ -33883,7 +33898,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if drawer is None or view is None or self._is_header(view):
             return ""
-        return drawer.add_to_collection(name, self._tab_label(view),
+        return drawer.add_to_collection(name, self._view_title(view),
                                         self._tab_url(view))
 
     def quick_capture(self):
@@ -33900,7 +33915,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         url = self._tab_url(view) if view is not None else ""
         body = text.strip()
         if url:
-            body += "\n\n[%s](%s)" % (self._tab_label(view) or url, url)
+            body += "\n\n[%s](%s)" % (self._view_title(view) or url, url)
         note = drawer.daily_note()
         drawer.append_note(note["id"], body)
         self.flash(self._ui_str("captureSaved"))
@@ -34050,7 +34065,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             view = self.current()
             if view is None or self._is_header(view):
                 return None
-            return {"title": self._tab_label(view),
+            return {"title": self._view_title(view),
                     "url": self._tab_url(view)}
         if verb == "open":
             url = str(want.get("url") or "")
@@ -34410,7 +34425,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not isinstance(rows, list):
             rows = []
             self.config["snoozed"] = rows
-        rows.append({"url": url, "title": self._tab_label(view), "at": at})
+        rows.append({"url": url, "title": self._view_title(view), "at": at})
         self.save_config(quiet=True)
         self.close_tab(index, ask=False)
         self.flash(self._ui_str("snoozed")
@@ -36400,7 +36415,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if at > 30 and (not duration or at < duration - 30):
                 table[url[:500]] = {"at": at, "d": duration,
                                     "t": int(time.time()),
-                                    "title": self._tab_label(view)[:120]}
+                                    "title": self._view_title(view)[:120]}
                 if len(table) > 200:
                     for key in sorted(
                             table, key=lambda k: table[k].get("t", 0))[:50]:
@@ -36624,7 +36639,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.flash(self._ui_str("capNone"))
             return ""
         view = self.current()
-        name = _slug(self._tab_label(view) if view is not None
+        name = _slug(self._view_title(view) if view is not None
                      else "subtitles") + ".srt"
         target = Path(str(path)) if path else (
             self.download_dir() / self._unique_download_name(name))
@@ -37180,7 +37195,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             now = now or {}
             service.update(
                 playing=bool(now.get("playing")),
-                title=now.get("title") or self._tab_label(view),
+                title=now.get("title") or self._view_title(view),
                 artist=now.get("artist", ""), album=now.get("album", ""),
                 url=self._tab_url(view))
 
@@ -37395,7 +37410,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if url is None and view is not None and not self._is_header(view):
             url = self._tab_url(view)
-            title = title or self._tab_label(view)
+            title = title or self._view_title(view)
         url = str(url or "")
         if not url:
             return False
@@ -37492,7 +37507,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if view is None or self._is_header(view):
             return False
         url = self._tab_url(view)
-        title = self._tab_label(view)
+        title = self._view_title(view)
 
         def got(state):
             at = float((state or {}).get("time") or 0)
@@ -37737,7 +37752,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         def with_meta(meta):
             meta = meta or {}
             title = str(meta.get("title") or _clean_title(
-                self._tab_label(view)) or "")
+                self._view_title(view)) or "")
             artist = str(meta.get("artist") or "")
             if not title:
                 self.flash(self._ui_str("lyricsNone"))
@@ -38418,7 +38433,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if view is None or self._is_header(view):
             return False
         url = self._tab_url(view)
-        title = self._tab_label(view)
+        title = self._view_title(view)
 
         def got(state):
             at = float((state or {}).get("time") or 0)
@@ -42348,7 +42363,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if view is None or self._is_header(view):
             return False
-        title = _clean_title(self._tab_label(view)) or "page"
+        title = _clean_title(self._view_title(view)) or "page"
         safe = re.sub(r"[^\w .-]", "_", title)[:80] or "page"
         if path is None:
             # never over a file already there (the same title saved
@@ -42415,7 +42430,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if view is None or self._is_header(view):
             return False
-        title = _clean_title(self._tab_label(view)) or "page"
+        title = _clean_title(self._view_title(view)) or "page"
         safe = re.sub(r"[^\w .-]", "_", title)[:80] or "page"
         target = Path(str(path)) if path else \
             self.download_dir() / self._unique_download_name(safe + ".md")
@@ -54616,7 +54631,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if not said:
                     continue
                 lines.append("[%d:%02d] %s" % (at // 60, at % 60, said))
-            title = self._tab_label(view) or "Transcript"
+            title = self._view_title(view) or "Transcript"
             note = desk.save_note(title=title[:120],
                                   body="\n".join(lines),
                                   link=self._tab_url(view),
@@ -54700,7 +54715,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
         def got(text):
             path = self.save_ics(str(text or ""),
-                                 title=self._tab_label(view),
+                                 title=self._view_title(view),
                                  url=self._tab_url(view))
             if then:
                 then(path or "")

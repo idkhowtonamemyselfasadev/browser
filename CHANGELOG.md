@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part eighteen)
+
+- **The page's title, not the tab's label, in the rest of the places too.** The
+  earlier fix covered bookmarks and sessions; 18 more took the tab strip's
+  label (empty for a pinned tab, "⊘ " in front for a muted one): to-dos and
+  notes made from a tab, clips, collections, snoozed tabs, watch-later,
+  moments, the desktop's "now playing", the lyrics search, saved page and
+  subtitle file names, transcripts and calendar entries.
+
 ## 2026-11-12 — line-by-line review, day 2 (part seventeen)
 
 - **An "&" in a name stays an "&".** Bookmarks, the bookmarks bar, recently

@@ -2111,6 +2111,16 @@ check("a bookmark called AT&T keeps its & on the bar and in the menu",
       str((_amp_btn.text(), _amp_menu.actions()[0].text())))
 _amp_btn.deleteLater()
 
+# a muted tab put off as a to-do is written down by its page title
+v33 = br.new_tab(); H.spin(300)
+H.load(v33, srv.url("/twhome")); H.spin(500)
+v33.page().setAudioMuted(True); br._refresh_tab_label(v33); H.spin(100)
+_todo_rows = br.tab_to_todo(index=br.tabs.indexOf(v33), close=True) or []
+_todo_texts = [r.get("text") for r in _todo_rows]
+check("a muted tab's to-do is called by its page title",
+      "tw" in _todo_texts and not any(str(t).startswith(br.MUTE_MARK)
+                                      for t in _todo_texts), str(_todo_texts))
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:
