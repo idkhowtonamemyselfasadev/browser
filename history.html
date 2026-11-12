@@ -313,7 +313,9 @@
       wrap.classList.toggle("pick", tick.checked);
     };
     const link = document.createElement("a");
-    link.href = e.url;
+    // a web address or no link: history.json is a file, and a line in
+    // it reading javascript: ran in this page, which holds the bridge
+    if (/^https?:\/\//i.test(String(e.url || ""))) link.href = e.url;
     link.className = "title";
     link.textContent = e.title || e.url;
     const time = document.createElement("span");

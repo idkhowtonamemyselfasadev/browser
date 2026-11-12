@@ -390,6 +390,25 @@ check("Finish closes setup", W.get("open") is False)
 check("and marks it done", W.get("done") == "1", W.get("done"))
 check("and nothing threw on the way", not W.get("errs"), W.get("errs"))
 
+# a quick link from before the checks were there: still no script link
+_qv = win.new_tab(url=QUrl(B.START_PAGE).toString())
+spin(3000)
+_qp = _qv.page()
+js(_qp, 'localStorage.setItem("quicklinks", JSON.stringify(['
+        '{name: "planted", url: "javascript:window.__pwned=1"},'
+        '{name: "fine", url: "https://ok.example/"}])); return 1;')
+_qv.reload()
+spin(3000)
+_ql = json.loads(js(_qp, """
+  var out = {};
+  document.querySelectorAll("#links a").forEach(function (a) {
+    out[a.textContent.replace("\u2715", "").trim()] = a.getAttribute("href");
+  });
+  return JSON.stringify(out);""") or "{}")
+check("a stored javascript: quick link is drawn without a link",
+      "planted" in _ql and not _ql.get("planted")
+      and _ql.get("fine") == "https://ok.example/", _ql)
+
 print("\n%d checks failed" % len(fails))
 for f in fails:
     print("  - " + f)

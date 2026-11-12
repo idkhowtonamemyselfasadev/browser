@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twenty)
+
+- **Start-page links and history rows are web links or no links.** The start
+  page's quick links are kept in its local storage and were made clickable
+  whatever they said, so a `javascript:` entry (possible before the setup
+  wizard's check earlier today) would run inside the start page, one of the
+  browser's own pages. They're checked where they're drawn now, and so are the
+  history page's rows (the history file could carry such a line).
+
 ## 2026-11-12 — line-by-line review, day 2 (part nineteen)
 
 - **Your own Chromium flags can't be turned into a way to run programs.** The

@@ -1116,7 +1116,9 @@
     box.innerHTML = "";
     links.forEach((l, i) => {
       const a = document.createElement("a");
-      a.href = l.url;
+      // checked here as well as where they are added: the list lives in
+      // localStorage and may hold a line from before those checks
+      if (/^https?:\/\//i.test(String(l.url || ""))) a.href = l.url;
       a.textContent = l.name;
       const rm = document.createElement("span");
       rm.className = "rm";
@@ -1232,7 +1234,7 @@
         a.onclick = openAdd;
         a.title = STR.add || "Add";
       } else {
-        a.href = url;
+        if (/^https?:\/\//i.test(String(url || ""))) a.href = url;
         // no favicon file survives the CSP, so the "favicon" is a carved
         // monogram: the first letter of the link's name.
         const mono = document.createElement("span");
