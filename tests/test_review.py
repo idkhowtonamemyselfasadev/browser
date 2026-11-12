@@ -2181,6 +2181,25 @@ check("...and adds itself to a readable one without losing the rest",
       _good_ok is True and _good_after.get("gpuCard") == "cardY"
       and len(_good_after) > 3, str((_good_ok, len(_good_after))))
 
+# a site rule whose proxy was deleted refuses the site, never goes direct
+_routing = B._proxy_routing({"activeProxy": "direct", "proxyProfiles": [],
+                             "proxyAuto": {"rules": [
+                                 {"pattern": "bank.invalid",
+                                  "profile": "gone"}]}})
+_rp = B.RuleProxy([("bank.invalid", ("block",))], [], ("direct",))
+import socket as _sock2
+_c = _sock2.create_connection(("127.0.0.1", _rp.port), 5)
+_c.sendall(b"CONNECT bank.invalid:443 HTTP/1.1\r\nHost: bank.invalid:443\r\n\r\n")
+_c.settimeout(5)
+try:
+    _answer = _c.recv(64)
+except OSError:
+    _answer = b""
+_c.close(); _rp.close()
+check("a site rule whose proxy is gone refuses the site instead of going direct",
+      _routing and _routing[0][0][1] == ("block",)
+      and _answer.startswith(b"HTTP/1.1 502"), str((_routing, _answer)))
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twenty-four)
+
+- **A per-site proxy rule fails closed when its proxy is gone.** "Send this site
+  through that proxy" rules stayed in place when the proxy profile was deleted
+  (or never parsed), and then sent the site straight out over your own
+  connection, the opposite of what the rule was for. Such a site is now
+  refused, the same way a proxy that doesn't answer already is.
+
 ## 2026-11-12 — line-by-line review, day 2 (part twenty-three)
 
 - **Choosing a graphics card can't wipe your settings.** When the start-up card

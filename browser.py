@@ -66872,13 +66872,17 @@ def _proxy_hostport(prof):
     return (host, port) if host and port else None
 
 
-def _proxy_route(profiles, name):
-    """A profile as a routing tuple: ("direct",) or
-    (kind, host, port, user, password)."""
+def _proxy_route(profiles, name, missing=("direct",)):
+    """A profile as a routing tuple: ("direct",), ("block",) or
+    (kind, host, port, user, password). `missing` is what a profile
+    that is not there (deleted, or never was) or will not parse turns
+    into: a per-site rule passes ("block",)."""
+    if name == "direct":
+        return ("direct",)
     prof = profiles.get(name)
     hp = _proxy_hostport(prof)
-    if hp is None:  # "direct", "system" or a deleted/broken profile
-        return ("direct",)
+    if hp is None:  # "system" or a deleted/broken profile
+        return missing
     kind = "socks5" if prof.get("type") == "socks5" else "http"
     return (kind, hp[0], hp[1], str(prof.get("user") or ""),
             str(prof.get("password") or ""))
@@ -66911,8 +66915,13 @@ def _proxy_routing(config):
         pat = re.sub(r"[^a-z0-9.*-]", "",
                      _normalize_rule_pattern(rule.get("pattern", "")))
         if pat:
+            # a rule says "this site goes through that proxy": with the
+            # proxy deleted it used to go DIRECT, the one thing the rule
+            # was written to stop. It is refused instead, as a dead
+            # upstream is (see RuleProxy).
             rules.append((pat, _proxy_route(profiles,
-                                            rule.get("profile", "direct"))))
+                                            rule.get("profile", "direct"),
+                                            missing=("block",))))
     if not rules:
         return None
     bypass = []
@@ -67247,6 +67256,8 @@ class RuleProxy:
                 head = self._single_use(head)
             host = host.strip("[]")
             route = self._route_for(host.lower())
+            if route[0] == "block":
+                raise OSError("this site's proxy is gone: refused")
             if method != "CONNECT" and route[0] != "http":
                 # direct and socks routes talk to the origin itself,
                 # which expects origin-form ("GET / HTTP/1.1"), not
