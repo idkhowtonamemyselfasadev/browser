@@ -56851,6 +56851,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             auto["rules"] = []
         config["guardNoWebRTC"] = True
         config["webrtcGuard"] = True
+        # ...and at the engine, where a page cannot reach: the in-page
+        # guard is undone by the page's own iframe (measured: the frame
+        # hands back a working RTCPeerConnection), and the ordinary
+        # policy still sends STUN over UDP past the proxy -- which is
+        # the real address, the one thing this window exists to hide
+        config["webrtcStrict"] = True
         try:
             where.mkdir(parents=True, exist_ok=True)
             _write_json(target, config)
@@ -67378,9 +67384,14 @@ def _privacy_flags(config):
         flags.append("--site-per-process")
     if config.get("webrtcGuard", False):
         # the one that stops a page learning the machine's address on
-        # the home network without stopping a call from working
+        # the home network without stopping a call from working -- or,
+        # where everything is meant to go through a proxy (the Tor
+        # window), the one that keeps WebRTC inside it: no UDP that is
+        # not proxied, so no STUN answer with the real address in it
         flags.append("--force-webrtc-ip-handling-policy="
-                     "default_public_interface_only")
+                     + ("disable_non_proxied_udp"
+                        if config.get("webrtcStrict", False)
+                        else "default_public_interface_only"))
     doh = str(config.get("dohUrl") or "").strip()
     if config.get("doh", False) and doh.startswith("https://"):
         flags.append("--enable-features=DnsOverHttps")

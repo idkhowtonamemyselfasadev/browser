@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twelve)
+
+- **The fingerprint guard protects every site, not half of them.** Its canvas
+  nudge flipped a bit by `seed & 1`, a number taken from the site's name, which
+  is 0 for about half of all sites (google.com, youtube.com, github.com and
+  twitter.com among them), so there the guard was "on" and changed nothing.
+  Every site is nudged now; the site only decides which pixels. Reading a
+  canvas also no longer changes the canvas on screen, and asking twice gives
+  the same answer (two different answers were a fingerprint of their own).
+- **"Block frames from other sites" blocks look-alikes.** It treated a frame as
+  the site's own when the frame's host merely *contained* ".site.com" anywhere,
+  so `ads.example.com.evil.net` stayed on example.com. It compares the end of
+  the name now. (The consent-banner guard also no longer stops on pages where a
+  button sits inside an SVG.)
+- **A note called "Todo" no longer eats your to-do list (or the other way
+  round).** Its file name was `todo.md`, the to-do list's own file, so the first
+  to-do you added wiped the note. Notes never take that name now.
+- **The Tor window keeps WebRTC inside Tor.** Its "WebRTC off" guard lives in
+  the page, and a page can get a working WebRTC back from an iframe it makes
+  itself (measured). The engine policy it also had still sends STUN over UDP
+  past the proxy, which reveals your real address. The Tor window now runs with
+  the engine's `disable_non_proxied_udp` policy, which a page can't undo.
+
 ## 2026-11-12 — line-by-line review, day 2 (part eleven)
 
 - **One odd line in a filter list no longer switches off all element hiding.**

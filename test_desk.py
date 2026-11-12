@@ -94,6 +94,15 @@ check("and something unusable still gives a name",
       N.slug("!!!") == "note")
 
 print("\n(2) the drawer")
+import tempfile as _tf
+_aside = N.Desk(_tf.mkdtemp())
+_n = _aside.save_note(title="Todo", body="a note called todo")
+_aside.add_todo("buy milk")
+check("a note called Todo is not the to-do list's file",
+      _n["id"] != "todo"
+      and (_aside.note(_n["id"]) or {}).get("body") == "a note called todo"
+      and [t.get("text") for t in _aside.todos()] == ["buy milk"],
+      (_n["id"], (_aside.note(_n["id"]) or {}).get("body")))
 desk = win.desk()
 check("the browser has one", desk is not None)
 check("in a folder of plain files",

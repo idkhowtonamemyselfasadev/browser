@@ -47,7 +47,8 @@ PAGES = {
       </script>""",
     "/frames": """<title>Frames</title>
       <iframe id=own src="/a"></iframe>
-      <iframe id=other src="http://localhost:1/x"></iframe>""",
+      <iframe id=other src="http://localhost:1/x"></iframe>
+      <iframe id=alike src="http://ads.127.0.0.1.evil.invalid:1/x"></iframe>""",
     "/banner": """<title>Banner</title>
       <div id="cookie-consent-dialog">
         <button id=yes>Accept all</button>
@@ -151,6 +152,21 @@ check("and putting it back does not leave two",
       names.count(PG.GUARD_SCRIPT_NAME) == 1, names)
 
 print("\n(4) what the machine looks like")
+# every host is nudged, not only the ones whose seed came out odd: the
+# guard's own source, run as if on google.com (an even seed)
+win.config["guardFingerprint"] = False
+win.refresh_guard_scripts()
+plain = page("/a")
+src = PG.source({"guardFingerprint": True}).replace(
+    "location.hostname.toLowerCase()", '"google.com"')
+js(plain, src)
+check("the canvas guard changes a pixel on a host with an even seed",
+      js(plain, """(function(){var c=document.createElement('canvas');
+        c.width=40;c.height=40;var x=c.getContext('2d');
+        x.fillStyle='#f00';x.fillRect(0,0,40,40);
+        var d=x.getImageData(0,0,40,40).data, n=0;
+        for (var i=0;i<d.length;i+=4) if (d[i]!==255) n++;
+        return n;})()""") >= 1)
 guard(fingerprint=True)
 view = page("/a")
 check("the number of cores is not the real one",
@@ -166,6 +182,11 @@ check("a canvas still draws",
         x.fillStyle='#f00';x.fillRect(0,0,8,8);
         return c.toDataURL().slice(0,11);})()""") == "data:image/",
       js(view, "1"))
+check("...and says the same thing twice, leaving the canvas as it was",
+      js(view, """(function(){var c=document.createElement('canvas');
+        c.width=40;c.height=40;var x=c.getContext('2d');
+        x.fillStyle='#f00';x.fillRect(0,0,40,40);
+        return c.toDataURL() === c.toDataURL();})()""") is True)
 win.config["guardOff"] = {"fingerprint": ["127.0.0.1"]}
 win.refresh_guard_scripts()
 view2 = page("/a")
@@ -244,6 +265,8 @@ check("a frame from another host is taken out",
       js(view, "document.querySelectorAll('iframe').length"))
 check("its own frame stays",
       js(view, "String(!!document.getElementById('own'))") == "true")
+check("...but one whose host only contains the site's name is taken out",
+      js(view, "String(!!document.getElementById('alike'))") == "false")
 check("the local font stack is put on the page",
       js(view, "String(!!document.getElementById('guard-fonts'))") == "true")
 

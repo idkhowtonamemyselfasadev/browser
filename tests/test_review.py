@@ -1492,6 +1492,10 @@ check("...and the Tor window's own start-up keeps it",
       _child.stdout[-200:] or _child.stderr[-200:])
 check("...with WebRTC switched off there",
       _tc.get("guardNoWebRTC") is True)
+check("...and kept off at the engine, where the page's own iframe cannot "
+      "bring it back",
+      "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+      in B._privacy_flags(dict(_tc)), str(B._privacy_flags(dict(_tc))))
 
 # the in-page answer bars answer his clicks, not the page's
 v22 = br.new_tab(); H.spin(300)

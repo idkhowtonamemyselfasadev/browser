@@ -155,8 +155,17 @@ class Desk:
             note.pop("_mtime", None)
         return out
 
+    def _note_id(self, nid):
+        """A note's file name, never the to-do list's: a note called
+        "Todo" is todo.md by its slug, and written there it was read as
+        the list and wiped by the next to-do added."""
+        nid = slug(nid)
+        if nid + ".md" == self.TODO_FILE:
+            nid += "-note"
+        return nid
+
     def note(self, nid):
-        path = self.folder / (slug(nid) + ".md")
+        path = self.folder / (self._note_id(nid) + ".md")
         if not path.exists():
             return None
         try:
@@ -174,10 +183,10 @@ class Desk:
         now = int(time.time())
         if nid:
             note = self.note(nid) or {}
-            nid = slug(nid)
+            nid = self._note_id(nid)
         else:
             note = {}
-            nid = slug(title or time.strftime("%Y-%m-%d-%H%M"))
+            nid = self._note_id(title or time.strftime("%Y-%m-%d-%H%M"))
             if (self.folder / (nid + ".md")).exists():
                 nid = "%s-%d" % (nid, now % 100000)
         note.update({
@@ -208,7 +217,7 @@ class Desk:
                               note.get("link", ""), note.get("tags", []))
 
     def delete_note(self, nid):
-        path = self.folder / (slug(nid) + ".md")
+        path = self.folder / (self._note_id(nid) + ".md")
         try:
             path.unlink()
         except OSError:

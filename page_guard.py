@@ -166,9 +166,14 @@ _JS = r"""
   if (on("fingerprint")) {
     var seed = 0;
     for (var i = 0; i < host.length; i++) seed = (seed * 31 + host.charCodeAt(i)) & 0xffff;
+    /* Every host is nudged; the seed picks WHICH pixels. It used to
+       pick whether: `^ (seed & 1)` is `^ 0` for every host whose seed
+       is even -- google.com, youtube.com, github.com, twitter.com, half
+       of all hosts -- and on those the guard said it was on and changed
+       nothing. */
     var nudge = function (data) {
-      for (var i = 0; i < data.length; i += 997 * 4) {
-        data[i] = data[i] ^ (seed & 1);
+      for (var i = (seed % 997) * 4; i < data.length; i += 997 * 4) {
+        data[i] = data[i] ^ 1;
       }
       return data;
     };
@@ -179,14 +184,21 @@ _JS = r"""
       return out;
     };
     var realToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    /* ...on a copy. Nudged in place, the canvas on the screen was
+       changed, and the second call flipped the same bits back: two
+       calls gave two answers, which is a fingerprint of its own. */
     HTMLCanvasElement.prototype.toDataURL = function () {
       try {
         var ctx = this.getContext("2d");
-        if (ctx) {
-          var shot = realGetImageData.call(ctx, 0, 0, this.width || 1,
-                                           this.height || 1);
+        if (ctx && this.width && this.height) {
+          var shot = realGetImageData.call(ctx, 0, 0, this.width,
+                                           this.height);
           nudge(shot.data);
-          ctx.putImageData(shot, 0, 0);
+          var copy = document.createElement("canvas");
+          copy.width = this.width;
+          copy.height = this.height;
+          copy.getContext("2d").putImageData(shot, 0, 0);
+          return realToDataURL.apply(copy, arguments);
         }
       } catch (e) {}
       return realToDataURL.apply(this, arguments);
@@ -433,7 +445,11 @@ _JS = r"""
     /* his own hidden elements, as a stylesheet rather than a script
        walking the page: a rule keeps working when the site rebuilds
        the node, and costs nothing per frame. */
-    var css = hide.join(",") + "{display:none !important}";
+    /* one rule each: in a list, one selector the engine cannot read
+       (a hand-edited config) took every hidden element back */
+    var css = hide.map(function (one) {
+      return one + "{display:none !important}";
+    }).join("\n");
     onReady(function () {
       var style = document.createElement("style");
       style.id = "guard-hide";
@@ -462,8 +478,12 @@ _JS = r"""
         var other = "";
         try { other = new URL(src, location.href).hostname
                         .toLowerCase().replace(/^www\./, ""); } catch (e) {}
-        if (other && other !== host && other.indexOf("." + host) < 0
-            && host.indexOf("." + other) < 0) {
+        /* the same site or a part of it, by the END of the name:
+           indexOf found ".example.com" inside ads.example.com.evil.net
+           and kept that frame on example.com */
+        if (other && other !== host
+            && other.slice(-(host.length + 1)) !== "." + host
+            && host.slice(-(other.length + 1)) !== "." + other) {
           frames[i].remove();
         }
       }
@@ -484,7 +504,10 @@ _JS = r"""
     var tries = 0;
     var looksLikeBanner = function (el) {
       for (var node = el; node && node !== document.body; node = node.parentElement) {
-        var text = ((node.id || "") + " " + (node.className || "")).toLowerCase();
+        /* an SVG node's className is an object, not a string */
+        var cls = node.className && node.className.baseVal !== undefined
+                  ? node.className.baseVal : node.className;
+        var text = (String(node.id || "") + " " + String(cls || "")).toLowerCase();
         for (var m = 0; m < R.marks.length; m++) {
           if (text.indexOf(R.marks[m]) >= 0) return true;
         }
