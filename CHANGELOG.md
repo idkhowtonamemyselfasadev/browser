@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 1 (part two: the password manager)
+
+- **A new vault key file is written atomically**, and a key that never reached the
+  disk is not used. A crash at the wrong instant used to leave a cut-short key, and
+  the next start set the vault aside with its key gone.
+- **Switching the master password off refuses a vault body that will not open**
+  instead of writing `{}` out over it.
+- **One junk number in a vault row** (an import, a hand edit) no longer stops the
+  vault loading at startup.
+- **"Import a file" reads this browser's own CSV export back exactly**: a password
+  starting with `=`, `+`, `-` or `@` came home with the export's protective
+  apostrophe stuck to it.
+- **1Password item ids are checked before they reach `op`**, so an id that is
+  really an option (`--vault=...`) never runs.
+- A malformed Bitwarden export is read as far as it goes; VS Code themes with
+  `#rgb` colours import those colours; the clickable-links autoscroll stops leaking
+  a listener per use; "keep drafts" no longer copies card numbers or one-time codes;
+  the accessibility audit and form filler survive an input id with a quote in it.
+
 ## 2026-11-12 — line-by-line review, day 1
 
 From reading browser.py top to bottom; `tests/test_review.py` holds one check per

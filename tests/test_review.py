@@ -44,6 +44,109 @@ check("a good debug port is kept",
       "--remote-debugging-port=9333" in B._startup_flags())
 B.CONFIG_FILE.unlink()
 
+# -- a VS Code theme with short colours imports them, not Mocha's -------
+got = B.kitty_colours(json.dumps({"colors": {
+    "editor.background": "#123", "editor.foreground": "#ffffffcc",
+    "focusBorder": "#zzzzzz", "button.background": "#0a0B0c"}}))
+check("VS Code import: #rgb becomes #rrggbb", got.get("bg") == "#112233", got)
+check("VS Code import: alpha dropped", got.get("text") == "#ffffff", got)
+check("VS Code import: a bad colour is skipped for the next name",
+      got.get("accent") == "#0a0b0c", got)
+
+# -- a vault key that never reached the disk is not handed out -----------
+import tempfile as _tempfile
+from pathlib import Path as _Path
+_kdir = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_real_atomic = B._write_atomic
+B._write_atomic = lambda path, data: False      # the disk says no
+try:
+    lock = B.VaultLock(_kdir)
+    got = lock._plain_key()
+    check("vault key: an unwritten key is not used", got is None, got)
+    check("vault key: and no half file is left",
+          not (_kdir / "passwords.key").exists())
+finally:
+    B._write_atomic = _real_atomic
+lock = B.VaultLock(_kdir)
+k1 = lock._plain_key()
+check("vault key: a written key is 32 bytes and on disk",
+      k1 is not None and len(k1) == 32
+      and (_kdir / "passwords.key").read_bytes() == k1)
+check("vault key: and stays the same next time", lock._plain_key() == k1)
+
+# -- switching the master password off never writes {} over a vault -----
+_mdir = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+ml = B.VaultLock(_mdir)
+ml.write({"items": [{"host": "x", "password": "keep-me"}]})
+check("master: switched on", ml.enable("correct horse battery"))
+raw = (_mdir / "passwords.json").read_bytes()
+(_mdir / "passwords.json").write_bytes(raw[:-1] + bytes([raw[-1] ^ 1]))
+check("master: off is refused while the body does not open",
+      ml.disable() is False)
+check("master: and the vault is still the sealed one",
+      (_mdir / "passwords.json").read_bytes()[:4] == B.MASTER_MAGIC)
+(_mdir / "passwords.json").write_bytes(raw)
+check("master: off works on a sound vault", ml.disable() is True)
+check("master: with everything still in it",
+      "keep-me" in json.dumps(B.VaultLock(_mdir).read()))
+
+# -- 1Password: an id that is really an option never reaches op ----------
+opp = B.OnePasswordProvider(_kdir)
+ran = []
+opp._run = lambda args, want_json=True, stdin=None: (ran.append(args)
+                                                     or (False, "x"))
+for bad in ("--vault=other", "-h", "a b", ""):
+    opp.details(bad); opp.totp(bad); opp.delete(bad)
+    opp.put({"id": bad or "-", "remote": True, "type": "login"})
+check("1Password: option-shaped ids never run op",
+      not [a for a in ran if a[:2] in (["item", "get"], ["item", "delete"],
+                                       ["item", "edit"])], ran[:3])
+opp.details("abc123")
+check("1Password: a real id still does", ran and ran[-1][2] == "abc123", ran)
+
+# -- one junk number in a vault row must not stop the vault loading -------
+for d in ({"items": [{"used": "abc"}]}, {"entries": [{"host": "x.com",
+                                                      "used": "zz"}]},
+          {"items": [{"history": [{"password": "a", "when": "x"}]}]},
+          {"version": "new"}, {"items": [{"type": "apikey",
+                                          "expires": "soon"}]}):
+    try:
+        got = B.PasswordVault.migrate(d)
+        check("vault migrate survives %r" % (d,), isinstance(got, dict))
+    except Exception as e:
+        check("vault migrate survives %r" % (d,), False, repr(e)[:60])
+
+# -- a malformed Bitwarden export is read as far as it goes, never raises -
+_bdir = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+bv = B.PasswordVault(_bdir)
+odd = {"items": [{"type": [1], "name": "a.example",
+                  "login": {"uris": {"0": "x"}, "password": "p1"}},
+                 {"type": 1, "name": "b.example", "fields": "nope",
+                  "login": {"uris": [{"uri": "https://b.example/"}],
+                            "username": "me", "password": "p2"}}]}
+try:
+    n = bv.import_bitwarden(json.dumps(odd))
+    check("Bitwarden import: odd rows do not raise, good rows land", n == 2,
+          n)
+except Exception as e:
+    check("Bitwarden import: odd rows do not raise, good rows land", False,
+          repr(e)[:80])
+
+# -- our own CSV export comes back through "import a file" unchanged ------
+_cdir = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+cv = B.PasswordVault(_cdir)
+cv.set_entry("c.example", "https", "me", "=SUM(1)")
+cv.set_entry("d.example", "https", "you", "plain")
+import csv as _csv, io as _io
+buf = _io.StringIO()
+_csv.writer(buf).writerows(cv.export_rows())
+cv2 = B.PasswordVault(_Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent))))
+cv2.import_rows(buf.getvalue())
+got = {(e["host"], e["password"]) for e in cv2.logins()}
+check("CSV round trip: a formula-looking password survives",
+      ("c.example", "=SUM(1)") in got, got)
+check("CSV round trip: a plain one too", ("d.example", "plain") in got, got)
+
 # -- the Minecraft ping never raises, whatever the server sends ---------
 import socket as _socket, threading as _threading
 
@@ -92,6 +195,10 @@ srv = H.Server({
                  "a&lt;i&gt;b</p>",
     "/code": "<title>c</title><pre id=c>// a comment \"quoted\" 42\n"
              "var s = \"text\"; x = f(3); # hash &lt;b&gt;</pre>",
+    "/drafts": "<title>d</title><input id=n name=note>"
+               "<input id=cc name=card autocomplete=cc-number>",
+    "/quoteid": "<title>q</title><input id='a\"b'><label for='x'>x</label>"
+                "<input id=x>",
     "/timers": "<title>t</title><script>window.ticks=0;"
                 "setInterval(function(){window.ticks++},20)</script>"})
 br = B.Browser()
@@ -134,6 +241,16 @@ check("clickable URLs: the words around it are kept",
 br.config["nav"] = {}
 br.refresh_nav()
 
+# keep drafts: an ordinary box is kept, a card number is not
+H.load(view, srv.url("/drafts"))
+H.spin(800)
+H.click(view, "#n"); H.type_text(view, "hello")
+H.click(view, "#cc"); H.type_text(view, "4111111111111111")
+H.spin(300)
+drafts = H.js(view, "sessionStorage.getItem('__formdraft') || ''") or ""
+check("drafts: the ordinary box is kept", "hello" in drafts, drafts)
+check("drafts: the card number is not", "4111" not in drafts, drafts)
+
 # bold word starts (accessibility): the page's text must stay text
 br.config["a11y"] = {"boldStarts": True}
 br.refresh_a11y()
@@ -147,6 +264,14 @@ check("bold starts: text that looks like markup is not run",
 check("bold starts: the text reads the same",
       H.js(view, "document.getElementById('t').textContent")
       == 'Hello reader <img src=x onerror="window.pwned2=1"> a<i>b')
+# the audit survives an input id with a quote in it
+H.load(view, srv.url("/quoteid"))
+H.spin(1000)
+audit = H.js(view, "(function(){try{return JSON.stringify("
+                   "window.__a11yAudit())}catch(e){return 'threw '+e}})()",
+             B.APP_WORLD_ID)
+check("a11y audit survives a quote in an id",
+      bool(audit) and not str(audit).startswith("threw"), audit)
 br.config["a11y"] = {}
 br.refresh_a11y()
 

@@ -7552,6 +7552,9 @@ NAV_JS = r"""(function (want) {
         if (rolling) {
           clearInterval(rolling.timer);
           if (rolling.mark) rolling.mark.remove();
+          /* and the pointer watcher with it: left on, every roll added
+             one more mousemove listener for the life of the page */
+          document.removeEventListener("mousemove", rolling.move, true);
           rolling = null;
         }
         return "off";
@@ -7894,6 +7897,12 @@ NAV_JS = r"""(function (want) {
       if (!W.keepDrafts) return;
       var el = e.target;
       if (!el || !("value" in el) || el.type === "password") return;
+      /* a card number, its code and a one-time code are typed into
+         plain text boxes; a draft of those is not worth keeping */
+      var ac = String(el.getAttribute && el.getAttribute("autocomplete")
+                      || "").toLowerCase();
+      if (/(^|\s)(cc-|one-time-code|new-password|current-password)/.test(ac))
+        return;
       var key = el.id || el.name || el.placeholder || "field";
       var rows = {};
       try {
@@ -8563,7 +8572,10 @@ A11Y_JS = r"""(function (want) {
       var el = inputs[i];
       var named = el.getAttribute("aria-label")
         || el.getAttribute("title")
-        || (el.id && document.querySelector('label[for="' + el.id + '"]'))
+        /* escaped: an id with a quote in it made the selector throw
+           and took the whole audit down with it */
+        || (el.id && document.querySelector(
+              'label[for="' + CSS.escape(el.id) + '"]'))
         || el.closest("label");
       if (!named) out.noLabel++;
     }
@@ -10451,8 +10463,18 @@ def kitty_colours(text):
             for token, names in pick.items():
                 for name in names:
                     value = colours.get(name)
-                    if isinstance(value, str) and value.startswith("#"):
-                        found[token] = value[:7]
+                    # "#rgb", "#rrggbb" and "#rrggbbaa" are all VS Code
+                    # colours; the short one used to come through as
+                    # "#rgb", fail the theme's own check and quietly
+                    # turn into Mocha's colour instead
+                    hit = re.fullmatch(
+                        r"#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?",
+                        value) if isinstance(value, str) else None
+                    if hit:
+                        six = hit.group(1)
+                        if len(six) == 3:
+                            six = "".join(c * 2 for c in six)
+                        found[token] = "#" + six.lower()
                         break
         return found
     # kitty.conf: "background #1e1e2e", "color4 #89b4fa"
@@ -11894,7 +11916,7 @@ class VaultLock:
             # to be instead of replacing it, which would lose every
             # password sealed under it.
             key = _undo_text_mode(key)
-            _write_private(self.key_file, key)
+            _write_atomic(self.key_file, key)
         if len(key) != 32:
             if self._raw().startswith(VAULT_MAGIC):
                 # the vault's key is gone and a new key cannot open it.
@@ -11903,7 +11925,12 @@ class VaultLock:
                 # key file (from a backup) can still open it
                 self._set_aside()
             key = os.urandom(32)
-            _write_private(self.key_file, key)
+            # swapped in whole, never truncated and refilled: a key file
+            # cut short by a crash is a vault nobody can open again. And
+            # a key that did not reach the disk is not handed out -
+            # passwords sealed under it would be gone at the next start.
+            if not _write_atomic(self.key_file, key):
+                return None
         return key
 
     def _set_aside(self):
@@ -12148,6 +12175,13 @@ class VaultLock:
         passphrase; it needs the vault open, which needs the
         passphrase."""
         if not self.enabled() or self._vault_key is None:
+            return False
+        # read() answers {} for a body it cannot open as well as for an
+        # empty vault; written out plain, that {} would be every
+        # password gone. Only a body that really opens goes on.
+        head, body = self._split(self._raw())
+        if head is None or _unseal(self._vault_key, body,
+                                   aad=MASTER_MAGIC) is None:
             return False
         data = self.read()
         token = self._token_plain()
@@ -12527,6 +12561,16 @@ OP_CATEGORIES = {"login": "LOGIN", "note": "SECURE_NOTE",
 OP_KINDS = {v: k for k, v in OP_CATEGORIES.items()}
 
 
+def _op_id(item_id):
+    """An item id fit to put in op's argument list, or None.
+
+    op's ids are plain letters and digits. Anything else -- above all
+    something starting with a dash -- is not an id but an option, and
+    "--vault=other" in the place of an id would be op reading a flag."""
+    text = str(item_id or "")
+    return text if re.fullmatch(r"[A-Za-z0-9]{1,64}", text) else None
+
+
 class OnePasswordProvider(VaultProvider):
     """Secrets kept in 1Password, reached through the official `op`
     command-line tool with a service-account token.
@@ -12830,7 +12874,10 @@ class OnePasswordProvider(VaultProvider):
     def details(self, item_id):
         """`op item get` — the full item including its secrets. Only
         ever called from a worker thread."""
-        ok, payload = self._run(["item", "get", str(item_id),
+        item_id = _op_id(item_id)
+        if item_id is None:
+            return None
+        ok, payload = self._run(["item", "get", item_id,
                                  "--format", "json"] + self._vault_args())
         if not ok or not isinstance(payload, dict):
             self.last_error = str(payload)
@@ -12884,7 +12931,10 @@ class OnePasswordProvider(VaultProvider):
         return value if isinstance(value, str) else ""
 
     def totp(self, item_id):
-        ok, payload = self._run(["item", "get", str(item_id), "--otp"]
+        item_id = _op_id(item_id)
+        if item_id is None:
+            return ""
+        ok, payload = self._run(["item", "get", item_id, "--otp"]
                                 + self._vault_args(), want_json=False)
         if not ok:
             self.last_error = str(payload)
@@ -12931,6 +12981,8 @@ class OnePasswordProvider(VaultProvider):
         alone, so nothing he just typed is thrown away."""
         fields = self._fields_for(item)
         if item.get("id") and item.get("remote"):
+            if _op_id(item["id"]) is None:
+                return None
             ok, current = self._run(["item", "get", str(item["id"]),
                                      "--format", "json"] + self._vault_args())
             if not ok or not isinstance(current, dict):
@@ -13019,7 +13071,10 @@ class OnePasswordProvider(VaultProvider):
         return out
 
     def delete(self, item_id):
-        ok, payload = self._run(["item", "delete", str(item_id)]
+        item_id = _op_id(item_id)
+        if item_id is None:
+            return False
+        ok, payload = self._run(["item", "delete", item_id]
                                 + self._vault_args(), want_json=False)
         if not ok:
             self.last_error = str(payload)
@@ -13298,7 +13353,7 @@ class PasswordVault:
             if not host or (host, username) in seen:
                 continue
             seen.add((host, username))
-            used = int(legacy.get("used", 0) or 0)
+            used = _sane_number(legacy.get("used", 0))
             item = dict(legacy)
             item.update({"type": "login", "host": host, "username": username,
                          "created": used, "changed": used, "used": used})
@@ -13312,7 +13367,10 @@ class PasswordVault:
             if host and host not in never:
                 never.append(host)
         out["never"] = never
-        out["version"] = max(int(out.get("version") or 0), cls.VERSION)
+        # every number in here is read with _sane_number: one row with
+        # "used": "abc" in it (an import, a hand edit) raised out of
+        # migrate, and migrate runs while the browser is starting
+        out["version"] = max(_sane_number(out.get("version")), cls.VERSION)
         return out
 
     @classmethod
@@ -13331,9 +13389,9 @@ class PasswordVault:
         if not isinstance(item.get("type"), str) or not item["type"].strip():
             item["type"] = "login"
         now = int(time.time())
-        item["used"] = int(item.get("used") or 0)
-        item["created"] = int(item.get("created") or item["used"] or now)
-        item["changed"] = int(item.get("changed") or item["created"])
+        item["used"] = _sane_number(item.get("used"))
+        item["created"] = _sane_number(item.get("created")) or item["used"] or now
+        item["changed"] = _sane_number(item.get("changed")) or item["created"]
         item.setdefault("title", "")
         item.setdefault("note", "")
         if not isinstance(item.get("tags"), list):
@@ -13368,7 +13426,7 @@ class PasswordVault:
             # token different from a password: it runs out
             for field in ("service", "key"):
                 item.setdefault(field, "")
-            item["expires"] = int(item.get("expires") or 0)
+            item["expires"] = _sane_number(item.get("expires"))
         elif item["type"] == "codes":
             # 2FA backup codes. Each one is used once, and a used one
             # has to stay visible and struck off rather than vanish:
@@ -13402,7 +13460,7 @@ class PasswordVault:
         past = item.get("history")
         item["history"] = [
             {"password": str(row.get("password", "")),
-             "when": int(row.get("when") or 0)}
+             "when": _sane_number(row.get("when"))}
             for row in (past if isinstance(past, list) else [])
             if isinstance(row, dict) and row.get("password")][:20]
         return item
@@ -14027,13 +14085,15 @@ class PasswordVault:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            kind = {1: "login", 2: "note", 3: "card",
-                    4: "identity"}.get(row.get("type"), "login")
+            kind = {1: "login", 2: "note", 3: "card", 4: "identity"}.get(
+                row.get("type") if isinstance(row.get("type"), int) else 1,
+                "login")
             item = {"type": kind, "title": str(row.get("name", "")),
                     "note": str(row.get("notes") or "")}
             login = row.get("login") or {}
             if kind == "login" and isinstance(login, dict):
-                uris = login.get("uris") or []
+                uris = login.get("uris")
+                uris = uris if isinstance(uris, list) else []
                 first = ""
                 if uris and isinstance(uris[0], dict):
                     first = str(uris[0].get("uri", ""))
@@ -14054,7 +14114,8 @@ class PasswordVault:
             if kind == "note":
                 item["body"] = str(row.get("notes") or "")
             extra = []
-            for field in row.get("fields") or []:
+            fields = row.get("fields")
+            for field in fields if isinstance(fields, list) else []:
                 if isinstance(field, dict) and field.get("name"):
                     extra.append({"name": str(field["name"]),
                                   "value": str(field.get("value") or ""),
@@ -14110,7 +14171,11 @@ class PasswordVault:
 
             def cell(field):
                 index = where.get(field)
-                return (str(row[index]).strip()
+                # _csv_plain: this browser's own export puts an
+                # apostrophe in front of a cell a spreadsheet would run
+                # (=, +, -, @), and read back without taking it off, a
+                # password "=abc" came home as "'=abc"
+                return (self._csv_plain(str(row[index]).strip())
                         if index is not None and index < len(row) else "")
 
             site = cell("url") or cell("title")
@@ -67078,7 +67143,8 @@ FORM_PICK = r"""(function () {
       }
     }
     if (el.id) {
-      var tied = document.querySelector("label[for='" + el.id + "']");
+      var tied = document.querySelector(
+        "label[for='" + CSS.escape(el.id) + "']");   /* page ids can hold quotes */
       if (tied) words.push(tied.textContent || "");
     }
     return words.join(" ").toLowerCase();
