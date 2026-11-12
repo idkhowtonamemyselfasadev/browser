@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part five)
+
+- **An encrypted history stays encrypted, and stays.** With history encryption on
+  and the vault still shut (the usual state right after start with a master
+  password), the first page you read wrote the history out in plain text, over
+  the encrypted file: everything from earlier runs was gone, and new pages sat on
+  disk unencrypted. Nothing is written while the vault is shut now; what you read
+  waits in memory and is written under the key when the vault opens, after the
+  history that was already there.
+- **Recording a tab "with its sound" records the tab, not your microphone.** Both
+  recorders were started on the default input, which is the microphone, so a tab
+  recording with sound captured the room. It records the output's monitor now; a
+  voice-over still uses the microphone.
+- **A page cannot have a file of yours transcribed.** "Make captions" handed the
+  video's address, as the page gave it, to ffmpeg; a `<video src="file:///home/...">`
+  got a recording off your disk turned into captions inside that page, where its
+  script could read them. Only web addresses are taken, and none on your own
+  network unless the page is there too.
+- **No capture tool pictures a private tab** unless Settings allows it. Most did
+  ask; "copy with link", "selection as picture", the annotator, the stamp, the
+  phone-sized and inner-element shots, the timelapse, the capture diff and the OCR
+  of the page did not.
+- **A website cannot draw its own message in the browser's corner.** The little
+  notices ("copied", a notification's title, a downloaded file's name) were a
+  label that guessed rich text, so a notification titled `<h1>Update required</h1>`
+  came out as a big styled line that looked like the browser's own.
+- **"Copy with link" no longer pastes your home folder into websites.** It put
+  `file:///home/<you>/...` next to the picture; the picture and the page's link
+  are what goes on the clipboard now.
+- **"Close unused tabs" never bookmarks a private tab** (it closes it, like the
+  others).
+- **A soft reload puts what you typed back only on the same site** — not into the
+  boxes of a login page on another host it was sent to.
+- **A private tab cannot be snoozed.** A snooze is written into the config and
+  comes back as an ordinary tab (ordinary cookies, ordinary history).
+- The link line laid over the address bar is plain text too (the one at the bottom
+  already was).
+- Two timers with the same name no longer go together when the first is up; due
+  snoozes past the first ten wait for the next look instead of being dropped; a
+  site-limit warning comes again on a new day; a private tab's time is not counted;
+  a second highlights export does not replace the first.
+
 ## 2026-11-12 — line-by-line review, day 2 (part four)
 
 - **"Allow this time" is this time, and taking a permission back takes it back.**

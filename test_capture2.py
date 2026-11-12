@@ -24,7 +24,7 @@ B = H.boot()
 import capture  # noqa: E402
 import qr  # noqa: E402
 from PyQt6.QtCore import QUrl, Qt  # noqa: E402
-from PyQt6.QtGui import QColor, QImage  # noqa: E402
+from PyQt6.QtGui import QColor, QGuiApplication, QImage  # noqa: E402
 
 fails = []
 
@@ -276,7 +276,12 @@ text = win.copy_with_link(view=view)
 check("a capture can be copied with the page's address",
       "](" in str(text) and "127.0.0.1" in str(text), str(text)[:70])
 text = win.copy_with_link(view=view, as_html=True)
-check("...or as HTML", "<img" in str(text), str(text)[:60])
+# the picture rides as image data; the HTML is the link alone, never the
+# file:///home/... path of this machine (that went into websites on paste)
+check("...or as HTML", "<a href=" in str(text) and "file://" not in str(text),
+      str(text)[:60])
+check("...with the picture itself on the clipboard",
+      QGuiApplication.clipboard().mimeData().hasImage())
 
 print("\n(6) the other ways to capture")
 path = win.shot_hidpi(view=view, scale=2)

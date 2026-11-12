@@ -279,6 +279,7 @@ srv = H.Server({
                   "<textarea class=t2></textarea></form>",
     "/auth/panel": "<title>panel</title><p>you are in</p>",
     "/blockme": "<title>bm</title><p id=b>served</p>",
+    "/vidfile": "<title>v</title><video src='file:///etc/hostname'></video>",
     "/notif": "<title>n</title><script>window.asked='';"
               "Notification.requestPermission().then(function(r){"
               "window.asked=r})</script>",
@@ -1150,6 +1151,16 @@ _hl = getattr(br, "_hoverlbl", None)
 check("the status line is plain text",
       _hl is not None and _hl.textFormat() == B.Qt.TextFormat.PlainText
       and "<h1>" in _hl.text(), _hl.text() if _hl is not None else None)
+_sl_was = br.config.get("statusLine")
+br.config["statusLine"] = "bar"
+br.urlbar.clearFocus()
+br.show_hovered_link("https://www.google.com/url?q=https://x.example/"
+                     "%3Ch1%3Ehttps://bank.example%3C/h1%3E")
+_bh = getattr(br, "_barhover", None)
+check("...and so is the one laid over the address bar",
+      _bh is not None and _bh.textFormat() == B.Qt.TextFormat.PlainText,
+      str(_bh.textFormat()) if _bh is not None else None)
+br.config["statusLine"] = _sl_was or "bottom"
 
 # a certificate exception is that certificate, or nothing
 br.config["certExceptions"] = {"legacy.lan": True}
@@ -1229,6 +1240,185 @@ if _drawer is not None:
           str(H.js(v20, "document.getElementById('n').value")))
     _drawer.set_snippet("zqsnip", "")
     br.refresh_snippet_script()
+
+# two timers of the same name: the first one up takes only itself
+br.config["timers"] = []
+br.start_timer(1)
+br.start_timer(2)
+br.timers()[0]["at"] = 1
+br._desk_tick()
+check("a timer that is up leaves its namesake running",
+      len(br.timers()) == 1 and br.timers()[0]["at"] > 1, str(br.timers()))
+br.config["timers"] = []
+
+# a private tab is not snoozed (written down, back as an ordinary tab)
+_snz_was = list(br.config.get("snoozed") or [])
+check("a private tab cannot be snoozed",
+      br.snooze_tab(index=br.tabs.indexOf(_pv), minutes=5) is None
+      and list(br.config.get("snoozed") or []) == _snz_was
+      and br.tabs.indexOf(_pv) >= 0)
+# and twelve due snoozes open ten now and keep two, not drop them
+br.config["snoozed"] = [{"url": srv.url("/twhome?s=%d" % i), "title": "s",
+                         "at": 1} for i in range(12)]
+check("ten due snoozes open at a time...", br.wake_snoozed() == 10)
+check("...and the other two wait for the next look",
+      len(br.snoozed_tabs()) == 2, len(br.snoozed_tabs()))
+br.config["snoozed"] = _snz_was
+
+# a new day warns again about a site limit
+br._limit_said = {"x.example": True}
+br._limit_warned = {"x.example": True}
+br.config["siteTime"] = {"day": "2000-01-01", "x.example": 9999}
+br.site_minutes_today()
+check("the day roll-over lets the limit warnings come again",
+      br._limit_said == {} and br._limit_warned == {})
+
+# exporting the highlights twice keeps both files
+br.config["highlights"] = {"https://a.example/": ["one marked line"]}
+_h1 = br.export_highlights()
+_h2 = br.export_highlights()
+check("a second highlights export does not replace the first",
+      _h1 and _h2 and _h1 != _h2, str((_h1, _h2)))
+br.config["highlights"] = {}
+
+# an encrypted history is never written out plain while the vault is shut,
+# and what was read meanwhile is kept and written under the key later
+_hf = B.HISTORY_FILE
+_hist_was = list(br.history)
+_file_was = _hf.read_bytes() if _hf.exists() else None
+_enc_was = br.config.get("historyEncrypted")
+_key = b"k" * 32
+br.config["historyEncrypted"] = True
+br.history_key = lambda: _key
+br.history[:] = [{"url": "https://older.example/", "title": "Older", "t": 1}]
+br.save_history()
+br.history_key = lambda: None
+br._history_locked = True
+br.history[:] = []
+_sealed = _hf.read_bytes()
+br._record_history(B.QUrl("https://visited-while-locked.example/"),
+                   "Locked visit")
+_now = _hf.read_bytes()
+check("with the vault shut, the encrypted history file is left alone",
+      _now == _sealed and _now.startswith(B.HISTORY_MAGIC), _now[:12])
+check("...and no visit lands on disk in the clear",
+      b"visited-while-locked" not in _now)
+br.history_key = lambda: _key
+br.unlock_history()
+_urls = [e["url"] for e in br.history]
+check("opening the vault brings back the old history and keeps the new",
+      _urls == ["https://older.example/",
+                "https://visited-while-locked.example/"], str(_urls))
+br._history_locked = False
+check("...and both are written down, under the key",
+      [e["url"] for e in br._read_history()] == _urls
+      and _hf.read_bytes().startswith(B.HISTORY_MAGIC))
+br.__dict__.pop("history_key", None)
+br.config["historyEncrypted"] = _enc_was
+br._history_locked = False
+br._history_unsaved = False
+br.history[:] = _hist_was
+if _file_was is None:
+    _hf.unlink()
+else:
+    _hf.write_bytes(_file_was)
+
+# a toast is text: a web notification cannot draw its own "browser" message
+class _Note2:
+    def origin(self): return B.QUrl("https://n.example/")
+    def title(self): return "<h1>Update required</h1>"
+    def message(self): return "body"
+    def show(self): pass
+    def close(self): pass
+br.config["desktopNotify"] = False
+br._web_notification(_Note2(), private=True)
+_fl = getattr(br, "_flash", None)
+check("a notification's title shows as text in the toast",
+      _fl is not None and _fl.textFormat() == B.Qt.TextFormat.PlainText
+      and "<h1>" in _fl.text(), _fl.text() if _fl is not None else None)
+
+# "close unused tabs" keeps the normal ones as bookmarks, never a private one
+_pv3 = br.new_private_tab(); H.spin(300)
+H.load(_pv3, srv.url("/twother?unused-private")); H.spin(600)
+br.tabs.setCurrentWidget(v15); H.spin(100)
+# after the switch: leaving a tab marks it as just seen
+_pv3._last_seen = 1
+_bm_before = len(br.bookmarks)
+_closed = br.close_unused_tabs(days=1)
+check("closing unused tabs does not bookmark a private one",
+      any(r["view"] is _pv3 for r in _closed)
+      and not any("unused-private" in str(e.get("url"))
+                  for e in br.bookmarks),
+      str((len(_closed), len(br.bookmarks) - _bm_before)))
+
+# a capture copied "with its link" carries no path of this machine
+if B.capture is not None:
+    br.config["shotDir"] = str(_xdir)
+    _pic = B.QImage(20, 20, B.QImage.Format.Format_RGB32)
+    _pic.fill(B.QColor("blue"))
+    _txt = br.copy_with_link(image=_pic, view=v15)
+    _md = B.QGuiApplication.clipboard().mimeData()
+    check("a capture with its link names the page, not a local file",
+          _txt and "file://" not in _txt
+          and "file://" not in (_md.html() if _md is not None else "")
+          and _md is not None and _md.hasImage(), str(_txt)[:120])
+
+# a private tab is not captured by any of the capture tools
+if B.capture is not None:
+    br.config["shotPrivate"] = False
+    _pv4 = br.new_private_tab(); H.spin(300)
+    H.load(_pv4, srv.url("/twother")); H.spin(600)
+    br.tabs.setCurrentWidget(_pv4); H.spin(100)
+    _caps_before = list(br.config.get("shotHistory") or [])
+    _outs = [br.copy_with_link(view=_pv4), br.annotate(view=_pv4),
+             br.stamp_capture(view=_pv4), br.shot_mobile(view=_pv4),
+             br.shot_inner("p", view=_pv4), br.capture_diff(view=_pv4),
+             br.timelapse(True, view=_pv4)]
+    check("no capture tool pictures a private tab",
+          all(not o for o in _outs)
+          and list(br.config.get("shotHistory") or []) == _caps_before,
+          str(_outs))
+    br.timelapse(False)
+
+# a tab recorded with its sound records the output, not the microphone
+class _FakeProc:
+    started = []
+    def __init__(self, *a, **k): pass
+    def start(self, prog, args): _FakeProc.started.append([prog] + list(args))
+_real_qp = B.QProcess
+_real_tools = br.record_tools
+B.QProcess = _FakeProc
+for _rec in ("/usr/bin/parec", "/usr/bin/ffmpeg"):
+    br.record_tools = lambda r=_rec: {"recorder": r}
+    br._record_audio_start(microphone=False)
+    br._record_audio_start(microphone=True)
+B.QProcess = _real_qp
+br.__dict__.pop("record_tools", None)
+_tab_p, _mic_p, _tab_f, _mic_f = _FakeProc.started
+check("parec records the output's monitor for a tab, the source for a voice",
+      "--device=@DEFAULT_MONITOR@" in _tab_p
+      and "--device=@DEFAULT_SOURCE@" in _mic_p, str((_tab_p, _mic_p)))
+check("...and so does ffmpeg",
+      _tab_f[_tab_f.index("-i") + 1] == "@DEFAULT_MONITOR@"
+      and _mic_f[_mic_f.index("-i") + 1] == "@DEFAULT_SOURCE@",
+      str((_tab_f, _mic_f)))
+
+# captions are never made from a file of his a page points its video at
+_jobs, _said_cap = [], []
+_ct = br.caption_tools
+br.caption_tools = lambda: {"captionTranscriber": "/bin/true"}
+_ff_was = br.config.get("ffmpegPath")
+br.config["ffmpegPath"] = "/bin/true"
+br._caption_job = lambda *a, **k: _jobs.append(a)
+v21 = br.new_tab(); H.spin(300)
+H.load(v21, srv.url("/vidfile")); H.spin(800)
+br.make_captions(view=v21, then=_said_cap.append)
+H.wait_for(lambda: _said_cap, 4000)
+check("a page's file:// video is not handed to ffmpeg",
+      _jobs == [] and _said_cap == [{"refused": True}], str((_jobs, _said_cap)))
+for _n in ("caption_tools", "_caption_job"):
+    br.__dict__.pop(_n, None)
+br.config["ffmpegPath"] = _ff_was
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

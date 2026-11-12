@@ -81,7 +81,10 @@ check("opening a copy that is not there refuses",
 path = win.bookmark_offline(mark["id"], view=view)
 check("a copy can be made", isinstance(path, str) and path.endswith(".mhtml"),
       path)
-H.wait_for(lambda: Path(path).is_file(), 9000)
+# the engine creates the file first and fills it after: waiting for it
+# only to exist read 0 bytes whenever the machine was busy
+H.wait_for(lambda: Path(path).is_file() and Path(path).stat().st_size > 200,
+           9000)
 check("...and it arrives on the disk", Path(path).is_file(), path)
 size = Path(path).stat().st_size if Path(path).is_file() else 0
 check("...with the page in it", size > 200, size)
