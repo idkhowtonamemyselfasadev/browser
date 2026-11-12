@@ -87,8 +87,15 @@ def _startup_flags():
     # the remote debugging port: off unless he asked, and the engine
     # binds it to this machine
     if data.get("debugPort"):
-        parts.append("--remote-debugging-port=%d"
-                     % int(data.get("debugPortNumber") or 9222))
+        # read at import, before any window can catch a bad value: a
+        # hand-edited "abc" here used to stop the browser starting
+        try:
+            port = int(data.get("debugPortNumber") or 9222)
+        except (TypeError, ValueError):
+            port = 9222
+        if not 1 <= port <= 65535:
+            port = 9222
+        parts.append("--remote-debugging-port=%d" % port)
     return " ".join(parts)
 
 
@@ -1941,10 +1948,19 @@ def _calc_answer(text):
                     and isinstance(e.value, (int, float))
                     and abs(e.value) <= 64):
                 return None
+            # ...and a power of a power multiplies the exponents:
+            # ((9^64)^64)^64 is 9^262144, seconds of work and a number
+            # too long to print (str() raises past 4300 digits)
+            if any(isinstance(inner, ast.BinOp)
+                   and isinstance(inner.op, ast.Pow)
+                   for inner in ast.walk(node.left)):
+                return None
     try:
         value = eval(compile(tree, "<bar>", "eval"), {"__builtins__": {}}, {})
     except (ArithmeticError, ValueError, TypeError):
         return None
+    if isinstance(value, int) and abs(value) >= 10 ** 300:
+        return None             # not a number anyone reads off a bar
     if isinstance(value, float):
         if value != value or value in (float("inf"), float("-inf")):
             return None
@@ -3888,18 +3904,32 @@ def mc_ping(host, port=25565, timeout=2.5):
     except (OSError, ValueError, ConnectionError, json.JSONDecodeError) as exc:
         return {"up": False, "error": str(exc)[:120],
                 "ms": int((time.monotonic() - start) * 1000)}
-    players = info.get("players") or {}
-    description = info.get("description")
-    if isinstance(description, dict):
-        text = description.get("text", "")
-        for extra in description.get("extra") or []:
-            text += extra.get("text", "") if isinstance(extra, dict) else ""
-        description = text
-    return {"up": True, "ms": int((time.monotonic() - start) * 1000),
-            "players": int(players.get("online") or 0),
-            "max": int(players.get("max") or 0),
-            "version": (info.get("version") or {}).get("name", ""),
-            "motd": str(description or "")[:120]}
+    # whatever came back is the server's word, not a promise of shape:
+    # a list, a number or a "players" that is a string used to raise
+    # out of a function that says it never does
+    ms = int((time.monotonic() - start) * 1000)
+    if not isinstance(info, dict):
+        return {"up": False, "error": "unexpected answer", "ms": ms}
+    try:
+        players = info.get("players")
+        players = players if isinstance(players, dict) else {}
+        description = info.get("description")
+        if isinstance(description, dict):
+            text = str(description.get("text", ""))
+            extras = description.get("extra")
+            for extra in extras if isinstance(extras, list) else []:
+                text += (str(extra.get("text", ""))
+                         if isinstance(extra, dict) else "")
+            description = text
+        version = info.get("version")
+        version = version if isinstance(version, dict) else {}
+        return {"up": True, "ms": ms,
+                "players": int(players.get("online") or 0),
+                "max": int(players.get("max") or 0),
+                "version": str(version.get("name", ""))[:80],
+                "motd": str(description or "")[:120]}
+    except (TypeError, ValueError, OverflowError):
+        return {"up": False, "error": "unexpected answer", "ms": ms}
 
 
 # sites that ship their own dark theme (served via preferredColorScheme):
@@ -7424,11 +7454,26 @@ NAV_JS = r"""(function (want) {
       nodes.push(node);
     }
     nodes.forEach(function (one) {
-      var holder = document.createElement("span");
-      holder.innerHTML = (one.nodeValue || "").replace(
-        pattern, function (hit) {
-          return '<a class="__navurl" href="' + hit + '">' + hit + "</a>";
-        });
+      /* built node by node, never through innerHTML: the text around
+         the address is the page's TEXT, and "&lt;img onerror=...&gt;"
+         shown on a forum is a string that innerHTML would have turned
+         into a live element and run */
+      var text = one.nodeValue || "", at = 0, hit;
+      var holder = document.createDocumentFragment();
+      pattern.lastIndex = 0;
+      while ((hit = pattern.exec(text))) {
+        if (hit.index > at)
+          holder.appendChild(document.createTextNode(
+            text.slice(at, hit.index)));
+        var link = document.createElement("a");
+        link.className = "__navurl";
+        link.href = hit[0];
+        link.textContent = hit[0];
+        holder.appendChild(link);
+        at = hit.index + hit[0].length;
+      }
+      if (at < text.length)
+        holder.appendChild(document.createTextNode(text.slice(at)));
       one.parentNode.replaceChild(holder, one);
     });
   }
@@ -8227,13 +8272,25 @@ A11Y_JS = r"""(function (want) {
     var mark = function (node) {
       var text = node.nodeValue;
       if (!text || !/\S/.test(text)) return;
+      /* node by node, never innerHTML: this is the page's TEXT, and a
+         "<" in it (a<i>b, a tag shown in an article) would otherwise
+         be parsed as markup */
       var holder = document.createElement("span");
       holder.className = "__a11yb";
-      holder.innerHTML = text.replace(/[A-Za-z\u00c0-\u024f]{3,}/g,
-        function (word) {
-          var cut = Math.max(1, Math.ceil(word.length * 0.4));
-          return "<b>" + word.slice(0, cut) + "</b>" + word.slice(cut);
-        });
+      var word = /[A-Za-z\u00c0-\u024f]{3,}/g, at = 0, hit;
+      while ((hit = word.exec(text))) {
+        if (hit.index > at)
+          holder.appendChild(document.createTextNode(
+            text.slice(at, hit.index)));
+        var cut = Math.max(1, Math.ceil(hit[0].length * 0.4));
+        var bold = document.createElement("b");
+        bold.textContent = hit[0].slice(0, cut);
+        holder.appendChild(bold);
+        holder.appendChild(document.createTextNode(hit[0].slice(cut)));
+        at = hit.index + hit[0].length;
+      }
+      if (at < text.length)
+        holder.appendChild(document.createTextNode(text.slice(at)));
       node.parentNode.replaceChild(holder, node);
     };
     var walker = document.createTreeWalker(document.body || root,
@@ -27148,10 +27205,15 @@ class Browser(QMainWindow):
         # dispatched cold is a bug. The two halves only make sense
         # together, in that order.
         code = tint_js(code)
+        # Freeze replaces the page's own setTimeout and friends, and an
+        # isolated world has copies of its own: swapped there, the page
+        # kept every new timer it set. Those two run where the page's
+        # functions live; everything else stays out of the page's reach.
+        world = MAIN_WORLD_ID if name in ("freeze", "thaw") else APP_WORLD_ID
         if then is None:
-            view.page().runJavaScript(code, APP_WORLD_ID)
+            view.page().runJavaScript(code, world)
         else:
-            view.page().runJavaScript(code, APP_WORLD_ID, then)
+            view.page().runJavaScript(code, world, then)
         return True
 
     def show_feeds(self):
@@ -66518,20 +66580,33 @@ READ_TOOLS = {
     if (pre.querySelector("span")) continue;      /* already coloured */
     var text = pre.textContent || "";
     if (!text.trim() || text.length > 20000) continue;
-    var html = text.replace(/[&<>]/g, function (c) {
-      return {"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c];
-    });
-    html = html.replace(/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)/g,
-      '<span style="color:' + C.com + '">$1</span>');
-    html = html.replace(/("[^"\n]*"|'[^'\n]*')/g,
-      '<span style="color:' + C.str + '">$1</span>');
-    html = html.replace(/\b(\d+(?:\.\d+)?)\b/g,
-      '<span style="color:' + C.num + '">$1</span>');
-    html = html.replace(new RegExp("\\b(" + WORDS.join("|") + ")\\b", "g"),
-      '<span style="color:' + C.kw + '">$1</span>');
-    html = html.replace(/\b([A-Za-z_][\w]*)\s*\(/g,
-      '<span style="color:' + C.fn + '">$1</span>(');
-    pre.innerHTML = html;
+    /* one pass over the RAW text, each piece put in as text. The old
+       way ran five replaces over HTML it had already written, so the
+       string rule coloured our own style="color:..." attributes and
+       every comment came out with "color:#6c7086"> printed in it */
+    var lex = new RegExp(
+      "(\\/\\/[^\\n]*|#[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)"   /* 1 comment */
+      + "|(\"[^\"\\n]*\"|'[^'\\n]*')"                    /* 2 string */
+      + "|\\b(\\d+(?:\\.\\d+)?)\\b"                     /* 3 number */
+      + "|\\b(" + WORDS.join("|") + ")\\b"                 /* 4 keyword */
+      + "|\\b([A-Za-z_]\\w*)(?=\\s*\\()", "g");             /* 5 call */
+    var colours = [null, C.com, C.str, C.num, C.kw, C.fn];
+    var out = document.createDocumentFragment(), at = 0, hit;
+    while ((hit = lex.exec(text))) {
+      if (!hit[0]) { lex.lastIndex++; continue; }
+      if (hit.index > at)
+        out.appendChild(document.createTextNode(text.slice(at, hit.index)));
+      var kind = 1;
+      while (kind < 6 && hit[kind] === undefined) kind++;
+      var tag = document.createElement("span");
+      tag.setAttribute("style", "color:" + colours[kind]);
+      tag.textContent = hit[0];
+      out.appendChild(tag);
+      at = hit.index + hit[0].length;
+    }
+    if (at < text.length) out.appendChild(document.createTextNode(text.slice(at)));
+    pre.textContent = "";
+    pre.appendChild(out);
     done++;
   }
   return String(done);

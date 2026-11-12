@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 1
+
+From reading browser.py top to bottom; `tests/test_review.py` holds one check per
+item, and 18 of them are red on the old code.
+
+- **Clickable addresses and "bold word starts" no longer turn page text into
+  markup.** Both rebuilt a text node through innerHTML, so `<img onerror=...>`
+  written as text on a forum became a live element and ran. They build nodes now.
+- **The code highlighter stops printing its own HTML into the code.** It ran five
+  replaces over markup it had already written; every comment came out with
+  `"color:#6c7086">` in it. One tokenizer pass now, the code reads exactly as before.
+- **Freeze really freezes.** It swapped setTimeout in an isolated world, so the
+  page kept every timer it set afterwards.
+- **A bad `debugPortNumber` in the config no longer stops the browser starting.**
+- **The bar's calculator declines `((9^64)^64)^2`** instead of raising.
+- **The Minecraft server ping survives an odd answer** (a list, a string where an
+  object belongs) instead of raising out of a function that promised not to.
+
 ## 2026-11-12 — the browser asks to save a password on real sites
 
 - **Signing in on most big sites now offers to save the password.** The watcher
