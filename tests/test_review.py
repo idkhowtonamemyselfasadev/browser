@@ -2100,6 +2100,17 @@ br.lite_mode(on=_lite_was)
 check("lite mode keeps images off after the tab goes to another page",
       _img_on is False, str(_img_on))
 
+# an "&" in a bookmark's name is shown, not taken for a menu shortcut
+_amp_entry = {"id": 999901, "type": "link", "title": "AT&T", "parent": 0,
+              "url": "https://att.example/", "icon": ""}
+_amp_btn = B.BookmarkButton(br, _amp_entry)
+_amp_menu = B.QMenu()
+br._fill_entries(_amp_menu, [_amp_entry], 0)
+check("a bookmark called AT&T keeps its & on the bar and in the menu",
+      _amp_btn.text() == "AT&&T" and _amp_menu.actions()[0].text() == "AT&&T",
+      str((_amp_btn.text(), _amp_menu.actions()[0].text())))
+_amp_btn.deleteLater()
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:

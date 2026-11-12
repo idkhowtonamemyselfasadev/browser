@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part seventeen)
+
+- **An "&" in a name stays an "&".** Bookmarks, the bookmarks bar, recently
+  closed tabs, the back/forward menus, the media menu and the other lists made
+  from page titles showed "AT&T" as "ATT" with the T underlined, because Qt
+  reads a single "&" as a keyboard shortcut marker.
+
 ## 2026-11-12 — line-by-line review, day 2 (part sixteen)
 
 - **Lite mode keeps images off.** Its "no images" switch was undone in every tab

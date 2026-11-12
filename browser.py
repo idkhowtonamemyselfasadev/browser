@@ -19684,6 +19684,14 @@ class LocalFileWidget(QWidget):
             self.info.setText(fail_text)
 
 
+def _amp(text):
+    """Text from a page or a bookmark, for a menu entry or a button: an
+    "&" doubled. Qt reads a single one as "underline the next letter",
+    so "AT&T" showed as "ATT" with the T underlined, and Alt+T in the
+    open menu picked it."""
+    return str(text or "").replace("&", "&&")
+
+
 def literal(text):
     """A string a website or a server controls, for a message box.
 
@@ -20233,12 +20241,12 @@ class BookmarkButton(QToolButton):
         # font only reaches the widget on polish, long after __init__
         short = title if len(title) <= 23 else title[:22].rstrip() + "\u2026"
         if entry["type"] == "folder":
-            self.setText("\u25b8 " + short)
+            self.setText("\u25b8 " + _amp(short))
         else:
             icon = _icon_from_data(entry.get("icon", ""))
             self.setIcon(icon if not icon.isNull() else _blank_favicon())
             self.setIconSize(QSize(16, 16))
-            self.setText(short)
+            self.setText(_amp(short))
             self.setToolButtonStyle(
                 Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.clicked.connect(self._left_click)
@@ -26112,7 +26120,7 @@ class Browser(QMainWindow):
             if not title:
                 continue
             shown += 1
-            menu.addAction(title).triggered.connect(
+            menu.addAction(_amp(title)).triggered.connect(
                 lambda _, s=saved: self._reopen_saved(s))
         if not shown:
             menu.addAction(self._ui_str("closedNone")).setEnabled(False)
@@ -27521,7 +27529,7 @@ class Browser(QMainWindow):
             if not feeds:
                 menu.addAction(self._ui_str("feedsNone")).setEnabled(False)
             for title, href in feeds[:12]:
-                menu.addAction("%s \u2014 %s" % (title[:40], href[:60])
+                menu.addAction(_amp("%s \u2014 %s" % (title[:40], href[:60]))
                                ).triggered.connect(
                     lambda _, u=href: (
                         QGuiApplication.clipboard().setText(u),
@@ -27608,7 +27616,7 @@ class Browser(QMainWindow):
         menu = QMenu(self)
         for item in (items if forward else reversed(items)):
             title = (item.title() or item.url().toString())[:70]
-            menu.addAction(title).triggered.connect(
+            menu.addAction(_amp(title)).triggered.connect(
                 lambda _, it=item: view.history().goToItem(it))
         return menu
 
@@ -27869,7 +27877,7 @@ class Browser(QMainWindow):
             menu.addAction(self._ui_str("mediaNoSound")).setEnabled(False)
         for i, view in tabs:
             title = self._tab_title(i) or view.url().host()
-            sub = menu.addMenu(title[:50])
+            sub = menu.addMenu(_amp(title[:50]))
             sub.addAction(self._ui_str("mediaGoTo")).triggered.connect(
                 lambda _, v=view: self.focus_tab(v))
             sub.addAction(self._ui_str("mediaPlayPause")).triggered.connect(
@@ -31352,7 +31360,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not items:
             menu.addAction(self._ui_str("laterNone")).setEnabled(False)
         for entry in reversed(items[-40:]):
-            action = menu.addAction((entry.get("title") or entry["url"])[:70])
+            action = menu.addAction(
+                _amp((entry.get("title") or entry["url"])[:70]))
             action.triggered.connect(
                 lambda _, u=entry["url"]: (self.new_tab(url=u),
                                            self.read_later(u)))
@@ -37445,8 +37454,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             lambda: self.watch_later_next())
         menu.addSeparator()
         for row in rows[:25]:
-            action = menu.addAction(_clean_title(row.get("title", ""))
-                                    or row["url"])
+            action = menu.addAction(_amp(_clean_title(row.get("title", ""))
+                                         or row["url"]))
             action.triggered.connect(
                 lambda _c=False, u=row["url"]: self.new_tab(QUrl(u)))
         menu.addSeparator()
@@ -47016,8 +47025,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def _fill_media_links(self, menu, rows):
         menu.clear()
         for row in rows[:40]:
-            action = menu.addAction(self._elide(row.get("title")
-                                                or row["url"], 60))
+            action = menu.addAction(_amp(self._elide(row.get("title")
+                                                     or row["url"], 60)))
             action.setToolTip(row["url"])
             action.triggered.connect(
                 lambda _c=False, u=row["url"]: self.new_tab(url=u))
@@ -55448,7 +55457,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             menu.addAction(self._ui_str("trailNone")).setEnabled(False)
             return menu
         for row in rows:
-            one = menu.addAction((row["title"] or row["url"])[:70])
+            one = menu.addAction(_amp((row["title"] or row["url"])[:70]))
             one.triggered.connect(
                 lambda _c=False, u=row["url"]: self.new_tab(url=QUrl(u)))
         return menu
@@ -65004,7 +65013,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if kid["type"] == "separator":
                 menu.addSeparator()
                 continue
-            action = menu.addAction(self._bm_label(kid))
+            action = menu.addAction(_amp(self._bm_label(kid)))
             action.setData(kid)
             action.setIcon(self.bookmark_icon(kid))
             action.triggered.connect(
@@ -65017,12 +65026,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         disappearing: the row is still there and still says its name,
         and it opens the manager, where there is no depth at all."""
         if depth > BOOKMARKS_DEPTH:
-            action = menu.addAction(self._folder_icon(), self._bm_label(entry))
+            action = menu.addAction(self._folder_icon(),
+                                    _amp(self._bm_label(entry)))
             action.setData(entry)
             action.triggered.connect(self.open_bookmarks)
             return None
         sub = BookmarkMenu(self, menu)
-        sub.setTitle(self._bm_label(entry))
+        sub.setTitle(_amp(self._bm_label(entry)))
         sub.setIcon(self._folder_icon())
         menu.addMenu(sub)
         # the row he points at is the submenu's own action, so that is
@@ -65104,7 +65114,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         for entry, depth in self.bookmark_folder_tree():
             if entry["id"] in barred:
                 continue
-            action = menu.addAction("    " * depth + self._bm_label(entry))
+            action = menu.addAction("    " * depth
+                                    + _amp(self._bm_label(entry)))
             action.setIcon(self._folder_icon())
             action.setEnabled(here != entry["id"])
             action.triggered.connect(
@@ -65327,7 +65338,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         menu = QMenu(self)
         for entry in self.bookmarks_with_tag(tag):
             menu.addAction(self.bookmark_icon(entry),
-                           self._bm_label(entry)).triggered.connect(
+                           _amp(self._bm_label(entry))).triggered.connect(
                 lambda _c=False, e=entry: self.open_bookmark(e, new_tab=True))
         if not menu.actions():
             menu.addAction(self._ui_str("bmNoMatch")).setEnabled(False)
