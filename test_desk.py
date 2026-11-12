@@ -109,6 +109,20 @@ _aside.toggle_todo(1)
 _aside.add_todo("task C")
 _aside.delete_todo([t for t in _aside.todos() if t["text"] == "task B"][0]["id"])
 _kept = _aside.todo_path().read_text()
+_kept_note = _aside.save_note(title="kept whole", body="the original words")
+_real_replace = N.os.replace
+def _cut(*_a):
+    raise OSError("the power went")
+N.os.replace = _cut
+try:
+    _aside.save_note(_kept_note["id"], "kept whole", "half of a new")
+except OSError:
+    pass
+finally:
+    N.os.replace = _real_replace
+check("a save cut off half way leaves the note as it was",
+      (_aside.note(_kept_note["id"]) or {}).get("body") == "the original words",
+      (_aside.note(_kept_note["id"]) or {}).get("body"))
 check("ticking, adding and deleting to-dos keeps his headings and notes",
       "# Work" in _kept and "a note under A" in _kept and "# Home" in _kept
       and "- [x] task A" in _kept and "task B" not in _kept

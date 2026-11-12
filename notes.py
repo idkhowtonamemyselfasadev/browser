@@ -16,6 +16,7 @@ it is files and dictionaries, so it can be tested on its own.
 """
 
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -30,6 +31,17 @@ CLIPS_MAX = 60
 FIELDS = ("title", "link", "tags", "t", "edited")
 
 _SLUG = re.compile(r"[^a-z0-9]+")
+
+
+def _write_atomic(path, text):
+    """Written beside the file and swapped in, the way the browser
+    writes its own files: a kill or a power cut in the middle of a save
+    leaves the note as it was, not half of it or nothing. A note, the
+    to-do list and the snippets are his own words, and the one copy."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".new")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def slug(text, fallback="note"):
@@ -199,7 +211,7 @@ class Desk:
         })
         path = self._dir(nid + ".md")
         try:
-            path.write_text(note_text(note), encoding="utf-8")
+            _write_atomic(path, note_text(note))
         except OSError:
             return None
         note["id"] = nid
@@ -328,8 +340,7 @@ class Desk:
         at = last + 1 if last >= 0 else len(out)
         out[at:at] = extra
         try:
-            self.todo_path().write_text("\n".join(out) + "\n",
-                                        encoding="utf-8")
+            _write_atomic(self.todo_path(), "\n".join(out) + "\n")
         except OSError:
             return False
         return True
@@ -439,8 +450,7 @@ class Desk:
         else:
             table.pop(key, None)
         try:
-            self.snippet_path().write_text(json.dumps(table, indent=1),
-                                           encoding="utf-8")
+            _write_atomic(self.snippet_path(), json.dumps(table, indent=1))
         except OSError:
             return {}
         return table

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twenty-two)
+
+- **A note survives a crash in the middle of saving it.** Notes, the to-do list
+  and the snippets were written straight over the old file, so a kill or a power
+  cut at the wrong moment left an empty or half-written note. They're written
+  beside it and swapped in now, the way the browser's own files already were.
+
 ## 2026-11-12 — line-by-line review, day 2 (part twenty-one)
 
 - **Behind your proxy, WebRTC doesn't reveal your real address.** With "keep
