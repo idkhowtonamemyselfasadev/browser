@@ -131,6 +131,16 @@ def _merge_engine_flags(text):
     return text.strip()
 
 
+#: Chromium switches that run a program they name, or open the browser
+#: to the network: never taken from his free-form flags (_startup_flags)
+_LAUNCHING_SWITCHES = frozenset({
+    "--renderer-cmd-prefix", "--gpu-launcher", "--utility-cmd-prefix",
+    "--zygote-cmd-prefix", "--gpu-cmd-prefix", "--browser-subprocess-path",
+    "--plugin-launcher", "--ppapi-plugin-launcher", "--nacl-gdb",
+    "--remote-debugging-address", "--remote-debugging-pipe",
+})
+
+
 def _startup_flags():
     """His own Chromium flags, from the config, before the engine
     starts.
@@ -152,8 +162,22 @@ def _startup_flags():
     parts = []
     for line in str(data.get("chromiumFlags", "") or "").splitlines():
         line = line.strip()
-        if line and not line.startswith("#"):
-            parts.append(line)
+        if not line or line.startswith("#"):
+            continue
+        # the switches that start a program of their own choosing for
+        # every renderer, GPU or utility process (and the one that puts
+        # the debugging port on the network). They are how a line of
+        # text in a config file becomes code run at the next start, so
+        # a page of ours that could write this setting -- Settings, if
+        # anything ever got script into it -- could not make it that.
+        names = {tok.split("=", 1)[0].lower() for tok in line.split()
+                 if tok.startswith("--")}
+        if names & _LAUNCHING_SWITCHES:
+            print("chromiumFlags: left out %s (it starts a program)"
+                  % ", ".join(sorted(names & _LAUNCHING_SWITCHES)),
+                  file=sys.stderr)
+            continue
+        parts.append(line)
     # a name pointed at an address, for testing a server before DNS
     # knows about it
     rules = []

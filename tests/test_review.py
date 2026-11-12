@@ -2136,6 +2136,22 @@ if _ix >= 0:
 check("zooming a private tab leaves no site in the zoom table",
       not _zoom_rows, str(_zoom_rows))
 
+# a flag line that would start a program of its own never reaches the engine
+_cf_was = br.config.get("chromiumFlags")
+br.config["chromiumFlags"] = ("--renderer-cmd-prefix=/bin/true\n"
+                              "--lang=de --gpu-launcher=/bin/true\n"
+                              "--disable-gpu-vsync")
+br.save_config()
+_flags_now = B._startup_flags()
+if _cf_was is None:
+    br.config.pop("chromiumFlags", None)
+else:
+    br.config["chromiumFlags"] = _cf_was
+br.save_config()
+check("his own flags may not start a program for every renderer",
+      "--disable-gpu-vsync" in _flags_now and "cmd-prefix" not in _flags_now
+      and "gpu-launcher" not in _flags_now, _flags_now)
+
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))
 for n in bad:

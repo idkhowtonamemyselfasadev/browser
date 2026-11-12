@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part nineteen)
+
+- **Your own Chromium flags can't be turned into a way to run programs.** The
+  free-form flags box goes onto the engine's command line at start-up, and a
+  few Chromium switches (`--renderer-cmd-prefix`, `--gpu-launcher` and
+  friends) start a program of their own for every page process. Anything that
+  could write that one setting could therefore run code at the next start.
+  Those switches, and the one that would expose the debugging port to the
+  network, are left out now (with a note on the console).
+
 ## 2026-11-12 — line-by-line review, day 2 (part eighteen)
 
 - **Zooming a private tab leaves no trace.** "Remember the zoom per site" wrote
