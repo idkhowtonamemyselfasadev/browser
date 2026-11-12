@@ -4792,10 +4792,10 @@
     document.getElementById("pausehidden").checked = !!s.pauseHidden;
     document.getElementById("holdfast").checked = !!s.holdFast;
     document.getElementById("heldembeds").checked = !!s.heldEmbeds;
-    document.getElementById("spoilershield").checked = !!s.spoiler;
+    document.getElementById("spoilershield").checked = !!s.spoilerShield;
     document.getElementById("shortsplayer").checked = !!s.shortsPlayer;
     document.getElementById("tracknotice").checked = !!s.trackNotice;
-    document.getElementById("pausecalls").checked = !!s.pauseCalls;
+    document.getElementById("pausecalls").checked = !!s.pauseForCalls;
     document.getElementById("ducklevel").value =
       Math.round((s.duckLevel || 0) * 100);
     document.getElementById("caplang").value = s.capLang || "";
@@ -4874,6 +4874,9 @@
     document.getElementById("indexpages").checked = s.indexPages;
     document.getElementById("blocknotif").checked = s.blockNotifications;
     document.getElementById("mousebuttons").checked = s.mouseButtons;
+    // what he has already changed: each edit saves the whole map, and
+    // starting from {} dropped every earlier custom key on the first one
+    window._shortcutsNow = Object.assign({}, s.shortcuts || {});
     renderKeys(s.actions || []);
     document.getElementById("blocklocal").checked = s.blockLocal;
     document.getElementById("striptracking").checked = s.stripTracking;
@@ -6379,7 +6382,12 @@
   document.getElementById("keysreset").addEventListener("click", () => {
     window._shortcutsNow = {};
     saveSetting("shortcuts", {});
-    load();
+    // load() wants the settings object: called bare it threw on the
+    // first field and the old keys stayed on screen
+    if (bridge && bridge.getSettings) bridge.getSettings((j) => {
+      try { window._settings = JSON.parse(j); load(window._settings); }
+      catch (e) {}
+    });
   });
 
   function saveExternalSites() {

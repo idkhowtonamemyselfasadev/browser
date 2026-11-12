@@ -255,6 +255,8 @@ srv = H.Server({
     "/drive-meta": "<title>dm</title><meta http-equiv=refresh "
                    "content='0;url=/files/meta.torrent'>",
     "/twhome": "<title>tw</title><p>home</p>",
+    "/chatpage": "<title>c</title><div class=chat-line id=c1>a spoiler here</div>"
+                 "<div class=chat-line id=c2>hello</div>",
     "/adpage": "<title>ad</title><p class=good id=g>ad</p><p id=n>text</p>",
     "/hooked": "<title>h</title><script>window.__seen=[];"
                "var o=String.prototype.toLowerCase;"
@@ -1948,7 +1950,10 @@ br.play_tool("blurprivate", view=v28, arg=False)
 
 # a private tab's cookies stay out of the browser-wide lists
 _pk = br.new_tab(private=True); H.spin(300)
-H.load(_pk, srv.url("/privck")); H.spin(1200)
+H.load(_pk, srv.url("/privck"))
+H.wait_for(lambda: any("privonly_review" in str(k)
+                       for k in (getattr(br, "_cookie_seen", None) or {})),
+           8000)
 _names = [n for n, _d, _e in br.known_cookies()]
 _rows = [r["host"] for r in br.site_data_rows()
          if "privonly_review" in r.get("names", [])]
@@ -2158,10 +2163,12 @@ _wp = {"webrtcGuard": True, "activeProxy": "mine",
                           "host": "127.0.0.1", "port": 1080}]}
 _with = B._privacy_flags(_wp)
 _without = B._privacy_flags({"webrtcGuard": True})
+_guard_only = B._privacy_flags(dict(_wp, webrtcGuard=False, guardNoWebRTC=True))
 check("with a proxy in use, WebRTC sends no UDP past it",
       any("disable_non_proxied_udp" in f for f in _with)
-      and any("default_public_interface_only" in f for f in _without),
-      str((_with, _without)))
+      and any("default_public_interface_only" in f for f in _without)
+      and any("disable_non_proxied_udp" in f for f in _guard_only),
+      str((_with, _without, _guard_only)))
 
 # remembering a graphics card never writes over a config that does not
 # read, and keeps everything else in one that does
@@ -2199,6 +2206,62 @@ _c.close(); _rp.close()
 check("a site rule whose proxy is gone refuses the site instead of going direct",
       _routing and _routing[0][0][1] == ("block",)
       and _answer.startswith(b"HTTP/1.1 502"), str((_routing, _answer)))
+
+# his chat filter rules stay out of the page's reach
+v34 = br.new_tab(); H.spin(300)
+H.load(v34, srv.url("/chatpage")); H.spin(500)
+br.play_tool("chatfilter", view=v34,
+             arg={"hide": ["spoiler"], "me": ["qwmyname"]})
+H.wait_for(lambda: H.js(v34, "getComputedStyle(document.getElementById('c1'))"
+                             ".display", B.MAIN_WORLD_ID) == "none", 5000)
+_rules_seen = H.js(v34, "typeof window.__chatRules", B.MAIN_WORLD_ID)
+_c1 = H.js(v34, "getComputedStyle(document.getElementById('c1')).display",
+           B.MAIN_WORLD_ID)
+check("the chat filter hides a line without handing the page his rules",
+      _rules_seen == "undefined" and _c1 == "none", str((_rules_seen, _c1)))
+
+# a private window's later tabs are private too, and no private tab's
+# address is kept in the window state
+_pw_win = br.new_private_window(); H.spin(800)
+_pw_tab = _pw_win.new_tab(url=srv.url("/twhome")); H.spin(800)
+_pw_ok = (getattr(_pw_tab, "private", False) is True
+          and _pw_tab.page().profile().isOffTheRecord())
+_ws_priv = br.new_tab(private=True); H.spin(300)
+H.load(_ws_priv, srv.url("/twother?secret=1")); H.spin(400)
+_ws = br.save_window_state()
+check("a second tab in a private window is private as well",
+      _pw_ok, str((getattr(_pw_tab, "private", None),)))
+check("...and a private tab's address is not kept in the window state",
+      not any("secret=1" in u for u in _ws.get("tabs", [])), str(_ws.get("tabs")))
+for _t in (_ws_priv,):
+    if br.tabs.indexOf(_t) >= 0:
+        br.close_tab(br.tabs.indexOf(_t), ask=False)
+try:
+    _pw_win.close()
+except RuntimeError:
+    pass
+H.spin(300)
+
+# Settings is told what is saved, not only the first 177 keys
+_set_keys = ("adBlock", "notesFolder", "snippetsText", "spoilerShield",
+             "pauseForCalls", "formDraftsOn")
+_set_was = {k: br.config.get(k, "__absent__") for k in _set_keys}
+br.config.update(adBlock=True, notesFolder="/tmp/review-notes",
+                 snippetsText=";a=b", spoilerShield=True, pauseForCalls=True)
+br.config.pop("formDraftsOn", None)
+_sset = B.json.loads(br.bridge.getSettings())
+for _k, _v in _set_was.items():
+    if _v == "__absent__":
+        br.config.pop(_k, None)
+    else:
+        br.config[_k] = _v
+check("Settings is sent the switches and fields it shows, as saved",
+      _sset.get("adBlock") is True and _sset.get("notesFolder") == "/tmp/review-notes"
+      and _sset.get("snippetsText") == ";a=b" and _sset.get("spoilerShield") is True
+      and _sset.get("pauseForCalls") is True,
+      str({k: _sset.get(k) for k in _set_keys}))
+check("...and an unsaved one with the browser's own default",
+      _sset.get("formDraftsOn") is True, str(_sset.get("formDraftsOn")))
 
 bad = [n for ok, n in RESULTS if not ok]
 print("%d checks, %d failed" % (len(RESULTS), len(bad)))

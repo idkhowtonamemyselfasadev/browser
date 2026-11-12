@@ -201,7 +201,9 @@ win.flash = lambda text, *a, **k: (flashed.append(text), real_flash(text, *a, **
 win.config["mediaPerSite"] = True
 win.config.pop("mediaSites", None)
 win.media_volume(-0.5, view=view)
-H.wait_for(lambda: flashed, 4000)
+# the first media call puts the tool in the page; under a CPU quota that
+# took longer than 4 s and the check read an empty list
+H.wait_for(lambda: flashed, 15000)
 check("the volume flash is a percentage", flashed[:1] == ["50%"], flashed)
 host = view.url().host()
 check("...and the level is kept for the site",

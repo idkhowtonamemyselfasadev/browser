@@ -77,8 +77,20 @@ if len(sys.argv) > 2 and sys.argv[1] == "--settings":
     win = B.Browser()
     win.show()
     win.open_settings()
-    H.spin(3000)
     page = win._panes["settings"].view.page()
+    # until load() has filled the page in: a fixed 3 s was enough on an
+    # idle box and not under a CPU quota, where the section list stood
+    # at 1.3 s and the values came at 9 -- both switches then read as
+    # off and it looked like the vault setting was ignored. The folder
+    # line is written right after the vault switch, in either mode.
+    def filled():
+        try:
+            return bool(H.js(win._panes["settings"].view,
+                "(document.getElementById('dlpath') || {}).textContent"
+                " || ''", B.MAIN_WORLD_ID))
+        except AssertionError:      # a busy page is not a loaded one
+            return False
+    H.wait_for(filled, 30000, 250)
     box = {}
     page.runJavaScript("""(function () {
       var sec = document.querySelector('section[data-desc="descPasswords"]');

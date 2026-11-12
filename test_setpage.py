@@ -225,6 +225,18 @@ check("and every see-through colour is one the painter can repaint",
 
 print("\n(7) one of our own pages lets the window through")
 win.apply_look("glass", save=False)
+# custom shortcuts saved earlier, for the editor check further down
+_acts = [e for e in win.actions_list() if e.get("key")]
+_keep = {_acts[0]["id"]: "Ctrl+Alt+Shift+1", _acts[1]["id"]: "Ctrl+Alt+Shift+2"}
+win.config["shortcuts"] = dict(_keep)
+# settings the page used never to be sent, with real values in them
+win.config.update({
+    "adBlock": True, "httpsOnly": True, "notesFolder": "/tmp/setpage-notes",
+    "countdowns": [{"name": "exam", "t": 4102444800}],
+    "sessionSites": {"work.example": "work"}, "spellLangs": ["en", "de"],
+    "chatHide": "spoiler\nleak", "blockHosts": ["ads.example"],
+    "tabWidth": "fixed", "snippetsText": ";a=b", "spoilerShield": True,
+    "pauseForCalls": True, "urlRules": "x.example -> block"})
 win.open_settings()
 H.spin(2500)
 view = settings_view(win)
@@ -267,6 +279,38 @@ if view is not None:
 
 
 print("\n(9) carry on is gone, not hidden")
+if view is not None:
+    check("every part of Settings draws with real values in it",
+          H.js(view, "document.getElementById('drawfail').classList"
+                     ".contains('on')") is False,
+          H.js(view, "document.getElementById('drawfail').textContent"))
+    check("...and shows what is saved",
+          H.js(view, "document.getElementById('adblock').checked") is True
+          and H.js(view, "document.getElementById('notesfolder').value")
+          == "/tmp/setpage-notes"
+          and H.js(view, "document.getElementById('spoilershield').checked")
+          is True,
+          (H.js(view, "document.getElementById('adblock').checked"),
+           H.js(view, "document.getElementById('notesfolder').value")))
+    # editing one shortcut keeps every other custom one
+    H.js(view, """(function (keep) {
+      var rows = document.querySelectorAll('#keyseditor .wrow');
+      var acts = window._keyActions || [], input = null;
+      for (var i = 0; i < acts.length && i < rows.length; i++) {
+        if (keep.indexOf(acts[i].id) < 0) {
+          input = rows[i].querySelector('input'); break;
+        }
+      }
+      if (!input) return 'none';
+      input.value = 'Ctrl+Alt+Shift+3';
+      input.dispatchEvent(new Event('change'));
+      return 'changed';
+    })(%s)""" % json.dumps(list(_keep)))
+    H.spin(400)
+    _now = win.config.get("shortcuts") or {}
+    check("changing one shortcut keeps the ones he set before",
+          all(_now.get(k) == v for k, v in _keep.items()) and len(_now) >= 3,
+          _now)
 check("the browser no longer works out where he left off",
       not hasattr(win, "continue_where"))
 extras = json.loads(win.bridge.startExtras())

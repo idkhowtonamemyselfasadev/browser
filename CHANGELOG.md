@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-12 — line-by-line review, day 2 (part twenty-five)
+
+- **The chat filter keeps your word list to itself.** It ran inside the page,
+  so the chat site could read the words you filter. It now runs in the
+  browser's own isolated world, like the gamepad and blur tools, and hides the
+  same lines.
+- **"Keep WebRTC behind the proxy" works on its own.** The proxy-only WebRTC
+  policy needed the general WebRTC guard to be on as well. With a proxy in use,
+  the proxy switch alone now does it.
+- **Every tab in a private window is private.** A second tab opened in a private
+  window (Ctrl+T, a link, the + button) could be an ordinary tab with your
+  normal cookies. Private tabs' addresses are also kept out of the saved
+  window state, so a restart doesn't bring them back.
+- **Settings shows what you saved.** About two hundred switches and fields
+  (ad blocking, the notes folder, the spoiler shield, pause for calls and more)
+  were never sent to the Settings page, so they always showed as off or empty.
+  Turning one "on" there then saved whatever the page thought, and saving the
+  Games section blanked your OBS password. Settings now gets every value it
+  shows, with the browser's default where you never set one.
+- **Changing one shortcut keeps the others.** Editing a single shortcut saved a
+  map with only that key in it, which threw away every other shortcut you had
+  set. "Reset shortcuts" also really redraws the list now.
+
 ## 2026-11-12 — line-by-line review, day 2 (part twenty-four)
 
 - **A per-site proxy rule fails closed when its proxy is gone.** "Send this site

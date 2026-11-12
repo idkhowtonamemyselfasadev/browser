@@ -14702,6 +14702,208 @@ class PasswordBridge(QObject):
             self.browser._login_form_seen(self.page, data)
 
 
+#: every setting the Settings page reads that getSettings did not send
+#: (193 of them): the page showed each as off or blank whatever was
+#: saved, its Save buttons wrote those blanks back, and a switch
+#: toggled saved the opposite of the real state. The default beside
+#: each key is the one the browser itself reads it with.
+_SETTINGS_EXTRA = (
+    ("adBlock", False),
+    ("adListUrls", ""),
+    ("adListsDir", ""),
+    ("agendaFile", ""),
+    ("aliasEmail", ""),
+    ("altClickSave", True),
+    ("askFullscreen", False),
+    ("autoCollapseGroups", False),
+    ("autoGameMode", False),
+    ("backClosesTab", False),
+    ("barBottom", False),
+    ("barClearBtn", True),
+    ("barCopyBtn", True),
+    ("barDecode", True),
+    ("barDimPath", True),
+    ("barHideScheme", False),
+    ("barInline", True),
+    ("barKeyBtn", True),
+    ("barLock", True),
+    ("barProgress", True),
+    ("barQrBtn", False),
+    ("barRows", 14),
+    ("barSourcesText", ""),
+    ("barTextSize", 100),
+    ("blockHosts", []),
+    ("blockPings", False),
+    ("blockReplay", False),
+    ("blockThirdCookies", False),
+    ("blurWords", ""),
+    ("bookmarkBackup", True),
+    ("bookmarkMirror", ""),
+    ("bookmarkOffline", False),
+    ("bookmarkScroll", True),
+    ("breachCheck", False),
+    ("breakAfter", 0),
+    ("capBottom", 0),
+    ("capLang", ""),
+    ("capOn", False),
+    ("capSize", 0),
+    ("catchScriptLogins", True),
+    ("chatHide", ""),
+    ("chatMe", ""),
+    ("chatUsers", ""),
+    ("childNextToParent", True),
+    ("chromiumFlags", ""),
+    ("cleanPaste", False),
+    ("cleanTitles", False),
+    ("clipClear", 30),
+    ("clipHistory", False),
+    ("closeButtons", "wide"),
+    ("closeDownloadTabs", True),
+    ("confirmCloseTabs", 0),
+    ("countdowns", []),
+    ("crashRecovery", True),
+    ("debugPort", False),
+    ("desktopNotify", True),
+    ("dictionarySite", ""),
+    ("discordBadge", False),
+    ("discordRoute", False),
+    ("dlAskFor", ""),
+    ("dlAtOnce", 0),
+    ("dlAutoExtract", False),
+    ("dlBigMb", 0),
+    ("dlBlocked", ""),
+    ("dlHashAll", False),
+    ("dlKeepDays", 0),
+    ("dlNotify", True),
+    ("dlOrigin", False),
+    ("dlRouteMods", False),
+    ("dlScan", False),
+    ("dlSpeedKb", 0),
+    ("dlTemplate", ""),
+    ("doh", False),
+    ("dohUrl", ""),
+    ("duckLevel", 0),
+    ("enginesText", ""),
+    ("expandShort", False),
+    ("expiryWarn", 30),
+    ("favDocked", False),
+    ("formDraftsOn", True),
+    ("formHistoryOn", False),
+    ("gamepadOn", False),
+    ("groupRules", []),
+    ("guardBanners", False),
+    ("guardClipboardRead", False),
+    ("guardCopyGuard", False),
+    ("guardFingerprint", False),
+    ("guardGpc", False),
+    ("guardLeaveTrap", False),
+    ("guardLocalFonts", False),
+    ("guardMediaLog", False),
+    ("guardNoFrames", False),
+    ("guardNoWebRTC", False),
+    ("guardPopups", False),
+    ("guardWsLog", False),
+    ("headerRules", ""),
+    ("heldEmbeds", False),
+    ("hideCursor", False),
+    ("hideFeeds", False),
+    ("hideStripSingle", False),
+    ("historyDays", 0),
+    ("historyEncrypted", False),
+    ("historyThumbs", False),
+    ("holdFast", False),
+    ("hostOverrides", ""),
+    ("httpsOnly", False),
+    ("imgBiggest", False),
+    ("imgLeast", 400),
+    ("langEnginesText", ""),
+    ("linkCheck", False),
+    ("linkedSites", ""),
+    ("liveEvery", 0),
+    ("liveWatch", ""),
+    ("localhostCerts", False),
+    ("lockAfter", 0),
+    ("logToNote", False),
+    ("lyricsOn", False),
+    ("mcInstances", ""),
+    ("mediaResume", True),
+    ("moneyRates", False),
+    ("mouseGestures", False),
+    ("mprisOn", False),
+    ("noSpeculative", False),
+    ("notesFolder", ""),
+    ("obsPassword", ""),
+    ("obsUrl", ""),
+    ("oneLanguage", False),
+    ("openWithText", ""),
+    ("ownRequestLog", True),
+    ("passLang", ""),
+    ("pauseForCalls", False),
+    ("pauseHidden", False),
+    ("pauseOnLock", False),
+    ("pdfRemember", True),
+    ("permissionDays", 0),
+    ("phishingList", False),
+    ("popupMode", "tab"),
+    ("printerUrl", ""),
+    ("privacyCheck", True),
+    ("privateDlDir", ""),
+    ("privateDlWipe", False),
+    ("privateEngine", ""),
+    ("privateNoMedia", True),
+    ("readAbbr", False),
+    ("readCode", False),
+    ("readDrafts", False),
+    ("readFootnotes", False),
+    ("readNoLineNumbers", False),
+    ("readPlainPaste", False),
+    ("readProgress", False),
+    ("readResume", False),
+    ("readSelBar", False),
+    ("redirectGuard", False),
+    ("renderFiles", True),
+    ("sessionSites", None),
+    ("shortsPlayer", False),
+    ("shotPrivate", False),
+    ("showPwButtons", False),
+    ("siteIsolation", False),
+    ("snippets", True),
+    ("snippetsText", ""),
+    ("spellBoth", False),
+    ("spellLangs", None),
+    ("spoilerShield", False),
+    ("sponsorSkip", False),
+    ("staleDays", 0),
+    ("startRecent", False),
+    ("streamChecks", ""),
+    ("streamDelay", 0),
+    ("stripDoubleClick", "newtab"),
+    ("stripUploadExif", False),
+    ("tabDoubleClick", "nothing"),
+    ("tabMiddleClick", "close"),
+    ("tabMinWidth", 34),
+    ("tabSnapshots", True),
+    ("tabTint", False),
+    ("tabWidth", "shrink"),
+    ("theaterMode", False),
+    ("trackNotice", False),
+    ("trackerBadge", False),
+    ("trimReferrer", ""),
+    ("twitchAds", False),
+    ("twitchPoints", False),
+    ("unreadBadge", True),
+    ("unusedDays", 365),
+    ("urlRules", ""),
+    ("vaultBackupDays", 0),
+    ("vaultBackupDir", ""),
+    ("vaultBackupKeep", 10),
+    ("vaultBackupWord", ""),
+    ("warnForms", True),
+    ("webmail", ""),
+    ("webrtcGuard", False),
+)
+
+
 class Bridge(QObject):
     """Exposed to the start/history pages via QWebChannel."""
 
@@ -15107,7 +15309,7 @@ class Bridge(QObject):
             lib_every = int(c.get("libUpdateEvery", LIB_UPDATE_DAYS) or 0)
         except (TypeError, ValueError):
             lib_every = LIB_UPDATE_DAYS      # junk in config -> the default
-        return json.dumps({
+        out = {
             "searchEngine": key,
             "engines": [[k, v[0]] for k, v in SEARCH_ENGINES.items()],
             "searchName": name,
@@ -15333,7 +15535,12 @@ class Bridge(QObject):
             "activeProxy": c.get("activeProxy", "system"),
             "proxyProfiles": c.get("proxyProfiles", []),
             "proxyAuto": c.get("proxyAuto") or {"rules": [], "default": "direct"},
-        })
+        }
+        # ...and everything else the page shows: as saved, or the default
+        # the browser itself would use (see _SETTINGS_EXTRA)
+        for name, default in _SETTINGS_EXTRA:
+            out.setdefault(name, c.get(name, default))
+        return json.dumps(out)
 
     def _toolbar_state(self):
         """The chrome's buttons, as a page that draws them needs them:
@@ -23997,6 +24204,11 @@ class Browser(QMainWindow):
         # this tab" is about where a tab you just opened should land;
         # applied to a restore it would stack every saved tab on top of
         # the one before it and hand back a reversed strip.
+        # A private window's every tab is private: Ctrl+T, the + button
+        # and the tab that replaces the last one closed came out as
+        # ordinary tabs -- the normal jar, history, the saved session --
+        # under a title bar still saying "Private window".
+        private = bool(private or getattr(self, "_all_private", False))
         if private:
             # a group carries a virtual browser's cookie jar with it,
             # and this tab's jar is not one of those: it joins none
@@ -37869,7 +38081,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     #: on every load: one `String.prototype.toLowerCase = ...` and any
     #: site he opened while live had the list. The DOM is the same from
     #: the isolated world; the page's prototypes are not.
-    _ISOLATED_PLAY_TOOLS = ("gamepad", "padwant", "blurprivate")
+    #: "chatfilter" too: it kept his rules in window.__chatRules in the
+    #: page's own world -- the words he hides, the people he mutes and
+    #: the names he highlights (his own) readable by Twitch or YouTube
+    #: without a hook, and emptied by them to switch the filter off.
+    _ISOLATED_PLAY_TOOLS = ("gamepad", "padwant", "blurprivate",
+                            "chatfilter")
 
     def play_tool(self, name, view=None, then=None, arg=None):
         """One of the gaming tools, in the page’s own world (the ones
@@ -54208,9 +54425,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 "w": geometry.width(), "h": geometry.height(),
                 "session": self.active_session,
                 "workspace": self.workspace_now(),
+                # never a private tab's: this goes into config.json at
+                # quit, query string and all
                 "tabs": [self._tab_url(view) or ""
                          for _index, view in self._real_tabs()
-                         if (self._tab_url(view) or "").startswith("http")]}
+                         if (self._tab_url(view) or "").startswith("http")
+                         and not getattr(view, "private", False)]}
 
     def save_window_state(self):
         """Remember this window, under its virtual browser.
@@ -67595,19 +67815,21 @@ def _privacy_flags(config):
         flags.append("--disable-features=PreconnectToSearch")
     if config.get("siteIsolation", False):
         flags.append("--site-per-process")
-    if config.get("webrtcGuard", False):
+    active = config.get("activeProxy", "system")
+    named = {str(p.get("name")) for p in config.get("proxyProfiles") or []
+             if isinstance(p, dict)}
+    proxied = active in named and active not in ("direct", "system")
+    # behind a proxy, the in-page "WebRTC off" guard alone is not enough
+    # either: a page gets a working RTCPeerConnection back from its own
+    # iframe, and STUN past the proxy answers with the real address
+    if config.get("webrtcGuard", False) or (
+            proxied and config.get("guardNoWebRTC", False)):
         # the one that stops a page learning the machine's address on
         # the home network without stopping a call from working -- or,
         # where everything is meant to go through a proxy (the Tor
-        # window), the one that keeps WebRTC inside it: no UDP that is
-        # not proxied, so no STUN answer with the real address in it
-        # ...which is any window with a proxy of his chosen as its way
-        # out: the ordinary policy sends STUN over UDP past it, and the
-        # answer is the address the proxy was there to hide
-        active = config.get("activeProxy", "system")
-        named = {str(p.get("name")) for p in config.get("proxyProfiles") or []
-                 if isinstance(p, dict)}
-        proxied = active in named and active not in ("direct", "system")
+        # window, or any proxy of his chosen as the way out), the one
+        # that keeps WebRTC inside it: no UDP that is not proxied, so no
+        # STUN answer with the real address in it
         flags.append("--force-webrtc-ip-handling-policy="
                      + ("disable_non_proxied_udp"
                         if config.get("webrtcStrict", False) or proxied
