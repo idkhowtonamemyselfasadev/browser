@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part forty-four: twenty-fourth and twenty-fifth passes)
+
+The twenty-fourth search looked at starting, quitting and the first run;
+the twenty-fifth at the browser's own pages and the moment their link to
+the browser is (or is not yet) there. 17 bugs, fixed here:
+
+- **Quitting and closing.** A recording's sound recorder is stopped when
+  its window closes or the browser quits, instead of running on with the
+  microphone open; a closed window lets go of its "keep the screen awake"
+  hold.
+- **Starting.** The graphics-card chooser waits for an old config to be
+  brought up to date before it applies a remembered card; a restart after
+  choosing a card no longer carries switches that have since been turned
+  off; a crashed run's "clear history on exit" also clears a sealed
+  history; a data file that cannot be read is set aside instead of being
+  read as empty and overwritten; the chooser window and the reading helps
+  fall back to the browser's own language.
+- **Settings.** The wheel and key step boxes show the step in effect; a
+  plugin added from a file shows up in the list straight away; a countdown
+  whose name has "=" in it is no longer deleted on save; one reading
+  switch writes only itself.
+- **Passwords.** Clicking Save twice no longer stores a new login twice;
+  the store picker opens once.
+- **Bookmarks.** Renaming a folder shows one name box and keeps its
+  contents in view.
+- **Notes.** A failed delete or collection save says so in every view.
+- **Mic test and player.** The level reads 40 %, not 40 %%; the arrow keys
+  seek once; the loop and skip buttons are in your language.
+
+Tests: test_bar's progress-line check, test_newtab's Settings child and
+test_setpage now wait for the thing itself (all three were red on main
+too under a CPU quota).
+
 ## 2026-11-13 — line-by-line review, day 3 (part forty-three: twenty-first to twenty-third passes)
 
 Three searches with one question each. The twenty-first asked what outlives

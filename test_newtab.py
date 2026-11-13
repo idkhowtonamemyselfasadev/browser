@@ -166,6 +166,17 @@ if len(sys.argv) > 1 and sys.argv[1] == "--settings":
     H.spin(3000)
     view = settings_view(win)
     out = {}
+
+    def _answers():
+        # Settings under a CPU quota (and a second suite) can be busy past
+        # one js() timeout: wait until it answers before driving it
+        try:
+            return H.js(view, "typeof showCat === 'function' && "
+                        "!!document.getElementById('newtaburl')",
+                        B.MAIN_WORLD_ID) is True
+        except AssertionError:
+            return False
+    H.wait_for(_answers, 30000)
     # sections that are not the open one are display:none, and nothing
     # inside one of those can take the focus - so open the one holding
     # the box first. Found by the box, not by the section's name: these

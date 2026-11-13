@@ -407,7 +407,7 @@ try:
     os.environ["BROWSER_DRM_ROOT"] = str(two)
     B.CONFIG_FILE.write_text(json.dumps(
         {"translateLang": "en", "gpuAsk": False,
-         "gpuCard": "0000:01:00.0"}))
+         "gpuCard": "0000:01:00.0", "gpuReset": 1}))
     for key in ("DRI_PRIME", "__NV_PRIME_RENDER_OFFLOAD"):
         os.environ.pop(key, None)
     B._gpu_startup()

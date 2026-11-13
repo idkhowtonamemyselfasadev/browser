@@ -176,6 +176,7 @@
     if (open !== null) return renderOneNote(body);
     desk("notes", {q: q}, (rows) => {
       body.innerHTML = "";
+      failLine(body);
       if (!rows || !rows.length) {
         body.appendChild(el("div", "empty", STR.notesNone || "No notes yet."));
         return;
@@ -190,8 +191,10 @@
         const edit = el("button", "act", "✎");
         edit.onclick = () => { open = note.id; render(); };
         const drop = el("button", "act warn", "✕");
-        drop.onclick = () => desk("deleteNote", {id: note.id},
-                                  () => render());
+        drop.onclick = () => desk("deleteNote", {id: note.id}, (res) => {
+          if (res === false) failMsg = true;
+          render();
+        });
         row.append(grow, el("span", "when", when(note.edited || note.t)),
                    edit, drop);
         body.appendChild(row);
@@ -384,6 +387,7 @@
   function renderCollections(body, q) {
     desk("collections", {}, (rows) => {
       body.innerHTML = "";
+      failLine(body);
       if (!rows || !rows.length) {
         body.appendChild(el("div", "empty", STR.collNone
           || "No collections yet."));
@@ -401,8 +405,10 @@
           body.append(el("h2", "", name), back, preview(text || ""));
         });
         const drop = el("button", "act warn", "✕");
-        drop.onclick = () => desk("deleteCollection", {name: name},
-                                  () => render());
+        drop.onclick = () => desk("deleteCollection", {name: name}, (res) => {
+          if (res === false) failMsg = true;
+          render();
+        });
         item.append(grow, show, drop);
         body.appendChild(item);
       }
@@ -414,7 +420,9 @@
       const go = el("button", "act", "+");
       go.onclick = () => {
         if (!box.value.trim()) return;
-        desk("collectPage", {name: box.value}, () => {
+        desk("collectPage", {name: box.value}, (res) => {
+          // nothing was written: keep what was typed and say so
+          if (!res) { failMsg = true; render(); return; }
           box.value = ""; drafts.coll = ""; render();
         });
       };

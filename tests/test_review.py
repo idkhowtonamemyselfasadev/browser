@@ -11762,6 +11762,226 @@ finally:
     B.MONEY_RATES.clear()
     B.MONEY_RATES.update(_old_rates_x213)
 
+# ---- fix 215: startup, shutdown, first run ----
+import inspect as _insp215
+
+
+class _FakeProc215:
+    def __init__(self, finishes=True):
+        self.calls = []
+        self.finishes = finishes
+
+    def terminate(self):
+        self.calls.append("terminate")
+
+    def kill(self):
+        self.calls.append("kill")
+
+    def waitForFinished(self, ms=0):
+        self.calls.append("wait")
+        return self.finishes
+
+
+# U5/U7: the audio recorder is ended; killed when it ignores terminate
+_p1_215 = _FakeProc215(True)
+br._audio_proc = _p1_215
+br._end_audio_recorder()
+check("the audio recorder is terminated and the slot cleared",
+      _p1_215.calls == ["terminate", "wait"] and br._audio_proc is None,
+      str(_p1_215.calls))
+_p2_215 = _FakeProc215(False)
+br._audio_proc = _p2_215
+br._end_audio_recorder()
+check("a recorder that ignores terminate is killed",
+      "kill" in _p2_215.calls and br._audio_proc is None, str(_p2_215.calls))
+_src_215 = _insp215.getsource(B.Browser.closeEvent)
+check("closeEvent stops a running recording before it removes the tabs",
+      "stop_recording" in _src_215
+      and _src_215.index("stop_recording") < _src_215.index("_close_all_views"))
+
+# U6: the non-last window branch lets go of its hold
+check("a closed window releases its screen-awake hold",
+      "keep_awake(False)" in _src_215)
+
+# U0: a config not yet migrated applies nothing in the chooser's start-up
+_saved_215 = (B.gpu_cards, B._gpu_config, B._gpu_ask_window,
+              os.environ.get("QT_QPA_PLATFORM"))
+_applied_215 = []
+_real_apply_215 = B.gpu_apply
+B.gpu_cards = lambda: [{"id": "a"}, {"id": "b"}]
+B.gpu_apply = lambda *a, **k: _applied_215.append(a)
+B._gpu_ask_window = lambda *a, **k: _applied_215.append("asked")
+B._gpu_config = lambda: {"gpuCard": "a", "gpuAsk": False}
+_mark_215 = os.environ.pop(B._GPU_MARK, None)
+_noask_215 = os.environ.pop("BROWSER_NO_GPU_ASK", None)
+try:
+    B._gpu_startup()
+    check("a config without gpuReset applies no stored card",
+          _applied_215 == [], str(_applied_215))
+    B._gpu_config = lambda: {"gpuCard": "a", "gpuAsk": False, "gpuReset": 1}
+    B._gpu_startup()
+    check("a migrated config still applies its card",
+          len(_applied_215) == 1, str(_applied_215))
+finally:
+    B.gpu_cards, B._gpu_config, B._gpu_ask_window = _saved_215[:3]
+    B.gpu_apply = _real_apply_215
+    if _mark_215 is not None:
+        os.environ[B._GPU_MARK] = _mark_215
+    if _noask_215 is not None:
+        os.environ["BROWSER_NO_GPU_ASK"] = _noask_215
+
+# U1: the successor of the chooser's restart gets the flags from outside only
+_envs_215 = []
+_real_exec_215 = os.execve
+_real_pick_215 = B._gpu_ask_window
+_real_cards_215 = B.gpu_cards
+_real_cfg_215 = B._gpu_config
+_real_out_215 = B._FLAGS_FROM_OUTSIDE
+_real_apply2_215 = B.gpu_apply
+_flags_215 = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
+_plat_215 = os.environ.get("QT_QPA_PLATFORM")
+_noask2_215 = os.environ.pop("BROWSER_NO_GPU_ASK", None)
+_mark2_215 = os.environ.pop(B._GPU_MARK, None)
+os.environ["QT_QPA_PLATFORM"] = "xcb"
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-pings --added-by-run"
+B._FLAGS_FROM_OUTSIDE = "--given-outside"
+B.gpu_cards = lambda: [{"id": "a"}, {"id": "b"}]
+B._gpu_config = lambda: {"gpuAsk": True, "gpuReset": 1}
+B._gpu_ask_window = lambda *a, **k: ("a", None)
+B.gpu_apply = lambda *a, **k: None
+
+
+def _fake_exec_215(exe, args, env):
+    _envs_215.append(dict(env))
+    raise SystemExit
+
+
+os.execve = _fake_exec_215
+try:
+    try:
+        B._gpu_startup()
+    except SystemExit:
+        pass
+finally:
+    os.execve = _real_exec_215
+    B._gpu_ask_window = _real_pick_215
+    B.gpu_cards = _real_cards_215
+    B._gpu_config = _real_cfg_215
+    B._FLAGS_FROM_OUTSIDE = _real_out_215
+    B.gpu_apply = _real_apply2_215
+    for _k215, _v215 in (("QTWEBENGINE_CHROMIUM_FLAGS", _flags_215),
+                         ("QT_QPA_PLATFORM", _plat_215),
+                         ("BROWSER_NO_GPU_ASK", _noask2_215),
+                         (B._GPU_MARK, _mark2_215)):
+        if _v215 is None:
+            os.environ.pop(_k215, None)
+        else:
+            os.environ[_k215] = _v215
+check("the chooser's restart carries only the flags given from outside",
+      len(_envs_215) == 1
+      and _envs_215[0].get("QTWEBENGINE_CHROMIUM_FLAGS") == "--given-outside",
+      str([e.get("QTWEBENGINE_CHROMIUM_FLAGS") for e in _envs_215]))
+
+# U4: an unreadable file is set aside, a missing one is just absent
+_d215 = _Path(_tempfile.mkdtemp())
+_f215 = _d215 / "config.json"
+_f215.write_text('{"a": 1}')
+_f215.chmod(0)
+try:
+    if os.geteuid() == 0:
+        _got215 = None
+    else:
+        _got215 = B._load_json(_f215, dict, {"d": 1})
+    _aside215 = list(_d215.glob("config.json.unreadable-*"))
+    check("an unreadable file is set aside and read as default",
+          os.geteuid() == 0 or (_got215 == {"d": 1} and len(_aside215) == 1
+                                and not _f215.exists()), str(_aside215))
+    check("a missing file is simply the default, nothing set aside",
+          B._load_json(_d215 / "none.json", dict, {"d": 2}) == {"d": 2}
+          and len(list(_d215.glob("none.json.*"))) == 0)
+finally:
+    for _x215 in _d215.glob("*"):
+        try:
+            _x215.chmod(0o600)
+            _x215.unlink()
+        except OSError:
+            pass
+    _d215.rmdir()
+
+# U2: the crash branch wipes through clear_history
+_s215 = _insp215.getsource(B.Browser.__init__)
+_at215 = _s215.index('if crashed and self.config.get("clearHistoryExit")')
+check("a crashed run's clear-on-exit goes through clear_history",
+      "clear_history(undoable=False)" in _s215[_at215:_at215 + 400])
+
+# fix216: the card chooser and the reading helps fall back to "de" like _ui_str
+_src216 = (_Path(B.__file__)).read_text()
+check("216 the language fallbacks match the browser's own default",
+      'data.get("translateLang", "") or "de"' in _src216
+      and 'self.config.get("translateLang") or "de")[:2]' in _src216
+      and 'self.config.get("translateLang", "en"))[:2]' not in _src216)
+# ---- 217: own pages against the bridge ----
+import inspect as _inspect_x217
+_dir_x217 = _Path(B.__file__).parent
+_pg_x217 = lambda n: (_dir_x217 / n).read_text()
+_set_x217 = _pg_x217("settings.html")
+_pw_x217 = _pg_x217("passwords.html")
+_bm_x217 = _pg_x217("bookmarks.html")
+_nt_x217 = _pg_x217("notes.html")
+_mt_x217 = _pg_x217("mictest.html")
+_pl_x217 = _pg_x217("player.html")
+
+check("217 step boxes clamp and write back",
+      "Math.min(2000, n)" in _set_x217 and "el.value = n;\n        was[key] = n;" in _set_x217)
+check("217 from-file refreshes from the slot's answer, not a timer",
+      "bridge.addPluginFromFile(renderPlugins)" in _set_x217
+      and "bridge.addPluginFromFile();" not in _set_x217)
+check("217 addPluginFromFile returns the plugin list",
+      "return self.getPlugins()" in _inspect_x217.getsource(B.Bridge.addPluginFromFile)
+      if hasattr(B, "Bridge") else True)
+check("217 countdown rows split on the last =",
+      'const cut = line.lastIndexOf("=");' in _set_x217)
+
+_old_perf_x217 = br.config.get("perf")
+try:
+    br.config["perf"] = {"pauseHidden": True, "lazyImages": False}
+    br.bridge.setSetting("perfField", json.dumps(["lazyImages", True]))
+    check("217 one perf field is merged, the rest kept",
+          br.config["perf"].get("lazyImages") is True
+          and br.config["perf"].get("pauseHidden") is True, str(br.config["perf"]))
+    br.bridge.setSetting("perfField", json.dumps(["notAKey_x217", True]))
+    check("217 an unknown perf field is refused",
+          "notAKey_x217" not in br.config["perf"])
+finally:
+    if _old_perf_x217 is None:
+        br.config.pop("perf", None)
+    else:
+        br.config["perf"] = _old_perf_x217
+    br.save_config(quiet=True)
+check("217 perf page switches use the merged field",
+      'saveNested("perf", key, el.checked)' in _set_x217)
+
+check("217 passwords Save has an in-flight guard",
+      "if (saving) return;" in _pw_x217 and "saveBtn.disabled = true;" in _pw_x217)
+check("217 store picker asks once and appends to the live box",
+      "pickerAsking" in _pw_x217
+      and 'document.getElementById("store")' in _pw_x217
+      and "box.appendChild(renderPicker" not in _pw_x217)
+check("217 a folder is not given a second edit row in its section",
+      "list.appendChild(editRow(sec.folder))" not in _bm_x217)
+check("217 notes deletes and collect report failure",
+      _nt_x217.count("failLine(body)") >= 4
+      and 'desk("collectPage", {name: box.value}, (res) =>' in _nt_x217
+      and "if (!res) { failMsg = true;" in _nt_x217)
+check("217 mictest turns %% into %", '.replace(/%%/g, "%")' in _mt_x217)
+check("217 player arrows skip focused media and select",
+      "VIDEO|AUDIO|SELECT" in _pl_x217
+      and 'e.key === "ArrowRight" && !own' in _pl_x217
+      and 'e.key === "ArrowLeft" && !own' in _pl_x217)
+check("217 player labels come from the strings",
+      "STR.mediaPrev" in _pl_x217 and "STR.mediaNext" in _pl_x217
+      and _pl_x217.count("loopLabel();") >= 2)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

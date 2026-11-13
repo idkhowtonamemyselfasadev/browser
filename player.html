@@ -169,9 +169,13 @@
   document.getElementById("loop").onclick = (e) => {
     looping = !looping;
     if (media) media.loop = looping;
-    e.target.textContent = (STR.playerLoop || "Loop: %s")
-      .replace("%s", looping ? (STR.on || "on") : (STR.off || "off"));
+    loopLabel();
   };
+  function loopLabel() {
+    document.getElementById("loop").textContent =
+      (STR.playerLoop || "Loop: %s")
+        .replace("%s", looping ? (STR.on || "on") : (STR.off || "off"));
+  }
   document.getElementById("prev").onclick = () => load(at - 1);
   document.getElementById("next").onclick = () => load(at + 1);
   document.getElementById("subs").onclick = () => {
@@ -192,8 +196,15 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === " ") { document.getElementById("play").click();
                         e.preventDefault(); }
-    if (e.key === "ArrowRight") document.getElementById("fwd").click();
-    if (e.key === "ArrowLeft") document.getElementById("back").click();
+    // with the video's own controls or the speed box focused the key
+    // already does its own thing, and ours came on top of it
+    const own = e.target && /^(VIDEO|AUDIO|SELECT)$/.test(e.target.tagName);
+    if (e.key === "ArrowRight" && !own) {
+      document.getElementById("fwd").click(); e.preventDefault();
+    }
+    if (e.key === "ArrowLeft" && !own) {
+      document.getElementById("back").click(); e.preventDefault();
+    }
     if (e.key === "Escape" && bridge && bridge.closePane) bridge.closePane();
   });
 
@@ -206,6 +217,11 @@
           STR.mediaPlayPause || "Play / pause";
         document.getElementById("subs").textContent =
           (STR.subsOpen || "Subtitles") + "…";
+        loopLabel();
+        document.getElementById("prev").textContent =
+          STR.mediaPrev || "Previous";
+        document.getElementById("next").textContent =
+          STR.mediaNext || "Next";
         // guarded like playerSubtitles above, and for the same
         // reason: neither method exists on the Bridge. Unguarded this
         // threw "bridge.playerQueue is not a function" on every open --

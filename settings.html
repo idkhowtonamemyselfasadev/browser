@@ -4041,7 +4041,12 @@
       el.onchange = () => {
         const was = Object.assign({},
           (window._settings && window._settings.mouse) || {});
-        was[key] = parseInt(el.value, 10) || 0;
+        // the browser clamps to 0..2000; the box and the page's copy
+        // said -50 or 100000 while something else was in effect
+        let n = parseInt(el.value, 10) || 0;
+        n = Math.max(0, Math.min(2000, n));
+        el.value = n;
+        was[key] = n;
         saveSetting("mouse", was);
       };
     }
@@ -4285,10 +4290,7 @@
       const el = document.getElementById(id);
       if (!el) continue;
       el.onchange = () => {
-        const was = Object.assign({},
-          (window._settings && window._settings.perf) || {});
-        was[key] = el.checked;
-        saveSetting("perf", was);
+        saveNested("perf", key, el.checked);
       };
     }
     const awake = document.getElementById("keepawake");
@@ -6354,13 +6356,14 @@
     const raw = document.getElementById("countdowns").value || "";
     const rows = [];
     for (const line of raw.split(/\n+/)) {
-      const bits = line.split("=");
-      if (bits.length < 2) continue;
-      const name = bits[0].trim();
+      // the date is the last piece: a name may hold an "=" itself
+      const cut = line.lastIndexOf("=");
+      if (cut < 0) continue;
+      const name = line.slice(0, cut).trim();
       // a date alone is read as UTC midnight by Date.parse (01:00 here,
       // the day before west of London); with a time it is local, the
       // way the browser's own add_countdown reads it
-      let text = bits.slice(1).join("=").trim();
+      let text = line.slice(cut + 1).trim();
       if (/^\d{4}-\d{2}-\d{2}$/.test(text)) text += "T00:00";
       const when = Date.parse(text);
       if (name && !isNaN(when)) rows.push({name: name,
@@ -6644,8 +6647,9 @@
     if (bridge) bridge.reloadPlugins(renderPlugins);
   };
   document.getElementById("fromfile").onclick = () => {
-    if (bridge) bridge.addPluginFromFile();
-    setTimeout(() => { if (bridge) bridge.getPlugins(renderPlugins); }, 400);
+    // the slot answers with the list once the dialog is closed and the
+    // file installed; a timer redrew it while the dialog was still open
+    if (bridge) bridge.addPluginFromFile(renderPlugins);
   };
   document.getElementById("getmore").onclick = () => {
     location.href = "https://greasyfork.org/";

@@ -428,10 +428,8 @@
       mk.onclick = () => newFolder(sec.id);
       head.appendChild(mk);
       list.appendChild(head);
-      if (sec.folder && sec.folder.id === editing) {
-        list.appendChild(editRow(sec.folder));
-        continue;
-      }
+      // the folder's own row in its parent's list is the edit row; a
+      // second one here gave two name boxes for one folder
       const kids = childrenOf(sec.id);
       const step = (node) => {
         node.style.marginLeft = (sec.depth * 18) + "px";

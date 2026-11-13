@@ -133,7 +133,7 @@
     document.getElementById("level").style.width = level + "%";
     document.getElementById("peak").textContent =
       (STR.micLevel || "now %d%%, loudest %d%%")
-        .replace("%d", level).replace("%d", peak);
+        .replace("%d", level).replace("%d", peak).replace(/%%/g, "%");
     raf = requestAnimationFrame(meter);
   }
 

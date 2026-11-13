@@ -1322,6 +1322,12 @@ def _gpu_startup(release=None):
         gpu_apply(os.environ.get("BROWSER_GPU_CARD", ""))
         return
     data = _gpu_config()
+    if not data.get("gpuReset"):
+        # a config from before the chooser was switched off has not been
+        # migrated yet (Browser.__init__ does that, after this): its card
+        # and its question were applied or asked once more on the first
+        # run of the update. Nothing of it counts until the migration ran.
+        return
     cards = gpu_cards()
     choice = str(data.get("gpuCard", "") or "")
     # off unless he asks for it: the window went out once and made a
@@ -1340,7 +1346,9 @@ def _gpu_startup(release=None):
         if choice:
             gpu_apply(choice, cards)
         return
-    lang = str(data.get("translateLang", "") or "en")
+    # the same default as every other window (_ui_str): on a fresh
+    # profile this one window alone came up in English
+    lang = str(data.get("translateLang", "") or "de")
     # the card he had before the chooser was switched off is what the
     # window opens on when he switches it back on: _migrate_gpu_choice
     # has been writing it to gpuCardWas all along and nothing ever read
@@ -1358,6 +1366,13 @@ def _gpu_startup(release=None):
     gpu_apply(choice, cards, env)
     env[_GPU_MARK] = "1"
     env["BROWSER_GPU_CARD"] = choice
+    # the flags this run added (privacy, proxy, theme) are in the
+    # environment by now; the successor would read them as given from
+    # outside and an in-app Restart would replay switches since turned off
+    if _FLAGS_FROM_OUTSIDE is None:
+        env.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
+    else:
+        env["QTWEBENGINE_CHROMIUM_FLAGS"] = _FLAGS_FROM_OUTSIDE
     # the successor takes this instance's place, so the socket that says
     # "a browser is already running" is given up first -- otherwise the
     # new one would find its own predecessor's name taken
@@ -12400,7 +12415,17 @@ def _load_json(path, kind, default):
     still be got back."""
     try:
         raw = path.read_bytes()
+    except FileNotFoundError:
+        return default
     except OSError:
+        # there but unreadable (wrong owner after a restore, an I/O
+        # error): read as empty, the next save replaced it with a near
+        # empty file. Set aside like a corrupt one, so it can be got back.
+        try:
+            path.replace(path.with_name(
+                "%s.unreadable-%d" % (path.name, int(time.time()))))
+        except OSError:
+            pass
         return default
     try:
         data = json.loads(raw.decode("utf-8"))
@@ -16659,14 +16684,20 @@ class Bridge(QObject):
                 if step in value:
                     value[step] = max(0, min(2000, int(
                         _sane_number(value[step]) or 0)))
-        if key in ("a11yField", "navField") \
+        if key in ("a11yField", "navField", "perfField") \
                 and isinstance(value, list) and len(value) == 2:
             # one entry of the table, merged here: the page sent the
             # whole table from the copy it loaded with, and a switch
             # changed meanwhere else was written back as it had been
-            table = "a11y" if key == "a11yField" else "nav"
-            known = (set(browser.A11Y_SWITCHES) | set(browser.A11Y_VALUES)
-                     if table == "a11y" else set(browser.NAV_SWITCHES))
+            table = {"a11yField": "a11y", "navField": "nav",
+                     "perfField": "perf"}[key]
+            if table == "a11y":
+                known = set(browser.A11Y_SWITCHES) | set(browser.A11Y_VALUES)
+            elif table == "nav":
+                known = set(browser.NAV_SWITCHES)
+            else:
+                known = set(browser.PERF_SWITCHES)
+                value = [value[0], bool(value[1])]
             if str(value[0]) not in known:
                 return
             rows = browser.config.get(table)
@@ -18483,9 +18514,11 @@ class Bridge(QObject):
     def installStarter(self, plugin_id):
         return self.browser.install_starter(plugin_id)
 
-    @pyqtSlot()
+    @pyqtSlot(result=str)
     def addPluginFromFile(self):
         self.browser.add_plugin_from_file()
+        # the page redraws from this once the dialog is gone
+        return self.getPlugins()
 
     @pyqtSlot(str, str)
     def savePlugin(self, filename, source):
@@ -24572,9 +24605,10 @@ class Browser(QMainWindow):
                         row["g"] = group.get("name")
                         self._crash_state.append(row)
         if crashed and self.config.get("clearHistoryExit"):
-            self.history = []
-            self.save_history()
-            self._forget_history_extras(None)
+            # with the vault shut, save_history writes nothing and the
+            # sealed file stayed on disk, to come back at unlock: the
+            # same wipe as a clean exit
+            self.clear_history(undoable=False)
         self._exit_cleared = False
         # ...and the engine gets its Python back before the interpreter
         # goes (see _release_engine_hooks)
@@ -59815,6 +59849,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         proc.start(args[0], args[1:])
         return str(path)
 
+    def _end_audio_recorder(self):
+        """The sound recorder's process ended: asked to stop, then killed
+        after a short wait. Left alone, it kept the microphone open and
+        grew a recording-*.wav with no browser left to stop it."""
+        audio = getattr(self, "_audio_proc", None)
+        self._audio_proc = None
+        if audio is None:
+            return
+        try:
+            audio.terminate()
+            if not audio.waitForFinished(1000):
+                audio.kill()
+                audio.waitForFinished(500)
+        except RuntimeError:
+            pass
+
     def stop_recording(self, save=True, fmt=None, start=0.0, end=None,
                        quality=None):
         """Stop, and write the file.
@@ -67154,7 +67204,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # every link and focus ring on the page. The literal was
             # the only record of what was meant.
             "red": palette["red"],
-            "lang": str(self.config.get("translateLang", "en"))[:2],
+            "lang": str(self.config.get("translateLang") or "de")[:2],
             "noAltWord": self._ui_str("a11yNoAlt"),
         })
         return payload
@@ -74509,6 +74559,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # a screen-share picker still up is declined here, while its tab
         # is whole: everything below this line is teardown
         self._drop_share()
+        # a recording in this window is written (or its sound process
+        # ended) while its tabs are whole: closing the window removed
+        # them without that, and the recorder ran on, an orphan after quit
+        if (self.recording_now() is not None
+                or getattr(self, "_audio_proc", None) is not None):
+            try:
+                self.stop_recording()
+            except Exception:
+                self._end_audio_recorder()
         # the popped-out tabs come home first: remembered before them,
         # "reopen closed window" brought the window back without them
         for mini in list(self._popouts):
@@ -74578,6 +74637,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         timer.stop()
                     except RuntimeError:
                         pass
+            # its media poll is stopped above and was the only thing that
+            # let go of the hold: the systemd-inhibit child blocked sleep
+            # for the rest of the run
+            if getattr(self, "_awake_proc", None) is not None:
+                self.keep_awake(False)
             super().closeEvent(event)
             return
         self._clear_on_exit()
@@ -79792,6 +79856,12 @@ def main():
         for one in [win] + list(WINDOWS):
             try:
                 one.keep_awake(False)
+            except Exception:
+                pass
+            # a quit that did not come through a window's close leaves the
+            # sound recorder running past os._exit
+            try:
+                one._end_audio_recorder()
             except Exception:
                 pass
         _end_process(win)
