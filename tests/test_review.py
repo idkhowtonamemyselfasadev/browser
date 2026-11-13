@@ -6653,6 +6653,1418 @@ br.config["noScriptSites"] = _ns_was126c
 check("switching a site rule off works when a parent site is listed too",
       _on126c is False and _still126c is False, str((_on126c, _still126c)))
 
+
+# ===== ninth pass: bar memory, suggestions, prices, captures, downloads ==
+_kh127 = set(br.known_hosts)
+_hist_on127 = br.config.get("history", "__absent__")
+br.config["history"] = False
+br._remember_host(B.QUrl("https://never127.example/"))
+_added127 = "never127.example" in br.known_hosts
+if _hist_on127 == "__absent__":
+    br.config.pop("history", None)
+else:
+    br.config["history"] = _hist_on127
+br.known_hosts.add("left127.example")
+br._forget_history_extras(None)
+_left127 = set(br.known_hosts)
+br.known_hosts = set(_kh127)
+try:
+    B._write_json(B.HOSTS_FILE, sorted(_kh127))
+except OSError:
+    pass
+check("the address bar forgets its sites with the history, and keeps none "
+      "with history off", not _added127 and not _left127,
+      str((_added127, sorted(_left127)[:3])))
+check("an address of the home network is never sent for suggestions",
+      not any(B.looks_like_search(t) for t in ("10.0.0.1", "localhost:3000",
+                                               "intranet/wiki", "[::1]:8080"))
+      and B.looks_like_search("how to cook pasta"))
+_pa127 = getattr(B, "_parse_amount", None)
+check("a price written the German way is read the German way",
+      _pa127 is not None and _pa127("1.234,56") == 1234.56
+      and _pa127("1,234.56") == 1234.56 and _pa127("12,50") == 12.5
+      and _pa127("0.125") == 0.125 and _pa127("0,500") == 0.5)
+_sh127 = json.dumps(br.config.get("shotHistory") or [])
+_img127 = B.QImage(40, 30, B.QImage.Format.Format_RGB32)
+_img127.fill(B.QColor("#336699"))
+_p127 = br._shot_done(_img127, copy=False, save=True)
+_listed127 = str(_p127) in (br.config.get("shotHistory") or [])
+_fl127 = []
+_real_fl127 = br.flash
+_real_save127 = B.capture.save
+br.flash = lambda text, *a, **k: _fl127.append(text)
+B.capture.save = lambda *a, **k: None
+try:
+    br._shot_done(_img127, copy=False, save=True)
+finally:
+    B.capture.save = _real_save127
+    br.flash = _real_fl127
+try:
+    if _p127:
+        _Path(str(_p127)).unlink()
+except OSError:
+    pass
+br.config["shotHistory"] = json.loads(_sh127)
+check("a plain screenshot is in the capture list, and a failed save says so",
+      _listed127 and _fl127[-1:] == [br._ui_str("shotFailed")],
+      str((_listed127, _fl127[-1:])))
+_ow127 = []
+_real_odf127 = br.open_download_file
+br.open_download_file = lambda i: _ow127.append(i) or True
+_dls127 = list(br.downloads)
+_dd127 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(_dd127 / "f127.stl").write_text("solid x")
+br.downloads[:] = [{"id": "d127", "name": "f127.stl", "dir": str(_dd127),
+                    "state": "done", "t": 1}]
+try:
+    br.open_download("d127", folder=False)
+finally:
+    br.open_download_file = _real_odf127
+_hashed127 = {}
+try:
+    _first127 = br.download_hash("d127", then=lambda v: _hashed127.update(v=v),
+                                 background=True)
+    H.wait_for(lambda: "v" in _hashed127, 8000)
+except TypeError:
+    _first127 = "old"
+br.downloads[:] = _dls127
+br.save_downloads()
+check("the downloads page's Open goes through the 'open with' rules",
+      _ow127 == ["d127"], str(_ow127))
+check("a download's hash is worked out off the window",
+      _first127 == "" and len(_hashed127.get("v", "")) == 64,
+      str((_first127, _hashed127.get("v", "")[:8])))
+_pt127 = []
+_real_pt127 = br.play_tool
+br.play_tool = lambda name, view=None, then=None, arg=None: (
+    _pt127.append((name, arg)) or True)
+_sv127 = {k: br.config.get(k, "__absent__") for k in
+          ("streamSafe", "streamSafePrev", "desktopNotify", "suggestHistory",
+           "guardFingerprint")}
+try:
+    br.stream_safe(True)
+    br.stream_safe(False)
+finally:
+    br.play_tool = _real_pt127
+    for _k, _v in _sv127.items():
+        if _v == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+_modes127 = [a.get("mode") for n, a in _pt127
+             if n == "blurprivate" and isinstance(a, dict)]
+check("stream-safe blurs every tab on, and takes it off every tab",
+      "on" in _modes127 and "off" in _modes127
+      and _modes127.count("on") == _modes127.count("off"), str(_modes127))
+_lt127 = []
+_real_lt127 = br.live_tick
+_le127 = br.config.get("liveEvery", "__absent__")
+br.live_tick = lambda then=None: _lt127.append(1) or True
+br.config["liveEvery"] = 5
+br._live_last = -1e9
+try:
+    br._live_check()
+    br._live_check()
+except AttributeError:
+    pass
+finally:
+    br.live_tick = _real_lt127
+    if _le127 == "__absent__":
+        br.config.pop("liveEvery", None)
+    else:
+        br.config["liveEvery"] = _le127
+check("'ask every N minutes' asks, once per interval", _lt127 == [1],
+      str(_lt127))
+_sp127 = br.new_tab(url=srv.url("/twhome?sp127=1"), switch=False); H.spin(200)
+_sp127._sponsor = [{"from": 0, "to": 9999, "what": "sponsor"}]
+_sp127._sponsor_video = "oldvideo127"
+_ms127 = []
+_real_ms127 = br.media_state
+br.media_state = lambda view=None, then=None: _ms127.append(1)
+try:
+    _sk127 = br.sponsor_skip_now(view=_sp127)
+finally:
+    br.media_state = _real_ms127
+br.close_tab(br.tabs.indexOf(_sp127), ask=False)
+check("one video's sponsor segments are never applied to another",
+      _sk127 is False and not _ms127, str((_sk127, _ms127)))
+check("Dark PDF switched off takes the inversion off the open PDF",
+      'want.darkPdf ? "invert(1)' in B.PAGE_LOOK_JS)
+check("every capture blurs password fields while that is on",
+      bool(getattr(B.capture, "_redacting", False)))
+
+
+# ===== ninth pass lows: daily log, dates, bar words, time zones ==========
+if br.desk() is not None:
+    _dk128 = br.desk()
+    _tp128 = _dk128.todo_path()
+    _was128 = _tp128.read_text() if _tp128.exists() else None
+    _done128 = json.dumps(br.config.get("todosDoneOn") or {})
+    _tp128.write_text("- [ ] tick128\n")
+    _tid128 = _dk128.todos()[0]["id"]
+    br.desk_do("toggleTodo", json.dumps({"id": _tid128}))
+    # ticked, unticked and ticked again is one to-do done, not two
+    br.desk_do("toggleTodo", json.dumps({"id": _tid128}))
+    br.desk_do("toggleTodo", json.dumps({"id": _tid128}))
+    _log128 = br.daily_log()
+    if _was128 is None:
+        _tp128.unlink()
+    else:
+        _tp128.write_text(_was128)
+    br.config["todosDoneOn"] = json.loads(_done128)
+    check("the daily log counts a to-do ticked off today",
+          int((_log128 or {}).get("todos") or 0) == 1, str(_log128))
+check("an impossible date makes no calendar entry",
+      br.ics_from_text("Meeting 2026-13-45 19:00") == "")
+check("'each' and 'beach' in the bar are words, not hex numbers",
+      B.bar_answer("each") is None and B.bar_answer("beach") is None)
+check("EST is five hours behind UTC all year",
+      B._zone_for("est") == "Etc/GMT+5", str(B._zone_for("est")))
+
+# ===== ninth pass, part 3: marks per window, bar hints, captures, misc ====
+# N23 the rate-table hint row opens Settings instead of emptying the clipboard
+_mr129 = dict(B.MONEY_RATES)
+B.MONEY_RATES["rates"] = {}
+try:
+    _rows129 = br._own_suggestions("20 usd in eur")
+    _act129 = dict(getattr(br, "_suggest_actions", None) or {})
+finally:
+    B.MONEY_RATES.clear()
+    B.MONEY_RATES.update(_mr129)
+_hint129 = [a for r, a in _act129.items() if "rate table" in r]
+check("the 'switch the rate table on' row opens Settings, it does not copy ''",
+      bool(_hint129) and _hint129[0][0] == "settings", str(_hint129))
+# N24 the preposition is not an inch, a place is not a stone
+_ma129 = B._metric_answer
+check("'3 in the book' and '1st place' are not measurements; '5 in long' is",
+      _ma129("Chapter 3 in the book") is None
+      and _ma129("we finished 1st today") is None
+      and (_ma129("it is 5 in long") or ("", ""))[1] == "127"
+      and _ma129("a 27 in monitor") is not None
+      and _ma129("2 lb of it") is not None,
+      str((_ma129("Chapter 3 in the book"), _ma129("we finished 1st today"),
+           _ma129("it is 5 in long"))))
+# N33 a subtitle file's language comes from its name, never "de" by default
+_sl129 = getattr(B, "_subtitle_lang", None)
+_addsubs129 = str(getattr(B, "MEDIA_TOOLS2", {}).get("addsubs", ""))
+check("a subtitle file is tagged with the language its name gives, or none",
+      _sl129 is not None and _sl129("film.en.srt") == "en"
+      and _sl129("Film_eng.forced.vtt") == "en" and _sl129("film.srt") == ""
+      and _sl129("film.2024.srt") == ""
+      and 'want.lang || "de"' not in _addsubs129,
+      str(_sl129 and [_sl129(n) for n in ("film.en.srt", "film.srt")]))
+# N32 the Mac edition asks pip
+_plat129 = sys.platform
+try:
+    sys.platform = "darwin"
+    _cmd129 = br._lib_check_cmd()
+    _up129 = br._lib_upgrade_cmd()
+    _found129 = br._lib_found_updates(0, "PyQt6 6.0 6.1 wheel")
+finally:
+    sys.platform = _plat129
+check("on a Mac the library check and upgrade are pip's, not dnf's",
+      _cmd129[0] == sys.executable and _up129[0] == sys.executable
+      and _found129 is True, str((_cmd129[0], _up129[0], _found129)))
+# N27 the capture diff is quick and counts what moved
+_d1_129 = B.QImage(800, 600, B.QImage.Format.Format_RGB32)
+_d1_129.fill(B.QColor("#202020"))
+_d2_129 = B.QImage(_d1_129)
+_pt129 = B.QPainter(_d2_129)
+_pt129.fillRect(100, 100, 50, 40, B.QColor("#ffffff"))
+_pt129.end()
+_t129 = _time.monotonic()
+_pic129, _ch129 = B.capture.diff_images(_d1_129, _d2_129)
+_dt129 = _time.monotonic() - _t129
+check("the capture diff counts the pixels that moved, without holding the "
+      "window", _ch129 == 50 * 40 and _dt129 < 3.0
+      and _pic129.pixelColor(120, 120).name() == "#f38ba8"
+      and _pic129.pixelColor(10, 10).name() == "#202020",
+      str((_ch129, round(_dt129, 2))))
+# N28 / N20 the downloads page says "Waiting"; a date-only countdown is local
+_dlh129 = (_Path(B.__file__).parent / "downloads.html").read_text()
+_seth129 = (_Path(B.__file__).parent / "settings.html").read_text()
+check("a queued download reads 'Waiting', and a date-only countdown ends at "
+      "local midnight", "e.queued" in _dlh129 and 'text += "T00:00"' in _seth129)
+# N30 Refresh shows the refreshed list
+_mcm129 = br.mc_menu()
+_ref129 = [a for a in _mcm129.actions() if a.text() == br._ui_str("mcRefresh")]
+br.__dict__.pop("_mc_shown", None)
+if _ref129:
+    _ref129[0].trigger()
+    H.spin(200)
+_shown129 = getattr(br, "_mc_shown", None)
+check("the server menu's Refresh shows the refreshed list",
+      _shown129 is not None, str(_shown129))
+try:
+    if _shown129 is not None:
+        _shown129.close()
+    _mcm129.deleteLater()
+except RuntimeError:
+    pass
+# N31 the grid takes only names it can use, and counts what it made
+_fl131 = []
+_real_fl131 = br.flash
+br.flash = lambda text, *a, **k: _fl131.append(str(text))
+try:
+    _none131 = br.multistream("ab, x")
+    _v131 = br.multistream(["abcd", "efgh", "x", "ijkl", "mnop", "qrst"])
+    if _v131 not in (None, False):
+        H.wait_for(lambda: any(br._ui_str("gridMade") % 4 == f
+                               for f in _fl131), 8000)
+finally:
+    br.flash = _real_fl131
+check("a grid of unusable names is refused, and a grid of six names says 4",
+      _none131 is False and (br._ui_str("gridMade") % 4) in _fl131
+      and (br._ui_str("gridMade") % 6) not in _fl131, str(_fl131[-3:]))
+try:
+    if _v131 not in (None, False) and br.tabs.indexOf(_v131) >= 0:
+        br.close_tab(br.tabs.indexOf(_v131), ask=False)
+except RuntimeError:
+    pass
+# N6 the Discord shot writes the bytes that fit
+_real_fit129 = B.capture.fit_under
+B.capture.fit_under = lambda image, limit, fmt="jpeg": (
+    b"\xff\xd8\xff\xe0fit129", image)
+_sh129 = json.dumps(br.config.get("shotHistory") or [])
+_dv129 = br.new_tab(url=srv.url("/twhome")); H.spin(300)
+H.wait_for(lambda: "twhome" in _dv129.url().toString(), 6000)
+br.tabs.setCurrentWidget(_dv129); H.spin(300)
+try:
+    _dp129 = br.shot_for_discord(view=_dv129)
+finally:
+    B.capture.fit_under = _real_fit129
+_dbytes129 = b""
+try:
+    _dbytes129 = _Path(str(_dp129)).read_bytes() if _dp129 else b""
+except OSError:
+    pass
+_dlisted129 = str(_dp129) in (br.config.get("shotHistory") or [])
+check("the Discord shot is the file that fits the limit, and is listed",
+      _dbytes129 == b"\xff\xd8\xff\xe0fit129" and _dlisted129,
+      str((_dbytes129[:12], _dlisted129)))
+try:
+    if _dp129:
+        _Path(str(_dp129)).unlink()
+except OSError:
+    pass
+br.config["shotHistory"] = json.loads(_sh129)
+# N26 a tab captured in the background stays where it was, as it was
+_bx129 = br.new_tab(url=srv.url("/twhome?bg=1"), switch=False); H.spin(200)
+_by129 = br.new_tab(url=srv.url("/twhome?bg=2"), switch=False); H.spin(200)
+H.wait_for(lambda: all("twhome" in w.url().toString()
+                       for w in (_bx129, _by129)), 6000)
+br.tabs.setCurrentWidget(_dv129); H.spin(300)
+br.tabs.setCurrentWidget(_by129); H.spin(300)
+br.tabs.setCurrentWidget(_dv129); H.spin(300)
+_at129 = br.tabs.indexOf(_bx129)
+_txt129 = br.tabs.tabText(_at129)
+_before129 = getattr(br, "_tab_before", None)
+_sp129 = None
+try:
+    _sp129 = br.shot_background_tab(view=_bx129)
+except Exception as _e129:
+    _sp129 = repr(_e129)
+H.spin(200)
+check("a tab captured in the background keeps its place, its name and the "
+      "'tab before'", br.tabs.indexOf(_bx129) == _at129
+      and br.tabs.tabText(br.tabs.indexOf(_bx129)) == _txt129
+      and br.current() is _dv129
+      and getattr(br, "_tab_before", None) is _before129,
+      str((_at129, br.tabs.indexOf(_bx129), _txt129, _sp129)))
+try:
+    if _sp129 and isinstance(_sp129, (str, _Path)) and _Path(str(_sp129)).is_file():
+        _Path(str(_sp129)).unlink()
+except OSError:
+    pass
+br.config["shotHistory"] = json.loads(_sh129)
+for _w129 in (_bx129, _by129):
+    try:
+        if br.tabs.indexOf(_w129) >= 0:
+            br.close_tab(br.tabs.indexOf(_w129), ask=False)
+    except RuntimeError:
+        pass
+# N35 printing the article with the reader already on prints the article
+_dl_was129 = br.config.get("downloadDir", "__absent__")
+_pd129 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+br.config["downloadDir"] = str(_pd129)
+H.load(_dv129, srv.url("/art96"))
+H.wait_for(lambda: jsq(_dv129, "document.readyState === 'complete' && "
+                       "document.body.innerText.length > 300"), 9000)
+br.reader_mode(_dv129)
+H.wait_for(lambda: jsq(_dv129, "!!document.getElementById('__readercss')",
+                       B.MAIN_WORLD_ID), 5000)
+_fl135 = []
+br.flash = lambda text, *a, **k: _fl135.append(str(text))
+try:
+    _pp135 = br.print_reader(view=_dv129)
+    _early135 = list(_fl135)
+    H.wait_for(lambda: _pp135 and _Path(str(_pp135)).is_file()
+               and _fl135, 12000)
+finally:
+    br.flash = _real_fl131
+_still135 = jsq(_dv129, "!!document.getElementById('__readercss')",
+                B.MAIN_WORLD_ID)
+check("printing the article with the reader on keeps the reader, and says "
+      "'written' only once the PDF is there",
+      bool(_pp135) and _Path(str(_pp135)).is_file() and _still135 is True
+      and not any(str(_Path(str(_pp135)).name) in f for f in _early135),
+      str((_still135, _early135[:2], _fl135[-1:])))
+if _dl_was129 == "__absent__":
+    br.config.pop("downloadDir", None)
+else:
+    br.config["downloadDir"] = _dl_was129
+try:
+    if br.tabs.indexOf(_dv129) >= 0:
+        br.close_tab(br.tabs.indexOf(_dv129), ask=False)
+except RuntimeError:
+    pass
+# N16 a private window's mark is that window's, and survives a repaint
+_pt_was129 = br.config.get("privateTint", "__absent__")
+br.config["privateTint"] = "#123457"
+_pw129 = br.new_private_window(); H.spin(800)
+_app_has129 = "#123457" in app.styleSheet()
+_pw_has129 = "#123457" in _pw129.styleSheet()
+_br_has129 = "#123457" in br.styleSheet()
+br.apply_chrome_style(); H.spin(200)
+_pw_kept129 = "#123457" in _pw129.styleSheet()
+_app_after129 = "#123457" in app.styleSheet()
+check("a private window's mark is on that window alone, and a repaint from "
+      "a normal window leaves it", not _app_has129 and _pw_has129
+      and not _br_has129 and _pw_kept129 and not _app_after129,
+      str((_app_has129, _pw_has129, _br_has129, _pw_kept129, _app_after129)))
+try:
+    _pw129._closing_anyway = True
+    _pw129.close()
+except RuntimeError:
+    pass
+H.spin(400)
+if _pt_was129 == "__absent__":
+    br.config.pop("privateTint", None)
+else:
+    br.config["privateTint"] = _pt_was129
+br.apply_chrome_style()
+
+# ===== review leftovers: translation bars, cache switch, volume boost ======
+_tr_was130 = dict(br.translate_rules())
+_ta130 = br.new_tab(url=srv.url("/twhome?tr=a"), switch=False); H.spin(200)
+_tb130 = br.new_tab(url=srv.url("/twhome?tr=b"), switch=False); H.spin(200)
+H.wait_for(lambda: all("twhome" in w.url().toString() and
+                       jsq(w, "document.readyState") == "complete"
+                       for w in (_ta130, _tb130)), 8000)
+br.offer_translation_bar("fr", view=_ta130)
+br.offer_translation_bar("es", view=_tb130)
+H.wait_for(lambda: all(jsq(w, "!!document.getElementById('__trbar')",
+                           B.APP_WORLD_ID) for w in (_ta130, _tb130)), 5000)
+# what a trusted press on "never" leaves behind, in the bar's own world
+H.js(_ta130, "window.__trAnswer = 'never'", B.APP_WORLD_ID)
+H.js(_tb130, "window.__trAnswer = 'never'", B.APP_WORLD_ID)
+H.wait_for(lambda: br.translate_rules().get("fr") == "never"
+           and br.translate_rules().get("es") == "never", 4000)
+_rules130 = dict(br.translate_rules())
+br.offer_translation_bar("it", view=_ta130); H.spin(300)
+H.load(_ta130, srv.url("/twhome?tr=c"))
+_tm130 = getattr(br, "_trbar_timer", None)
+H.wait_for(lambda: _tm130 is not None and not _tm130.isActive(), 4000)
+check("each tab's translation bar is read, and the polling stops once the "
+      "bars are answered or gone",
+      _rules130.get("fr") == "never" and _rules130.get("es") == "never"
+      and _tm130 is not None and not _tm130.isActive(),
+      str((_rules130, _tm130 is not None and _tm130.isActive())))
+br.config["translateRules"] = _tr_was130
+for _w130 in (_ta130, _tb130):
+    try:
+        if br.tabs.indexOf(_w130) >= 0:
+            br.close_tab(br.tabs.indexOf(_w130), ask=False)
+    except RuntimeError:
+        pass
+# the cache switch in a private tab comes back on
+_pc130 = br.new_tab(url=srv.url("/twhome?cache"), private=True,
+                    switch=False); H.spin(300)
+_kinds130 = B.QWebEngineProfile.HttpCacheType
+br.cache_off(view=_pc130, on=True)
+_off130 = _pc130.page().profile().httpCacheType()
+br.cache_off(view=_pc130, on=False)
+_on130 = _pc130.page().profile().httpCacheType()
+check("switching the cache back on in a private tab really turns it on",
+      _off130 == _kinds130.NoCache and _on130 == _kinds130.MemoryHttpCache,
+      str((_off130, _on130)))
+try:
+    if br.tabs.indexOf(_pc130) >= 0:
+        br.close_tab(br.tabs.indexOf(_pc130), ask=False)
+except RuntimeError:
+    pass
+# the volume boost never routes a cross-origin player into silence
+_vb130 = br.new_tab(url=srv.url("/twhome?boost"), switch=False); H.spin(200)
+H.wait_for(lambda: jsq(_vb130, "document.readyState") == "complete", 6000)
+H.js(_vb130, "var a = document.createElement('audio');"
+             "a.src = 'http://localhost:' + location.port + '/a130.mp3';"
+             "document.body.appendChild(a); 1")
+_bg130 = []
+br.media_tool("boost", view=_vb130, then=_bg130.append, factor=2.0)
+H.wait_for(lambda: _bg130, 4000)
+_ctx130 = jsq(_vb130, "!!window.__boostCtx", B.APP_WORLD_ID)
+check("the volume boost leaves a player from another site at plain volume",
+      _bg130 and _bg130[0] is not None and _bg130[0] <= 1
+      and _ctx130 is False, str((_bg130, _ctx130)))
+try:
+    if br.tabs.indexOf(_vb130) >= 0:
+        br.close_tab(br.tabs.indexOf(_vb130), ask=False)
+except RuntimeError:
+    pass
+# a self-signed certificate is described in the panel, not left blank
+import ssl as _ssl130, socket as _sock130, threading as _thr130
+import subprocess as _subp130   # "_sp" is a tab in an earlier section
+_cd130 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_subp130.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+         "-keyout", str(_cd130 / "k.pem"), "-out", str(_cd130 / "c.pem"),
+         "-days", "2", "-subj", "/CN=review130.test/O=Review"],
+        capture_output=True, timeout=60)
+_info130 = {}
+if (_cd130 / "c.pem").is_file():
+    _ctx130s = _ssl130.SSLContext(_ssl130.PROTOCOL_TLS_SERVER)
+    _ctx130s.load_cert_chain(str(_cd130 / "c.pem"), str(_cd130 / "k.pem"))
+    _ls130 = _sock130.socket()
+    _ls130.bind(("127.0.0.1", 0)); _ls130.listen(4)
+    _ls130.settimeout(15)
+    def _serve130():
+        for _n in range(2):
+            try:
+                c, _a = _ls130.accept()
+            except OSError:
+                return
+            try:
+                _ctx130s.wrap_socket(c, server_side=True).close()
+            except (OSError, _ssl130.SSLError):
+                c.close()
+    _thr130.Thread(target=_serve130, daemon=True).start()
+    _info130 = br.certificate_for("127.0.0.1", port=_ls130.getsockname()[1])
+    _ls130.close()
+check("a self-signed certificate shows its name, issuer and dates",
+      _info130.get("subject") == "review130.test"
+      and _info130.get("verified") is False and _info130.get("until"),
+      str({k: _info130.get(k) for k in ("subject", "issuer", "until",
+                                        "verified", "error")}))
+
+# ===== tenth pass: windows -- moves, gathering, closing, the timers ========
+# T17 a tab moved to its own window is not "recently closed"
+_mv132 = br.new_tab(url=srv.url("/twhome?mv132"), switch=False); H.spin(300)
+H.wait_for(lambda: "mv132" in _mv132.url().toString(), 6000)
+_w132 = br.move_tab_to_window(br.tabs.indexOf(_mv132)); H.spin(600)
+_closed132 = [r.get("url", "") for r in getattr(br, "_closed_tabs", [])]
+check("a tab moved to another window is not on the recently-closed list",
+      not any("mv132" in u for u in _closed132), str(_closed132[-2:]))
+try:
+    if _w132 is not None:
+        _w132._closing_anyway = True
+        _w132.close()
+except RuntimeError:
+    pass
+H.spin(300)
+# T16 / T21 a group moved to a window: its colour, loaded, no spare tab
+_g132 = br.ensure_group("rv132grp", colour="#ff0000")
+_ga132 = br.new_tab(url=srv.url("/twhome?ga132"), switch=False,
+                    group=_g132); H.spin(300)
+_gb132 = br.new_tab(url=srv.url("/twhome?gb132"), switch=False,
+                    group=_g132); H.spin(300)
+H.wait_for(lambda: all("132" in w.url().toString() for w in (_ga132, _gb132)),
+           6000)
+_gw132 = br.move_group_to_window(_g132); H.spin(900)
+_grows132 = [w for _i, w in _gw132._real_tabs()] if _gw132 else []
+check("a group moved to a window keeps its colour, loads, and brings no "
+      "blank start tab", _gw132 is not None
+      and _gw132.group_colors.get("rv132grp") == "#ff0000"
+      and len(_grows132) == 2
+      and not any(getattr(w, "_pending", None) for w in _grows132),
+      str((_gw132 and _gw132.group_colors.get("rv132grp"), len(_grows132),
+           [getattr(w, "_pending", None) for w in _grows132])))
+try:
+    if _gw132 is not None:
+        for w in _grows132:
+            w.locked = False
+        _gw132._closing_anyway = True
+        _gw132.close()
+except RuntimeError:
+    pass
+H.spin(300)
+# T27 a window closed with a tab popped out is remembered with that tab
+_pw132 = br.new_window(url=srv.url("/twhome?keep132")); H.spin(900)
+_pt132 = _pw132.new_tab(url=srv.url("/twhome?pop132")); H.spin(300)
+H.wait_for(lambda: "pop132" in _pt132.url().toString(), 6000)
+_mini132 = _pw132.pop_out_tab(_pw132.tabs.indexOf(_pt132)); H.spin(300)
+_pw132._closing_anyway = True
+_pw132.close(); H.spin(500)
+_last132 = (B.CLOSED_WINDOWS[-1].get("tabs") if B.CLOSED_WINDOWS else []) or []
+check("a window closed with a popped-out tab can come back with that tab",
+      any("pop132" in str(e.get("u", "")) for e in _last132),
+      str([e.get("u", "")[-14:] for e in _last132]))
+# T0 a window that owned the desk timer hands it over when it closes
+_dw132 = br.new_window(url=srv.url("/twhome?desk132")); H.spin(900)
+_dw132._desk_timer.start()
+_dw132._closing_anyway = True
+_dw132.close(); H.spin(400)
+_desk_left132 = _dw132._desk_timer.isActive()
+_sn_was132 = json.dumps(br.config.get("snoozed") or [])
+br.config["snoozed"] = [{"url": srv.url("/twhome?snz132"), "at": 1}]
+_woke132 = 0
+try:
+    _woke132 = _dw132.wake_snoozed()
+except RuntimeError:
+    _woke132 = -1
+H.spin(400)
+def _snz_tabs132():
+    out = []
+    for win in br.windows():
+        try:
+            for _i, w in win._real_tabs():
+                if "snz132" in (getattr(w, "_pending", "") or
+                                w.url().toString()):
+                    out.append((win, w))
+        except RuntimeError:
+            continue
+    return out
+_snz_here132 = bool(_snz_tabs132())
+check("a closed window stops its desk timer, and a snoozed tab wakes in a "
+      "window that is open", not _desk_left132 and _woke132 == 1
+      and _snz_here132, str((_desk_left132, _woke132, _snz_here132)))
+for _win132, _w in _snz_tabs132():
+    try:
+        _win132.close_tab(_win132.tabs.indexOf(_w), ask=False)
+    except RuntimeError:
+        pass
+br.config["snoozed"] = json.loads(_sn_was132)
+# T1 a private window gathers nothing, and gathering leaves private ones
+_pv132 = br.new_private_window(); H.spin(800)
+_pvt132 = _pv132.current()
+_got_p132 = _pv132.merge_windows()
+_alive132 = br in br.windows()
+_got_n132 = br.merge_windows(); H.spin(600)
+_pv_open132 = _pv132 in br.windows()
+check("a private window gathers no windows, and gathering into an ordinary "
+      "one leaves the private window open", _got_p132 == 0 and _alive132
+      and _pv_open132, str((_got_p132, _alive132, _pv_open132)))
+try:
+    _pv132._closing_anyway = True
+    _pv132.close()
+except RuntimeError:
+    pass
+H.spin(400)
+# T5 / T19 the command line hands a "cmd" over, and an --app on the retry
+_main_src132 = __import__("inspect").getsource(B.main)
+check("'browser cmd <name>' is sent as a command, and the second hand-off "
+      "keeps --app", 'words[0] == "cmd"' in _main_src132
+      and _main_src132.count("app=app_url") >= 2)
+
+# ===== tenth pass: a11y, groups, stale tabs ================================
+# T2 the hover picture and the text-zoom sheet are two elements
+check("the hover zoom picture has an id of its own, apart from the text zoom",
+      'getElementById("__a11yhover")' in B.A11Y_JS
+      and B.A11Y_JS.count('getElementById("__a11yzoom")') == 2,
+      str(B.A11Y_JS.count('getElementById("__a11yzoom")')))
+# T3 mono reaches a page loaded after the switch was flipped
+_mono_was133 = br.a11y_config().get("monoAudio")
+br.set_a11y("monoAudio", True)
+_au133 = br.new_tab(url=srv.url("/twhome?mono133"), switch=False); H.spin(300)
+H.wait_for(lambda: jsq(_au133, "!!window.__audioShape", B.MAIN_WORLD_ID), 6000)
+_shape133 = jsq(_au133, "window.__audioShape ? window.__audioShape.mono : null",
+                B.MAIN_WORLD_ID)
+br.set_a11y("monoAudio", bool(_mono_was133))
+check("mono sound reaches a page opened after it was switched on",
+      _shape133 is True, str(_shape133))
+try:
+    if br.tabs.indexOf(_au133) >= 0:
+        br.close_tab(br.tabs.indexOf(_au133), ask=False)
+except RuntimeError:
+    pass
+# T4 a private tab's menus offer no "only on this site"
+_pa133 = br.new_tab(url=srv.url("/twhome?pa133"), private=True,
+                    switch=False); H.spin(300)
+H.wait_for(lambda: "pa133" in _pa133.url().toString(), 6000)
+def _menu_texts133(m):
+    out = []
+    for a in m.actions():
+        out.append(a.text())
+        if a.menu() is not None:
+            out.extend(_menu_texts133(a.menu()))
+    return out
+_site133 = br._ui_str("a11ySiteOnly") % "127.0.0.1"
+_txt133 = _menu_texts133(br.a11y_menu(view=_pa133))
+check("a private tab's accessibility menu offers no per-site profile",
+      _site133 not in _txt133, str([t for t in _txt133 if "127" in t][:3]))
+try:
+    if br.tabs.indexOf(_pa133) >= 0:
+        br.close_tab(br.tabs.indexOf(_pa133), ask=False)
+except RuntimeError:
+    pass
+# T6 a group rule leaves another virtual browser's group of that name alone
+_sess_was133 = list(br.sessions)
+if not any(e.get("sid") == "rv133" for e in br.sessions):
+    br.sessions.append({"name": "Review 133", "sid": "rv133"})
+br.ensure_group("Mods133", session="rv133")
+_rules_was133 = br.config.get("groupRules", "__absent__")
+br.config["groupRules"] = [{"group": "Mods133", "match": "127.0.0.1"}]
+try:
+    _gt133 = br.new_tab(url=srv.url("/twhome?g133"), switch=False)
+finally:
+    if _rules_was133 == "__absent__":
+        br.config.pop("groupRules", None)
+    else:
+        br.config["groupRules"] = _rules_was133
+H.spin(300)
+_gs133 = (getattr(_gt133, "session", None), getattr(_gt133, "group", None))
+check("a group rule never puts a tab into another browser's group",
+      _gs133[0] == br.active_session and _gs133[1] != "Mods133", str(_gs133))
+try:
+    if br.tabs.indexOf(_gt133) >= 0:
+        br.close_tab(br.tabs.indexOf(_gt133), ask=False)
+    if "Mods133" in br.groups:
+        br.delete_group("Mods133")
+except RuntimeError:
+    pass
+br.sessions[:] = _sess_was133
+# T7 leaving a tab counts as looking at it; T8 it is saved with the session
+_sa133 = br.new_tab(url=srv.url("/twhome?sa133")); H.spin(300)
+_sb133 = br.new_tab(url=srv.url("/twhome?sb133"), switch=False); H.spin(300)
+H.wait_for(lambda: all("133" in w.url().toString() for w in (_sa133, _sb133)),
+           6000)
+br.tabs.setCurrentWidget(_sa133); H.spin(200)
+_sa133._seen_wall = 1.0
+br.tabs.setCurrentWidget(_sb133); H.spin(200)
+_left133 = getattr(_sa133, "_seen_wall", 0)
+_sb133._seen_wall = 1234567.0
+br.tabs.setCurrentWidget(_sa133); H.spin(200)
+_sb133._seen_wall = 1234567.0
+br._save_groups(quiet=True)
+_rows133 = [r for rows in (br.config.get("sessionTabs") or {}).values()
+            for r in rows if isinstance(r, dict) and "sb133" in r.get("u", "")]
+check("a tab just left counts as looked at, and when is kept with the session",
+      _left133 > _time.time() - 60 and _rows133
+      and _rows133[0].get("w") == 1234567, str((_left133, _rows133[:1])))
+for _w133 in (_sa133, _sb133):
+    try:
+        if br.tabs.indexOf(_w133) >= 0:
+            br.close_tab(br.tabs.indexOf(_w133), ask=False)
+    except RuntimeError:
+        pass
+
+# ===== tenth pass: macro stop, cookie rules, text tools, translation ======
+# T9 a stop works on the recording it was asked about
+_absrc134 = (_Path(B.__file__).parent / "agent_bridge.py").read_text()
+check("a macro stop takes its own recording and clears the slot at once",
+      "macro = self.macro\n            self.macro = None" in _absrc134
+      and 'self.macro["steps"] = steps' not in _absrc134)
+# T12 the most specific cookie rule decides, as the menu shows
+_cr_was134 = json.dumps(br.cookie_rules())
+br.cookie_rule("rv134.example", "close")
+br.cookie_rule("sub.rv134.example", "block")
+br.cookie_rule("rv134b.example", "block")
+br.cookie_rule("a.rv134b.example", "allow")
+_r134 = (br.cookie_rule_for("sub.rv134.example"),
+         br.cookie_rule_for(".x.sub.rv134.example"),
+         br.cookie_rule_for("other.rv134.example"),
+         br.cookie_rule_for("a.rv134b.example"),
+         br.cookie_rule_for("b.rv134b.example"))
+_rules134 = br.cookie_rules()
+_rules134.clear()
+_rules134.update(json.loads(_cr_was134))
+br.save_config(quiet=True)
+check("the closest cookie rule wins, and 'allow' under a blocked parent holds",
+      _r134 == ("block", "block", "close", "allow", "block"), str(_r134))
+# T14 Title Case with an apostrophe and an umlaut
+_tc134 = br.new_tab(url=srv.url("/twhome?tc134")); H.spin(300)
+H.wait_for(lambda: jsq(_tc134, "document.readyState") == "complete", 6000)
+H.js(_tc134, "var i = document.createElement('input'); i.id = 'tc134';"
+             "i.value = \"it's über uns\"; document.body.appendChild(i);"
+             "i.focus(); i.select(); 1")
+_tcd134 = []
+br.desk_tool("textcase", view=_tc134, then=_tcd134.append, arg="title")
+H.wait_for(lambda: _tcd134, 4000)
+_tcv134 = jsq(_tc134, "document.getElementById('tc134').value")
+check("Title Case leaves the letter after an apostrophe alone and knows ü",
+      _tcv134 == "It's Über Uns", str(_tcv134))
+# T15 the translation keeps links for Undo, and a list's inner list
+H.js(_tc134, "document.body.innerHTML = '<p id=p134>Read the <a href=\"/x\">"
+             "full article</a> here please</p><ul><li id=li134>Outer item "
+             "words<ul><li>Inner item words</li></ul></li></ul>'; 1")
+_real_rt134 = br.run_translator
+_real_ct134 = br.caption_tools
+br.run_translator = lambda text, then=None, lang="de", limit=0: (
+    then and then("T:" + text))
+# a translator on this machine, as far as the browser can tell: without
+# one, translating in place does nothing at all
+br.caption_tools = lambda: {"captionTranslator": "/bin/true"}
+try:
+    br.translate_in_place(view=_tc134, lang="de")
+    H.wait_for(lambda: jsq(_tc134, "document.querySelectorAll('[data-was]')"
+                                   ".length") == 3, 6000)
+    _inner134 = jsq(_tc134, "document.querySelectorAll('#li134 ul li').length")
+    _own134 = jsq(_tc134, "document.getElementById('li134').firstChild"
+                          ".nodeValue")
+    br.undo_translation(view=_tc134)
+    H.wait_for(lambda: jsq(_tc134, "document.querySelectorAll('[data-was]')"
+                                   ".length") == 0, 4000)
+finally:
+    br.run_translator = _real_rt134
+    br.caption_tools = _real_ct134
+    br.__dict__.pop("caption_tools", None)
+    br.__dict__.pop("run_translator", None)
+_link134 = jsq(_tc134, "!!document.querySelector('#p134 a[href=\"/x\"]')")
+check("translating keeps a list's inner list (its own words translated), "
+      "and Undo brings the links back",
+      _inner134 == 1 and str(_own134).startswith("T:Outer item words")
+      and _link134 is True, str((_inner134, _own134, _link134)))
+try:
+    if br.tabs.indexOf(_tc134) >= 0:
+        br.close_tab(br.tabs.indexOf(_tc134), ask=False)
+except RuntimeError:
+    pass
+# T11 a dragged rail width is written back
+check("the rail's dragged width is written back when the drag settles",
+      hasattr(br, "_rail_drag") and hasattr(br, "_sidebar_dragged"))
+
+# ===== tenth pass: feeds, lite mode, sleeping, panels, clipboard, modes ===
+# T20 an Atom entry links to its article
+check("a feed entry links to its rel=alternate article, not the first link",
+      'item.querySelector("link[rel=alternate]")'
+      in _Path(B.__file__).read_text())
+# T22 lite mode off gives his image block back
+from PyQt6.QtWebEngineCore import QWebEngineSettings as _QWS135
+_ni_was135 = br.config.get("noImageSites", "__absent__")
+_lite_was135 = bool(br.config.get("liteMode", False))
+br.config["noImageSites"] = ["127.0.0.1"]
+_li135 = br.new_tab(url=srv.url("/twhome?lite135"), switch=False); H.spin(300)
+H.wait_for(lambda: "lite135" in _li135.url().toString(), 6000)
+br.apply_site_privacy(_li135)
+br.lite_mode(True)
+br.lite_mode(False)
+_img135 = _li135.page().settings().testAttribute(
+    _QWS135.WebAttribute.AutoLoadImages)
+if _ni_was135 == "__absent__":
+    br.config.pop("noImageSites", None)
+else:
+    br.config["noImageSites"] = _ni_was135
+if _lite_was135:
+    br.lite_mode(True)
+check("lite mode switched off leaves images off on a site he blocks them on",
+      _img135 is False, str(_img135))
+# T23 a tab using the camera is not put to sleep
+_ml_was135 = list(getattr(br, "_media_live", None) or [])
+br._media_live = _ml_was135 + [{"view": _li135, "kind": "camera"}]
+try:
+    _slept135 = br.sleep_tab(_li135)
+finally:
+    br._media_live = _ml_was135
+if _slept135:
+    br.sleep_tab(_li135, on=False)
+check("a background tab using the camera is never put to sleep",
+      _slept135 is False, str(_slept135))
+try:
+    if br.tabs.indexOf(_li135) >= 0:
+        br.close_tab(br.tabs.indexOf(_li135), ask=False)
+except RuntimeError:
+    pass
+# T24 the panel is measured in the page splitter
+check("the side panel is sized in the page splitter, not the whole window",
+      hasattr(br, "_split_width") and 0 < br._split_width() <= br.width())
+# T25 a second secret's timer is its own
+_cc_was135 = br.config.get("clipClear", "__absent__")
+_QGA.clipboard().setText("secret-one-135")
+br.clear_clipboard_later(1)
+H.spin(400)
+_QGA.clipboard().setText("secret-two-135")
+br.clear_clipboard_later(2)
+H.spin(900)
+_still135 = _QGA.clipboard().text()
+H.wait_for(lambda: _QGA.clipboard().text() == "", 3000)
+_gone135 = _QGA.clipboard().text()
+check("each copied secret is cleared by its own timer, not the one before",
+      _still135 == "secret-two-135" and _gone135 == "",
+      str((_still135, _gone135)))
+# E30 a mode brings the side panel back with its site
+_modes_was135 = json.dumps(br.modes())
+_mode_now135 = br.mode_now()
+br.open_panel(srv.url("/twhome?panel135")); H.spin(400)
+H.wait_for(lambda: "panel135" in br._panel_view.url().toString(), 6000)
+br.save_mode("rv135")
+br.toggle_panel(False); H.spin(200)
+br.open_mode("rv135"); H.spin(400)
+H.wait_for(lambda: "panel135" in br._panel_view.url().toString(), 6000)
+_pon135 = bool(getattr(br, "_panel", None) is not None and br._panel.isVisible())
+_purl135 = br._panel_view.url().toString() if _pon135 else ""
+br.toggle_panel(False)
+br.config["modes"] = json.loads(_modes_was135)
+br.config["modeNow"] = _mode_now135
+check("a mode saved with the side panel open opens it again, on its site",
+      _pon135 and "panel135" in _purl135, str((_pon135, _purl135)))
+
+# ===== tenth pass: a11y switches undo, a site's storage cleared ===========
+# T18 bold starts switched off take the marks off the page
+_bs_was136 = bool(br.a11y_config().get("boldStarts"))
+_bv136 = br.new_tab(url=srv.url("/art96?bold136")); H.spin(300)
+H.wait_for(lambda: jsq(_bv136, "document.readyState") == "complete", 6000)
+br.set_a11y("boldStarts", True)
+H.wait_for(lambda: (jsq(_bv136, "document.querySelectorAll('span.__a11yb')"
+                               ".length") or 0) > 0, 6000)
+_on136 = jsq(_bv136, "document.querySelectorAll('span.__a11yb').length")
+br.set_a11y("boldStarts", False)
+H.wait_for(lambda: jsq(_bv136, "document.querySelectorAll('span.__a11yb')"
+                               ".length") == 0, 6000)
+_off136 = jsq(_bv136, "document.querySelectorAll('span.__a11yb').length")
+_text136 = jsq(_bv136, "document.querySelector('article p').textContent")
+br.set_a11y("boldStarts", _bs_was136)
+check("bold starts switched off give the page its own words back",
+      (_on136 or 0) > 0 and _off136 == 0
+      and str(_text136).startswith("Paragraph 0 of the article"),
+      str((_on136, _off136, str(_text136)[:30])))
+# T13 clearing a site takes its IndexedDB too, from every tab of it
+H.js(_bv136, "localStorage.setItem('k136', '1');"
+             "indexedDB.open('db136', 1).onsuccess = function (e) {"
+             "  e.target.result.close(); window.__db136 = 1; }; 1")
+H.wait_for(lambda: jsq(_bv136, "window.__db136 === 1"), 5000)
+br.clear_site_data("127.0.0.1")
+H.spin(1500)
+H.wait_for(lambda: jsq(_bv136, "document.readyState") == "complete", 6000)
+H.js(_bv136, "window.__dbs136 = null; indexedDB.databases().then("
+             "function (d) { window.__dbs136 = d.map(function (x) {"
+             " return x.name; }).join(','); }); 1")
+H.wait_for(lambda: jsq(_bv136, "window.__dbs136 !== null"), 5000)
+_dbs136 = jsq(_bv136, "window.__dbs136")
+_ls136 = jsq(_bv136, "localStorage.getItem('k136')")
+check("clearing a site's data takes its IndexedDB as well as its storage",
+      "db136" not in str(_dbs136) and _ls136 is None,
+      str((_dbs136, _ls136)))
+try:
+    if br.tabs.indexOf(_bv136) >= 0:
+        br.close_tab(br.tabs.indexOf(_bv136), ask=False)
+except RuntimeError:
+    pass
+
+# ===== notes page: the search box keeps a half-typed to-do ================
+_np137 = br.new_tab(url=None); H.spin(200)
+_np137.page().prime_trust(br.notes_url())
+H.load(_np137, br.notes_url().toString())
+H.wait_for(lambda: jsq(_np137, "!!document.getElementById('v_todo')"), 6000)
+H.spin(800)
+H.js(_np137, "document.getElementById('v_todo').click(); 1")
+H.wait_for(lambda: jsq(_np137, "!!document.querySelector('#body input"
+                               "[type=text]')"), 6000)
+H.js(_np137, "var b = document.querySelector('#body input[type=text]');"
+             "b.value = 'half typed 137';"
+             "b.dispatchEvent(new Event('input', {bubbles: true}));"
+             "var q = document.getElementById('q'); q.value = 'zz';"
+             "q.dispatchEvent(new Event('input', {bubbles: true})); 1")
+H.spin(1200)
+H.wait_for(lambda: jsq(_np137, "!!document.querySelector('#body input"
+                               "[type=text]')"), 4000)
+_draft137 = jsq(_np137, "document.querySelector('#body input[type=text]')"
+                        ".value")
+H.js(_np137, "var q = document.getElementById('q'); q.value = '';"
+             "q.dispatchEvent(new Event('input', {bubbles: true})); 1")
+check("typing in the notes search box keeps a half-typed to-do",
+      _draft137 == "half typed 137", str(_draft137))
+try:
+    if br.tabs.indexOf(_np137) >= 0:
+        br.close_tab(br.tabs.indexOf(_np137), ask=False)
+except RuntimeError:
+    pass
+
+# ===== eleventh pass: QR secrets, app windows, vault clock, timers ========
+# V1 the QR text never goes on qrencode's command line
+_qrsrc139 = __import__("inspect").getsource(B.Browser.qr_code)
+_qr139 = []
+_shown139 = None
+if __import__("shutil").which("qrencode"):
+    _real_show139 = br._show_qr
+    br._show_qr = lambda image, text, then=None: _qr139.append(
+        (image.isNull(), text)) or True
+    try:
+        _shown139 = br.qr_code("-o/tmp/x139 hello")
+    finally:
+        br._show_qr = _real_show139
+check("a QR code's text goes to qrencode on its input, never its command line",
+      '"--", text]' not in _qrsrc139 and "proc.write(" in _qrsrc139
+      and (_shown139 is None or (_qr139 and _qr139[0] == (False,
+                                                          "-o/tmp/x139 hello"))),
+      str((_shown139, _qr139)))
+# V2 a private tab opened as an app is a private window
+_pv139 = br.new_tab(url=srv.url("/twhome?app139"), private=True,
+                    switch=False); H.spin(300)
+H.wait_for(lambda: "app139" in _pv139.url().toString(), 6000)
+_aw139 = br.open_as_app(br._tab_url(_pv139), view=_pv139); H.spin(800)
+_awp139 = bool(getattr(_aw139, "_all_private", False)) if _aw139 else None
+check("a private tab opened as an app opens in a private window",
+      _awp139 is True, str(_awp139))
+# V3 an app window never writes its one site over the session
+_st139 = json.dumps(br.config.get("sessionTabs"), sort_keys=True)
+try:
+    if _aw139 is not None:
+        _aw139._save_groups(quiet=True)
+except RuntimeError:
+    pass
+_st139b = json.dumps(br.config.get("sessionTabs"), sort_keys=True)
+check("an app window does not save its site as his session",
+      _st139 == _st139b)
+try:
+    if _aw139 is not None:
+        _aw139._closing_anyway = True
+        _aw139.close()
+    if br.tabs.indexOf(_pv139) >= 0:
+        br.close_tab(br.tabs.indexOf(_pv139), ask=False)
+except RuntimeError:
+    pass
+H.spin(400)
+# V9 the 2FA poll does not wind the auto-lock clock
+_totp_src139 = __import__("inspect").getsource(B.Bridge.totpFor)
+check("the once-a-second 2FA poll does not keep the vault from locking",
+      "touch=False" in _totp_src139)
+# V10 Ctrl+Shift+G copies as a secret, and clears it later
+_gen139 = []
+_real_cst139, _real_ccl139 = br._copy_secret_text, br.clear_clipboard_later
+_real_vpo139 = br.vault_password_on
+br._copy_secret_text = lambda text: _gen139.append("secret")
+br.clear_clipboard_later = lambda *a, **k: _gen139.append("later") or True
+br.vault_password_on = lambda: True
+try:
+    br.generate_to_clipboard()
+finally:
+    br._copy_secret_text, br.clear_clipboard_later = _real_cst139, _real_ccl139
+    br.vault_password_on = _real_vpo139
+    for _n139 in ("_copy_secret_text", "clear_clipboard_later",
+                  "vault_password_on"):
+        br.__dict__.pop(_n139, None)
+check("Ctrl+Shift+G puts the password on the clipboard as a secret, cleared "
+      "later", _gen139 == ["secret", "later"], str(_gen139))
+# V18 a timer row with no sane time is dropped, and the desk tick runs
+_tm_was139 = json.dumps(br.config.get("timers") or [])
+br.config["timers"] = [{"name": "bad139", "at": "soon"},
+                       {"name": "ok139", "at": _time.time() + 3600}]
+_tick_err139 = None
+try:
+    br._desk_tick()
+except Exception as _e139:
+    _tick_err139 = repr(_e139)
+_names139 = [r.get("name") for r in br.timers()]
+br.config["timers"] = json.loads(_tm_was139)
+check("a malformed timer row is dropped and the desk tick goes on",
+      _tick_err139 is None and _names139 == ["ok139"],
+      str((_tick_err139, _names139)))
+
+# ===== eleventh pass: agent window, gestures, captions, subtitles =========
+# V0 the agent bridge moves to a window that is open
+import agent_bridge as _ab140
+_aw140 = br.new_window(url=srv.url("/twhome?agent140")); H.spin(900)
+_bridge140 = _ab140.AgentBridge(_aw140)
+_aw140._closing_anyway = True
+_aw140.close(); H.spin(500)
+try:
+    _now140 = _bridge140.win
+except Exception as _e140:
+    _now140 = repr(_e140)
+check("the agent bridge works on an open window once its own is closed",
+      _now140 is not _aw140 and _now140 in br.windows(), str(_now140))
+try:
+    _bridge140.server.close()
+except (AttributeError, RuntimeError):
+    pass
+# V4 / V5 / V6 the gesture filter and the wheel step
+_mw_src140 = __import__("inspect").getsource(B.MouseWatch) \
+    if hasattr(B, "MouseWatch") else _Path(B.__file__).read_text()
+check("right button + wheel skips hidden tabs, and a lost release does not "
+      "leave a button held", "bar.isTabVisible(at)" in _mw_src140
+      and "held = event.buttons()" in _mw_src140)
+check("the custom wheel step leaves boxes that scroll themselves alone",
+      "scrollsItself(e.target, \"y\")" in B.NAV_JS
+      and "scrollsItself(e.target, \"x\")" in B.NAV_JS)
+# V11 the palette's transcript menu opens once it is filled
+_tv140 = br.new_tab(url=srv.url("/twhome?tr140")); H.spin(300)
+H.wait_for(lambda: jsq(_tv140, "document.readyState") == "complete", 6000)
+br.__dict__.pop("_media_menu_shown", None)
+_tm140 = None
+try:
+    _tm140 = br.transcript_menu(view=_tv140, popup_at=B.QPoint(10, 10))
+except TypeError as _e140:
+    _tm140 = repr(_e140)
+H.wait_for(lambda: getattr(br, "_media_menu_shown", None) is not None, 4000)
+_shown140 = getattr(br, "_media_menu_shown", None)
+_rows140 = len(_shown140.actions()) if _shown140 is not None else 0
+check("the transcript menu from the palette shows up filled",
+      _shown140 is not None and _rows140 >= 1, str((_tm140, _rows140)))
+try:
+    if _shown140 is not None:
+        _shown140.close()
+    if br.tabs.indexOf(_tv140) >= 0:
+        br.close_tab(br.tabs.indexOf(_tv140), ask=False)
+except RuntimeError:
+    pass
+# V12 a translated caption is taken off when its line ends
+check("a translated page caption goes when the line ends",
+      "clear=True" in __import__("inspect").getsource(
+          B.Browser.translate_page_captions))
+# V13 a German subtitle file saved on Windows keeps its umlauts
+_sd140 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(_sd140 / "film.srt").write_bytes(
+    "1\r\n00:00:01,000 --> 00:00:02,000\r\nGrüße aus Köln\r\n".encode("cp1252"))
+_url140, _p140 = br.subtitle_data_url(str(_sd140 / "film.srt"))
+import base64 as _b64_140
+_vtt140 = _b64_140.b64decode(_url140.split(",", 1)[1]).decode("utf-8") \
+    if _url140 else ""
+check("a subtitle file saved as Windows-1252 keeps its umlauts",
+      "Grüße aus Köln" in _vtt140, _vtt140[-40:])
+
+# ===== eleventh pass: agent sockets, bookmarks, open-with, history, tabs ==
+check("a finished agent connection is deleted, and an endless line dropped",
+      "conn.disconnected.connect(conn.deleteLater)"
+      in (_Path(B.__file__).parent / "agent_bridge.py").read_text())
+# V16 a rename refused by a lock tells the page
+_bm_was141 = list(br.bookmarks)
+br.bookmarks.append({"id": 141001, "type": "folder", "title": "lk141",
+                     "locked": True})
+br.bookmarks.append({"id": 141002, "type": "link", "title": "x141",
+                     "url": "https://x141.example/", "parent": 141001})
+_bmc141 = []
+_bmcb141 = lambda *a: _bmc141.append(1)
+br.bridge.bookmarksChanged.connect(_bmcb141)
+br.update_bookmark(141002, "renamed141", "https://x141.example/")
+H.spin(100)
+try:
+    br.bridge.bookmarksChanged.disconnect(_bmcb141)
+except TypeError:
+    pass
+_title141 = next((e["title"] for e in br.bookmarks if e.get("id") == 141002),
+                 None)
+br.bookmarks[:] = _bm_was141
+check("a rename a lock refuses leaves the title and tells the page to redraw",
+      _title141 == "x141" and len(_bmc141) >= 1, str((_title141, _bmc141)))
+# V19 an open-with rule's flags reach the program
+_ow_was141 = br.config.get("openWith", "__absent__")
+_real_owr141 = br.open_with_rules
+br.open_with_rules = lambda: {"pdf": "zathura --fork --mode 'a b'"}
+try:
+    _args141 = br.open_with_args("doc.pdf")
+except AttributeError:
+    _args141 = None
+br.__dict__.pop("open_with_rules", None)
+check("an open-with rule's arguments are passed to the program",
+      _args141 == ["--fork", "--mode", "a b"], str(_args141))
+# V22 statistics leave out the hops the list leaves out
+_hist_was141 = list(br.history)
+_now141 = _time.time()
+br.history.append({"url": "https://real141.example/page", "t": _now141,
+                   "title": "r"})
+_noise141 = next((h for h in getattr(B, "NOISE_HOSTS", ()) if "." in h),
+                 None)
+if _noise141:
+    br.history.append({"url": "https://%s/redirect?x=1" % _noise141,
+                       "t": _now141, "title": "n"})
+_stats141 = br.browsing_stats(days=1)
+br.history[:] = _hist_was141
+_hosts141 = [r["host"] for r in _stats141["sites"]]
+check("browsing statistics leave out sign-in bounces and link wrappers",
+      "real141.example" in _hosts141
+      and (not _noise141 or not any(_noise141.endswith(h) or h.endswith(
+          _noise141) for h in _hosts141)), str((_noise141, _hosts141[:5])))
+# V25 a tab closed to the left is not "the tab before"
+_ta141 = br.new_tab(url=srv.url("/twhome?a141")); H.spin(200)
+_tb141 = br.new_tab(url=srv.url("/twhome?b141")); H.spin(200)
+_tc141 = br.new_tab(url=srv.url("/twhome?c141"), switch=False); H.spin(200)
+br.tabs.setCurrentWidget(_ta141); H.spin(150)
+br.tabs.setCurrentWidget(_tb141); H.spin(150)
+_mid141 = br.new_tab(url=srv.url("/twhome?m141"), switch=False)
+br.tabs.tabBar().moveTab(br.tabs.indexOf(_mid141), br.tabs.indexOf(_tb141))
+H.spin(150)
+br.tabs.setCurrentWidget(_tb141); H.spin(150)
+_before0_141 = getattr(br, "_tab_before", None)
+br.close_tab(br.tabs.indexOf(_mid141), ask=False); H.spin(300)
+check("closing a tab to the left of the one in front leaves 'the tab before'",
+      br.current() is _tb141 and getattr(br, "_tab_before", None)
+      is _before0_141, str((br.current() is _tb141,
+                            getattr(br, "_tab_before", None) is _ta141)))
+for _w141 in (_ta141, _tb141, _tc141):
+    try:
+        if br.tabs.indexOf(_w141) >= 0:
+            br.close_tab(br.tabs.indexOf(_w141), ask=False)
+    except RuntimeError:
+        pass
+# V29 a saved transcript keeps its milliseconds, and no cue is zero long
+_sd141 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_srt141 = br.save_subtitles([{"t": 1.25, "e": 1.25, "text": "a"},
+                             {"t": 3.5, "e": 4.75, "text": "b"}],
+                            path=str(_sd141 / "t.srt"))
+_txt141 = (_sd141 / "t.srt").read_text() if _srt141 else ""
+check("a saved transcript keeps its timing and has no zero-length cue",
+      "00:00:01,250 --> 00:00:03,250" in _txt141
+      and "00:00:03,500 --> 00:00:04,750" in _txt141, _txt141[:120])
+# V28 / V23 the passwords page and the history page
+_pwh141 = (_Path(B.__file__).parent / "passwords.html").read_text()
+_hh141 = (_Path(B.__file__).parent / "history.html").read_text()
+check("a vault lock forgets the Esc draft, and 'yesterday' is a calendar day",
+      _pwh141.count("escDraft = null") >= 4
+      and "midnight - 86400" not in _hh141)
+
+# ===== eleventh pass: agent client, wheel volume, generator, pages =======
+import importlib as _il142
+_agent142 = _il142.import_module("agent")
+_wf142 = getattr(_agent142, "_wait_for", None)
+check("the agent client waits as long as the op it asked for",
+      _wf142 is not None and _wf142({"timeout": 700000}) == 730.0
+      and _wf142({"op": "tabs"}) == 60.0 and _wf142({}, 5) == 5.0)
+# V20 switching wheel-over-video off reaches the open pages
+_wv_was142 = br.config.get("wheelVolume", False)
+_wv142 = br.new_tab(url=srv.url("/twhome?wv142")); H.spin(300)
+H.wait_for(lambda: jsq(_wv142, "document.readyState") == "complete", 6000)
+br.media_tool("wheelvolume", view=_wv142)
+H.wait_for(lambda: jsq(_wv142, "window.__wheelVol === true",
+                       B.APP_WORLD_ID), 4000)
+br.bridge.setSetting("wheelVolume", "false")
+H.wait_for(lambda: jsq(_wv142, "window.__wheelVolOn === false",
+                       B.APP_WORLD_ID), 4000)
+_off142 = jsq(_wv142, "window.__wheelVolOn", B.APP_WORLD_ID)
+br.config["wheelVolume"] = _wv_was142
+check("switching wheel-over-video off stops it on pages already open",
+      _off142 is False, str(_off142))
+try:
+    if br.tabs.indexOf(_wv142) >= 0:
+        br.close_tab(br.tabs.indexOf(_wv142), ask=False)
+except RuntimeError:
+    pass
+# V27 the generator opens on his saved settings
+_pg_was142 = br.config.get("pwGen", "__absent__")
+br.config["pwGen"] = {"length": 40, "symbols": False, "digits": True,
+                      "upper": True, "ambiguous": False}
+try:
+    _gc142 = json.loads(br.bridge.generatorChoice(br.bridge_key()
+                                                  if hasattr(br, "bridge_key")
+                                                  else "") or "{}")
+except (AttributeError, TypeError):
+    _gc142 = None
+if _pg_was142 == "__absent__":
+    br.config.pop("pwGen", None)
+else:
+    br.config["pwGen"] = _pg_was142
+_pwh142 = (_Path(B.__file__).parent / "passwords.html").read_text()
+check("the password generator opens on the settings he left it at",
+      hasattr(br.bridge, "generatorChoice")
+      and "bridge.generatorChoice(KEY" in _pwh142, str(_gc142))
+# V24 / V17 picks and a rename in progress
+_hh142 = (_Path(B.__file__).parent / "history.html").read_text()
+_bh142 = (_Path(B.__file__).parent / "bookmarks.html").read_text()
+check("deleted history rows drop their picks, and a redraw keeps a rename",
+      "if (key === lastFilter)" in _hh142 and "editDraft" in _bh142)
+
+# ===== twelfth pass: ad block per site, guard lists, clips, proxy names ===
+# W0 blocking switched back on for a subdomain of a site that is let off
+_abo_was143 = json.dumps(br.config.get("adBlockOff") or {})
+_ab_was143 = br.config.get("adBlock", False)
+br.config["adBlock"] = True
+br.config["adBlockOff"] = {"rv143.example": True}
+_before143 = br.ad_block_on("m.rv143.example")
+br.ad_block_on("m.rv143.example", True)
+_after143 = br.ad_block_on("m.rv143.example")
+_parent143 = br.ad_block_on("rv143.example")
+br.config["adBlockOff"] = json.loads(_abo_was143)
+br.config["adBlock"] = _ab_was143
+check("ad blocking switched on again for a subdomain of a site let off holds",
+      _before143 is False and _after143 is True and _parent143 is False,
+      str((_before143, _after143, _parent143)))
+# W3 a protocol-relative frame from another site is dropped
+_pgsrc143 = (_Path(B.__file__).parent / "page_guard.py").read_text()
+check("the frame guard resolves //host frames, and watches src changes",
+      "new URL(src, location.href)" in _pgsrc143
+      and 'attributeFilter: ["src"]' in _pgsrc143)
+# W4 letting a site open windows renews the guard script
+_rg143 = []
+_real_rg143 = br.refresh_guard_scripts
+br.refresh_guard_scripts = lambda *a, **k: _rg143.append(1)
+_pop_was143 = list(br.site_rules("popupSites"))
+try:
+    br.toggle_site_rule("popupSites", "pop143.example")
+finally:
+    br.refresh_guard_scripts = _real_rg143
+    br.__dict__.pop("refresh_guard_scripts", None)
+br.config["popupSites"] = _pop_was143
+check("letting a site open windows renews the guard's script",
+      len(_rg143) >= 1, str(_rg143))
+# W5 / W6 a copy in a private window is not recorded; off clears the list
+_ch_was143 = br.config.get("clipHistory", False)
+br.config["clipHistory"] = True
+_dk143 = br.desk()
+_pw143 = br.new_private_window(); H.spin(800)
+_real_aw143 = B.QApplication.activeWindow
+try:
+    B.QApplication.activeWindow = staticmethod(lambda: _pw143)
+    _patched143 = True
+except (TypeError, AttributeError):
+    _patched143 = False
+    _pw143.activateWindow(); H.spin(300)
+_QGA.clipboard().setText("private-secret-143")
+try:
+    br._clipboard_changed()
+finally:
+    if _patched143:
+        B.QApplication.activeWindow = _real_aw143
+_clips143 = [c.get("text") for c in (_dk143.clips() if _dk143 else [])]
+if _dk143 is not None:
+    _dk143.add_clip("kept-143", "text") if hasattr(_dk143, "add_clip") else None
+br.watch_clipboard(False)
+_left143 = len(_dk143.clips()) if _dk143 is not None else 0
+br.config["clipHistory"] = _ch_was143
+try:
+    _pw143._closing_anyway = True
+    _pw143.close()
+except RuntimeError:
+    pass
+H.spin(300)
+check("a copy made in a private window stays out of the clip history, and "
+      "switching it off empties the list",
+      "private-secret-143" not in _clips143 and _left143 == 0,
+      str((_clips143[:3], _left143)))
+# W8 a proxy profile named "auto" is refused
+_pp_was143 = json.dumps(br.config.get("proxyProfiles") or [])
+br.bridge.saveProxyProfile(json.dumps({"name": "auto", "type": "http",
+                                       "host": "192.0.2.10", "port": 8080}))
+_names143 = [p.get("name") for p in (br.config.get("proxyProfiles") or [])
+             if isinstance(p, dict)]
+br.config["proxyProfiles"] = json.loads(_pp_was143)
+check("a proxy profile called 'auto' is refused, like system and direct",
+      "auto" not in _names143, str(_names143))
+
+# ===== twelfth pass: LAN from blob pages, history traps, notes, pages =====
+import privacy as _pv144
+_blob144 = _pv144.check_request({"blockLocal": True},
+                                B.QUrl("http://192.168.1.1/"),
+                                B.QUrl("blob:https://evil144.example/uuid"))
+_data144 = _pv144.check_request({"blockLocal": True},
+                                B.QUrl("http://192.168.1.1/"),
+                                B.QUrl("data:text/html,hi"))
+_mine144 = _pv144.check_request({"blockLocal": True},
+                                B.QUrl("http://192.168.1.1/"), None)
+check("a public site's blob: or data: page cannot reach the home network; "
+      "his own navigation can", _blob144[0] is False and _data144[0] is False
+      and _mine144[0] is True, str((_blob144[0], _data144[0], _mine144[0])))
+_nav_src144 = __import__("inspect").getsource(B.WebPage.acceptNavigationRequest) \
+    if hasattr(B, "WebPage") else ""
+check("cleaning tracking never re-issues Back, Forward or Reload",
+      "NT.NavigationTypeReload)):" in _nav_src144)
+# W17 another notes folder reloads the snippet expander
+_nf_was144 = br.config.get("notesFolder", "")
+_rs144 = []
+_real_rs144 = br.refresh_snippet_script
+br.refresh_snippet_script = lambda *a, **k: _rs144.append(1)
+try:
+    br.set_notes_folder(str(_Path(_tempfile.mkdtemp(
+        dir=str(B.CONFIG_FILE.parent)))))
+finally:
+    br.refresh_snippet_script = _real_rs144
+    br.__dict__.pop("refresh_snippet_script", None)
+br.set_notes_folder(_nf_was144)
+check("pointing the notes at another folder reloads the snippets",
+      len(_rs144) >= 1, str(_rs144))
+# W24 / W9 / W7 / W25 / W10
+_ss_src144 = __import__("inspect").getsource(B.Bridge.setSetting)
+_set144 = (_Path(B.__file__).parent / "settings.html").read_text()
+_mic144 = (_Path(B.__file__).parent / "mictest.html").read_text()
+_start144 = (_Path(B.__file__).parent / "start.html").read_text()
+_tw144 = (_Path(B.__file__).parent / "theme_web.py").read_text()
+check("the start page follows its rows' settings; the history switch, the "
+      "device lists, the setup wizard and re-theming are fixed",
+      '"countdowns", "agendaFile", "startRecent"' in _ss_src144
+      and 'document.getElementById("histenc").onchange' in _set144
+      and "const was = select.value;" in _mic144
+      and "if (!bridge) maybeStartSetup();" in _start144
+      and "orig.delete(all[i]);" in _tw144)
+
+# ===== review of the whole 2ab diff, part 2 ===============================
+# X9 the side buttons' off switch holds with gestures off, press and release
+from PyQt6.QtGui import QMouseEvent as _QME145
+from PyQt6.QtCore import QPointF as _QPF145, QObject as _QO145
+_mg_was145 = br.config.get("mouseGestures", False)
+_mb_was145 = br.config.get("mouseButtons", True)
+br.config["mouseGestures"] = False
+br.config["mouseButtons"] = False
+_mw145 = B.MouseWatch(br)
+_mv145 = br.new_tab(url=srv.url("/twhome?mb145"), switch=False); H.spin(200)
+_obj145 = _QO145()
+_mw145.views[_obj145] = _mv145
+_held145 = []
+for _kind145 in (B.QEvent.Type.MouseButtonPress,
+                 B.QEvent.Type.MouseButtonRelease):
+    _ev145 = _QME145(_kind145, _QPF145(5, 5), _QPF145(5, 5),
+                     B.Qt.MouseButton.XButton1, B.Qt.MouseButton.NoButton,
+                     B.Qt.KeyboardModifier.NoModifier)
+    _held145.append(bool(_mw145._watch(_obj145, _ev145)))
+br.config["mouseGestures"] = _mg_was145
+br.config["mouseButtons"] = _mb_was145
+_close_if_open(_mv145)
+check("side buttons switched off are held back with gestures off, press "
+      "and release", _held145 == [True, True], str(_held145))
+# X7 the Settings engine text follows a dropped engine
+_et_was145 = br.config.get("enginesText", "__absent__")
+_oe_was145 = json.dumps(br.config.get("ownEngines") or [])
+br.add_engine("Drop145", "https://drop145.example/?q=%s", "", engine_id="d145")
+br.drop_engine("d145")
+_text145 = str(br.config.get("enginesText") or "")
+if _et_was145 == "__absent__":
+    br.config.pop("enginesText", None)
+else:
+    br.config["enginesText"] = _et_was145
+br.config["ownEngines"] = json.loads(_oe_was145)
+check("a dropped engine leaves the Settings engine text too",
+      "drop145" not in _text145, _text145[-120:])
+# X6 terminals that wait
+check("only terminals that wait for the editor are used",
+      not any(n == "x-terminal-emulator" for n, _a in B.Browser.TERMINALS)
+      and dict(B.Browser.TERMINALS).get("konsole", [""])[0] == "--nofork")
+# X1 an update the store refused is undone
+class _Refuse145:
+    eager = False
+
+    def put(self, item):
+        return None
+
+    def delete(self, item_id):
+        return True
+
+
+_v145 = B.PasswordVault(_Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent))))
+_v145.add_item({"type": "login", "host": "imp145.example", "username": "u",
+                "password": "old145", "title": "t"})
+_v145.provider = _Refuse145()
+try:
+    _v145.import_rows("url,username,password\n"
+                      "https://imp145.example/,u,new145\n")
+except (TypeError, KeyError, AttributeError):
+    pass
+_pw145 = [i.get("password") for i in _v145.items()
+          if i.get("host") == "imp145.example"]
+check("an import's update the store refused leaves the login as it was",
+      _pw145 == ["old145"], str(_pw145))
+
+# ===== review of the 2ac diff: agent wait, zone labels, desk, cookies =====
+_ab146 = (_Path(B.__file__).parent / "agent_bridge.py").read_text()
+check("an agent wait whose client hung up stops without an exception",
+      "gave_up = True" in _ab146)
+_za146 = B._zone_answer("stream at 8 PM EST")
+_ta146 = B._time_answer("time in est")
+check("a zone typed as EST is shown as EST (UTC-5), not an inverted Etc name",
+      _za146 is not None and "(UTC-5)" in _za146[0]
+      and "Etc/" not in _za146[0] and _ta146 is not None
+      and "EST (UTC-5)" in _ta146[0], str((_za146, _ta146)))
+_src146 = _Path(B.__file__).read_text()
+check("the window that takes over the session restores it first, and a "
+      "parent's block leaves a subdomain he allowed",
+      "_restore_as_writer = True" in _src146
+      and 'self.cookie_rules().get(here) == "allow"' in _src146)
+if br.desk() is not None:
+    _dw146 = br.new_window(); H.spin(700)
+    _same146 = _dw146.desk() is br.desk()
+    try:
+        _dw146._closing_anyway = True
+        _dw146.close()
+    except RuntimeError:
+        pass
+    H.spin(300)
+    check("every window shares one notes drawer and clip history",
+          _same146 is True, str(_same146))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

@@ -797,6 +797,13 @@ fresh = made("hashme.txt", "hash me please")
 did = win._download_landed(fresh)
 check("the landing does the things that are switched on",
       "hash" in did, did)
+# worked out on a worker now (a big file held the window): it lands on
+# the row a moment later
+_until = time.time() + 10
+while (len(win.download_entry(fresh["id"]).get("sha256", "")) != 64
+       and time.time() < _until):
+    app.processEvents()
+    time.sleep(0.02)
 check("...and the checksum is on the row",
       len(win.download_entry(fresh["id"]).get("sha256", "")) == 64)
 win.config["dlHashAll"] = False

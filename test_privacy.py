@@ -123,6 +123,9 @@ H.spin(400)
 view = win.new_tab(url=None)
 
 H.load(view, srv.url("/s"))
+# the page itself: under a CPU quota H.load can come back on the new
+# tab's start page (see the harness note)
+H.wait_for(lambda: view.title() == "scripted", 8000)
 check("the page's script runs to begin with",
       H.js(view, "document.getElementById('p').textContent",
            B.MAIN_WORLD_ID) == "the script ran")

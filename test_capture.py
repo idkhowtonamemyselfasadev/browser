@@ -117,10 +117,15 @@ check("an area outside the page is empty",
       capture.area(view, (5000, 5000, 10, 10)).isNull())
 
 print("\n(5) blurring what should not be in a picture")
-plain = capture.visible(view)
+# the module's own blur, on the view's own grab (capture.visible is
+# wrapped by the browser to blur by itself, checked below). A moment
+# first: the capture just before blurred the page and took the blur
+# off, and the frame without it is painted a little later
+H.spin(700)
+plain = view.grab().toImage()
 capture.redact(view, B.APP_WORLD_ID, True)
-H.spin(300)
-blurred = capture.visible(view)
+H.spin(600)
+blurred = view.grab().toImage()
 check("the picture changed where the password is",
       plain.pixelColor(30, 20) != blurred.pixelColor(30, 20)
       or plain != blurred,
@@ -130,6 +135,17 @@ check("the page says the blur is on",
 capture.redact(view, B.APP_WORLD_ID, False)
 H.spin(200)
 check("and it comes off again",
+      not H.js(view, "!!document.getElementById('__shotredact')",
+               B.MAIN_WORLD_ID))
+# and a capture through the browser blurs by itself (its wrapper, with
+# "blur password fields in captures" on), then takes the blur off again
+H.spin(700)
+plain2 = view.grab().toImage()
+wrapped = capture.visible(view)
+check("a capture through the browser blurs the password by itself",
+      plain2 != wrapped, (plain2.pixelColor(30, 20).name(),
+                          wrapped.pixelColor(30, 20).name()))
+check("...and leaves no blur on the page",
       not H.js(view, "!!document.getElementById('__shotredact')",
                B.MAIN_WORLD_ID))
 

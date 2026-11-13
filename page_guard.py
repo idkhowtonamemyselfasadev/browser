@@ -517,10 +517,13 @@ _JS = r"""
       var frames = document.querySelectorAll("iframe[src]");
       for (var i = 0; i < frames.length; i++) {
         var src = frames[i].getAttribute("src") || "";
-        if (!/^https?:/i.test(src)) continue;
-        var other = "";
-        try { other = new URL(src, location.href).hostname
-                        .toLowerCase().replace(/^www\./, ""); } catch (e) {}
+        /* resolved first: "//ads.tracker.net/frame", the usual way a
+           third-party embed is written, failed the http(s) test and was
+           kept */
+        var at = null;
+        try { at = new URL(src, location.href); } catch (e) {}
+        if (!at || !/^https?:$/i.test(at.protocol)) continue;
+        var other = at.hostname.toLowerCase().replace(/^www\./, "");
         /* the same site or a part of it, by the END of the name:
            indexOf found ".example.com" inside ads.example.com.evil.net
            and kept that frame on example.com */
@@ -533,8 +536,11 @@ _JS = r"""
     };
     onReady(function () {
       dropFrames();
+      /* a frame whose address is set after it was put in, too */
       new MutationObserver(dropFrames).observe(
-        document.documentElement, {childList: true, subtree: true});
+        document.documentElement, {childList: true, subtree: true,
+                                   attributes: true,
+                                   attributeFilter: ["src"]});
     });
   }
 

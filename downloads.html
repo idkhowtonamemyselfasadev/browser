@@ -117,7 +117,8 @@
     dlClearAll: "Clear finished", dlOpen: "Open", dlFolder: "Folder",
     dlRemove: "Remove", dlCancel: "Cancel", dlPause: "Pause",
     dlResume: "Resume", dlDone: "Done", dlCancelled: "Cancelled",
-    dlFailed: "Failed", dlPaused: "Paused", dlLeft: "left",
+    dlFailed: "Failed", dlPaused: "Paused", dlQueued: "Waiting",
+    dlLeft: "left",
     pdfSaving: "Saving as PDF\u2026",
     today: "Today", yesterday: "Yesterday", lang: undefined};
   const speeds = {};  // id -> [lastBytes, lastMs, bytes/s] between polls
@@ -175,7 +176,9 @@
         ? fmtSize(e.received) + " / " + fmtSize(e.size)
         : fmtSize(e.received));
       const speed = speedOf(e);
-      if (e.paused) parts.push(STR.dlPaused);
+      // held back by "at most N at once": waiting, not paused by him
+      if (e.queued) parts.push(STR.dlQueued);
+      else if (e.paused) parts.push(STR.dlPaused);
       else if (speed > 0) {
         parts.push(fmtSize(speed) + "/s");
         if (e.size > 0)

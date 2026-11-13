@@ -79,6 +79,7 @@ check("a count in the middle is not one",
 check("no number, no count", B._title_badge("Alpha") == 0)
 badge = open_tab("/badge")
 H.spin(300)
+H.wait_for(lambda: getattr(badge, "_badge", 0) == 7, 6000)
 check("a real page's title is read", getattr(badge, "_badge", 0) == 7,
       getattr(badge, "_badge", None))
 year = open_tab("/year")
@@ -388,10 +389,12 @@ H.spin(200)
 
 print("\n(16) stale tabs")
 old = open_tab("/d")
-old._seen_wall = time.time() - 9 * 86400
-old._opened_at = old._seen_wall
 front = open_tab("/a")        # never the tab he is looking at
 H.spin(200)
+# backdated after the switch: leaving a tab counts as looking at it, so
+# the switch itself stamps it with now
+old._seen_wall = time.time() - 9 * 86400
+old._opened_at = old._seen_wall
 check("a tab untouched for nine days goes after seven",
       win.close_stale_tabs(days=7) == 1)
 H.spin(200)

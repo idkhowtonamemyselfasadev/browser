@@ -211,7 +211,10 @@
     const d = new Date(t * 1000), now = new Date();
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     if (d >= midnight) return STR.today;
-    if (d >= new Date(midnight - 86400000)) return STR.yesterday;
+    // the calendar's day before, not 24 hours: the day after a clock
+    // change is 23 or 25 hours long
+    if (d >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
+      return STR.yesterday;
     return d.toLocaleDateString(STR.lang || [],
       { weekday: "long", day: "numeric", month: "long" });
   }
@@ -271,7 +274,10 @@
     const midnight = Math.floor(
       new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000);
     if (v === "today") return [midnight, now];
-    if (v === "yesterday") return [midnight - 86400, midnight];
+    if (v === "yesterday")
+      return [Math.floor(new Date(d.getFullYear(), d.getMonth(),
+                                  d.getDate() - 1).getTime() / 1000),
+              midnight];
     const secs = parseInt(v, 10);
     if (!secs) return [null, null];
     return [now - secs, now];
@@ -475,12 +481,31 @@
     undoTimer = setTimeout(() => { box.hidden = true; }, 8000);
   }
 
+  let lastFilter = null;
   function load() {
     if (!bridge) { renderList(); return; }
     document.getElementById("filters").hidden = view !== "list";
     if (view === "list") {
-      bridge.historyRows(filterJson(), (json) => {
+      const filter = filterJson();
+      // the same list, whatever the clock says: "Today" and "last hour"
+      // carry the time of asking, which moves on every reload
+      let same = {};
+      try { same = JSON.parse(filter); } catch (e) {}
+      delete same.since; delete same.until;
+      same.range = document.getElementById("range").value;
+      const key = JSON.stringify(same);
+      bridge.historyRows(filter, (json) => {
         entries = JSON.parse(json);
+        // the same list again (a delete, an undo, "forget this site"):
+        // a pick whose rows are gone goes too -- the bar said "1
+        // picked" with nothing on screen, and Open acted on it
+        if (key === lastFilter) {
+          const shown = new Set(entries.map((e) => e.url));
+          for (const url of Object.keys(picked))
+            if (!shown.has(url)) delete picked[url];
+          syncPicked();
+        }
+        lastFilter = key;
         withIcons(entries.map((e) => hostOf(e.url)), renderList);
       });
     } else if (view === "sites") {

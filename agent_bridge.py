@@ -479,7 +479,7 @@ _FINDTEXT_JS = """
 
 class AgentBridge:
     def __init__(self, win):
-        self.win = win
+        self._win = win
         self.server = QLocalServer()
         self._next_id = 1
         # his settings, so the permission levels and the audit log are
@@ -490,6 +490,40 @@ class AgentBridge:
         self._watch_id = 1
         self.macro = None          # the recording in progress
         self.hooks_ran = []        # what a hook was last run for
+
+    @property
+    def win(self):
+        """The window the ops act on: the one the bridge was started for
+        while it is open, else the newest ordinary window still open.
+        Kept to the first window, every op went to an emptied, hidden
+        window once that one was closed: `tabs` listed nothing and
+        `open` loaded pages nobody could see."""
+        win = self._win
+        try:
+            live = win.windows()
+        except (AttributeError, RuntimeError):
+            return win
+        if not live or win in live:
+            return win
+        normal = [w for w in live if not getattr(w, "_all_private", False)
+                  and not getattr(w, "_app_url", None)]
+        if not normal:
+            # only private (or app) windows left: none of them is the
+            # agent's to read -- it stays where it was, seeing nothing
+            return win
+        target = normal[-1]
+        self._win = target
+        try:
+            target.tabs.currentChanged.connect(
+                lambda index: self.emit("switched", tab=self._id_at(index)))
+            target._agent_bridge = self
+        except (AttributeError, RuntimeError):
+            pass
+        return target
+
+    @win.setter
+    def win(self, value):
+        self._win = value
 
     # ---- lifecycle ---------------------------------------------------
     def listen(self):
@@ -564,13 +598,27 @@ class AgentBridge:
                     line, _, rest = bytes(buf).partition(b"\n")
                     del buf[:len(line) + 1]
                     self._dispatch(conn, line)
+                if len(buf) > 8 * 1024 * 1024:
+                    # a line with no end in sight is not a request
+                    del buf[:]
+                    conn.abort()
             conn.readyRead.connect(read)
+            # every call is a connection of its own: kept after it
+            # closed, each one (and its buffer and closure) stayed until
+            # the browser quit -- a helper polling once a second grew it
+            # for as long as it ran
+            conn.disconnected.connect(conn.deleteLater)
 
     def _reply(self, conn, payload):
-        if conn.state() != QLocalSocket.LocalSocketState.ConnectedState:
+        # an answer that comes after the client hung up: its socket is
+        # deleted by then (see _accept), and that is no error
+        try:
+            if conn.state() != QLocalSocket.LocalSocketState.ConnectedState:
+                return
+            conn.write((json.dumps(payload) + "\n").encode())
+            conn.flush()
+        except RuntimeError:
             return
-        conn.write((json.dumps(payload) + "\n").encode())
-        conn.flush()
 
     # ---- tabs --------------------------------------------------------
     def _views(self):
@@ -975,7 +1023,12 @@ class AgentBridge:
                     return
                 waited[0] += step
                 QTimer.singleShot(step, poll)
-            if conn.state() != QLocalSocket.LocalSocketState.ConnectedState:
+            try:
+                gave_up = (conn.state()
+                           != QLocalSocket.LocalSocketState.ConnectedState)
+            except RuntimeError:
+                gave_up = True    # its socket is deleted once it hangs up
+            if gave_up:
                 return  # the caller gave up; stop polling
             if self._gone(v):
                 self._reply(conn, {"ok": False, "error": "no-such-tab",
@@ -1707,17 +1760,24 @@ class AgentBridge:
             if rows is None:
                 self._reply(conn, {"ok": False, "error": "not-recording"})
                 return
-            v = self._find(self.macro["tab"]) if self.macro else None
+            # this recording, held here: the recording is over the
+            # moment stop is asked. Read back from self.macro when the
+            # page answered, a second stop found None (and raised in the
+            # callback, its client never answered) and a new start had
+            # the old steps -- and the old private flag -- written into
+            # the new recording
+            macro = self.macro
+            self.macro = None
+            v = self._find(macro["tab"]) if macro else None
             name = str(req.get("name") or "")
 
             def finish(raw):
                 steps = _json_or(raw, []) or []
-                self.macro["steps"] = steps
+                macro["steps"] = steps
                 # what was typed in a private tab (a search, an address,
                 # a card number) is handed back, never written to
                 # config.json under a name
-                if name and self.macro.get("private"):
-                    self.macro = None
+                if name and macro.get("private"):
                     self._reply(conn, {"ok": False, "steps": list(steps),
                                        "error": "private-tab-not-saved"})
                     return
@@ -1725,7 +1785,6 @@ class AgentBridge:
                     # nothing came back: the page navigated and took the
                     # recorder with it. Saved, that wrote an empty macro
                     # over the one of that name
-                    self.macro = None
                     self._reply(conn, {"ok": False, "steps": [],
                                        "error": "nothing-recorded"})
                     return
@@ -1733,14 +1792,11 @@ class AgentBridge:
                     rows = dict(self.config.get("macros") or {})
                     rows[name] = steps
                     self.config["macros"] = rows
-                out = list(steps)
-                self.macro = None
-                self._reply(conn, {"ok": True, "steps": out,
+                self._reply(conn, {"ok": True, "steps": list(steps),
                                    "name": name})
 
             if v is None or self._gone(v):
                 self._reply(conn, {"ok": True, "steps": [], "name": name})
-                self.macro = None
                 return
             self._run(v, "window.__macroTake ? window.__macroTake() : '[]'",
                       finish)

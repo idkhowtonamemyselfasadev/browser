@@ -6171,7 +6171,19 @@
   document.getElementById("adlisturls").onchange = (e) => {
     saveSetting("adListUrls", e.target.value);
   };
-  bindSwitch("histenc", "historyEncrypted");
+  // read back after saving: the browser refuses or keeps it while the
+  // vault is locked, and the switch showed the opposite of what was
+  // stored until Settings was opened again
+  document.getElementById("histenc").onchange = (e) => {
+    saveSetting("historyEncrypted", e.target.checked);
+    if (bridge && bridge.getSettings) bridge.getSettings((j) => {
+      let s = {};
+      try { s = JSON.parse(j) || {}; } catch (err) { return; }
+      e.target.checked = !!s.historyEncrypted;
+      if (window._settings)
+        window._settings.historyEncrypted = !!s.historyEncrypted;
+    });
+  };
   bindSwitch("spellboth", "spellBoth");
   bindSwitch("hidefeeds", "hideFeeds");
   bindSwitch("logtonote", "logToNote");
@@ -6258,7 +6270,12 @@
       const bits = line.split("=");
       if (bits.length < 2) continue;
       const name = bits[0].trim();
-      const when = Date.parse(bits.slice(1).join("=").trim());
+      // a date alone is read as UTC midnight by Date.parse (01:00 here,
+      // the day before west of London); with a time it is local, the
+      // way the browser's own add_countdown reads it
+      let text = bits.slice(1).join("=").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(text)) text += "T00:00";
+      const when = Date.parse(text);
       if (name && !isNaN(when)) rows.push({name: name,
                                            t: Math.floor(when / 1000)});
     }
@@ -6648,7 +6665,8 @@
       port: parseInt(document.getElementById("pport").value) || 0};
     if (!prof.name || !prof.host || prof.port < 1 || prof.port > 65535) return;
     // the browser keeps these two names for itself and refuses them
-    if (prof.name === "system" || prof.name === "direct") return;
+    if (prof.name === "system" || prof.name === "direct"
+        || prof.name === "auto") return;
     if (bridge) bridge.saveProxyProfile(JSON.stringify(prof));
     window._proxyProfiles = (window._proxyProfiles||[]).filter(p=>p.name!==prof.name).concat([prof]);
     document.getElementById("pname").value = "";

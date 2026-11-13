@@ -2559,7 +2559,12 @@
   }
   if (typeof qt === "undefined") maybeStartSetup();
   // with a bridge, the check happens after pulling the shared setup
-  setTimeout(maybeStartSetup, 600);  // fallback if the bridge is slow
+  // fallbacks if the bridge is slow: only with no bridge at all after
+  // 600 ms -- a bridge still fetching the shared setup answers itself,
+  // and a wizard opened before it did came up over a jar that was
+  // set up -- and after five seconds whatever has happened
+  setTimeout(() => { if (!bridge) maybeStartSetup(); }, 600);
+  setTimeout(maybeStartSetup, 5000);
 
   // ---- privacy / history (talks to the browser via QWebChannel) ----
   let bridge = null;

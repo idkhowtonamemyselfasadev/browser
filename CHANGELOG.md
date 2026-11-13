@@ -1,5 +1,213 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part thirty-seven: twelfth pass)
+
+The twelfth search read files whole: Settings, the start page, the player
+and microphone test, website theming, the page guard and privacy rules, the
+ad blocker, captures and notes. It confirmed 26 bugs. Fixed here, with the
+last findings of the review of the whole previous batch:
+
+- **Private stays private.** A copy made in a private window never goes into
+  the clipboard history (the check looked at the wrong window). Switching the
+  history off empties it, and copied text no longer shows up as a "note" in
+  the address bar.
+- **Home network.** A public site can no longer reach your router through a
+  blob: or data: page it made.
+- **Frames from other sites** are blocked however their address is written
+  (`//tracker.example/...` slipped through), also when the address is set
+  later.
+- **Guard lists.** Letting a site open windows, use the microphone or keep
+  you on the page takes effect at once instead of after a restart.
+- **Ad blocking** switched back on for a subdomain of a site you let off
+  now holds.
+- **Settings.** The encrypted-history switch shows what is really stored. A
+  proxy profile called "auto" is refused (it was silently turned into
+  Direct). Changing countdowns, the agenda file or recent bookmarks updates
+  an open start page. The setup wizard no longer pops up over a browser that
+  was already set up.
+- **Smaller fixes:**
+  - The microphone test keeps the device you picked.
+  - Websites themed again after switching theming off and on are themed
+    completely.
+  - Back, Forward and Reload are never turned into new pages by the
+    tracking cleaner (Back used to lead in circles).
+  - Pointing notes at another folder loads that folder's snippets.
+  - With mouse gestures off, the side mouse buttons' off switch works, for
+    the press and the release.
+  - Adding, changing or removing a search engine keeps the Settings list in
+    step.
+  - The external editor only uses terminals that wait for it.
+  - An imported login update that 1Password refuses is undone on screen.
+  - A new bookmark's id counter is saved at once.
+  - Captures blur password fields reliably: they wait for the blur to be
+    painted before taking the picture.
+  - Times given as EST, PST or CET show as "EST (UTC-5)" instead of an
+    upside-down Etc/GMT name.
+  - A first launch with `--app` keeps your saved tabs: the first ordinary
+    window puts them back before it saves.
+  - Blocking a site's cookies leaves a subdomain you allowed by name.
+  - Every window shares one clip history and notes drawer.
+  - The agent's wait stops quietly when its client hangs up.
+  - Opening a site in the side panel loads it once, not twice.
+
+## 2026-11-13 — line-by-line review, day 3 (part thirty-six: eleventh pass)
+
+The eleventh search covered the desk tools, mouse gestures, handing things to
+other programs, finding and switching tabs, the history, bookmarks and
+passwords pages, the small helper modules, the agent socket and speech. It
+confirmed 31 bugs. Fixed here:
+
+- **A secret shown as a QR code** (a vault password, a Wi-Fi key) no longer
+  appears on qrencode's command line, where any process on the machine could
+  read it. The text goes in on its input.
+- **Private stays private.** "Site as app" from a private tab or window
+  opens a private app window.
+- **`--app` launches.** A first launch with `--app` no longer restores your
+  whole session behind a window with no tab strip, and never saves the app
+  site over your session.
+- **Vault.** Leaving the manager open on an entry with a 2FA code no longer
+  keeps the vault from auto-locking. Ctrl+Shift+G copies the new password as
+  a secret, hidden from clipboard managers and cleared after the usual delay.
+  The generator opens on your last settings instead of overwriting them. A
+  lock forgets a draft that Esc put aside.
+- **The agent** keeps working when its first window is closed, and never
+  adopts a private window. Finished connections are freed. Its command line
+  waits as long as the operation it asked for.
+- **Gestures and the wheel.** Right button + wheel only switches between tabs
+  you can see. A release lost to a drag no longer leaves a button "held".
+  Your wheel step and the sideways swipe leave boxes that scroll by
+  themselves alone (chats, code, tables, maps). The tab-strip wheel moves one
+  tab per notch and ignores sideways scrolling. Wheel-over-video volume
+  switches on and off on open pages.
+- **Captions and subtitles.** Subtitle files saved in Windows encodings keep
+  their umlauts. A translated caption goes when its line ends. A saved
+  transcript keeps its timing. Resetting the caption style removes it from
+  open pages. The palette's transcript and chapter menus open filled.
+- **Smaller fixes:**
+  - A malformed timer or notification entry no longer stops the desk.
+  - Open-with rules pass their arguments to the program.
+  - History statistics leave out sign-in bounces. "Yesterday" is a
+    calendar day across clock changes. Picks of deleted rows are dropped.
+  - "The tab before" is the tab you were on, even after a tab to its left
+    closes.
+  - Sorting by site puts tabs that have not loaded yet in their place.
+  - A bookmark rename refused by a lock clears the edit row, and a rename in
+    progress survives a redraw.
+  - A too-long QR text says so instead of "qrencode is not installed".
+
+## 2026-11-13 — line-by-line review, day 3 (part thirty-five: tenth pass and leftovers)
+
+The tenth search covered windows, tab groups, the text tools, the command
+palette and macros, the tab rail and side panel, accessibility, sleeping tabs,
+the command line, site data and feeds. It confirmed 28 bugs. Fixed here,
+together with leftovers from earlier passes:
+
+- **Closing the first window** no longer leaves its timers running on a
+  hidden window. Snoozed and daily tabs used to wake up there, unseen and
+  lost, and tab snapshots stopped. Now they move to a window that is still
+  open.
+- **Gathering windows** never touches private tabs. A private window can't
+  gather the others (it used to turn every ordinary tab private and close
+  the originals). A private window is left alone, and a window that has
+  private tabs keeps them. Popped-out tabs come along.
+- **Moving a group to a new window** keeps its colour. Its tabs arrive
+  loaded, with their history, and without an extra blank tab. Moved tabs and
+  gathered windows no longer show up under "recently closed" (Ctrl+Shift+T
+  made a second copy). A window closed with a tab popped out comes back with
+  that tab.
+- **Accessibility.** Mono sound and balance now reach pages opened after the
+  switch, and players a page creates later. Switching contrast fixing,
+  missing-alt marks or bold word starts off removes them from the page.
+  Hover zoom on pictures no longer deletes the text-zoom setting. Per-site
+  menus never offer to save a private tab's site.
+- **Group rules** no longer put a tab into a same-named group of another
+  virtual browser (and its cookie jar).
+- **Stale tabs.** Leaving a tab counts as having looked at it, and when you
+  last looked at a tab is saved with the session. "Close tabs not looked at
+  for N days" no longer closes the tab you just left, and now works across
+  restarts.
+- **Cookies.** The closest rule wins (a rule on sub.example.com beats one on
+  example.com, as the menu shows). "Allow" on a site under a blocked parent
+  holds.
+- **Clearing a site** also removes its IndexedDB, caches and service workers,
+  in every tab of the site and its subdomains, in every window.
+- **Text tools.** Title Case handles apostrophes and umlauts ("It's Über").
+  Translating a page in place keeps nested lists, and Undo brings back links
+  and formatting. Each tab's translation bar is read, and its polling stops
+  once the bar is answered or gone.
+- **Smaller fixes:**
+  - The tab rail keeps the active tab in view, and a width you drag is
+    remembered.
+  - The side panel and favourites dock open at their saved width when the
+    tab rail is shown.
+  - Modes save and restore the side panel.
+  - Switching the cache back on in a private tab really turns it on.
+  - Volume boost no longer silences a player from another site.
+  - The certificate panel describes self-signed and expired certificates.
+  - A second copied secret is no longer cleared early by the first one's
+    timer.
+  - Lite mode switched off keeps images off on sites you block them on, in
+    every window.
+  - A tab in a call, or using the camera or screen, is never put to sleep.
+  - Feed entries link to the article.
+  - The notes panel's search filters collections and snippets too, and
+    never wipes a half-typed to-do.
+  - The desktop's media keys follow what plays in any window, also after
+    the first window is closed.
+  - `browser cmd <name>` runs the command (it used to open a tab called
+    "cmd").
+  - A second `--app` launch that races the first one still opens its app
+    window.
+  - A macro stop works on its own recording.
+  - The scheduled security check reports a recurring notice again after an
+    all-clear.
+  - The invariant run keeps all of the browser's data in its scratch
+    folder.
+
+## 2026-11-13 — line-by-line review, day 3 (part thirty-four: ninth pass)
+
+The ninth search covered the address bar's answers, captures, the downloads
+page, the agenda, game tools, library updates, the player, printing, scripts
+and themes. It confirmed 38 bugs. Fixed here:
+
+- **The address bar's memory of sites** follows the history settings. It
+  is empty with history off and cleared with the history.
+- **Suggestions** never send a home-network address (an IP, host:port,
+  intranet/wiki) to Google.
+- **Prices written the German way** (1.234,56) are read the German way.
+- **Captures.** Every capture is in the capture list and named after the tab
+  it shows, also from a background tab. A failed save says so instead of
+  "copied". Password blurring applies to every capture path. The
+  Discord-sized shot is the file that fits the limit. A background-tab
+  capture leaves the tab where it was. The diff is quick, and says when the
+  two pictures differ in size.
+- **Downloads.** The page's Open follows the "open with" rules. Hashing a
+  big file no longer freezes the window. A queued download says "Waiting".
+- **Streams.** Stream-safe blurs every tab and unblurs every tab. "Ask every N
+  minutes" asks. Minecraft servers are pinged side by side, off the window,
+  and Refresh shows the new list. Sponsor segments belong to their video. The
+  stream grid counts the streams it made.
+- **Themes.** A theme, look or evening filter reaches every window's pages.
+  The private and session marks belong to their own window. Reset appearance
+  stops following the colour file.
+- **Smaller fixes:**
+  - The daily log counts the to-dos done today.
+  - An impossible date is "no date" in the calendar export.
+  - Ordinary words are no longer read as hex numbers.
+  - EST/PST/CET mean the same offset all year.
+  - "3 in the book" and "1st" are no longer measurements.
+  - The rate-table hint opens Settings instead of emptying the clipboard.
+  - A date-only countdown ends at local midnight.
+  - Extracting checks every archive entry.
+  - A second print no longer cancels the first.
+  - Printing an article with the reader already on prints the article, and
+    says "written" once the PDF exists.
+  - Subtitle files are tagged with the language their name gives.
+  - A Mac checks for library updates with pip.
+  - Dark PDF switched off removes the inversion.
+  - A timelapse stops when its tab turns private and skips frames while
+    the tab is hidden.
+
 ## 2026-11-13 — line-by-line review, day 3 (part thirty-three: eighth pass)
 
 The eighth search covered the panes, the browser's own widgets, the notes and

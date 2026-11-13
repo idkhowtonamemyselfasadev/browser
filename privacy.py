@@ -157,6 +157,16 @@ def check_request(config, url, page_url):
     """
     host = (url.host() or "").lower()
     page_host = (page_url.host() or "").lower() if page_url is not None else ""
+    if page_url is not None and not page_host:
+        scheme = page_url.scheme()
+        if scheme == "blob":
+            # blob:https://evil.example/uuid -- the page that made it
+            page_host = (QUrl(page_url.path()).host() or "").lower()
+        elif scheme in ("data", "about"):
+            # no origin of its own, so made by a page: his own
+            # navigations come here with no page at all. Read as "no
+            # page", a public site's blob or data page reached the router
+            page_host = "opaque.invalid"
     if url.scheme() not in ("http", "https"):
         return True, url
 

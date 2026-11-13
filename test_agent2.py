@@ -505,7 +505,10 @@ win.tabs.setCurrentIndex(0)             # new tabs go in beside this one
 target = win.new_tab(url=srv.url("/askbox"))
 H.spin(800)
 _real_new_tab = win.new_tab
-win.new_tab = lambda *a, **k: target    # no trip to the real site
+# no trip to the real site -- and a tab that loads after it is handed
+# over, as a new tab does: handed a page already loaded, the ask waited
+# for a loadFinished that had come and gone (a race the CPU quota lost)
+win.new_tab = lambda *a, **k: (target.reload(), target)[1]
 try:
     r = ask("askq", {"op": "ask", "text": "hello there"})
 finally:
@@ -719,7 +722,10 @@ hook.write_text("#!/bin/sh\ncat > %s\n" % (scratch / "hook-saw.json"))
 hook.chmod(0o755)
 win.config["eventHooks"] = {"loaded": str(hook)}
 bridge.emit("loaded", tab=tid, url=srv.url("/page"), ok=True)
-H.wait_for(lambda: (scratch / "hook-saw.json").is_file(), 8000)
+# the file is there the moment the hook opens it, its words a moment
+# later (a CPU quota widens the gap): wait for the words
+H.wait_for(lambda: (scratch / "hook-saw.json").is_file()
+           and "loaded" in (scratch / "hook-saw.json").read_text(), 8000)
 check("a hook runs when an event happens",
       (scratch / "hook-saw.json").is_file())
 check("...and is handed the event as JSON",

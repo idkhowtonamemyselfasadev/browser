@@ -359,7 +359,11 @@ win.close_tab(win.tabs.indexOf(raw))
 print("\n(6) the chrome's own marks")
 check("a virtual browser can have a colour",
       win.set_session_tint("#ff8800") == "#ff8800")
-check("...and it is in the sheet", "#ff8800" in app.styleSheet())
+# the marks are the window's own sheet now (one window's private or
+# session colour no longer goes on every window)
+def _sheets():
+    return app.styleSheet() + win.styleSheet()
+check("...and it is in the sheet", "#ff8800" in _sheets())
 check("a colour that is not one is refused",
       win.set_session_tint("mauve") == "")
 check("...and it can be taken off", win.set_session_tint("") == "")
@@ -441,14 +445,14 @@ win.set_page_theme_colour(True)
 win.page_theme_colour(view=view, then=got.append)
 H.wait_for(lambda: got, 5000)
 check("a site's own theme-color is read", got == ["#223344"], got)
-check("...and the toolbar wears it", "#223344" in app.styleSheet())
+check("...and the toolbar wears it", "#223344" in _sheets())
 check("...and a virtual browser's colour wins over it",
       win.set_session_tint("#00ff00") == "#00ff00"
-      and "#00ff00" in app.styleSheet())
+      and "#00ff00" in _sheets())
 win.set_session_tint("")
 win.set_page_theme_colour(False)
 check("...and switching it off takes it away",
-      "#223344" not in app.styleSheet())
+      "#223344" not in _sheets())
 
 print("\n(7) a page that did not load")
 html = win.error_page_html("http://nowhere.invalid/x", "no answer")

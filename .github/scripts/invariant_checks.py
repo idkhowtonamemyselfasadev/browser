@@ -35,7 +35,13 @@ os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 _SCRATCH = tempfile.TemporaryDirectory(prefix="browser-invariants-")
 SCRATCH = Path(_SCRATCH.name)
 os.environ["XDG_DATA_HOME"] = str(SCRATCH / "xdg")
-os.environ["HOME"] = os.environ.get("HOME", str(SCRATCH))
+# everything the browser keeps lives under BROWSER_HOME, read once when
+# browser.py is imported: pointed here, nothing of the real profile is
+# read or written. Redirecting a handful of file constants (and setting
+# HOME only when it was unset, which it never is) left the GPU report,
+# the crash log and the rest going to the real data directory.
+os.environ["BROWSER_HOME"] = str(SCRATCH / "data")
+os.environ["HOME"] = str(SCRATCH)
 
 sys.path.insert(0, str(REPO))
 import browser as B  # noqa: E402

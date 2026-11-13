@@ -263,7 +263,11 @@
     if (bridge) bridge.openBookmarkById(KEY, entry.id, !!newTab);
   }
 
-  function beginEdit(id) { editing = id; render(); }
+  // what he has typed into the edit row: any bookmarksChanged (the bar
+  // switch, a bookmark opened, a sync) redraws the list, and the row
+  // came back with the old name
+  let editDraft = null;
+  function beginEdit(id) { editing = id; editDraft = null; render(); }
 
   function editRow(entry) {
     const row = el("div", "row");
@@ -271,17 +275,26 @@
     const box = el("div", "edit");
     const name = document.createElement("input");
     name.type = "text";
-    name.value = entry.title;
+    const kept = (editDraft && editDraft.id === entry.id) ? editDraft : null;
+    name.value = kept ? kept.title : entry.title;
     name.placeholder = entry.type === "folder" ? STR.bmFolderName : STR.bmName;
     box.appendChild(name);
     let addr = null;
     if (entry.type !== "folder") {
       addr = document.createElement("input");
       addr.type = "text";
-      addr.value = entry.url;
+      addr.value = kept ? kept.url : entry.url;
       addr.placeholder = STR.bmUrl;
       box.appendChild(addr);
     }
+    const note = () => {
+      editDraft = {id: entry.id, title: name.value,
+                   url: addr ? addr.value : "",
+                   field: document.activeElement === addr ? "url" : "name",
+                   at: (document.activeElement || {}).selectionStart};
+    };
+    name.addEventListener("input", note);
+    if (addr) addr.addEventListener("input", note);
     const save = () => {
       if (bridge)
         bridge.updateBookmark(KEY, entry.id, name.value,
@@ -298,7 +311,16 @@
     acts.appendChild(btn(STR.bmSave, "", save));
     acts.appendChild(btn(STR.bmCancel, "", () => { editing = 0; render(); }));
     row.append(box, acts);
-    setTimeout(() => { name.focus(); name.select(); }, 0);
+    // the first time the row opens: the name, selected. Redrawn while he
+    // types (a bookmarksChanged): the field and the caret he was at,
+    // or his next key replaced the whole name
+    setTimeout(() => {
+      if (!kept) { name.focus(); name.select(); return; }
+      const box = (kept.field === "url" && addr) ? addr : name;
+      box.focus();
+      const at = typeof kept.at === "number" ? kept.at : box.value.length;
+      try { box.setSelectionRange(at, at); } catch (e) {}
+    }, 0);
     return row;
   }
 

@@ -92,6 +92,9 @@
       for (const [kind, box] of [["audioinput", "mics"],
                                  ["videoinput", "cams"]]) {
         const select = document.getElementById(box);
+        // what he picked, kept: rebuilt after every Start, the list went
+        // back to "whatever the system uses" with his device in use
+        const was = select.value;
         select.innerHTML = "";
         const any = document.createElement("option");
         any.value = "";
@@ -104,6 +107,8 @@
           opt.textContent = row.label || row.deviceId.slice(0, 12);
           select.appendChild(opt);
         }
+        if (was && [...select.options].some((o) => o.value === was))
+          select.value = was;
       }
     } catch (e) {}
   }

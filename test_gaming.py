@@ -151,7 +151,13 @@ win.config["mcServers"] = ["Practice=127.0.0.1:%d" % mc.port]
 check("watching can be switched on", win.mc_watch(True)
       and win._mc_timer is not None)
 win._mc_check()
-check("and it remembers what it saw", win._mc_was.get("Practice") is True,
+# the check runs on a worker now (pings held the window): its answer
+# lands a moment later
+H.wait_for(lambda: getattr(win, "_mc_job", None) is None
+           and (getattr(win, "_mc_was", None) or {}).get("Practice")
+           is not None, 8000)
+check("and it remembers what it saw",
+      (getattr(win, "_mc_was", None) or {}).get("Practice") is True,
       getattr(win, "_mc_was", None))
 check("and off again", not win.mc_watch(False) and win._mc_timer is None)
 

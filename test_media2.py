@@ -98,6 +98,17 @@ def page(path):
     view = win.new_tab(url=None)
     H.load(view, srv.url(path))
     H.spin(400)
+    if path == "/v":
+        # the page's own script has to have run (it fakes the video's
+        # size and times): under a CPU quota the first tool call came
+        # before it
+        def ready():
+            try:
+                return H.js(view, "(document.getElementById('v') || {})"
+                                  ".duration", MAIN) == 600
+            except AssertionError:
+                return False
+        H.wait_for(ready, 10000)
     return view
 
 

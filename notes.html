@@ -79,6 +79,13 @@
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
   let bridge = null, view = "notes", open = null;
+  // what he was typing into an "add" box: the search box redraws the
+  // list, and the box with it, and the half-typed to-do was gone
+  const drafts = {};
+  function keep(box, name) {
+    box.value = drafts[name] || "";
+    box.addEventListener("input", () => { drafts[name] = box.value; });
+  }
   let STR = {};
 
   // One door for everything in the drawer: desk(verb, payload) answers
@@ -153,8 +160,8 @@
     if (view === "notes") return renderNotes(body, q);
     if (view === "todo") return renderTodo(body, q);
     if (view === "clips") return renderClips(body, q);
-    if (view === "coll") return renderCollections(body);
-    return renderSnippets(body);
+    if (view === "coll") return renderCollections(body, q);
+    return renderSnippets(body, q);
   }
 
   function renderNotes(body, q) {
@@ -241,10 +248,13 @@
       const box = el("input");
       box.type = "text";
       box.placeholder = STR.todoNew || "Something to do";
+      keep(box, "todo");
       const go = el("button", "act", "+");
       const send = () => {
         if (!box.value.trim()) return;
-        desk("addTodo", {text: box.value}, () => { box.value = ""; render(); });
+        desk("addTodo", {text: box.value}, () => {
+          box.value = ""; drafts.todo = ""; render();
+        });
       };
       go.onclick = send;
       box.onkeydown = (e) => { if (e.key === "Enter") send(); };
@@ -333,14 +343,16 @@
     });
   }
 
-  function renderCollections(body) {
+  function renderCollections(body, q) {
     desk("collections", {}, (rows) => {
       body.innerHTML = "";
       if (!rows || !rows.length) {
         body.appendChild(el("div", "empty", STR.collNone
           || "No collections yet."));
       }
+      const want = String(q || "").toLowerCase();
       for (const name of rows || []) {
+        if (want && String(name).toLowerCase().indexOf(want) < 0) continue;
         const item = el("div", "item");
         const grow = el("div", "grow", name);
         const show = el("button", "act", STR.collOpen || "Show");
@@ -360,11 +372,12 @@
       const box = el("input");
       box.type = "text";
       box.placeholder = STR.collNew || "Add this page to…";
+      keep(box, "coll");
       const go = el("button", "act", "+");
       go.onclick = () => {
         if (!box.value.trim()) return;
         desk("collectPage", {name: box.value}, () => {
-          box.value = ""; render();
+          box.value = ""; drafts.coll = ""; render();
         });
       };
       add.append(box, go);
@@ -372,13 +385,16 @@
     });
   }
 
-  function renderSnippets(body) {
+  function renderSnippets(body, q) {
     desk("snippets", {}, (table) => {
       body.innerHTML = "";
       body.appendChild(el("div", "sub", STR.snipHint
         || "Type the key in any text field to insert the text."));
       const rows = Object.keys(table || {}).sort();
+      const want = String(q || "").toLowerCase();
       for (const key of rows) {
+        if (want && (key + " " + (table[key] || "")).toLowerCase()
+                      .indexOf(want) < 0) continue;
         const item = el("div", "item");
         const grow = el("div", "grow");
         grow.append(el("div", "", key),
@@ -398,14 +414,17 @@
       key.type = "text";
       key.placeholder = STR.snipKey || ";ip";
       key.style.maxWidth = "110px";
+      keep(key, "snipKey");
       const text = el("input");
       text.type = "text";
       text.placeholder = STR.snipText || "what it inserts";
+      keep(text, "snipText");
       const go = el("button", "act", "+");
       go.onclick = () => {
         if (!key.value.trim()) return;
         desk("setSnippet", {key: key.value, text: text.value}, () => {
-          key.value = ""; text.value = ""; render();
+          key.value = ""; text.value = "";
+          drafts.snipKey = ""; drafts.snipText = ""; render();
         });
       };
       add.append(key, text, go);

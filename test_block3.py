@@ -434,10 +434,20 @@ def fresh():
     return target
 
 
+HELD = [Qt.MouseButton.NoButton]
+
+
 def press(button, where=(60, 60), kind=QEvent.Type.MouseButtonPress):
+    """As Qt sends it: buttons() is every button held after the event,
+    so the second button of a rocker arrives with both in the mask (the
+    filter reads the mask to drop a press whose release was lost)."""
+    if kind == QEvent.Type.MouseButtonPress:
+        HELD[0] = HELD[0] | button
+    else:
+        HELD[0] = HELD[0] & ~button
     point = QPoint(*where).toPointF()
     watch.eventFilter(target, QMouseEvent(
-        kind, point, point, button, button,
+        kind, point, point, button, HELD[0],
         Qt.KeyboardModifier.NoModifier))
 
 
@@ -494,6 +504,7 @@ H.spin(800)
 fresh()
 watch.right_down = False
 watch.left_down = False
+HELD[0] = Qt.MouseButton.NoButton
 press(Qt.MouseButton.RightButton)
 press(Qt.MouseButton.LeftButton)
 H.spin(700)
@@ -504,6 +515,7 @@ press(Qt.MouseButton.RightButton, kind=QEvent.Type.MouseButtonRelease)
 fresh()
 watch.right_down = False
 watch.left_down = False
+HELD[0] = Qt.MouseButton.NoButton
 press(Qt.MouseButton.LeftButton)
 press(Qt.MouseButton.RightButton)
 H.spin(700)

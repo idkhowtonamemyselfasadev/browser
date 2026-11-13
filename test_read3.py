@@ -333,7 +333,9 @@ H.spin(600)
 win.tabs.setCurrentWidget(spare)
 check("...and “translate now” says it would use Google",
       win.translate_page_now(view=spare) == "google")
-H.spin(1500)
+# Google's own redirect, which a CPU quota slows past a fixed spin
+H.wait_for(lambda: "translate.goog" in (spare.url().toString() or "")
+           or "translate.google" in (spare.url().toString() or ""), 15000)
 check("...which is a navigation, so the tab really went there",
       "translate.goog" in (spare.url().toString() or "")
       or "translate.google" in (spare.url().toString() or ""),

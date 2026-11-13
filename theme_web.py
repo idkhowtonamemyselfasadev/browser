@@ -1573,7 +1573,13 @@ SITE_JS = """(function () {
     var all = document.querySelectorAll("*");
     for (var i = 0; i < all.length; i++) {
       var saved = orig.get(all[i]);
-      if (saved) restore(all[i], saved);
+      if (saved) {
+        restore(all[i], saved);
+        // forgotten, so the next run reads the element afresh: kept,
+        // its old run marks made a run with the same theme skip it, and
+        // the wrappers stayed unthemed until a reload
+        orig.delete(all[i]);
+      }
     }
   };
 

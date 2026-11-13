@@ -160,6 +160,10 @@ def main():
                  "--body-file", "-", stdin=body)
         return 0
     if action == "close":
+        # the stored finding ids go with the all-clear: left in the body,
+        # the same watch finding coming back later read as "already
+        # reported, nothing changed" and the closed issue stayed closed
+        gh.write("issue", "edit", number, "--body-file", "-", stdin=body)
         gh.write("issue", "comment", number, "--body",
                  "All clear — the last check found nothing to act on. "
                  "Closing; the scheduled check will reopen this if that "

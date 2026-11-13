@@ -236,13 +236,28 @@ OPS = (
 )
 
 
+def _wait_for(req, given=None):
+    """How long the client waits for an answer: what it was told, or
+    long enough for an op that waits in the browser (idle, wait and ask
+    take a timeout of their own, in ms). A fixed 60 s cut those off
+    while the browser was still waiting, and called it a failure."""
+    if given:
+        return float(given)
+    try:
+        server = float(req.get("timeout") or 0) / 1000.0
+    except (TypeError, ValueError):
+        server = 0.0
+    return max(60.0, server + 30.0)
+
+
 def op(name, **what):
     """One op by name, with its arguments. The honest primitive: every
     function below is this with the name filled in."""
+    # the client's own setting, never sent along to the browser
+    given = what.pop("timeout_s", None)
     req = {"op": str(name)}
     req.update({k: v for k, v in what.items() if v is not None})
-    answer = call(req, timeout=float(what.pop("timeout_s", 60) or 60))
-    return answer
+    return call(req, timeout=_wait_for(req, given))
 
 
 def _make(name):
@@ -280,7 +295,8 @@ def run(steps, stop_on_error=True):
             if stop_on_error:
                 break
             continue
-        answer = call(one, timeout=float(one.pop("timeout_s", 60) or 60))
+        given = one.pop("timeout_s", None)
+        answer = call(one, timeout=_wait_for(one, given))
         out.append(answer)
         if stop_on_error and not answer.get("ok"):
             break
@@ -481,7 +497,9 @@ def main(argv):
                        y=int(args[2]) if len(args) > 2 else 0,
                        tox=int(args[3]) if len(args) > 3 else None,
                        toy=int(args[4]) if len(args) > 4 else None)
-        r = call(req, timeout=(a.timeout or 15) + 30 if op == "wait" else 60)
+        r = call(req, timeout=max(_wait_for(req),
+                                  (a.timeout or 15) + 30 if op == "wait"
+                                  else 60))
     except ConnectionError as e:
         print(e, file=sys.stderr)
         return 2

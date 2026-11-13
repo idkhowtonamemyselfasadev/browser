@@ -340,13 +340,14 @@ js("""(function(){
     {bubbles: true, clientX: 40, clientY: 40}));
   return 'sent';})()""", APP)
 H.spin(300)
+# its own id since the text zoom stopped sharing one with it
 check("...and the big copy is really on the page",
-      js("!!document.getElementById('__a11yzoom')", APP) is True)
+      js("!!document.getElementById('__a11yhover')", APP) is True)
 js("""document.querySelector('img').dispatchEvent(
      new MouseEvent('mouseout', {bubbles: true}))""", APP)
 H.spin(300)
 check("...and goes when the mouse leaves",
-      js("!!document.getElementById('__a11yzoom')", APP) is False)
+      js("!!document.getElementById('__a11yhover')", APP) is False)
 check("Alt-drag can select a link's words",
       win.set_a11y("altDragSelect", True) is True)
 H.spin(400)

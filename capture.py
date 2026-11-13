@@ -75,7 +75,10 @@ REDACT_JS = """(function (on) {
   s.textContent = "input[type=password], [data-redact],"
     + " .__redact { filter: blur(7px) !important; }";
   document.documentElement.appendChild(s);
-  return "on";
+  /* how many things it blurs: none, and a capture need not wait for
+     the blurred frame to be painted */
+  return document.querySelectorAll(
+    "input[type=password], [data-redact], .__redact").length;
 })(%s)"""
 
 # how tall the page is, how wide, and where it is scrolled to
@@ -297,9 +300,11 @@ def name_for(pattern, title="", host="", fmt="png"):
 
 
 def save(image, directory, pattern="shot-%Y%m%d-%H%M%S", title="", host="",
-         fmt="png", quality=-1):
-    """Write it out; returns the path, or None if it could not be."""
-    raw = encode(image, fmt, quality)
+         fmt="png", quality=-1, data=None):
+    """Write it out; returns the path, or None if it could not be.
+    `data` is the picture already encoded (fit_under's bytes), written
+    as it is."""
+    raw = data if data else encode(image, fmt, quality)
     if not raw:
         return None
     path = directory / name_for(pattern, title, host, fmt)
@@ -784,16 +789,36 @@ def diff_images(first, second, colour="#f38ba8", tolerance=24):
         return QImage(), 0
     left = first.convertToFormat(QImage.Format.Format_RGB32)
     right = second.convertToFormat(QImage.Format.Format_RGB32)
-    out = QImage(right)
+    # the bytes, not two pixelColor calls a pixel: on a 1080p view that
+    # held the window for tens of seconds. Rows (and 16-pixel runs) that
+    # are byte-identical are skipped whole, which on a page is nearly all
+    # of them.
+    lstep, rstep = left.bytesPerLine(), right.bytesPerLine()
+    lbits = left.constBits()
+    lbits.setsize(left.sizeInBytes())
+    rbits = right.constBits()
+    rbits.setsize(right.sizeInBytes())
+    lraw, rraw = bytes(lbits), bytes(rbits)
+    out = bytearray(rraw)
     mark = QColor(colour)
+    paint = bytes((mark.blue(), mark.green(), mark.red(), 255))
+    span = width * 4
     changed = 0
     for y in range(height):
-        for x in range(width):
-            a = left.pixelColor(x, y)
-            b = right.pixelColor(x, y)
-            if (abs(a.red() - b.red()) + abs(a.green() - b.green())
-                    + abs(a.blue() - b.blue())) <= tolerance:
+        a = lraw[y * lstep:y * lstep + span]
+        b = rraw[y * rstep:y * rstep + span]
+        if a == b:
+            continue
+        for run in range(0, span, 64):
+            if a[run:run + 64] == b[run:run + 64]:
                 continue
-            changed += 1
-            out.setPixelColor(x, y, mark)
-    return out, changed
+            for x in range(run, min(run + 64, span), 4):
+                if (abs(a[x] - b[x]) + abs(a[x + 1] - b[x + 1])
+                        + abs(a[x + 2] - b[x + 2])) <= tolerance:
+                    continue
+                changed += 1
+                at = y * rstep + x
+                out[at:at + 4] = paint
+    picture = QImage(bytes(out), right.width(), right.height(), rstep,
+                     QImage.Format.Format_RGB32).copy()
+    return picture, changed
