@@ -3365,7 +3365,7 @@
             <span class="wname" id="t_expiryWarnName">Warn about keys and cards</span>
             <span class="wsub" id="t_expiryWarnHint">Days before the date.</span>
           </span>
-          <input type="number" id="expirywarn" min="0" max="365"
+          <input type="number" id="expirywarn" min="1" max="365" data-zero="no"
                  style="width:90px">
         </div>
         <div class="wrow">
@@ -3373,7 +3373,7 @@
             <span class="wname" id="t_unusedDaysName">Call a login unused after</span>
             <span class="wsub" id="t_unusedDaysHint">Days.</span>
           </span>
-          <input type="number" id="unuseddays" min="0" max="3650"
+          <input type="number" id="unuseddays" min="1" max="3650" data-zero="no"
                  style="width:90px">
         </div>
         <div class="wrow">
@@ -3381,7 +3381,7 @@
             <span class="wname" id="t_backupKeepName">Keep this many backups</span>
             <span class="wsub" id="t_backupKeepHint">The older ones are deleted.</span>
           </span>
-          <input type="number" id="vaultbackupkeep" min="0" max="99"
+          <input type="number" id="vaultbackupkeep" min="1" max="99" data-zero="no"
                  style="width:90px">
         </div>
         <div class="wrow">
@@ -6062,7 +6062,9 @@
       if (isNaN(n) || n < 0) n = 0;
       const lo = parseInt(el.min, 10), hi = parseInt(el.max, 10);
       if (!isNaN(hi) && n > hi) n = hi;
-      if (!isNaN(lo) && n > 0 && n < lo) n = lo;
+      // 0 means "off" for most of these; where it would only bring the
+      // default back behind his back (data-zero="no") it is the minimum
+      if (!isNaN(lo) && n < lo && (n > 0 || el.dataset.zero === "no")) n = lo;
       el.value = n;
       saveSetting(key, n);
     };
@@ -6398,12 +6400,20 @@
       const input = document.createElement("input");
       input.type = "text";
       input.value = a.key || "";
-      input.placeholder = a.default;
+      // a cleared box is no key at all (the browser binds nothing for
+      // ""): showing the default there made it look bound
+      const unbound = "\u2014";
+      input.placeholder = a.key === "" ? unbound : a.default;
       input.style.minWidth = "160px";
       input.addEventListener("change", () => {
         const want = input.value.trim();
+        // what each action really answers to: its key as the browser
+        // reported it ("" when cleared). "o.key || o.default" counted a
+        // cleared action as still on its default, so no other action
+        // could take that key
         const clash = (window._keyActions || []).find(
-          (o) => o.id !== a.id && (o.key || o.default) === want && want);
+          (o) => o.id !== a.id && want
+                 && (typeof o.key === "string" ? o.key : o.default) === want);
         if (clash) {
           sub.textContent = clash.name;
           input.value = a.key || "";
@@ -6411,6 +6421,7 @@
         }
         a.key = want;
         sub.textContent = a.default;
+        input.placeholder = want ? a.default : unbound;
         const all = Object.assign({}, window._shortcutsNow || {});
         if (want === a.default) delete all[a.id]; else all[a.id] = want;
         window._shortcutsNow = all;

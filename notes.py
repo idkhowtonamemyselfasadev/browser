@@ -98,8 +98,9 @@ def parse_note(text):
             out["tags"] = [t.strip() for t in value.split(",") if t.strip()]
         elif key in ("t", "edited"):
             try:
-                out[key] = int(float(value))
-            except ValueError:
+                out[key] = max(0, int(float(value)))
+            except (ValueError, OverflowError):
+                # "inf" or 1e999 overflowed and took the whole list with it
                 out[key] = 0
         else:
             out[key] = value

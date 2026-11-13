@@ -2993,6 +2993,18 @@ def as_qurl(url):
     return QUrl(str(url or ""))
 
 
+def _known_or_under(host):
+    """The well-known name this host is, or is a subdomain of (www.,
+    login., secure. -- the usual form of a phishing address), or ""."""
+    host = str(host or "").lower().strip(".")
+    if host in WELL_KNOWN_HOSTS:
+        return host
+    for known in WELL_KNOWN_HOSTS:
+        if host.endswith("." + known):
+            return known
+    return ""
+
+
 def lookalike_warning(host):
     """Whether a host is dressed up as another one.
 
@@ -3005,15 +3017,20 @@ def lookalike_warning(host):
     host = raw.lower()
     if not host:
         return ""
+    # the real site, or a part of it, is never its own look-alike:
+    # folding letters in learn.microsoft.com would make "leam"
+    if _known_or_under(host):
+        return ""
     # the letters that only look alike while the case is still there:
     # paypaI.com (capital i) is the oldest one in the book
     case_folded = raw
     for odd, plain in (("I", "l"), ("0", "o"), ("1", "l"), ("rn", "m"),
                        ("vv", "w")):
         case_folded = case_folded.replace(odd, plain)
-    if case_folded.lower() != host and case_folded.lower() in \
-            WELL_KNOWN_HOSTS:
-        return "looks:" + case_folded.lower()
+    # www., login., secure. in front of the look-alike: the usual form
+    # of a phishing address, and an exact match missed every one
+    if case_folded.lower() != host and _known_or_under(case_folded.lower()):
+        return "looks:" + _known_or_under(case_folded.lower())
     label_scripts = []
     for label in host.split("."):
         scripts = set()
@@ -3034,8 +3051,8 @@ def lookalike_warning(host):
     for odd, plain in CONFUSABLES.items():
         if len(odd) == 1 and odd.islower() or len(odd) > 1:
             folded = folded.replace(odd, plain)
-    if folded != host and folded in WELL_KNOWN_HOSTS:
-        return "looks:" + folded
+    if folded != host and _known_or_under(folded):
+        return "looks:" + _known_or_under(folded)
     if any("CYRILLIC" in s or "GREEK" in s for s in label_scripts):
         return "script:" + host
     return ""
@@ -12332,6 +12349,16 @@ def _unseal(key, blob, aad=b""):
     return _xor(body, _prf_stream(enc, nonce, len(body)))
 
 
+def _awake_clock():
+    """Seconds on a clock that keeps counting while the machine sleeps:
+    the monotonic clock stops during a suspend, so a laptop shut for a
+    night came back with the vault still open past its auto-lock."""
+    try:
+        return time.clock_gettime(time.CLOCK_BOOTTIME)
+    except (AttributeError, OSError):
+        return time.time()
+
+
 class VaultLock:
     """Locked and unlocked, and the two migrations between them.
 
@@ -12366,7 +12393,7 @@ class VaultLock:
         #: the vault key while unlocked; None is the locked state, and
         #: it is the whole of the locked state
         self._vault_key = None
-        self._used = time.monotonic()
+        self._used = _awake_clock()
         #: the last read could not open a vault that is there, so what
         #: the caller holds is not its contents and nothing may be saved
         self._blind = False
@@ -12423,10 +12450,10 @@ class VaultLock:
 
     def touch(self):
         """The vault was used. Auto-lock counts from here."""
-        self._used = time.monotonic()
+        self._used = _awake_clock()
 
     def idle(self):
-        return time.monotonic() - self._used
+        return _awake_clock() - self._used
 
     def state(self):
         return {"on": self.enabled(), "locked": self.locked()}
@@ -14829,7 +14856,9 @@ class PasswordVault:
             kind = {1: "login", 2: "note", 3: "card", 4: "identity"}.get(
                 row.get("type") if isinstance(row.get("type"), int) else 1,
                 "login")
-            item = {"type": kind, "title": str(row.get("name", "")),
+            # "or": a null in the export came across as the word "None",
+            # as a login's title and as the site it was offered on
+            item = {"type": kind, "title": str(row.get("name") or ""),
                     "note": str(row.get("notes") or "")}
             login = row.get("login") or {}
             if kind == "login" and isinstance(login, dict):
@@ -14837,8 +14866,8 @@ class PasswordVault:
                 uris = uris if isinstance(uris, list) else []
                 first = ""
                 if uris and isinstance(uris[0], dict):
-                    first = str(uris[0].get("uri", ""))
-                item["host"] = first or str(row.get("name", ""))
+                    first = str(uris[0].get("uri") or "")
+                item["host"] = first or str(row.get("name") or "")
                 item["username"] = str(login.get("username") or "")
                 item["password"] = str(login.get("password") or "")
                 item["totp"] = str(login.get("totp") or "")
@@ -17443,7 +17472,7 @@ class Bridge(QObject):
 
     @pyqtSlot(result=str)
     def getHistory(self):
-        return json.dumps(self.browser.history)
+        return json.dumps(self.browser.visible_history())
 
     @pyqtSlot(result=int)
     def clearHistory(self):
@@ -17602,7 +17631,8 @@ class Bridge(QObject):
         # empty "History ..." folder was left behind otherwise), and
         # each with the title history has for it rather than a bare host
         titles = {e.get("url"): str(e.get("title") or "")
-                  for e in self.browser.history if isinstance(e, dict)}
+                  for e in self.browser.visible_history()
+                  if isinstance(e, dict)}
         rows = []
         for one in urls[:200]:
             if isinstance(one, dict):
@@ -17968,6 +17998,20 @@ def is_internal_page(url):
     return path in tuple(APP_DIR / name for name in OWN_PAGES)
 
 
+def _page_for_check(page):
+    """The page a navigation comes from, for the home-network rule:
+    this one -- or, for a tab a page opened (no address of its own yet,
+    or a blank page), the page that opened it. Read as "no page", a
+    public site's target=_blank link reached the router through the new
+    tab."""
+    own = page.url()
+    if own.isEmpty() or own.scheme() == "about":
+        opener = getattr(page, "_opener_url", None)
+        if isinstance(opener, QUrl) and not opener.isEmpty():
+            return opener
+    return own
+
+
 class WebPage(QWebEnginePage):
     """Hands out web channels by trust level: the browser's own pages
     (start/settings/history) get the full settings bridge in the main
@@ -18267,8 +18311,21 @@ class WebPage(QWebEnginePage):
                 his = nav_type in (NT.NavigationTypeTyped,
                                    NT.NavigationTypeBackForward,
                                    NT.NavigationTypeReload)
+                page = None if his else _page_for_check(self)
+                if is_main_frame and nav_type == NT.NavigationTypeRedirect:
+                    # a redirect is the server it comes from asking, so
+                    # it is checked against that address: his typed
+                    # router address going on to /login on the router is
+                    # the router asking for itself, a public page sending
+                    # the tab to the router is not (checked against the
+                    # page in front, his own router redirect was refused)
+                    hop = getattr(self, "_nav_hop", None)
+                    if isinstance(hop, QUrl) and not hop.isEmpty():
+                        page = hop
+                if is_main_frame:
+                    self._nav_hop = QUrl(url)
                 allow, want = privacy.check_request(
-                    self.browser.config, url, None if his else self.url())
+                    self.browser.config, url, page)
                 if not allow:
                     self.browser.privacy_blocked(url.host())
                     return False
@@ -18308,6 +18365,15 @@ class WebPage(QWebEnginePage):
             if secure is not None:
                 if self.browser.http_allowed(url.host()):
                     pass          # he said "carry on" for this host
+                elif nav_type == QWebEnginePage.NavigationType \
+                        .NavigationTypeFormSubmitted \
+                        and self.browser.upgrade_on_the_wire(url):
+                    # a form: sent again from here it went as a bare GET
+                    # and every field was lost. It goes on, and the
+                    # request interceptor moves it to https on its way
+                    # out, where the engine keeps the POST and its body
+                    self.browser.note_https_upgrade(self._view, url,
+                                                    secure)
                 else:
                     # Write down where he came from BEFORE sending the
                     # tab to the secure address. Without this,
@@ -18378,7 +18444,7 @@ class WebPage(QWebEnginePage):
             # a frame is the page asking for something on its own, and a
             # frame pointed at the router is what the first rule is for
             allow, _want = privacy.check_request(
-                self.browser.config, url, self.url())
+                self.browser.config, url, _page_for_check(self))
             if not allow:
                 self.browser.privacy_blocked(url.host())
                 return False
@@ -18661,6 +18727,12 @@ class WebView(QWebEngineView):
         view = self.browser.new_tab(switch=not background, blank=True,
                                      private=self.private, group=group,
                                      session=session, opener=self)
+        # the page that opened it, for the home-network rule of its
+        # first navigation (see _page_for_check)
+        try:
+            view.page()._opener_url = QUrl(self.url())
+        except (AttributeError, RuntimeError):
+            pass
         # a window the page asked for, as the kind of window he wants:
         # a tab (the default) or a small one of its own. The popups
         # guard is what stops the ones nobody asked for; this is about
@@ -23606,6 +23678,36 @@ class Dock(QWidget):
 
 
 class Browser(QMainWindow):
+    def _shared_list(name):
+        """A list every window shares, kept on the first one (see
+        _root_window). A second window took the root's list when it was
+        made, and any change that built a new list ("self.history = [e
+        for e in ...]", a bookmark deleted, a download forgotten) left
+        that window holding a copy of its own: the root wrote the
+        deleted rows back at its next save, and what the window added
+        afterwards never reached the file. Measured: a history row
+        deleted from the second window stayed in the root's list."""
+        key = "_shared_" + name
+
+        def get(self):
+            return getattr(self._root_window(), key)
+
+        def put(self, rows):
+            setattr(self._root_window(), key, rows)
+        return property(get, put)
+
+    history = _shared_list("history")
+    bookmarks = _shared_list("bookmarks")
+    downloads = _shared_list("downloads")
+    # ...and the state of the sealed history file, which is the root's
+    # too: unlocking the vault from a second window ran unlock_history
+    # there, found no "_history_locked" of its own and never read the
+    # sealed history back
+    _history_locked = _shared_list("history_locked")
+    _history_unsaved = _shared_list("history_unsaved")
+    _history_drops = _shared_list("history_drops")
+    del _shared_list
+
     def __init__(self, initial_url=None, share=None, private=False,
                  app_url=None):
         """share: another window whose config, cookie jars, bookmarks
@@ -24903,6 +25005,8 @@ class Browser(QMainWindow):
         lay.addWidget(update)
         lay.addWidget(close)
 
+        # the toast an update's answer is for (see _toast_result)
+        toast.setProperty("updateOffer", True)
         self._toast = toast
         self._toast_timer = QTimer(self)
         self._toast_timer.setSingleShot(True)
@@ -24940,6 +25044,12 @@ class Browser(QMainWindow):
 
     def _toast_result(self, msg):
         if not self._toast:
+            return
+        if not self._toast.property("updateOffer"):
+            # only the update offer is waiting for this answer. A silent
+            # auto-update (it has no toast) wrote "Updated" over whatever
+            # else was up -- a restart notice, a plain line -- gave it a
+            # Restart button and stopped its timer, so it never went
             return
         if self._toast.property("libOffer"):
             return           # the library offer manages its own lifetime
@@ -25953,9 +26063,12 @@ class Browser(QMainWindow):
             _, _, port = head.partition(":")
             home = ("http://" if port.isdigit() else "https://") + home
         url = QUrl(home)
-        if not url.isValid() or not url.host():
-            return ""
         if url.scheme() not in ("http", "https", "file"):
+            return ""
+        # a file: page has no host, only a path: "not url.host()" refused
+        # every one of them although file is on the list above
+        if not url.isValid() or not (url.host() if url.scheme() != "file"
+                                     else url.path()):
             return ""
         return url.toString()
 
@@ -28442,6 +28555,11 @@ class Browser(QMainWindow):
     def snapshot_tabs(self):
         """What is open, every few minutes, so an older state can be
         put back after a mistake and not only after a crash."""
+        if self.history_encrypted():
+            # a rolling record of what was open is history as well, and
+            # the config is not sealed: dropped when sealing began (see
+            # encrypt_history) and not written again while it is on
+            return 0
         # never a site he said must not be written down for restoring
         state = [s for s in self.tab_state()
                  if not self.restore_excluded(s.get("u", ""))]
@@ -30191,17 +30309,34 @@ class Browser(QMainWindow):
             name = (name or "").lower().removeprefix("www.")
             return name == host or name.endswith("." + host)
         before, old = len(self.history), self.history
+        self._drop_from_sealed(
+            lambda e: this_site(QUrl(e.get("url", "")).host()))
         self.history = [e for e in self.history
                         if not this_site(QUrl(e.get("url", "")).host())]
         if len(self.history) != before:
             self.save_history()
             self._history_dropped(old)
+        def this_key(key):
+            origin = str(key).rpartition("|")[0] or str(key)
+            return this_site(QUrl(origin).host())
         perms = dict(self.config.get("permissions") or {})
         for key in list(perms):
-            origin = str(key).rpartition("|")[0] or str(key)
-            if this_site(QUrl(origin).host()):
+            if this_key(key):
                 perms.pop(key, None)
         self.config["permissions"] = perms
+        # and the answers of this run, and when they were given and used:
+        # kept, the "forgotten" site's microphone was granted again with
+        # no card for the rest of the run
+        times = self.config.get("permissionTimes")
+        if isinstance(times, dict):
+            self.config["permissionTimes"] = {
+                k: v for k, v in times.items() if not this_key(k)}
+        for win in self.windows() or [self]:
+            for name in ("_session_perms", "_perm_used_at"):
+                book = getattr(win, name, None)
+                if isinstance(book, dict):
+                    for key in [k for k in book if this_key(k)]:
+                        book.pop(key, None)
         self.known_hosts = {h for h in self.known_hosts if not this_site(h)}
         try:
             _write_json(HOSTS_FILE, sorted(self.known_hosts))
@@ -33442,7 +33577,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         index = self.config.get("pageIndex")
         index = index if isinstance(index, dict) else {}
         out = []
-        for entry in reversed(self.history):
+        for entry in reversed(self.visible_history()):
             url = entry.get("url", "")
             hay = (entry.get("title", "") + " " + url).lower()
             where = "title"
@@ -34099,12 +34234,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def _apply_hide_now(self, view, rules):
         """Put the hide rules on a page that is already open."""
-        css = (",".join(rules) + "{display:none !important}") if rules else ""
+        # one rule at a time, as page_guard puts them on at load: as one
+        # list, one selector the engine cannot read took every hidden
+        # element back on the tabs already open -- and even a rule a line
+        # was swallowed after a selector with an unclosed bracket
         view.page().runJavaScript(
-            """(function(){var s=document.getElementById('guard-hide');
+            """(function(rules){var s=document.getElementById('guard-hide');
             if(!s){s=document.createElement('style');s.id='guard-hide';
             (document.head||document.documentElement).appendChild(s);}
-            s.textContent=%s;})()""" % json.dumps(css), MAIN_WORLD_ID)
+            var sheet=s.sheet,n=0;if(!sheet)return 0;
+            while(sheet.cssRules.length){sheet.deleteRule(0);}
+            for(var i=0;i<rules.length;i++){try{sheet.insertRule(
+              rules[i]+'{display:none !important}',sheet.cssRules.length);
+              n++;}catch(e){}}
+            return n;})(%s)""" % json.dumps([str(r) for r in rules]),
+            MAIN_WORLD_ID)
         return True
 
     def pick_element_to_hide(self, pos, view=None):
@@ -34311,6 +34455,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         secure = QUrl(url)
         secure.setScheme("https")
         return secure
+
+    def upgrade_on_the_wire(self, url):
+        """Have the request interceptor send this one request to https as
+        it goes out (see RequestWatch._work). True when it will."""
+        try:
+            if self.request_watch() is None:
+                return False
+        except Exception:
+            return False
+        if len(_HTTPS_ON_THE_WIRE) > 64:
+            _HTTPS_ON_THE_WIRE.clear()
+        _HTTPS_ON_THE_WIRE.add(
+            url.adjusted(QUrl.UrlFormattingOption.RemoveFragment).toString())
+        return True
 
     def allow_http_once(self, host):
         """"Carry on to the insecure page": this host, this run."""
@@ -34981,6 +35139,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         except RuntimeError:
             return False
         host = host.lower().removeprefix("www.")
+        try:
+            scheme = view.url().scheme()
+        except RuntimeError:
+            scheme = ""
+
+        def same_place(origin):
+            # matched whole by host; a page with no host (a file: page)
+            # by its scheme, where "host and ..." never matched and the
+            # camera it was given stayed given
+            there = (QUrl(origin).host() or "").lower().removeprefix("www.")
+            if host:
+                return there == host
+            return not there and bool(scheme) \
+                and QUrl(origin).scheme() == scheme
         media = ("use the microphone", "use the camera", "share your screen",
                  "MediaAudioCapture", "MediaVideoCapture",
                  "MediaAudioVideoCapture", "DesktopVideoCapture",
@@ -34991,22 +35163,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # own answer was left to start the camera again
             for key in list(self._private_perms):
                 origin, _, what = str(key).partition("|")
-                there = (QUrl(origin).host() or "").lower() \
-                    .removeprefix("www.")
-                if host and there == host and what in media:
+                if same_place(origin) and what in media:
                     self._private_perms.pop(key, None)
             return True
         for row in self.permission_rows():
             # the origin's own host, matched whole: "x.com" in the
             # origin string also matched netflix.com's grants. And the
             # one-card microphone-and-camera grant has a name of its own
-            there = (QUrl(row["origin"]).host() or "").lower() \
-                .removeprefix("www.")
-            if host and there == host and row["what"] in (
-                    "use the microphone", "use the camera",
-                    "share your screen", "MediaAudioCapture",
-                    "MediaVideoCapture", "MediaAudioVideoCapture",
-                    "DesktopVideoCapture", "DesktopAudioVideoCapture"):
+            if same_place(row["origin"]) and row["what"] in media:
                 self.revoke_permission(row["key"])
         return True
 
@@ -35873,6 +36037,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 done += 1
             if "history" in what:
                 before, old = len(self.history), self.history
+                self._drop_from_sealed(
+                    lambda e, sid=sid: e.get("s", "main") == sid)
                 self.history = [e for e in self.history
                                 if e.get("s", "main") != sid]
                 if len(self.history) != before:
@@ -46321,7 +46487,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return ""
         never = set(self.never_suggest())
         counts = {}
-        for entry in self.history[-4000:]:
+        for entry in self.visible_history()[-4000:]:
             host = _hist_host(entry.get("url", ""))
             if not host or host in never:
                 continue
@@ -50587,6 +50753,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not url:
             return False
         before, old = len(self.history), self.history
+        self._drop_from_sealed(lambda e: e.get("url") == url)
         self.history = [e for e in self.history if e.get("url") != url]
         if len(self.history) != before:
             self.save_history()
@@ -51028,7 +51195,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         seen = set()
         own_engines = self.own_engine_urls()
         if want["history"] and scope in ("", "history"):
-            for entry in reversed(self.history[-4000:]):
+            for entry in reversed(self.visible_history()[-4000:]):
                 url = entry.get("url", "")
                 if url in seen or not allowed(url):
                     continue
@@ -51238,6 +51405,25 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # shown as two spaces.
         return search_query_of(url, self.own_engine_urls()) or text
 
+    def _history_may_note(self, view, host):
+        """What the history skips, the other records of where he has
+        been skip too: a throwaway browser, a tab he paused, a site
+        never recorded (in this browser or all of them), and anything
+        while the history is sealed (hosts.json is plain text)."""
+        try:
+            session = getattr(view, "session", None) or self.active_session
+            if self.session_is_throwaway(session):
+                return False
+            if getattr(view, "no_history", False):
+                return False
+            if host and self.never_record(host, session=session):
+                return False
+            if self.history_encrypted():
+                return False
+        except (AttributeError, RuntimeError):
+            return False
+        return True
+
     def _remember_host(self, url):
         host = url.host()
         if self.site_rule_on("noHistorySites", host):
@@ -51346,9 +51532,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # the engine's zoom rides on the page, and a website reached
         # from one of the browser's own pages must not inherit its level
         self._apply_zoom(view)
-        if not getattr(view, "private", False):
+        if not getattr(view, "private", False) \
+                and self._history_may_note(view, url.host()):
             # the address bar's suggestions are a record of where he has
-            # been, and a private tab adds nothing to that either
+            # been, and a private tab adds nothing to that either -- nor
+            # a throwaway browser, a paused tab or a never-record site
             self._remember_host(url)
         self._apply_page_force_dark(view, url)
         self.apply_site_privacy(view, url)
@@ -51577,7 +51765,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if self.config.get("formDraftsOn", True):
             view = self.current()
             if view is not None and not self._is_header(view) \
-                    and not getattr(view, "private", False):
+                    and not getattr(view, "private", False) \
+                    and self._history_may_note(view, view.url().host()):
                 self.save_form_draft(view=view)
                 did.append("draft")
         if self.config.get("formHistoryOn", False):
@@ -51589,7 +51778,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     web = view.url().scheme() in ("http", "https")
                 except RuntimeError:
                     web = False
-                if web and self.note_form_values(view=view):
+                if web and self._history_may_note(view, view.url().host()) \
+                        and self.note_form_values(view=view):
                     did.append("formHistory")
         if self._backup_tick():
             did.append("backup")
@@ -51948,6 +52138,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             rows = self._read_history()
             if getattr(self, "_history_locked", False):
                 return False          # still unreadable: leave it alone
+            drops = getattr(self, "_history_drops", None) or []
+            self._history_drops = []
+            if drops:
+                rows = [e for e in rows
+                        if not any(gone(e) for gone in drops)]
             held = list(self.history)
             self.history[:] = rows + [e for e in held if e not in rows]
         self._history_unsaved = False
@@ -52013,6 +52208,38 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                               sort_keys=True, default=str)
         except (TypeError, ValueError):
             return None
+
+    def _wipe_history_store(self, sealed_too):
+        """The history on disk thrown away whole -- no key is needed to
+        delete a file. The copies set aside as unreadable go with it
+        (they are history too); with sealed_too the sealed file itself,
+        for a "clear" made while the vault is shut, when it could not be
+        written over and every page came back the moment it opened."""
+        doomed = list(HISTORY_FILE.parent.glob(
+            HISTORY_FILE.name + ".unreadable-*"))
+        if sealed_too:
+            doomed.append(HISTORY_FILE)
+        for one in doomed:
+            try:
+                one.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if sealed_too:
+            self._history_locked = False
+            self._history_unsaved = False
+            self._history_drops = []
+
+    def _drop_from_sealed(self, doomed):
+        """A delete made while the sealed history has not been read (the
+        vault shut since the start): its rows on disk are out of reach,
+        so the same rule is kept and applied the moment unlock reads
+        them. Without it every deleted page came back on unlock."""
+        if not getattr(self, "_history_locked", False):
+            return
+        drops = getattr(self, "_history_drops", None)
+        if drops is None:
+            drops = self._history_drops = []
+        drops.append(doomed)
 
     def _set_aside_history(self):
         try:
@@ -54507,6 +54734,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         on = bool(self.config.get("spellCheck", False))
         langs = self.spell_languages() if hasattr(self, "spell_languages") \
             else [self.spell_language()]
+        if on:
+            # before the checker starts, which is when it reads them
+            self._write_custom_words(profile)
         for prof in self._all_profiles(profile):
             prof.setSpellCheckEnabled(on)
             prof.setSpellCheckLanguages(list(langs) if on else [])
@@ -56198,6 +56428,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if days > 0 and isinstance(self.history, list):
             cut = time.time() - days * 86400
             before, old = len(self.history), self.history
+            self._drop_from_sealed(
+                lambda e: float(e.get("t", 0) or 0) < cut)
             self.history = [row for row in self.history
                             if float(row.get("t", 0) or 0) >= cut]
             out["history"] = before - len(self.history)
@@ -57781,8 +58013,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         Per virtual browser rather than per window handle: a window has
         no name that survives a restart, and "the window I had Twitch
         signed in to" is the one he means."""
-        rows = dict(self.config.get("windowStates") or {})
-        rows[self.active_session] = self.window_state()
+        # where it was and how big: the tab list (every address, query
+        # string and all) was written at quit, after "clear on exit",
+        # and nothing ever read it back -- taken out of the rows older
+        # copies left for the other virtual browsers too
+        rows = {sid: {k: v for k, v in row.items() if k != "tabs"}
+                for sid, row in dict(self.config.get("windowStates")
+                                     or {}).items()
+                if isinstance(row, dict)}
+        rows[self.active_session] = {k: v for k, v in
+                                     self.window_state().items()
+                                     if k != "tabs"}
         self.config["windowStates"] = rows
         self.save_config(quiet=True)
         return rows[self.active_session]
@@ -59297,7 +59538,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         which is what makes it useful."""
         url = str(url or "")
         by_url = {}
-        for row in self.history:
+        for row in self.visible_history():
             by_url.setdefault(str(row.get("url") or ""), row)
         trail = []
         seen = set()
@@ -59319,7 +59560,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
         Rows that came from another page hang under it; the rest are
         roots. A research afternoon reads back as the shape it had."""
-        rows = self.history[-int(limit):]
+        rows = self.visible_history()[-int(limit):]
         kids = {}
         roots = []
         known = {str(row.get("url") or "") for row in rows}
@@ -59449,7 +59690,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """The pictures for one day of history, newest first."""
         rows = []
         want = str(day or time.strftime("%Y-%m-%d"))
-        for row in reversed(self.history):
+        for row in reversed(self.visible_history()):
             when = time.strftime("%Y-%m-%d",
                                  time.localtime(int(row.get("t") or 0)))
             if when != want:
@@ -59855,6 +60096,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         rows = None
             if rows is None:
                 return False     # left alone; save_history keeps it aside
+            drops = getattr(self, "_history_drops", None) or []
+            self._history_drops = []
+            if drops:
+                rows = [e for e in rows
+                        if not any(gone(e) for gone in drops)]
             held = list(self.history)
             self.history[:] = rows + [e for e in held if e not in rows]
             self._history_locked = False
@@ -59904,7 +60150,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if want and self.history_key() is None:
             self.flash(self._ui_str("histEncNeedsVault"))
             return False
+        was = self.history_encrypted()
         self.config["historyEncrypted"] = want
+        if want and not was:
+            # the words of every page read, their pictures, the sites in
+            # the bar and the tab snapshots were all left in plain text
+            # beside the sealed file: they go (nothing new is kept while
+            # it is sealed)
+            self._forget_history_extras(None)
         self.save_config(quiet=True)
         self.save_history()
         return want
@@ -61002,11 +61255,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             except RuntimeError:
                 pass
             if answer == "keep":
-                self.set_fullscreen_rule(host, True)
+                if not getattr(view, "private", False):
+                    # a private tab's site is not written into config.json
+                    self.set_fullscreen_rule(host, True)
             elif answer in ("stop", "never"):
                 self.leave_fullscreen(view=view)
                 if answer == "never":
-                    self.set_fullscreen_rule(host, False)
+                    if not getattr(view, "private", False):
+                        self.set_fullscreen_rule(host, False)
 
         try:
             page.runJavaScript(
@@ -61356,6 +61612,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             rows.append(word)
         self.config["myWords"] = sorted(set(rows))
         self.save_config(quiet=True)
+        self._write_custom_words()
         path = CONFIG_FILE.parent / "my-words.txt"
         try:
             path.write_text("\n".join(self.config["myWords"]) + "\n",
@@ -61364,6 +61621,60 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             pass
         self.flash(self._ui_str("spellAdded") % word)
         return self.config["myWords"]
+
+    #: what Chromium's own custom dictionary takes (see
+    #: spellcheck_custom_dictionary.cc): a word of up to 99 bytes, no
+    #: blanks, at most 50000 of them
+    CUSTOM_WORD_BYTES = 99
+    CUSTOM_WORDS_MAX = 50000
+
+    def _write_custom_words(self, profile=None):
+        """His words where the engine's spell checker reads them:
+        "Custom Dictionary.txt" in each jar's folder, in Chromium's own
+        format (a word a line, then an MD5 checksum line). The checker
+        reads it when it starts, so a word added now counts from the
+        next start; until then it went into config and my-words.txt,
+        which nothing reads, and stayed underlined for good."""
+        def fits(word):
+            return isinstance(word, str) and word \
+                and not any(c.isspace() for c in word) \
+                and len(word.encode("utf-8")) <= self.CUSTOM_WORD_BYTES
+        mine = {w for w in (self.config.get("myWords") or []) if fits(w)}
+        if not mine:
+            return False
+        wrote = False
+        for prof in self._all_profiles(profile):
+            try:
+                if prof.isOffTheRecord():
+                    continue
+                folder = prof.persistentStoragePath()
+            except (AttributeError, RuntimeError):
+                continue
+            if not folder:
+                continue
+            path = Path(folder) / "Custom Dictionary.txt"
+            words = set(mine)
+            try:
+                old = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                old = ""
+            # what is there already stays (written by the engine itself
+            # or by an older copy of this list)
+            words |= {w for w in old.split("checksum_v1 = ")[0]
+                      .splitlines() if fits(w)}
+            body = "".join(w + "\n" for w in
+                           sorted(words)[:self.CUSTOM_WORDS_MAX])
+            text = body + "checksum_v1 = " + hashlib.md5(
+                body.encode("utf-8")).hexdigest()
+            if text == old:
+                continue
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                _write_atomic(path, text.encode("utf-8"))
+                wrote = True
+            except OSError:
+                pass
+        return wrote
 
     def lookup_word(self, word="", view=None, then=None):
         """One word in the other language, as a tooltip.
@@ -67212,9 +67523,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def _plugin_toast(self, name):
         self.bridge.updateFinished.emit("Plugin installed: " + name)
-        self._show_toast()
-        if self._toast:
-            self._toast_label.setText("Plugin installed ✓")
+        # a line of its own: this built the UPDATE offer and relabelled
+        # it, so "Plugin installed" came with an "Update now" button that
+        # pulled the browser -- or, with another toast up, relabelled
+        # that one (the save-password question among them)
+        self.flash("Plugin installed \u2713")
 
     def _plugin_downloaded(self, request):
         if request.isFinished() and request.state() == \
@@ -67769,6 +68082,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     # out of the list that is already on disk.
     # ------------------------------------------------------------------
 
+    def visible_history(self):
+        """The history as the pages and the bar may show it: nothing
+        while it is sealed and the vault is shut. Kept in memory, the
+        whole sealed history was readable in the History page by
+        whoever sat down at the locked machine."""
+        try:
+            if self.history_encrypted() and self.vault_locked():
+                return []
+        except AttributeError:
+            pass
+        return self.history
+
     def history_rows(self, query="", since=None, until=None, host="",
                      session="", noise=False, limit=2000):
         """The history, filtered the way the history page asks for it.
@@ -67784,7 +68109,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # by the clock, not by the order the file is in: a hand-edited
         # or merged history is not promised to be in order, and a page
         # of rows in the wrong order is worse than a slow sort
-        for entry in sorted(self.history, key=lambda e: -e.get("t", 0)):
+        for entry in sorted(self.visible_history(),
+                            key=lambda e: -e.get("t", 0)):
             when = entry.get("t", 0)
             if since is not None and when < since:
                 continue
@@ -67811,7 +68137,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """The history as days, newest first: the timeline the history
         page draws, with how many pages each day holds."""
         days = {}
-        for entry in self.history:
+        for entry in self.visible_history():
             start = _day_start(entry.get("t", 0))
             day = days.setdefault(start, {"t": start, "pages": 0,
                                           "hosts": set()})
@@ -67832,6 +68158,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 gone += 1
                 continue
             keep.append(entry)
+        self._drop_from_sealed(
+            lambda e: (since is None or e.get("t", 0) >= since)
+            and (until is None or e.get("t", 0) <= until))
         if gone:
             old = list(self.history)
             self._note_history_undo(old)
@@ -67950,6 +68279,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return 0
         before = len(self.history)
         old = list(self.history)
+        self._drop_from_sealed(lambda e: e.get("url") in wanted)
         self.history = [e for e in self.history
                         if e.get("url") not in wanted]
         gone = before - len(self.history)
@@ -67968,9 +68298,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return 0
         before = len(self.history)
         kept, old = [], self.history
-        for entry in self.history:
+
+        def of_site(entry):
             where = _hist_host(entry.get("url", ""))
-            if where == host or where.endswith("." + host):
+            return where == host or where.endswith("." + host)
+        self._drop_from_sealed(of_site)
+        for entry in self.history:
+            if of_site(entry):
                 continue
             kept.append(entry)
         self.history = kept
@@ -67989,6 +68323,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         gone = len(self.history)
         self.history = []
         self.save_history()
+        self._wipe_history_store(
+            self.history_encrypted() and self.history_key() is None)
         self._forget_history_extras(None)
         return gone
 
@@ -68026,6 +68362,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return 0
         cutoff = time.time() - days * 86400
         before, old = len(self.history), self.history
+        self._drop_from_sealed(lambda e: e.get("t", 0) < cutoff)
         self.history = [e for e in self.history if e.get("t", 0) >= cutoff]
         gone = before - len(self.history)
         if gone:
@@ -68037,7 +68374,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """First visit, last visit and how many times — for a bookmark's
         row and for the page-information popup."""
         url = str(url or "")
-        times = [e.get("t", 0) for e in self.history if e.get("url") == url]
+        times = [e.get("t", 0) for e in self.visible_history()
+                 if e.get("url") == url]
         if not times:
             return {"count": 0, "first": 0, "last": 0}
         return {"count": len(times), "first": min(times), "last": max(times)}
@@ -68047,7 +68385,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         in all. A habit, counted out of what is already written down."""
         host = str(host or "").lower().removeprefix("www.")
         days, visits = set(), 0
-        for entry in self.history:
+        for entry in self.visible_history():
             where = _hist_host(entry.get("url", ""))
             if where != host and not where.endswith("." + host):
                 continue
@@ -68069,7 +68407,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def most_visited(self, limit=20, since=None):
         """The sites he goes to most, counted out of the history."""
         counts = {}
-        for entry in self.history:
+        for entry in self.visible_history():
             if since is not None and entry.get("t", 0) < since:
                 continue
             host = _hist_host(entry.get("url", ""))
@@ -68111,7 +68449,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         for _ in range(days - 1):
             day_marks.append(_day_after(day_marks[-1]))
         per_day, per_host = {}, {}
-        for entry in self.history:
+        for entry in self.visible_history():
             when = entry.get("t", 0)
             if when < start:
                 continue
@@ -70217,7 +70555,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.config["passwordProvider"] = name
         self.save_config()
         self.vault = self.make_vault()
-        self.bridge.vaultChanged.emit()
+        self._vault_changed()
         return {"provider": name, "checking": self.vault_checking,
                 "fellBack": self.vault_fell_back}
 
@@ -70294,6 +70632,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         bridge = getattr(self, "bridge", None)
         if bridge is not None:
             bridge.vaultChanged.emit()
+        # the other windows share the vault: rebuilt here (a lock, an
+        # unlock, a store switch), they kept the old object -- its
+        # decrypted items, and a snapshot whose next save wrote over
+        # what had been added here meanwhile
+        for win in self.windows():
+            if win is self:
+                continue
+            try:
+                if win.vault is not self.vault:
+                    win.vault = self.vault
+                    # their in-flight vault jobs answer the old vault
+                    win._vault_epoch = getattr(win, "_vault_epoch", 0) + 1
+                win._sync_acct()
+                other = getattr(win, "bridge", None)
+                if other is not None and other is not bridge:
+                    other.vaultChanged.emit()
+            except (RuntimeError, AttributeError):
+                continue
 
     def ask_unlock_vault(self):
         """The passphrase, in a box of the browser's own.
@@ -70399,11 +70755,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         if not self.vault_lock.enable(dialog.value("first")):
-            self._toast_result(self._ui_str("masterFailed"))
+            self.flash(self._ui_str("masterFailed"))
             return
         self.vault = self.make_vault()
         self._vault_changed()
-        self._toast_result(self._ui_str("masterOnDone"))
+        self.flash(self._ui_str("masterOnDone"))
 
     def _master_disable(self):
         """Off again, with everything still in it.
@@ -70422,15 +70778,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return
         was = self._history_out_of_vault()
         if was is None:
-            self._toast_result(self._ui_str("masterFailed"))
+            self.flash(self._ui_str("masterFailed"))
             return
         if not self.vault_lock.disable():
             self._history_back_in_vault(was)
-            self._toast_result(self._ui_str("masterFailed"))
+            self.flash(self._ui_str("masterFailed"))
             return
         self.vault = self.make_vault()
         self._vault_changed()
-        self._toast_result(self._ui_str("masterOffDone"))
+        self.flash(self._ui_str("masterOffDone"))
 
     def change_master_password(self):
         """A new passphrase. The dialog does the work and says no to a
@@ -70443,7 +70799,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self._rekey_history()
             self.vault = self.make_vault()
             self._vault_changed()
-            self._toast_result(self._ui_str("masterChangeDone"))
+            self.flash(self._ui_str("masterChangeDone"))
         return self.master_state()
 
     def set_master_minutes(self, minutes):
@@ -70479,7 +70835,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         del text
         if self.vault_provider_name() == "1password":
             self.vault = self.make_vault()   # the check runs in the
-        return {"hasToken": provider.have_token(),   # background now
+            self._vault_changed()            # background now
+        return {"hasToken": provider.have_token(),
                 "checking": self.vault_checking}
 
     def vault_job(self, work, then):
@@ -71328,9 +71685,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # ...and whatever he asked each virtual browser to wipe
         self.clear_on_exit_per_session()
         if self.config.get("clearHistoryExit"):
-            self.history = []
-            self.save_history()
-            self._forget_history_extras(None)
+            # with the vault shut this wrote nothing over the sealed
+            # file, and the whole history was there at the next start
+            self.clear_history(undoable=False)
         if self.config.get("clearCookiesExit"):
             for profile in self._all_profiles():
                 profile.cookieStore().deleteAllCookies()
@@ -71459,6 +71816,7 @@ _RULE_PROXY = None  # the RuleProxy serving per-site rules, if any
 
 
 def _migrate_proxy_config(config):
+    _sane_proxy_config(config)
     # old single-proxy config -> a named profile + active selection
     if "activeProxy" not in config:
         old = config.get("proxy")
@@ -71586,6 +71944,10 @@ def _proxy_routing(config):
         default, bypass = _system_proxy_route()
     return rules, bypass, default
 
+
+#: main-frame requests the interceptor sends to https on their way out:
+#: forms sent to http with https only on (see upgrade_on_the_wire)
+_HTTPS_ON_THE_WIRE = set()
 
 #: the engine's resource types in the words a filter list uses. The
 #: lists say "script", "image", "xmlhttprequest"; the engine says
@@ -71829,6 +72191,20 @@ class RequestWatch(QWebEngineUrlRequestInterceptor):
         host = url.host().lower().removeprefix("www.")
         kind = info.resourceType()
         method = bytes(info.requestMethod()).decode("ascii", "replace")
+
+        # 0. a form sent to an http address with https only on (see
+        # upgrade_on_the_wire): moved here, where the engine's redirect
+        # keeps the method and the body
+        if _HTTPS_ON_THE_WIRE \
+                and getattr(kind, "name", "") == "ResourceTypeMainFrame":
+            key = url.adjusted(
+                QUrl.UrlFormattingOption.RemoveFragment).toString()
+            if key in _HTTPS_ON_THE_WIRE:
+                _HTTPS_ON_THE_WIRE.discard(key)
+                secure = QUrl(url)
+                secure.setScheme("https")
+                info.redirect(secure)
+                return
 
         # 1. blocked and mapped addresses
         rules = browser.url_rules()
@@ -72115,6 +72491,44 @@ def _proxy_launch_flags(config):
     return "--proxy-server=%s%s:%d" % (scheme, hp[0], hp[1])
 
 
+def _launch_config():
+    """The config as the passes before Qt read it: a dict, whatever the
+    file holds. A list or a string there raised in these passes, before
+    there was a window to say anything (the window's own load sets such
+    a file aside; these never got that far)."""
+    try:
+        config = json.loads(CONFIG_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
+def _sane_proxy_config(config):
+    """The proxy keys each the shape their readers expect: a string
+    where the old proxy dict belongs, a profile that is not a dict, or
+    rules that are not a list raised at start-up (and in apply_proxy)."""
+    if not isinstance(config, dict):
+        return {}
+    if "proxy" in config and not isinstance(config.get("proxy"), dict):
+        config.pop("proxy", None)
+    profiles = config.get("proxyProfiles")
+    if profiles is not None:
+        config["proxyProfiles"] = [p for p in profiles if isinstance(p, dict)] \
+            if isinstance(profiles, list) else []
+    auto = config.get("proxyAuto")
+    if auto is not None:
+        if not isinstance(auto, dict):
+            config.pop("proxyAuto", None)
+        else:
+            rules = auto.get("rules")
+            if rules is not None:
+                auto["rules"] = [r for r in rules if isinstance(r, dict)] \
+                    if isinstance(rules, list) else []
+    if not isinstance(config.get("activeProxy", ""), str):
+        config.pop("activeProxy", None)
+    return config
+
+
 def _install_proxy_flags():
     """Bake the proxy config into Chromium's command line; must run
     before the QApplication (and thus the web engine) exists. Any
@@ -72124,10 +72538,7 @@ def _install_proxy_flags():
     win over the current config. Per-site rules start a RuleProxy and
     point the engine at it."""
     global _PROXY_FLAGS_AT_LAUNCH, _RULE_PROXY
-    try:
-        config = json.loads(CONFIG_FILE.read_text())
-    except (OSError, ValueError):
-        config = {}
+    config = _sane_proxy_config(_launch_config())
     _migrate_proxy_config(config)
     flags = _proxy_launch_flags(config)
     if _RULE_PROXY is not None:  # re-entry (tests): free the old port
@@ -72337,7 +72748,12 @@ def _privacy_flags(config):
                         if config.get("webrtcStrict", False) or proxied
                         else "default_public_interface_only"))
     doh = str(config.get("dohUrl") or "").strip()
-    if config.get("doh", False) and doh.startswith("https://"):
+    # one value for one switch: the flags are split on spaces, so a
+    # space (or a quote, or a control character) in the address was a
+    # second switch of the file's making -- a renderer prefix runs a
+    # program at the next start
+    if config.get("doh", False) and doh.startswith("https://") \
+            and not re.search(r"[\s\"'\\\x00-\x1f]", doh):
         flags.append("--enable-features=DnsOverHttps")
         flags.append("--dns-over-https-mode=secure")
         flags.append("--dns-over-https-templates=" + doh)
@@ -72392,10 +72808,7 @@ def _install_privacy_flags():
     reason _install_theme_flags does: this runs before there is one.
     """
     global _PRIVACY_FLAGS_AT_LAUNCH
-    try:
-        config = json.loads(CONFIG_FILE.read_text())
-    except (OSError, ValueError):
-        config = {}
+    config = _launch_config()
     flags = _privacy_flags(config)
     _PRIVACY_FLAGS_AT_LAUNCH = flags
     if not flags:
@@ -72416,10 +72829,7 @@ def _install_theme_flags():
     the theme in the config, while there is still no engine to hear it.
     Switching theme later paints the browser at once and says in
     Settings that the websites want a restart."""
-    try:
-        config = json.loads(CONFIG_FILE.read_text())
-    except (OSError, ValueError):
-        config = {}
+    config = _launch_config()
     register_custom_themes(config.get("customThemes"))
     name = _select_theme(config.get("theme", DEFAULT_THEME))
     # the look too, and for a related reason: the first stylesheet is

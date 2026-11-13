@@ -488,16 +488,21 @@ _JS = r"""
     /* his own hidden elements, as a stylesheet rather than a script
        walking the page: a rule keeps working when the site rebuilds
        the node, and costs nothing per frame. */
-    /* one rule each: in a list, one selector the engine cannot read
-       (a hand-edited config) took every hidden element back */
-    var css = hide.map(function (one) {
-      return one + "{display:none !important}";
-    }).join("\n");
+    /* one rule at a time: in a list, one selector the engine cannot
+       read (a hand-edited config) took every hidden element back, and
+       even a rule a line was swallowed after a selector with an
+       unclosed bracket. insertRule refuses the bad one alone. */
     onReady(function () {
       var style = document.createElement("style");
       style.id = "guard-hide";
-      style.textContent = css;
       (document.head || document.documentElement).appendChild(style);
+      var sheet = style.sheet;
+      for (var i = 0; sheet && i < hide.length; i++) {
+        try {
+          sheet.insertRule(hide[i] + "{display:none !important}",
+                           sheet.cssRules.length);
+        } catch (e) {}
+      }
     });
   }
 

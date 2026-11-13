@@ -165,7 +165,9 @@ def check_request(config, url, page_url):
         elif scheme in ("data", "about"):
             # no origin of its own, so made by a page: his own
             # navigations come here with no page at all. Read as "no
-            # page", a public site's blob or data page reached the router
+            # page", a public site's blob or data page reached the router.
+            # (A blank page a page opened is checked by its opener
+            # first; see _page_for_check in browser.py.)
             page_host = "opaque.invalid"
     if url.scheme() not in ("http", "https"):
         return True, url

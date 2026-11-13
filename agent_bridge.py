@@ -54,6 +54,7 @@ processes running as the same user can reach it.
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -697,6 +698,27 @@ class AgentBridge:
             return bool(req.get("move") or req.get("name") and req.get("tab"))
         return False
 
+    @staticmethod
+    def _clean_host(raw):
+        """A host name as an op may name one: "" for none, None when it
+        is anything but a bare name (a path, a query, a user, a port)."""
+        text = str(raw or "").strip().lower().removeprefix("www.")
+        if not text:
+            return ""
+        if not re.fullmatch(r"[a-z0-9.-]+", text) or ".." in text \
+                or text.startswith(".") or text.endswith("."):
+            return None
+        return text
+
+    @staticmethod
+    def _web_url(url):
+        """An address an agent may send a tab to or act on: http(s), or
+        the blank page a new tab starts on."""
+        text = str(url or "").strip()
+        if text in ("about:blank",):
+            return True
+        return QUrl(text).scheme().lower() in ("http", "https")
+
     def site_ok(self, url):
         """The address is on his site list, or there is no list."""
         sites = (self.config or {}).get("bridgeSites")
@@ -734,6 +756,14 @@ class AgentBridge:
         rows = (self.config or {}).get("bridgeOps")
         if isinstance(rows, list) and rows and op not in rows:
             return False, "op-not-allowed"
+        # web pages only, where a tab is sent and the tab it is done to:
+        # the browser's own pages carry the Settings bridge, so a client
+        # held to a few ops opened settings.html, ran script there and
+        # rewrote its own limits -- or set a hook that runs a program.
+        # A file on the disk is no web page either.
+        for one_url in (url, tab_url):
+            if one_url and not self._web_url(one_url):
+                return False, "not-a-web-page"
         sites = (self.config or {}).get("bridgeSites")
         if isinstance(sites, list) and sites:
             # where a tab is being sent AND the tab it is done to. Only
@@ -789,7 +819,11 @@ class AgentBridge:
             target = str(req.get("url") or req.get("selector")
                          or req.get("tab") or "")
             tab_url = ""
-            if op in self.TAB_OPS:
+            # a macro's list and status touch no page: judged by the tab
+            # in front (the start page, a file), "macro list" was refused
+            no_page = op == "macro" and str(req.get("do") or "status") \
+                in ("list", "status")
+            if op in self.TAB_OPS and not no_page:
                 v = self._find(req.get("tab"))
                 if v is not None and not self._gone(v):
                     tab_url = self._view_url(v)
@@ -800,8 +834,14 @@ class AgentBridge:
                 # (query string and all) went there with it
                 target = "(private)"
             self._req = req
+            host = self._clean_host(req.get("host"))
+            if host is None:
+                # "allowed.com/.com": the gate read allowed.com, op_cookies
+                # matched every cookie under .com
+                self._reply(conn, {"ok": False, "error": "bad-host"})
+                return
             ok, why = self.allowed(op, str(req.get("url") or ""), tab_url,
-                                   host=str(req.get("host") or "").strip())
+                                   host=host)
             self._req = None
             if not ok:
                 self.note(op, target, why)

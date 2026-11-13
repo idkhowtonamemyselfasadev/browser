@@ -312,6 +312,48 @@ if view is not None:
     check("changing one shortcut keeps the ones he set before",
           all(_now.get(k) == v for k, v in _keep.items()) and len(_now) >= 3,
           _now)
+    # a cleared shortcut is no key: its default is free for another
+    _sc_before = dict(win.config.get("shortcuts") or {})
+    _freed = H.js(view, """(function (keep) {
+      var rows = document.querySelectorAll('#keyseditor .wrow');
+      var acts = window._keyActions || [], pick = [];
+      for (var i = 0; i < acts.length && i < rows.length; i++) {
+        if (keep.indexOf(acts[i].id) < 0 && acts[i].default
+            && acts[i].key === acts[i].default) pick.push(i);
+        if (pick.length == 2) break;
+      }
+      if (pick.length < 2) return 'none';
+      var a = rows[pick[0]].querySelector('input');
+      var b = rows[pick[1]].querySelector('input');
+      a.value = ''; a.dispatchEvent(new Event('change'));
+      b.value = acts[pick[0]].default; b.dispatchEvent(new Event('change'));
+      return JSON.stringify({a: acts[pick[0]].id, b: acts[pick[1]].id,
+                             key: acts[pick[0]].default,
+                             ph: a.placeholder, bval: b.value});
+    })(%s)""" % json.dumps(list(_keep)))
+    H.spin(400)
+    try:
+        _fr = json.loads(_freed)
+    except (TypeError, ValueError):
+        _fr = {}
+    _sc = win.config.get("shortcuts") or {}
+    check("a cleared shortcut frees its default key for another action",
+          _fr and _sc.get(_fr["a"]) == "" and _sc.get(_fr["b"]) == _fr["key"]
+          and _fr["bval"] == _fr["key"], (_freed, _sc))
+    check("...and the cleared box does not show the default as if bound",
+          _fr and _fr["ph"] == "\u2014", _freed)
+    win.config["shortcuts"] = _sc_before
+    win.save_config(quiet=True)
+    _ew = H.js(view, """(function () {
+            var el = document.getElementById('expirywarn');
+            el.value = '0'; el.dispatchEvent(new Event('change'));
+            return el.value; })()""")
+    H.wait_for(lambda: win.config.get("expiryWarn") == 1, 4000)
+    check("a zero for expiry warning becomes the minimum, not a hidden default",
+          _ew == "1" and win.config.get("expiryWarn") == 1,
+          (_ew, win.config.get("expiryWarn")))
+    win.config.pop("expiryWarn", None)
+    win.save_config(quiet=True)
     # two curated flags ticked one after the other are both kept
     win.config["safeFlags"] = []
     _nflags = H.js(view, """(function () {

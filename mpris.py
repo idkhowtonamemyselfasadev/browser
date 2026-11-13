@@ -22,9 +22,10 @@ import json
 
 try:
     from PyQt6.QtDBus import (QDBusConnection, QDBusMessage,
-                              QDBusAbstractAdaptor)
+                              QDBusAbstractAdaptor, QDBusArgument,
+                              QDBusObjectPath)
     from PyQt6.QtCore import (QObject, pyqtSlot, pyqtProperty, QVariant,
-                              pyqtClassInfo)
+                              pyqtClassInfo, QMetaType)
     HAVE_DBUS = True
 except ImportError:  # pragma: no cover - Qt built without QtDBus
     HAVE_DBUS = False
@@ -38,6 +39,16 @@ except ImportError:  # pragma: no cover - Qt built without QtDBus
 #: and waybar show, so it is the browser's own name and not a number.
 SERVICE = "org.mpris.MediaPlayer2.browser"
 PATH = "/org/mpris/MediaPlayer2"
+
+
+def _strings(items):
+    """A D-Bus "as". A Python list goes out as "av", and measured on a
+    private bus that made PropertiesChanged "(sa{sv}av)": GDBus clients
+    (playerctl, so waybar) drop a signal that is not "(sa{sv}as)" and
+    never heard that anything changed."""
+    arg = QDBusArgument()
+    arg.add([str(one) for one in items], QMetaType.Type.QStringList.value)
+    return arg
 
 
 def available():
@@ -150,7 +161,7 @@ class Player(QDBusAbstractAdaptor):
 
     @pyqtProperty("QVariantMap")
     def Metadata(self):
-        return self.state.metadata
+        return self.state.bus_metadata()
 
     @pyqtProperty(float)
     def Volume(self):
@@ -243,6 +254,18 @@ class Service(QObject):
         self._announce()
         return self.status
 
+    def bus_metadata(self):
+        """self.metadata in the types MPRIS names: the track id is an
+        object path ("o") and the artists a list of strings ("as"). Both
+        went out as a string and an "av", which the spec does not allow
+        and players built on GDBus refuse."""
+        out = dict(self.metadata)
+        if "mpris:trackid" in out:
+            out["mpris:trackid"] = QDBusObjectPath(str(out["mpris:trackid"]))
+        if "xesam:artist" in out:
+            out["xesam:artist"] = _strings(out["xesam:artist"] or [])
+        return out
+
     def _announce(self):
         """Tell the bus the properties changed, which is how waybar and
         playerctl notice without polling."""
@@ -252,7 +275,7 @@ class Service(QObject):
             PATH, "org.freedesktop.DBus.Properties", "PropertiesChanged")
         message.setArguments(["org.mpris.MediaPlayer2.Player",
                               {"PlaybackStatus": self.status,
-                               "Metadata": self.metadata},
-                              []])
+                               "Metadata": self.bus_metadata()},
+                              _strings([])])
         QDBusConnection.sessionBus().send(message)
         return True

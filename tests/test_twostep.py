@@ -158,7 +158,14 @@ ATTACKS = r"""(function () {
   // 21: reach into the isolated world where the filler lives
   t('reach isolated world', function () {
     window.__seen_bpw = (typeof window.__bpw !== 'undefined');
-    window.__seen_qt = (typeof qt !== 'undefined');
+    // the TRANSPORT is what would let a page talk to a channel. Right
+    // after a tab leaves one of our own pages the engine leaves an empty
+    // "qt" object in the page's world: measured 2026-11-13, 8 of 20
+    // loads had it, 0 of 20 had qt.webChannelTransport, not even for the
+    // first inline script of the page (scratchpad x2/probe_qt.py). A
+    // bare "typeof qt" made this check fail on that shell, 1 run in 3.
+    window.__seen_qt = (typeof qt !== 'undefined' && !!qt
+                        && typeof qt.webChannelTransport !== 'undefined');
   });
   return out.length;
 })()"""

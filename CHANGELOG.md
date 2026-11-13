@@ -1,5 +1,70 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part thirty-eight: thirteenth pass, security)
+
+The thirteenth search looked only for security and privacy holes: the
+vault, the bridge, the agent, injected script, addresses, private tabs,
+crafted files, updates, permissions and the page guard. It confirmed 23
+bugs; with the last open findings of earlier passes, fixed here:
+
+- **Several windows share one history, one bookmark list and one download
+  list again.** A history entry, bookmark or download deleted from a page
+  in a second window came back at the next save, and what that window
+  added afterwards never reached the file.
+- **Encrypted history.**
+  - While the vault is locked, the History page, the day timeline, the
+    address bar's suggestions and completion, and a page's visit count show
+    nothing from the sealed history.
+  - Clearing history with the vault locked really deletes it, and so does
+    "clear history when I close the browser". Single pages, sites or time
+    ranges deleted while it is locked stay deleted after the vault opens.
+  - Unlocking the vault from a second window brings the sealed history
+    back.
+  - Turning encryption on removes the page words, pictures and tab
+    snapshots that were kept in plain text, and no new snapshots are
+    written while it is on.
+- **The vault.**
+  - The auto-lock clock keeps counting while the laptop sleeps.
+  - Every window uses the vault as it is after a lock, an unlock or a
+    change of password manager.
+- **The home network.** A redirect is checked against the address it
+  comes from: your own router's address that redirects to its login page
+  opens, while a public site cannot bounce a tab to the router. A tab or
+  blank window opened by a public page, or a frame inside it, cannot reach
+  the router either.
+- **Private tabs.** Fullscreen answers from a private tab are not saved.
+  Sites from throwaway virtual browsers, paused-history tabs and
+  never-record sites are not written down for the address bar or for form
+  drafts. The window's saved state keeps its place on screen, not the
+  address of every open tab.
+- **Https only** sends a form on to https with everything you typed in it,
+  instead of turning it into an empty page load.
+- **The agent** only acts on web pages and takes a plain host name for
+  cookies.
+- **Smaller fixes:**
+  - "Add to dictionary" puts the word into the engine's own spelling
+    dictionary, so it is no longer underlined after the next start.
+  - The media keys and the bar's player widget see track changes: the
+    desktop's media players had been ignoring them because of the wrong
+    D-Bus types.
+  - Hidden elements stay hidden when one hidden-element rule is broken.
+  - Stopping the camera or microphone on a local file page takes its
+    permission back too.
+  - A Bitwarden login with no name or address is no longer called "None".
+  - A quiet auto-update no longer writes over another message; "plugin
+    installed" no longer comes with an "Update now" button, and the master
+    password's results always show.
+  - The start and new-tab pages can be local files.
+  - A cleared shortcut frees its key for another action.
+  - 0 days for the expiry warning, "unused after" and the backups kept
+    becomes the minimum, not a hidden default.
+  - Look-alike warnings catch a spoofed site's subdomains, and the real
+    sites' own subdomains are not flagged.
+  - Notes with an impossible date no longer break the notes list.
+  - An encrypted-DNS address with spaces or quotes in it is ignored at
+    start: it could slip extra engine switches into the launch.
+  - "Forget this site" also takes back its permissions for this session.
+
 ## 2026-11-13 — line-by-line review, day 3 (part thirty-seven: twelfth pass)
 
 The twelfth search read files whole: Settings, the start page, the player

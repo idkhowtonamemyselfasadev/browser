@@ -341,6 +341,25 @@ check("and the element is not drawn",
         return e ? getComputedStyle(e).display : 'gone';})()"""))
 check("the rest of the page is untouched",
       js(view, "document.getElementById('p').textContent") == "text")
+# a broken selector in front (a hand-edited config) costs only itself
+win.config["hideElements"] = {"127.0.0.1": ["p:bogus(((", "a}body{",
+                                            ".advert"]}
+win.save_config(quiet=True)
+win.refresh_guard_scripts()
+view = page("/ad")
+H.spin(400)
+check("a selector with an unclosed bracket before it does not take the "
+      "rule after it, and none hides the whole page",
+      js(view, """(function(){var e=document.querySelector('.advert');
+        return [e ? getComputedStyle(e).display : 'gone',
+                getComputedStyle(document.body).display].join();})()""")
+      == "none,block",
+      js(view, """(function(){var e=document.querySelector('.advert');
+        return [e ? getComputedStyle(e).display : 'gone',
+                getComputedStyle(document.body).display].join();})()"""))
+win.config["hideElements"] = {"127.0.0.1": [".advert"]}
+win.save_config(quiet=True)
+win.refresh_guard_scripts()
 check("it is listed for this site",
       win.hidden_elements("127.0.0.1") == [".advert"])
 win.hide_element(".advert", "127.0.0.1", on=False)

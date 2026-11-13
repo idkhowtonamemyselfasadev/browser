@@ -2195,7 +2195,10 @@ _amp_btn.deleteLater()
 
 # a muted tab put off as a to-do is written down by its page title
 v33 = br.new_tab(); H.spin(300)
-H.load(v33, srv.url("/twhome")); H.spin(500)
+H.load(v33, srv.url("/twhome"))
+# the page itself, not the start page's load (H.load can return on that)
+H.wait_for(lambda: "twhome" in v33.url().toString() and v33.title() == "tw",
+           8000)
 v33.page().setAudioMuted(True); br._refresh_tab_label(v33); H.spin(100)
 _todo_rows = br.tab_to_todo(index=br.tabs.indexOf(v33), close=True) or []
 _todo_texts = [r.get("text") for r in _todo_rows]
@@ -8065,6 +8068,455 @@ if br.desk() is not None:
     check("every window shares one notes drawer and clip history",
           _same146 is True, str(_same146))
 
+# ===== thirteenth pass (security): agent pages, launch config, DoH, forget =
+# Z0 the agent cannot drive the browser's own pages or local files
+import agent_bridge as _ab149
+_br149 = _ab149.AgentBridge(br)
+_lv_was149 = br.config.get("bridgeLevel", "__absent__")
+br.config["bridgeLevel"] = "full"
+try:
+    _own149 = _br149.allowed("open", B.QUrl.fromLocalFile(
+        str(_Path(B.__file__).parent / "settings.html")).toString())
+    _tabown149 = _br149.allowed("js", "", B.QUrl(B.START_PAGE).toString())
+    _web149 = _br149.allowed("open", "https://ok149.example/")
+    _blank149 = _br149.allowed("text", "", "about:blank")
+finally:
+    if _lv_was149 == "__absent__":
+        br.config.pop("bridgeLevel", None)
+    else:
+        br.config["bridgeLevel"] = _lv_was149
+    try:
+        _br149.server.close()
+    except (AttributeError, RuntimeError):
+        pass
+check("an agent can open web pages but not the browser's own pages or files",
+      _own149[0] is False and _tabown149[0] is False and _web149[0] is True
+      and _blank149[0] is True, str((_own149, _tabown149, _web149, _blank149)))
+# Z1 a config file of the wrong shape cannot stop the start
+_cf_text149 = B.CONFIG_FILE.read_text() if B.CONFIG_FILE.exists() else None
+_launch149 = None
+try:
+    B.CONFIG_FILE.write_text("[]")
+    _launch149 = B._launch_config()
+finally:
+    if _cf_text149 is None:
+        B.CONFIG_FILE.unlink()
+    else:
+        B.CONFIG_FILE.write_text(_cf_text149)
+_bad149 = {"proxy": "direct", "proxyProfiles": ["a", {"name": "p149",
+           "type": "http", "host": "192.0.2.10", "port": 8080}],
+           "proxyAuto": [], "activeProxy": ["x"]}
+_err149 = None
+try:
+    B._migrate_proxy_config(_bad149)
+    B._proxy_launch_flags(_bad149)
+except Exception as _e149:
+    _err149 = repr(_e149)
+check("a config of the wrong shape (or wrong-typed proxy keys) does not stop "
+      "the start", _launch149 == {} and _err149 is None,
+      str((_launch149, _err149)))
+# Z2 a DoH address with a space in it is not a second engine switch
+_evil149 = B._privacy_flags({"doh": True, "dohUrl":
+                             "https://x149/dns --renderer-cmd-prefix=/tmp/e"})
+_good149 = B._privacy_flags({"doh": True, "dohUrl": "https://dns149.example/q"})
+check("a DoH address that would smuggle a switch is refused",
+      not any("renderer-cmd-prefix" in f for f in _evil149)
+      and not any("dns-over-https" in f for f in _evil149)
+      and any("dns149.example" in f for f in _good149),
+      str((_evil149, _good149)))
+# Z3 forgetting a site forgets this run's grants for it
+_key149 = "https://meet149.example|use the microphone"
+_sp149 = getattr(br, "_session_perms", None)
+if isinstance(_sp149, dict):
+    _sp149[_key149] = True
+_perms_was149 = json.dumps(br.config.get("permissions") or {})
+br.config.setdefault("permissions", {})[_key149] = True
+br.forget_site("meet149.example")
+_left149 = isinstance(_sp149, dict) and _key149 in _sp149
+br.config["permissions"] = json.loads(_perms_was149)
+if isinstance(_sp149, dict):
+    _sp149.pop(_key149, None)
+check("forgetting a site takes back this run's answers for it too",
+      _sp149 is not None and not _left149, str((_sp149 is not None, _left149)))
+# ===== thirteenth pass (security), part 2 ================================
+import privacy as _pv150
+
+
+class _Pg150:
+    def __init__(self, own, opener=None):
+        self._own = B.QUrl(own)
+        if opener is not None:
+            self._opener_url = B.QUrl(opener)
+
+    def url(self):
+        return self._own
+
+
+_lan150 = B.QUrl("http://192.168.1.1/")
+_r1 = _pv150.check_request({"blockLocal": True}, _lan150,
+                           B._page_for_check(_Pg150("", "https://evil150.example/")))
+_r2 = _pv150.check_request({"blockLocal": True}, _lan150,
+                           B._page_for_check(_Pg150("about:blank",
+                                                    "http://192.168.1.5/")))
+_r3 = _pv150.check_request({"blockLocal": True}, _lan150,
+                           B._page_for_check(_Pg150("about:blank")))
+check("a tab a public page opened cannot reach the home network; one the "
+      "router's own page opened can; a blank page nobody is known to have "
+      "opened counts as made by a page", _r1[0] is False and _r2[0] is True
+      and _r3[0] is False, str((_r1[0], _r2[0], _r3[0])))
+_tab150 = br.new_tab(); H.spin(500)
+# a web page first: from the start page a web address is bounced to the
+# other web channel before anything else is asked
+H.load(_tab150, srv.url("/urltext"))
+H.wait_for(lambda: "urltext" in _tab150.url().toString(), 8000)
+_pg150 = _tab150.page()
+_NT150 = B.QWebEnginePage.NavigationType
+_pg150._nav_hop = B.QUrl("https://public150.example/")
+_bad150 = _pg150.acceptNavigationRequest(
+    B.QUrl("http://192.168.1.1/login"), _NT150.NavigationTypeRedirect, True)
+_pg150._nav_hop = B.QUrl("http://192.168.1.1/")
+_ok150 = _pg150.acceptNavigationRequest(
+    B.QUrl("http://192.168.1.1/login"), _NT150.NavigationTypeRedirect, True)
+_close_if_open(_tab150)
+check("a redirect is checked against the address it comes from: a public "
+      "site cannot bounce the tab to the router, the router can send it to "
+      "its own login", _bad150 is False and _ok150 is True,
+      str((_bad150, _ok150)))
+check("a look-alike behind www. or login. is flagged, the real site's own "
+      "subdomains are not", B.lookalike_warning("www.paypa1.com")
+      == "looks:paypal.com" and B.lookalike_warning("login.arnazon.com")
+      == "looks:amazon.com" and B.lookalike_warning("learn.microsoft.com")
+      == "" and B.lookalike_warning("mail.google.com") == "")
+import agent_bridge as _ab150
+check("the agent's cookie host must be a bare host name",
+      _ab150.AgentBridge._clean_host("allowed.com/.com") is None
+      and _ab150.AgentBridge._clean_host("www.Example.com") == "example.com"
+      and _ab150.AgentBridge._clean_host("") == "")
+import notes as _nt150
+_np150 = _nt150.parse_note("---\nt: inf\nedited: 1e999\ntitle: x\n---\nbody\n") \
+    if hasattr(_nt150, "parse_note") else None
+check("a note dated 'inf' is read as having no date, not a broken list",
+      _np150 is not None and _np150.get("t") == 0
+      and _np150.get("edited") == 0, str(_np150))
+# Z8 / Z9 a throwaway browser leaves no host in the bar's memory
+_kh150 = set(br.known_hosts)
+class _V150:
+    session = "main"
+    no_history = True      # a tab he paused the history for
+check("a throwaway browser's or a paused tab's sites are not noted",
+      br._history_may_note(_V150(), "x150.example") is False)
+br.known_hosts = _kh150
+# Z10 the window's saved state has no addresses
+_wsk150 = br.config.get("windowStates")
+br.config["windowStates"] = {"other150": {"x": 1, "y": 1, "w": 800, "h": 600,
+                                          "tabs": ["https://s150.example/"]}}
+_ws150 = br.save_window_state()
+_other150 = dict(br.config["windowStates"].get("other150") or {})
+if _wsk150 is None:
+    br.config.pop("windowStates", None)
+else:
+    br.config["windowStates"] = _wsk150
+check("the window state written at quit holds its place, not its addresses "
+      "(an older row of another virtual browser loses them too)",
+      "tabs" not in _ws150 and "tabs" not in _other150
+      and _other150.get("w") == 800, str((sorted(_ws150), _other150)))
+# ===== thirteenth pass (security), part 3: vault clock, windows, history =
+check("the auto-lock clock keeps counting while the machine sleeps",
+      "_awake_clock()" in __import__("inspect").getsource(B.VaultLock.idle))
+_vw151 = br.new_window(); H.spin(700)
+br.vault = br.make_vault()
+br._vault_changed()
+_same151 = _vw151.vault is br.vault
+try:
+    _vw151._closing_anyway = True
+    _vw151.close()
+except RuntimeError:
+    pass
+H.spin(300)
+check("a vault rebuilt in one window is the vault of every window",
+      _same151 is True, str(_same151))
+_real_he151, _real_vl151 = br.history_encrypted, br.vault_locked
+br.history_encrypted = lambda: True
+br.vault_locked = lambda: True
+try:
+    _hrow151 = (br.history[-1].get("url") if br.history else "")
+    _seen151 = (len(br.visible_history()), br.bridge.getHistory(),
+                len(br.history_rows()), br.history_days(),
+                br.visit_info(_hrow151)["count"])
+finally:
+    br.history_encrypted, br.vault_locked = _real_he151, _real_vl151
+    br.__dict__.pop("history_encrypted", None)
+    br.__dict__.pop("vault_locked", None)
+check("a sealed history shows nothing while the vault is shut",
+      _seen151 == (0, "[]", 0, [], 0), str(_seen151))
+_real_hk151, _real_sh151 = br.history_key, br.save_history
+br.history_key = lambda: b"k" * 32
+br.save_history = lambda *a, **k: None
+_was_he151 = br.config.get("historyEncrypted", False)
+br.config["historyEncrypted"] = False
+br.config["pageIndex"] = {"https://anvils.example/": "words of a page"}
+br.config["tabSnapList"] = [{"u": "https://anvils.example/"}]
+try:
+    _on151 = br.encrypt_history(True)
+    _left151 = (dict(br.config.get("pageIndex") or {}),
+                br.config.get("tabSnapList"))
+finally:
+    br.history_key, br.save_history = _real_hk151, _real_sh151
+    br.__dict__.pop("history_key", None)
+    br.__dict__.pop("save_history", None)
+    br.config["historyEncrypted"] = _was_he151
+    br.save_config(quiet=True)
+check("sealing the history drops the page words and tab snapshots kept "
+      "in the clear", _on151 is True and _left151 == ({}, None),
+      str((_on151, _left151)))
+_real_he151b = br.history_encrypted
+br.history_encrypted = lambda: True
+_snaps151 = list(br.config.get("tabSnapList") or [])
+try:
+    _sn151 = br.snapshot_tabs()
+finally:
+    br.__dict__.pop("history_encrypted", None)
+check("no tab snapshots are written into the config while the history is "
+      "sealed", _sn151 == 0
+      and list(br.config.get("tabSnapList") or []) == _snaps151, str(_sn151))
+# ===== thirteenth pass (security), part 4: deletes reach a shut vault ====
+_h152 = list(br.history)
+_cfg152 = br.config.get("historyEncrypted", False)
+_real152 = (br.history_key, br.save_history)
+try:
+    br.config["historyEncrypted"] = True
+    br.history_key = lambda: None
+    B.HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    B.HISTORY_FILE.write_bytes(B.HISTORY_MAGIC + b"sealed rows")
+    _aside152 = B.HISTORY_FILE.with_name(B.HISTORY_FILE.name
+                                        + ".unreadable-1")
+    _aside152.write_bytes(B.HISTORY_MAGIC + b"older sealed rows")
+    br._history_locked = True
+    br.clear_history(undoable=False)
+    _files152 = (B.HISTORY_FILE.exists(), _aside152.exists())
+    # a delete of single pages while the sealed file is still unread
+    br._history_locked = True
+    br.history = [{"url": "https://gone.example/", "t": 5}]
+    br.delete_history_entries(["https://gone.example/"])
+    br.forget_history_site("site.example")
+    br.forget_site("fs152.example")
+    br.prune_history(days=30)
+    br.history_key = lambda: b"k" * 32
+    br.save_history = lambda *a, **k: None
+    br._read_history = lambda: [
+        {"url": "https://gone.example/", "t": 1},
+        {"url": "https://a.site.example/x", "t": 2},
+        {"url": "https://fs152.example/a", "t": _time.time()},
+        {"url": "https://old152.example/", "t": 4},
+        {"url": "https://kept.example/", "t": _time.time()}]
+    br.unlock_history()
+    _urls152 = [e.get("url") for e in br.history]
+finally:
+    for _n152 in ("history_key", "save_history", "_read_history"):
+        br.__dict__.pop(_n152, None)
+    br.config["historyEncrypted"] = _cfg152
+    br._history_locked = False
+    br._history_unsaved = False
+    br.history = _h152
+    br.save_history()
+    br.save_config(quiet=True)
+check("clear history with the vault shut deletes the sealed file and the "
+      "set-aside copies", _files152 == (False, False), str(_files152))
+check("pages deleted while the sealed history was unread stay deleted "
+      "after unlock", _urls152 == ["https://kept.example/"], str(_urls152))
+import inspect as _insp152
+check("clear on exit goes through the same clear",
+      "self.clear_history(undoable=False)"
+      in _insp152.getsource(B.Browser._clear_on_exit))
+# ===== thirteenth pass, the lows Z17-Z22 =================================
+_bv153 = B.PasswordVault(_Path(_tempfile.mkdtemp(
+    dir=str(B.CONFIG_FILE.parent))))
+_bv153.import_bitwarden(json.dumps({"items": [
+    {"type": 1, "name": None,
+     "login": {"username": "u153", "password": "p153",
+               "uris": [{"uri": None}]}}]}))
+_it153 = [i for i in _bv153.items() if i.get("username") == "u153"]
+check("a Bitwarden login with null name and address is not called None",
+      _it153 and "None" not in (str(_it153[0].get("host")),
+                                str(_it153[0].get("title"))),
+      str(_it153[:1]))
+
+
+class _Page153:
+    def __init__(self):
+        self.ran = []
+
+    def runJavaScript(self, js, *a):
+        self.ran.append(js)
+
+
+class _View153:
+    def __init__(self, url):
+        self._p = _Page153()
+        self._u = B.QUrl(url)
+
+    def page(self):
+        return self._p
+
+    def url(self):
+        return self._u
+
+
+_ht153 = br.new_tab(); H.spin(500)
+H.load(_ht153, srv.url("/urltext"))
+H.wait_for(lambda: "urltext" in _ht153.url().toString(), 8000)
+H.js(_ht153, """(function(){var d=document.createElement('div');
+  d.id='banner153';d.textContent='x';document.body.appendChild(d);
+  var p=document.createElement('p');p.className='ad153';p.textContent='y';
+  document.body.appendChild(p);return 1;})()""")
+br._apply_hide_now(_ht153, ["p:bogus(((", "#banner153", "a}body{",
+                            "p.ad153"])
+H.spin(300)
+_hid153 = H.js(_ht153, """[getComputedStyle(document.getElementById(
+  'banner153')).display, getComputedStyle(document.querySelector(
+  'p.ad153')).display, getComputedStyle(document.body).display].join()""")
+_close_if_open(_ht153)
+check("hiding on an open tab survives a broken selector before the good "
+      "ones, and a selector cannot hide the whole page",
+      _hid153 == "none,none,block", _hid153)
+_rev153 = []
+_real_rows153 = br.permission_rows
+_real_rev153 = br.revoke_permission
+br.permission_rows = lambda: [
+    {"origin": "file:///", "what": "use the camera", "key": "f153"},
+    {"origin": "https://other153.example", "what": "use the camera",
+     "key": "o153"}]
+br.revoke_permission = lambda key: _rev153.append(key)
+try:
+    br.stop_media_use(_View153("file:///tmp/page153.html"))
+finally:
+    br.__dict__.pop("permission_rows", None)
+    br.__dict__.pop("revoke_permission", None)
+check("stopping the camera on a file: page takes its grant back",
+      _rev153 == ["f153"], str(_rev153))
+br._show_plain_toast("plain line 153")
+_t153 = br._toast
+br._toast_result("Updated! Restart the browser to finish.")
+_after153 = (br._toast is _t153, br._toast_label.text(),
+             br._toast_timer.isActive())
+br._hide_toast()
+check("a silent update's answer does not land on another toast",
+      _after153 == (True, "plain line 153", True), str(_after153))
+br._show_toast()
+br._toast_result("Updated to abc153")
+_upd153 = br._toast_label.text() if br._toast else ""
+br._hide_toast()
+check("...while the update offer still shows its answer",
+      _upd153 == "Updated to abc153", _upd153)
+check("a file: address is a page the start setting accepts",
+      B.Browser.resolve_page_url("file:///tmp/start153.html")
+      == "file:///tmp/start153.html"
+      and B.Browser.resolve_page_url("file://") == "",
+      B.Browser.resolve_page_url("file:///tmp/start153.html"))
+
+
+class _Info153:
+    def __init__(self, url):
+        self.u = B.QUrl(url)
+        self.to = None
+
+    def requestUrl(self):
+        return self.u
+
+    def resourceType(self):
+        return _MainKind153()
+
+    def requestMethod(self):
+        return b"POST"
+
+    def redirect(self, url):
+        self.to = url.toString()
+
+    def block(self, on):
+        self.to = "blocked"
+
+    def setHttpHeader(self, *a):
+        pass
+
+    def firstPartyUrl(self):
+        return self.u
+
+
+class _MainKind153:
+    name = "ResourceTypeMainFrame"
+    value = 0
+
+
+_ok153 = br.upgrade_on_the_wire(B.QUrl("http://form153.example/send#top"))
+_inf153 = _Info153("http://form153.example/send")
+br.request_watch()._work(_inf153)
+_again153 = _Info153("http://form153.example/send")
+br.request_watch()._work(_again153)
+check("https only sends a form on to https from the interceptor (body kept)",
+      _ok153 is True and _inf153.to == "https://form153.example/send"
+      and _again153.to is None, str((_ok153, _inf153.to, _again153.to)))
+br.add_to_dictionary("zorbleflux153")
+_sp153 = br.profile.persistentStoragePath()
+try:
+    _cd153 = (B.Path(_sp153) / "Custom Dictionary.txt").read_text(
+        encoding="utf-8") if _sp153 else ""
+except OSError:
+    _cd153 = ""
+_body153, _, _sum153 = _cd153.partition("checksum_v1 = ")
+check("a word added to the dictionary is in the engine's own custom "
+      "dictionary, with Chromium's checksum",
+      "zorbleflux153" in _body153.splitlines()
+      and _sum153 == __import__("hashlib").md5(
+          _body153.encode("utf-8")).hexdigest(), _cd153[-120:])
+if B.mpris is not None and getattr(B.mpris, "HAVE_DBUS", False):
+    _ms153 = B.mpris.Service(None)
+    _ms153.update(True, "Song153", "Band153")
+    _bm153 = _ms153.bus_metadata()
+    # typed D-Bus values (the 'o' and 'as' they make on the bus were
+    # measured on a private session bus: scratchpad/v8); the plain list
+    # stays for the status and the tests
+    _ok_md153 = (type(_bm153.get("mpris:trackid")).__name__,
+                 type(_bm153.get("xesam:artist")).__name__,
+                 _ms153.metadata.get("xesam:artist"))
+    check("MPRIS sends the track id as an object path and the artists as "
+          "a string list", _ok_md153 == ("QDBusObjectPath", "QDBusArgument",
+                                         ["Band153"]), str(_ok_md153))
+# ===== X1b: one history, one bookmark list, one download list ==========
+_h157 = list(br.history)
+_w157 = br.new_window(); H.spin(700)
+br.history[:] = [{"url": "https://keep157.example/", "t": 1, "title": "k"},
+                 {"url": "https://gone157.example/", "t": 2, "title": "g"}]
+_w157.delete_history_entries(["https://gone157.example/"])
+_gone157 = [e.get("url") for e in br.history]
+_w157.bookmarks = list(_w157.bookmarks)
+_w157.downloads = list(_w157.downloads)
+_same157 = (_w157.history is br.history, _w157.bookmarks is br.bookmarks,
+            _w157.downloads is br.downloads)
+try:
+    _w157._closing_anyway = True
+    _w157.close()
+except RuntimeError:
+    pass
+H.spin(300)
+br.history = _h157
+br.save_history()
+check("a history row deleted in a second window is gone from every window",
+      _gone157 == ["https://keep157.example/"], str(_gone157))
+check("...and the windows still share one history, bookmark and download "
+      "list after a change", _same157 == (True, True, True), str(_same157))
+_w2_157 = br.new_window(); H.spin(700)
+_was157 = getattr(br, "_history_locked", False)
+_w2_157._history_locked = True
+_lk157 = getattr(br, "_history_locked", False)
+br._history_locked = _was157
+try:
+    _w2_157._closing_anyway = True
+    _w2_157.close()
+except RuntimeError:
+    pass
+H.spin(300)
+check("whether the sealed history is still unread is one answer for every "
+      "window", _lk157 is True, str(_lk157))
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 
