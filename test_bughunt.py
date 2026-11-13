@@ -202,6 +202,11 @@ H.spin(400)
 print("\n(2) turning a video up says so and is remembered")
 view = win.new_tab(url=None)
 H.load(view, srv.url("/media"))
+# the page itself: right after new_tab, H.load can return on the start
+# page's load, and the volume tool then found no player there at all
+H.wait_for(lambda: "/media" in view.url().toString(), 8000)
+H.wait_for(lambda: H.js(view, "!!document.getElementById('a')") is True,
+           8000)
 flashed = []
 real_flash = win.flash
 win.flash = lambda text, *a, **k: (flashed.append(text), real_flash(text, *a, **k))

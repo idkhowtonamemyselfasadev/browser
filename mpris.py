@@ -75,11 +75,21 @@ class Root(QDBusAbstractAdaptor):
     def Raise(self):
         """The desktop asking for the window. Exactly what clicking the
         taskbar entry would do."""
-        window = getattr(self.browser, "showNormal", None)
-        if window is not None:
-            self.browser.showNormal()
-            self.browser.raise_()
-            self.browser.activateWindow()
+        # a window that is open: the player belongs to the first window,
+        # and once that was closed this brought it back, empty and off
+        # the list of windows (closing the last real one then quit the
+        # browser under it)
+        target = self.browser
+        live = getattr(target, "_live_window", None)
+        if callable(live):
+            try:
+                target = live()
+            except RuntimeError:
+                pass
+        if getattr(target, "showNormal", None) is not None:
+            target.showNormal()
+            target.raise_()
+            target.activateWindow()
 
     @pyqtSlot()
     def Quit(self):

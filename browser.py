@@ -23706,6 +23706,42 @@ class Browser(QMainWindow):
     _history_locked = _shared_list("history_locked")
     _history_unsaved = _shared_list("history_unsaved")
     _history_drops = _shared_list("history_drops")
+    # the rest of what belongs to the browser rather than to a window
+    # (fourteenth pass): each window kept its own, so a second window
+    # showed no cookies for the main jar, handed out download ids the
+    # first had used, could not pause the first one's downloads and
+    # stranded its queue, granted a camera the other window had revoked,
+    # wrote hosts.json back from a stale copy (a forgotten site came
+    # back), put its own request interceptor over the shared jars, and
+    # cleared the clipboard under a newer copy made in another window
+    _cookies = _shared_list("cookies")
+    _cookie_seen = _shared_list("cookie_seen")
+    dl_active = _shared_list("dl_active")
+    _dl_seq = _shared_list("dl_seq")
+    _dl_queue = _shared_list("dl_queue")
+    _session_perms = _shared_list("session_perms")
+    _private_perms = _shared_list("private_perms")
+    _perm_used_at = _shared_list("perm_used_at")
+    known_hosts = _shared_list("known_hosts")
+    _req_watch = _shared_list("req_watch")
+    _req_watch_quiet = _shared_list("req_watch_quiet")
+    _ad_rules = _shared_list("ad_rules")
+    _ad_counted = _shared_list("ad_counted")
+    _http_allowed = _shared_list("http_allowed")
+    _clip_gen = _shared_list("clip_gen")
+    _clip_mine = _shared_list("clip_mine")
+    # the copy the clip history must not record: the history is kept by
+    # the first window, and a secret copied in a second window set the
+    # mark on that window only, so the first one recorded the password
+    _skip_clip = _shared_list("skip_clip")
+    # a private download's name held without a row: per window, the same
+    # file name was handed to a download in another window
+    _dl_held = _shared_list("dl_held")
+    _held_notifications = _shared_list("held_notifications")
+    # the virtual browsers: a list per window meant one added, renamed
+    # or moved in a second window was lost (only the first window's list
+    # was saved), and one closed in a window lived on in the others
+    sessions = _shared_list("sessions")
     del _shared_list
 
     def __init__(self, initial_url=None, share=None, private=False,
@@ -23813,8 +23849,10 @@ class Browser(QMainWindow):
                           else load_downloads())
         self.bookmarks = (share.bookmarks if share is not None
                           else load_bookmarks())
-        self.dl_active = {}  # id -> running QWebEngineDownloadRequest
-        self._dl_seq = max((e["id"] for e in self.downloads), default=0) + 1
+        if share is None:
+            self.dl_active = {}  # id -> running QWebEngineDownloadRequest
+            self._dl_seq = max((e["id"] for e in self.downloads),
+                               default=0) + 1
         # only pages the browser opened itself carry this run's key, so a
         # website talking raw QWebChannel can't drive the download slots
         self._page_key = uuid.uuid4().hex
@@ -23907,14 +23945,17 @@ class Browser(QMainWindow):
                         else self._make_profile("browser"))
         self._perm_queue = []
         self._perm_widget = None
-        self._session_perms = {}
+        if share is None:
+            self._session_perms = {}
         # names minted for files that keep no row: a private download,
         # and a private page printed to PDF. self.downloads speaks for
         # every other in-flight name, and cannot speak for these.
-        self._dl_held = set()
+        if share is None:
+            self._dl_held = set()
         # what a private tab was allowed, kept apart from the rest and
         # thrown away with the last private tab
-        self._private_perms = {}
+        if share is None:
+            self._private_perms = {}
         self._share_picker = None
         # the account chooser on screen, and the pages it has already
         # offered itself to unasked (page id -> host), so a login form
@@ -23966,10 +24007,11 @@ class Browser(QMainWindow):
         self.urlbar.installEventFilter(self)
 
         # suggestions dropdown: domain guesses + Google search suggestions
-        try:
-            self.known_hosts = set(json.loads(HOSTS_FILE.read_text()))
-        except Exception:
-            self.known_hosts = set()
+        if share is None:
+            try:
+                self.known_hosts = set(json.loads(HOSTS_FILE.read_text()))
+            except Exception:
+                self.known_hosts = set()
         self.suggest_model = QStringListModel(self)
         self.completer = QCompleter(self.suggest_model, self)
         self.completer.setCompletionMode(
@@ -24050,7 +24092,8 @@ class Browser(QMainWindow):
         self.group_sessions = {}
         # the last few closed tabs, oldest first (Ctrl+Shift+T)
         self._closed_tabs = []
-        self.sessions = [{"name": "Browser 1", "sid": "main"}]
+        if share is None:
+            self.sessions = [{"name": "Browser 1", "sid": "main"}]
         self.active_session = "main"
         self.session_profiles = (share.session_profiles if share is not None
                                  else {})
@@ -24261,7 +24304,9 @@ class Browser(QMainWindow):
         # twenty minutes went into bisecting that in clean worktrees
         # before the cause turned out to be git state rather than code.
         # BROWSER_NO_LIB_CHECK exists for exactly the same reason.
-        if not os.environ.get("BROWSER_NO_UPDATE_CHECK"):
+        # (by the first window only: one per window ran git and, with auto
+        # updates on, pulled twice at once)
+        if share is None and not os.environ.get("BROWSER_NO_UPDATE_CHECK"):
             QTimer.singleShot(3000, self._check_updates)
         # ...and once, a little later than that, what the graphics
         # turned out to be. Later because a renderer has to exist
@@ -24280,7 +24325,7 @@ class Browser(QMainWindow):
         # a window a test is making assertions about. The feature is
         # still tested -- test_libs drives _check_lib_updates itself --
         # it is only the automatic arming that the harness turns off.
-        if not os.environ.get("BROWSER_NO_LIB_CHECK"):
+        if share is None and not os.environ.get("BROWSER_NO_LIB_CHECK"):
             QTimer.singleShot(LIB_FIRST_MS, self._check_lib_updates)
             self._lib_timer = QTimer(self)
             self._lib_timer.setInterval(LIB_TICK_MS)
@@ -24327,7 +24372,8 @@ class Browser(QMainWindow):
         self._overview = None  # the thumbnail grid, built on first use
         # https-only: the hosts he has said "carry on" for, this run
         # only. A permanent exception is a site rule (httpsExempt).
-        self._http_allowed = set()
+        if share is None:
+            self._http_allowed = set()
         # what the redirect guard turned away, and the popups the
         # engine refused, both for the marks that say so
         self._blocked_redirects = []
@@ -24348,8 +24394,10 @@ class Browser(QMainWindow):
         self._break_from = time.monotonic()
         self._zen = False
         self._clip_hooked = False
-        self._skip_clip = ""
-        self._held_notifications = []
+        if share is None:
+            self._skip_clip = ""
+        if share is None:
+            self._held_notifications = []
         # the tabs whose music was stopped for a call, and the last
         # track a notification was sent for
         self._paused_for_call = []
@@ -24473,7 +24521,7 @@ class Browser(QMainWindow):
         saved_sessions = [e for e in self.config.get("sessions", [])
                           if e.get("sid") and e.get("name")
                           and not str(e.get("sid")).startswith("tmp-")]
-        if saved_sessions:
+        if saved_sessions and share is None:
             self.sessions = saved_sessions
             if not any(e["sid"] == "main" for e in self.sessions):
                 self.sessions.insert(0, {"name": "Browser 1", "sid": "main"})
@@ -24556,7 +24604,7 @@ class Browser(QMainWindow):
         # chrome while the menu said hidden, and the first click "hid"
         # it by switching the setting off
         if self.config.get("autoHideChrome", False) and not self._app_url:
-            self.set_auto_hide_chrome(True)
+            self._auto_hide_here(True)
         # the dimmer's next edge, for the tabs that are open then
         self._arm_evening_timer()
         # a controller switched on last time: the page script comes back
@@ -26513,6 +26561,7 @@ class Browser(QMainWindow):
             name += " 2"
         self.sessions.append({"name": name, "sid": uuid.uuid4().hex[:8]})
         self.switch_session(self.sessions[-1]["sid"])
+        self._sessions_changed()
 
     def _session_buttons_in_layout(self):
         out = []
@@ -26565,7 +26614,7 @@ class Browser(QMainWindow):
             rest = [e for e in self.sessions if e["sid"] != sid]
             i = max(0, min(drag["index"], len(rest)))
             self.sessions = rest[:i] + [entry] + rest[i:]
-        self._update_session_bar()
+        self._sessions_changed()
 
     def _session_menu(self, button, sid):
         menu = QMenu(self)
@@ -26584,11 +26633,53 @@ class Browser(QMainWindow):
                 for entry in self.sessions:
                     if entry["sid"] == sid:
                         entry["name"] = new
-                self._update_session_bar()
+                self._sessions_changed()
+
+    def _sessions_changed(self):
+        """Every window's row of virtual browsers, drawn again after
+        one was added, renamed, moved or closed."""
+        for win in self._all_windows():
+            try:
+                win._update_session_bar()
+            except RuntimeError:
+                continue
+        return True
 
     def _close_session(self, sid):
         if len(self.sessions) <= 1:
             return
+        # in every window: closed in one, it went on in the others with
+        # its tabs on a jar no longer on the list (the next tab there
+        # made a second jar on the same folder, which Chromium refuses)
+        for win in self._all_windows():
+            try:
+                win._close_session_here(sid)
+            except RuntimeError:
+                continue
+        self.sessions = [e for e in self.sessions if e["sid"] != sid]
+        self.session_profiles.pop(sid, None)
+        # a throwaway browser's mark goes with it (the list only ever
+        # grew). What to wipe of it at exit stays: that wipe goes by its
+        # name, and dropped here its jar's cookies stayed on disk
+        names = self.config.get("throwawaySessions")
+        if isinstance(names, list) and sid in names:
+            names.remove(sid)
+            self.save_config(quiet=True)
+        # private tabs of that browser went with it: so must their jar,
+        # or the next private tab opens already logged in
+        self._drop_private_profile()
+        for win in self._all_windows():
+            try:
+                if win.active_session == sid:
+                    win.switch_session(self.sessions[0]["sid"])
+                else:
+                    win._update_session_bar()
+            except RuntimeError:
+                continue
+
+    def _close_session_here(self, sid):
+        """This window's part of closing a virtual browser: its tabs,
+        its groups and its closed-tab memory."""
         for i in reversed(range(self.tabs.count())):
             w = self.tabs.widget(i)
             if getattr(w, "session", "main") == sid:
@@ -26605,17 +26696,8 @@ class Browser(QMainWindow):
             self.collapsed.pop(g, None)
             self.group_ids.pop(g, None)
             self.group_sessions.pop(g, None)
-        self.sessions = [e for e in self.sessions if e["sid"] != sid]
-        self.session_profiles.pop(sid, None)
-        # private tabs of that browser went with it: so must their jar,
-        # or the next private tab opens already logged in
-        self._drop_private_profile()
         self._closed_tabs = [t for t in self._closed_tabs
                              if t.get("session") != sid]
-        if self.active_session == sid:
-            self.switch_session(self.sessions[0]["sid"])
-        else:
-            self._update_session_bar()
 
     # ---- site permissions (microphone, camera, notifications) ----
     def _permission_requested(self, permission, page=None):
@@ -35251,7 +35333,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.sessions.append({"name": name, "sid": sid})
         self.throwaway_sessions().append(sid)
         self.save_config(quiet=True)
-        self._update_session_bar()
+        self._sessions_changed()
         self.switch_session(sid)
         return sid
 
@@ -42215,7 +42297,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.clear_clipboard_later()
                 if host and not private and self.vault_password_on():
                     self.vault.set_entry(host, url.scheme(), user, secret)
-                    self.bridge.vaultChanged.emit()
+                    self._push_all("vaultChanged")
                 self.flash(self._ui_str("genMade")
                            % password_strength(secret))
                 if then:
@@ -43970,7 +44052,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.downloads[:] = [e for e in self.downloads
                              if e.get("id") != item_id]
         self.save_downloads()
-        self.bridge.downloadsChanged.emit()
+        self._push_all("downloadsChanged")
         return True
 
     def clean_downloads(self, days=None):
@@ -43990,7 +44072,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         gone = before - len(self.downloads)
         if gone:
             self.save_downloads()
-            self.bridge.downloadsChanged.emit()
+            self._push_all("downloadsChanged")
         return gone
 
     def export_downloads(self, path=None):
@@ -44511,6 +44593,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         the rest of this second if that is over the cap."""
         cap = self.speed_cap()
         if cap <= 0:
+            return 0
+        if self._root_window() is not self:
+            # the downloads are the browser's: every window pausing all
+            # of them each second held them well under the cap
             return 0
         now = time.monotonic()
         total = 0
@@ -45185,7 +45271,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return
             entry["state"] = "done" if proc.returncode == 0 else "failed"
             self.save_downloads()
-            self.bridge.downloadsChanged.emit()
+            self._push_all("downloadsChanged")
             if then:
                 then(entry["state"])
 
@@ -45233,7 +45319,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             state["done"] = True
             entry["scan"] = answer
             self.save_downloads()
-            self.bridge.downloadsChanged.emit()
+            self._push_all("downloadsChanged")
             if answer == "infected":
                 self.flash(self._ui_str("dlInfected") % path.name, ms=8000)
             elif answer == "clean":
@@ -51671,14 +51757,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             else bool(on)
         self.config["monoFavicons"] = want
         self.save_config(quiet=True)
-        for index in range(self.tabs.count()):
-            view = self.tabs.widget(index)
-            if self._is_header(view) or getattr(view, "private", False):
-                continue
+        for win in self._all_windows():
             try:
-                self.tabs.setTabIcon(index, self.mono_icon(view.icon()))
-            except (AttributeError, RuntimeError):
+                count = win.tabs.count()
+            except RuntimeError:
                 continue
+            for index in range(count):
+                view = win.tabs.widget(index)
+                if win._is_header(view) or getattr(view, "private", False):
+                    continue
+                try:
+                    win.tabs.setTabIcon(index, win.mono_icon(view.icon()))
+                except (AttributeError, RuntimeError):
+                    continue
         return want
 
     def _fill_bookmark_icon(self, view, icon):
@@ -52652,7 +52743,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies
             if private else
             QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies)
-        profile.downloadRequested.connect(self._download)
+        profile.downloadRequested.connect(self._download_here)
         # the web's own notifications. Without a presenter the engine
         # drops them silently, which is why they never appeared; with
         # one they are written down, held back while Do Not Disturb is
@@ -52661,8 +52752,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # the jar says whether it is the private one: a private
             # tab's notification is shown and never written down
             profile.setNotificationPresenter(
-                lambda note, p=private: self._web_notification(
-                    note, private=p))
+                lambda note, p=private: self._live_window()
+                ._web_notification(note, private=p))
         except (AttributeError, TypeError):
             pass
         s = profile.settings()
@@ -54277,14 +54368,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             vault.set_entry(p["host"], p["scheme"], p["username"],
                             p["password"])
             # the cached Passwords pane is told, as the other branch is
-            self.bridge.vaultChanged.emit()
+            self._push_all("vaultChanged")
             return
         # a remote store means a subprocess, and a subprocess must not
         # hang off the click that dismissed the toast
         self.vault_job(
             lambda: vault.set_entry(p["host"], p["scheme"], p["username"],
                                     p["password"]),
-            lambda _saved: self.bridge.vaultChanged.emit())
+            lambda _saved: self._push_all("vaultChanged"))
 
     def _pw_never_pending(self):
         p = self._pw_pending
@@ -54292,7 +54383,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._hide_toast()
         if p:
             self.vault.never(p["host"])
-            self.bridge.vaultChanged.emit()
+            self._push_all("vaultChanged")
 
     # ---- the browser's own pages, as panes over the current tab ----
     def _pane_url_fn(self, name):
@@ -54993,18 +55084,25 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                   else lang + ",en")
         for profile in [self.profile] + list(self.session_profiles.values()):
             profile.setHttpAcceptLanguage(accept)
-        # the tooltips in the chrome are in his language too
-        self.relabel_toolbar()
         # no dictionary of his own picked means the spell checker
         # follows the browser's language, so it has to move along too
         self.apply_spellcheck()
-        for i in range(self.tabs.count()):
-            w = self.tabs.widget(i)
-            if hasattr(w, "url") and w.url().scheme() == "file":
-                w.reload()
-        if self._pane is not None and self._pane.isVisible():
-            self._pane.view.load(self._pane.page_url())
-        self._update_private_marks()
+        # every window: the tooltips in the chrome are in his language
+        # too, and our own pages say it -- the window whose Settings
+        # changed it was the only one relabelled
+        for win in self._all_windows():
+            try:
+                win.relabel_toolbar()
+                for i in range(win.tabs.count()):
+                    w = win.tabs.widget(i)
+                    if hasattr(w, "url") and w.url().scheme() == "file":
+                        w.reload()
+                pane = getattr(win, "_pane", None)
+                if pane is not None and pane.isVisible():
+                    pane.view.load(pane.page_url())
+                win._update_private_marks()
+            except RuntimeError:
+                continue
 
     def refresh_google_scripts(self):
         """Swap the Google white/black script in every cookie jar."""
@@ -55053,6 +55151,33 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def _all_windows(self):
         wins = self.windows()
         return wins if self in wins else [self] + wins
+
+    def _views_everywhere(self):
+        """Every tab of every window."""
+        views = []
+        for win in self._all_windows():
+            try:
+                views += [win.tabs.widget(i) for i in range(win.tabs.count())]
+            except RuntimeError:
+                continue
+        return [v for v in views if v is not None]
+
+    def _push_all(self, name):
+        """One of the page pushes (downloadsChanged, bookmarksChanged,
+        vaultChanged) on the bridge of every window. The lists are the
+        browser's, and pushed on one window's bridge only, a Downloads,
+        Bookmarks or Passwords page open in another window went on
+        showing the old rows -- and an edit made from it could write
+        them back."""
+        for win in self._all_windows():
+            bridge = getattr(win, "bridge", None)
+            if bridge is None:
+                continue
+            try:
+                getattr(bridge, name).emit()
+            except (AttributeError, RuntimeError):
+                continue
+        return True
 
     def _restyle_widgets(self):
         """The few widgets that carry a stylesheet of their own instead
@@ -55327,9 +55452,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             app.setStyleSheet(theme_style() + look_style()
                               + self.chrome_extras())
         self._marks_everywhere()
-        self._rebuild_furniture()
+        # every window's dock or taskbar: built only in the window whose
+        # Settings changed the look, the others kept the old furniture
+        for win in self._all_windows():
+            try:
+                win._rebuild_furniture()
+            except RuntimeError:
+                continue
         self.refresh_look_scripts()
-        self._restyle_widgets()
+        for win in self._all_windows():
+            try:
+                win._restyle_widgets()
+            except RuntimeError:
+                continue
         payload = json.dumps(json.dumps(name))
         for view in self._own_open_pages():
             page = view.page()
@@ -55631,7 +55766,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._call_apply()
 
     def _call_apply(self):
-        if self._call_live:
+        # one flag for the process, so every open window's calls count:
+        # a window with none dropped the flag another had just raised,
+        # and it flapped off between ticks for the rest of the call
+        live = False
+        for win in self._all_windows():
+            try:
+                if getattr(win, "_call_live", None):
+                    live = True
+                    break
+            except RuntimeError:
+                continue
+        if live:
             call_flag_raise()
         else:
             call_flag_drop()
@@ -55738,8 +55884,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 scripts.insert(main)
         if not live:
             return True
-        for index in range(self.tabs.count()):
-            view = self.tabs.widget(index)
+        for view in self._views_everywhere():
             if self._is_header(view):
                 continue
             page = self._live_page(view)
@@ -60347,8 +60492,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.config["mouseGestures"] = want
         self.save_config(quiet=True)
         if want:
-            for _index, view in self._real_tabs():
-                self.watch_view_mouse(view)
+            # every window's tabs, not only the calling window's
+            for win in self._all_windows():
+                try:
+                    rows = win._real_tabs()
+                except RuntimeError:
+                    continue
+                for _index, view in rows:
+                    win.watch_view_mouse(view)
         return want
 
     def gesture_trail(self, points, view=None):
@@ -63249,8 +63400,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             scripts.insert(self._nav_script())
         if not live:
             return True
-        for index in range(self.tabs.count()):
-            view = self.tabs.widget(index)
+        # every window's open pages (the jars are shared, so the next
+        # load had it anyway; the pages already open did not)
+        for view in self._views_everywhere():
             if self._is_header(view):
                 continue
             page = self._live_page(view)
@@ -66789,6 +66941,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             else bool(on)
         self.config["autoHideChrome"] = want
         self.save_config(quiet=True)
+        # every window: the timer ran, and the chrome went, only in the
+        # window whose Settings or menu made the change
+        for win in self._all_windows():
+            try:
+                win._auto_hide_here(want)
+            except RuntimeError:
+                continue
+        return want
+
+    def _auto_hide_here(self, want):
+        """This window's part of set_auto_hide_chrome. A window for one
+        site has no chrome to hide."""
+        if getattr(self, "_app_url", None):
+            return False
         timer = getattr(self, "_peek_timer", None)
         if want:
             if timer is None:
@@ -66856,6 +67022,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if on is None else bool(on)
         self.config["revealInFullscreen"] = want
         self.save_config(quiet=True)
+        for win in self._all_windows():
+            try:
+                win._reveal_here(want)
+            except RuntimeError:
+                continue
+        return want
+
+    def _reveal_here(self, want):
+        """This window's part of set_reveal_in_fullscreen: a window
+        already in fullscreen starts or stops its peek."""
         timer = getattr(self, "_peek_timer", None)
         if want and self.isFullScreen():
             if timer is None:
@@ -67111,7 +67287,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         style = (Qt.ToolButtonStyle.ToolButtonTextBesideIcon if want
                  else Qt.ToolButtonStyle.ToolButtonIconOnly)
         done = 0
-        for button in self.findChildren(QToolButton):
+        # every window's toolbar, not only the one whose Settings asked
+        buttons = []
+        for win in self._all_windows():
+            try:
+                buttons += win.findChildren(QToolButton)
+            except RuntimeError:
+                continue
+        for button in buttons:
             if button.objectName() in ("dlall",):
                 continue
             tip = button.toolTip()
@@ -67680,7 +67863,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def _private_downloads_running(self):
         out = []
         bars = []
-        for win in self.windows() or [self]:
+        # every window there is, the closed ones too: a private download
+        # started in a window that was closed since still runs in its
+        # bar, and the jar went from under it
+        wins = [w for w in QApplication.topLevelWidgets()
+                if isinstance(w, Browser)] or [self]
+        for win in wins:
             bar = getattr(win, "dlbar", None)
             if bar is not None and bar not in bars:
                 bars.append(bar)
@@ -67723,6 +67911,54 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         target = url if url.toString() else QUrl(getattr(view, "_requested", ""))
         view.attach_profile(want)
         view.load(target if target.toString() else START_PAGE)
+
+    def _live_window(self):
+        """A window he can see: the one in front, else the newest open
+        one. What the jars' signals and the root's services answer
+        through -- the window that made a jar may have been closed, and
+        a closed window is only hidden."""
+        wins = self.windows()
+        try:
+            active = QApplication.activeWindow()
+        except RuntimeError:
+            active = None
+        if active is not None and active in wins:
+            return active
+        return wins[-1] if wins else self
+
+    def _window_of_page(self, page):
+        """The open window holding this page, or None."""
+        if page is None:
+            return None
+        for win in self.windows():
+            try:
+                views = [win.tabs.widget(i) for i in range(win.tabs.count())]
+                split = getattr(win, "_split_view", None)
+                if split is not None:
+                    views.append(split)
+            except RuntimeError:
+                continue
+            for view in views:
+                try:
+                    if view is not None and hasattr(view, "page") \
+                            and view.page() is page:
+                        return win
+                except RuntimeError:
+                    continue
+        return None
+
+    def _download_here(self, request):
+        """A download goes to the window it came from. The jars are
+        shared, and their signal was connected by whichever window made
+        the jar: a download in a second window put its questions, its
+        toast and its bar in the first -- hidden, once that one had been
+        closed -- and only that window's Downloads page could stop it."""
+        try:
+            page = request.page()
+        except RuntimeError:
+            page = None
+        win = self._window_of_page(page) or self._live_window()
+        return win._download(request)
 
     def _download(self, request):
         # the click that started this was a navigation as far as the
@@ -67957,7 +68193,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         request.stateChanged.connect(
             lambda *_, r=request, e=entry: self._download_state(r, e))
         self.queue_download(request, entry)
-        self.bridge.downloadsChanged.emit()
+        self._push_all("downloadsChanged")
 
     def _download_progress(self, request, entry):
         if entry["state"] != "active":
@@ -67983,7 +68219,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         entry["paused"] = False
         self.dl_active.pop(entry["id"], None)
         self.save_downloads()
-        self.bridge.downloadsChanged.emit()
+        self._push_all("downloadsChanged")
         if entry["state"] == "done":
             self._download_landed(entry)
         self.start_next_download()
@@ -69562,9 +69798,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.write_bookmarks()
         if self.config.get("bookmarkMirror"):
             self.mirror_bookmarks()
-        self.rebuild_bookmarks_bar()
-        self._sync_star()
-        self.bridge.bookmarksChanged.emit()
+        # every window's bar and star: a bookmark added or deleted in one
+        # window left the other's bar showing the old ones
+        for win in self._all_windows():
+            if win is not self and getattr(win, "_app_url", None):
+                continue        # a window for one site has no bar
+            try:
+                win.rebuild_bookmarks_bar()
+                win._sync_star()
+            except RuntimeError:
+                continue
+        self._push_all("bookmarksChanged")
 
     def write_bookmarks(self):
         _page_data_changed()
@@ -69900,9 +70144,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         show = (not self.bookmarks_bar_on()) if on is None else bool(on)
         self.config["bookmarksBar"] = show
         self.save_config()
-        if getattr(self, "bmbar", None) is not None:
-            self.bmbar.setVisible(show)
-        self.bridge.bookmarksChanged.emit()
+        # one setting, every window's bar
+        for win in self._all_windows():
+            if getattr(win, "_app_url", None):
+                continue        # a window for one site has no bar
+            try:
+                if getattr(win, "bmbar", None) is not None:
+                    win.bmbar.setVisible(show)
+            except RuntimeError:
+                continue
+        self._push_all("bookmarksChanged")
 
     def rebuild_bookmarks_bar(self):
         bar = getattr(self, "bmbar", None)
@@ -70612,14 +70863,27 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not self.vault_lock.can_seal():
             return False
         self.vault_lock.lock()
-        # a sign-in attempt held for its save offer carries a password
-        self._pw_attempts = {}
         # Everything already on its way back from a worker thread is
         # now answering a question the browser is no longer allowed to
         # ask. Moving the epoch on is what drops it (see vault_job).
         self._vault_epoch += 1
         self.vault = self.make_vault()
-        self._close_account_chooser()   # nothing left to choose between
+        # in every window: a sign-in attempt held for its save offer, the
+        # save offer itself (the toast held the plain password, and its
+        # Save wrote nothing into the locked vault, without a word) and
+        # the account chooser with his user names on it -- this window's
+        # went, the other windows' stayed up over a locked vault
+        for win in self._all_windows():
+            try:
+                win._pw_attempts = {}
+                if getattr(win, "_pw_pending", None) is not None:
+                    win._pw_pending = None
+                    toast = getattr(win, "_toast", None)
+                    if toast is not None and toast.property("pwPrompt"):
+                        win._hide_toast()
+                win._close_account_chooser()
+            except RuntimeError:
+                continue
         self._vault_changed()
         return True
 
@@ -71300,7 +71564,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         widget.info.setText(self._ui_str("pdfSaving"))
         self.dllay.insertWidget(self.dllay.count() - 1, widget)
         self.dlbar.show()
-        self.bridge.downloadsChanged.emit()
+        self._push_all("downloadsChanged")
 
         page = view.page()
 
@@ -71339,7 +71603,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         entry["state"] = "done" if good else "failed"
         entry["received"] = entry["size"] = size if good else 0
         self.save_downloads()
-        self.bridge.downloadsChanged.emit()
+        self._push_all("downloadsChanged")
         try:
             widget.finished(path, size, good, self._ui_str("dlDone"),
                             self._ui_str("pdfFailed"))
@@ -71387,7 +71651,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         widget.info.setText(self._ui_str("imgSaving"))
         self.dllay.insertWidget(self.dllay.count() - 1, widget)
         self.dlbar.show()
-        self.bridge.downloadsChanged.emit()
+        self._push_all("downloadsChanged")
         ok = True
         try:
             path.write_bytes(data)
@@ -71396,7 +71660,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         entry["state"] = "done" if ok else "failed"
         entry["received"] = entry["size"] = len(data) if ok else 0
         self.save_downloads()
-        self.bridge.downloadsChanged.emit()
+        self._push_all("downloadsChanged")
         widget.finished(path, len(data), ok, self._ui_str("dlDone"),
                         self._ui_str("imgFailed"))
 
@@ -71763,7 +72027,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # up in a window nobody could see and was lost, and the
             # snapshots stopped for the rest of the run
             keeper = writers[-1] if writers else heir
-            for name in ("_desk_timer", "_track_timer", "_snap_timer"):
+            for name in ("_desk_timer", "_track_timer", "_snap_timer",
+                         "_live_timer"):
                 mine = getattr(self, name, None)
                 if mine is None or not mine.isActive():
                     continue
@@ -71772,6 +72037,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if theirs is not None and not theirs.isActive():
                     theirs.start()
             QTimer.singleShot(0, heir._drop_private_profile)
+            if self._root_window() is not self:
+                # nothing deletes a closed window, so its timers went on
+                # for the rest of the run: its idle housekeeping, frozen
+                # at the moment of closing, emptied every cache while he
+                # browsed in another window. The first window keeps its
+                # own: it holds the jars, the vault and the services.
+                for timer in self.findChildren(QTimer):
+                    try:
+                        timer.stop()
+                    except RuntimeError:
+                        pass
             super().closeEvent(event)
             return
         self._clear_on_exit()
@@ -71803,6 +72079,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.tabs.removeTab(i)
             w._closed = True
             w.deleteLater()
+        # and the panes it built (Settings, History...): kept for a quick
+        # reopen, they held a renderer each for the rest of the run, and
+        # the call poll went on asking them
+        try:
+            self.close_pane()
+        except (AttributeError, RuntimeError):
+            pass
+        for name in list(getattr(self, "_panes", None) or {}):
+            pane = self._panes.pop(name, None)
+            if pane is None:
+                continue
+            try:
+                pane.release()
+            except RuntimeError:
+                pass
 
     def _dismiss_download(self, widget):
         self.dllay.removeWidget(widget)

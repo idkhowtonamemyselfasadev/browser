@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part thirty-nine: fourteenth pass, several windows)
+
+The fourteenth search looked only at what goes wrong with more than one
+window open. It confirmed 33 bugs, all fixed here:
+
+- **One browser, not one per window.** A second window now sees the
+  first one's cookies, uses the same download numbers and queue, and
+  can pause or stop the first one's downloads. A permission taken back
+  in one window is taken back everywhere, the address bar's memory of
+  sites is one list (a forgotten site no longer comes back from the
+  other window), and a password copied in a second window stays out of
+  the clip history.
+- **Ad blocking and the request log** keep working after a second window
+  opens: it no longer replaces the first window's filter.
+- **Downloads** ask their questions and show their progress in the
+  window they came from, also after the first window was closed. A
+  private download is no longer cut off when the last private tab closes
+  in another window.
+- **Pages stay current in every window.** The Downloads, Bookmarks and
+  Passwords pages, the bookmarks bar and the star follow changes made in
+  another window.
+- **Settings land in every window:** the look's dock or taskbar, words on
+  the toolbar, the auto-hiding toolbar, the language, the keyboard and
+  speed switches for open pages, flat site icons and mouse gestures.
+- **Virtual browsers** added, renamed, moved or closed in one window are
+  the same in all of them and are remembered after a restart. Closing one
+  closes its tabs in every window.
+- **Locking the vault** closes the account chooser and drops a pending
+  "save password?" offer in every window.
+- **Smaller fixes:**
+  - The "on a call" signal no longer flickers off while another window is
+    open.
+  - A closed window gives back the memory of its Settings and History
+    panes and stops its background timers.
+  - The update checks run once, not once per window, and the download
+    speed cap holds with several windows open.
+  - The media keys' "show the player" opens a window that is still open.
+  - Live-channel checks and website notifications keep working after the
+    first window was closed.
 ## 2026-11-13 — line-by-line review, day 3 (part thirty-eight: thirteenth pass, security)
 
 The thirteenth search looked only for security and privacy holes: the

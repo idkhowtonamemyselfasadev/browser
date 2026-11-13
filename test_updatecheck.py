@@ -25,6 +25,7 @@ assumption as the code.
 No Qt, no browser, no network, nothing outside its own temp directory.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -164,9 +165,12 @@ check("a stranded copy is offered a replace, not a pull",
 # about the checkout, not about the code, so a tree with unpushed
 # commits used to raise a genuine toast three seconds into every
 # window -- and two suites elsewhere assert that no toast is up.
+# (armed by the first window only since the fourteenth pass: one per
+# window ran git twice at once)
 check("the check is skipped when the suites say so",
-      'if not os.environ.get("BROWSER_NO_UPDATE_CHECK"):\n'
-      "            QTimer.singleShot(3000, self._check_updates)" in SRC)
+      re.search(r'if (?:share is None and )?not os\.environ\.get\('
+                r'"BROWSER_NO_UPDATE_CHECK"\):\n\s+QTimer\.singleShot\('
+                r'3000, self\._check_updates\)', SRC) is not None)
 check("...and the harness says so for every suite at once",
       'os.environ["BROWSER_NO_UPDATE_CHECK"] = "1"' in
       (HERE / "tests" / "harness.py").read_text(encoding="utf-8"))

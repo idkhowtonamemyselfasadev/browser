@@ -8517,6 +8517,86 @@ except RuntimeError:
 H.spin(300)
 check("whether the sealed history is still unread is one answer for every "
       "window", _lk157 is True, str(_lk157))
+# ===== fourteenth pass: one browser, several windows ====================
+br._session_perms["k159|use the camera"] = True
+_w159 = br.new_window(); H.spin(800)
+_kept159 = br._session_perms.get("k159|use the camera") is True
+_shared159 = {n: getattr(_w159, n) is getattr(br, n) for n in (
+    "_session_perms", "_private_perms", "dl_active", "known_hosts",
+    "_http_allowed", "sessions", "downloads")}
+check("a second window does not empty the first one's permission answers",
+      _kept159, str(br._session_perms.get("k159|use the camera")))
+check("the windows share their permission books, downloads in flight, "
+      "address-bar hosts, https answers and virtual browsers",
+      all(_shared159.values()), str(_shared159))
+br.config.setdefault("permissions", {})["k159|use the camera"] = "allow"
+_w159.revoke_permission("k159|use the camera")
+check("...so a permission taken back in one window is gone in the other",
+      "k159|use the camera" not in br._session_perms)
+check("a second window uses the browser's one request interceptor",
+      _w159.request_watch() is br.request_watch())
+_got159 = []
+br.bridge.downloadsChanged.connect(lambda: _got159.append("dl"))
+br.bridge.bookmarksChanged.connect(lambda: _got159.append("bm"))
+_w159._push_all("downloadsChanged")
+_w159.save_bookmarks()
+H.spin(100)
+check("a change made in one window is pushed to the pages of the others",
+      "dl" in _got159 and "bm" in _got159, str(_got159))
+_tl159 = br.config.get("textLabels", False)
+br.config["textLabels"] = True
+_w159.apply_text_labels()
+_btns159 = [b for b in br.findChildren(B.QToolButton)
+            if b.objectName() not in ("dlall",)]
+_style159 = bool(_btns159) and all(
+    b.toolButtonStyle() == B.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+    for b in _btns159)
+br.config["textLabels"] = _tl159
+_w159.apply_text_labels()
+check("words on the toolbar, switched on in one window, reach the other",
+      _style159, str(len(_btns159)))
+_tab159 = _w159.new_tab(); H.spin(400)
+check("a download is answered by the window whose page asked for it",
+      br._window_of_page(_tab159.page()) is _w159)
+br.sessions.append({"name": "S159", "sid": "s159"})
+_seen159 = any(e["sid"] == "s159" for e in _w159.sessions)
+_w159._close_session("s159")
+check("a virtual browser added in one window is in the other, and closing "
+      "it there closes it everywhere", _seen159
+      and not any(e["sid"] == "s159" for e in br.sessions))
+_cl159 = dict(getattr(br, "_call_live", {}) or {})
+br._call_live = {"k159": _time.monotonic()}
+_w159._call_live = {}
+_w159._call_apply()
+_up159 = B._call_flag_raised
+br._call_live = _cl159
+br._call_apply()
+check("a window with no call does not drop the flag another window raised",
+      _up159 is True, str(_up159))
+_vl159 = br.vault_lock
+_pend159 = getattr(br, "_pw_pending", None)
+br._pw_pending = {"host": "h159.example", "username": "u", "password": "p"}
+_vl159.can_seal = lambda: True
+_vl159.lock = lambda: None
+try:
+    _w159.lock_vault()
+finally:
+    _vl159.__dict__.pop("can_seal", None)
+    _vl159.__dict__.pop("lock", None)
+_after159 = getattr(br, "_pw_pending", None)
+br._pw_pending = _pend159
+check("locking the vault in one window drops the other window's held "
+      "password offer", _after159 is None, str(_after159))
+_close_if_open(_tab159, _w159)
+try:
+    _w159._closing_anyway = True
+    _w159.close()
+except RuntimeError:
+    pass
+H.spin(400)
+_busy159 = [t for t in _w159.findChildren(B.QTimer) if t.isActive()]
+check("a closed second window has no timer still running",
+      not _busy159, str(len(_busy159)))
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 
