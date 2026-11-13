@@ -213,7 +213,17 @@
         desk("saveNote", {id: note.id, title: title.value,
                           body: text.value, tags: tags.value.split(","),
                           edited: note.edited || 0},
-             (saved) => { open = saved ? saved.id : null; render(); });
+             (saved) => {
+               if (!saved) {
+                 // not written (a read-only or full folder, a drive that
+                 // went): this went back to the list and threw away what
+                 // he had typed, without a word
+                 save.textContent = STR.readSaveFailed
+                   || "That could not be written.";
+                 return;
+               }
+               open = saved.id; render();
+             });
       };
       const back = el("button", "act", STR.noteBack || "Back");
       back.onclick = () => { open = null; render(); };
@@ -222,6 +232,9 @@
         if (!info) return;
         text.value += (text.value ? "\n\n" : "") +
           "[" + (info.title || info.url) + "](" + info.url + ")";
+        // set from here, not typed: no input event, and the preview kept
+        // showing the text without the link
+        if (text.oninput) text.oninput();
       });
       bar.append(save, back, clip);
       body.append(title, el("div", "row"), text, el("div", "row"), tags,
@@ -280,7 +293,7 @@
           const tick = el("input");
           tick.type = "checkbox";
           tick.checked = row.done;
-          tick.onchange = () => desk("toggleTodo", {id: row.id},
+          tick.onchange = () => desk("toggleTodo", {id: row.id, text: row.text},
                                      () => render());
           const grow = el("div", "grow");
           grow.appendChild(el("div", "", row.text));
@@ -292,10 +305,11 @@
           if (row.due) grow.appendChild(el("div", "sub",
             (STR.todoDue || "due %s").replace("%s", when(row.due))));
           const up = el("button", "act", "↑");
-          up.onclick = () => desk("moveTodo", {id: row.id, delta: -1},
+          up.onclick = () => desk("moveTodo", {id: row.id, text: row.text,
+                                               delta: -1},
                                   () => render());
           const drop = el("button", "act warn", "✕");
-          drop.onclick = () => desk("deleteTodo", {id: row.id},
+          drop.onclick = () => desk("deleteTodo", {id: row.id, text: row.text},
                                     () => render());
           item.append(tick, grow, up, drop);
           body.appendChild(item);

@@ -84,7 +84,7 @@ def body_for(report_text, ids):
             + "\n" + MARKER % json.dumps({"ids": ids}) + "\n")
 
 
-def decide(findings, issue):
+def decide(findings, issue, unknown=()):
     """(action, why) — the whole policy in one place.
 
     act    something is installable/fixable  -> the issue must be open
@@ -97,6 +97,11 @@ def decide(findings, issue):
     changed = stored_ids(issue) != ids
 
     if not findings:
+        if unknown:
+            # sources that could not be read are not "all clear": every
+            # network hiccup closed the open issue, and the next run
+            # opened it again
+            return "silent", "some sources could not be read"
         if open_now:
             return "close", "everything is clear again"
         return "silent", "nothing to report"
@@ -136,12 +141,14 @@ def main():
     ap.add_argument("--gh", default="gh", help="the gh binary to use")
     args = ap.parse_args()
 
-    findings = json.loads(Path(args.findings).read_text())["findings"]
+    data = json.loads(Path(args.findings).read_text())
+    findings = data["findings"]
+    unknown = data.get("unknown") or []
     report = Path(args.report).read_text()
     gh = Gh(args.dry_run, args.gh)
 
     issue = existing_issue(gh)
-    action, why = decide(findings, issue)
+    action, why = decide(findings, issue, unknown)
     ids = sorted(f["id"] for f in findings)
     body = body_for(report, ids)
     number = str(issue["number"]) if issue else None

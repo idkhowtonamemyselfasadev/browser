@@ -16449,8 +16449,11 @@ class Bridge(QObject):
         elif key in ("uiSize", "uiFont", "uiFontSize", "cornerRadius",
                      "glassStrength", "focusRing", "tabMinWidth",
                      "tabMaxWidth", "toolbarHeight", "plainMenus",
-                     "privateTint", "sessionTint", "pageThemeColour"):
+                     "privateTint", "sessionTint"):
             browser.apply_chrome_style()
+        elif key == "pageThemeColour":
+            # through its own switch: the restyle alone never read a page
+            browser.set_page_theme_colour(bool(value))
         elif key == "textLabels":
             browser.apply_text_labels()
         elif key == "monoFavicons":
@@ -17300,6 +17303,9 @@ class Bridge(QObject):
             # a check still out for the old name must not land after
             self.browser._vault_epoch += 1
             self.browser.vault = self.browser.make_vault()
+            # and every window takes it, as with any other store change:
+            # the others kept the old vault, its items and its name
+            self.browser._vault_changed()
         return json.dumps({"vault": str(name or "")})
 
     @pyqtSlot(result=str)
@@ -17761,12 +17767,20 @@ class Bridge(QObject):
     def cancelDownload(self, key, dl_id):
         request = self._running(key, dl_id)
         if request is not None:
+            # a waiting one leaves the queue (as a resume by hand does):
+            # it stayed listed as waiting, and was saved as queued
+            entry = self.browser.download_entry(dl_id)
+            if entry is not None and entry.pop("queued", None):
+                queue = getattr(self.browser, "_dl_queue", None) or []
+                if dl_id in queue:
+                    queue.remove(dl_id)
             request.cancel()
 
     @pyqtSlot(str, int)
     def pauseDownload(self, key, dl_id):
         request = self._running(key, dl_id)
         if request is not None:
+            request._cap_paused = False   # his pause, not the cap's
             request.pause()
 
     @pyqtSlot(str, int)
@@ -23742,6 +23756,13 @@ class Browser(QMainWindow):
     # or moved in a second window was lost (only the first window's list
     # was saved), and one closed in a window lived on in the others
     sessions = _shared_list("sessions")
+    # when he last touched ANY window, when his break began and which
+    # due to-dos were already said: per window, working in a second
+    # window counted as idle in the first (no break reminder ever), and
+    # every due to-do was said again when the desk timer moved windows
+    _last_touch = _shared_list("last_touch")
+    _break_from = _shared_list("break_from")
+    _todo_said = _shared_list("todo_said")
     del _shared_list
 
     def __init__(self, initial_url=None, share=None, private=False,
@@ -24390,8 +24411,10 @@ class Browser(QMainWindow):
         self._desk = None
         self._limit_said = {}
         self._limit_warned = {}
-        self._todo_said = {}
-        self._break_from = time.monotonic()
+        if share is None:
+            self._todo_said = {}
+            # on a clock that runs while the machine sleeps (see VaultLock)
+            self._break_from = _awake_clock()
         self._zen = False
         self._clip_hooked = False
         if share is None:
@@ -24403,7 +24426,8 @@ class Browser(QMainWindow):
         self._paused_for_call = []
         self._last_track = ""
         self._lock_cover = None
-        self._last_touch = time.monotonic()
+        if share is None:
+            self._last_touch = _awake_clock()
         self._short_links = {}
         # the tabs he has ctrl-clicked, as views rather than indices:
         # an index means nothing the moment a tab moves or closes
@@ -25311,6 +25335,15 @@ class Browser(QMainWindow):
         self._show_lib_toast()
 
     def _show_lib_toast(self):
+        live = self._live_window()
+        if live is not self:
+            # the first window holds this timer, and it may have been
+            # closed (only hidden): the offer went up on it, unseen, and
+            # came back every six hours for ever
+            return live._show_lib_toast()
+        return self._show_lib_toast_here()
+
+    def _show_lib_toast_here(self):
         """The offer. Same toast as the browser's own update, because it
         is the same kind of news, and one at a time like all of them: if
         something else is already asking, this waits for the next tick
@@ -25693,9 +25726,21 @@ class Browser(QMainWindow):
             lambda _u, v=view: self.note_media_place(v))
         view.loadFinished.connect(
             lambda ok, v=view: ok and self.maybe_render_file(v))
-        # ...and where he was on the page he is leaving
+        # a page loaded in front: its colour, when he wants the chrome to
+        # wear it (nothing read that again after the switch was flipped)
+        view.loadFinished.connect(
+            lambda ok, v=view: ok
+            and self.config.get("pageThemeColour", False)
+            and self.current() is v and self.page_theme_colour(v))
+        # ...and where he was on the page he is leaving: asked when the
+        # next load starts, while that page is still the one shown, and
+        # filed under its own address. On urlChanged the new address was
+        # already there, and the old page's place went under it -- or
+        # the new page's top (0) took away the place saved for it.
         view.urlChanged.connect(
-            lambda _u, v=view: self.note_reading_place(v))
+            lambda u, v=view: setattr(v, "_read_url", u.toString()))
+        view.loadStarted.connect(
+            lambda v=view: self.note_reading_place(v))
         # a sign-in that changed the address without loading anything:
         # the moment to ask the page what was in the login boxes, since
         # there was no form submit for the watcher to see
@@ -31836,14 +31881,25 @@ class Browser(QMainWindow):
             if not found.get("found"):
                 self.flash(self._ui_str("keyNoField"))
                 return
-            path = CONFIG_FILE.parent / "edit.txt"
+            # a file of its own, 0600, in the temporary folder: one fixed
+            # edit.txt in the (synced, backed-up) config folder was shared
+            # by two edits at once, and stayed there, a private draft and
+            # all, when the editor could not start
             try:
-                path.write_text(str(found.get("value") or ""),
-                                encoding="utf-8")
+                handle, name = tempfile.mkstemp(prefix="browser-edit-",
+                                                suffix=".txt")
+                with os.fdopen(handle, "w", encoding="utf-8") as out:
+                    out.write(str(found.get("value") or ""))
             except OSError:
                 return
+            path = Path(name)
             proc = QProcess(self)
             self._editor_proc = proc
+            page0 = page
+            try:
+                url0 = view.url()
+            except RuntimeError:
+                url0 = QUrl()
 
             def done(_code=0, _status=None):
                 try:
@@ -31858,7 +31914,15 @@ class Browser(QMainWindow):
                 except OSError:
                     pass
                 back = self._live_page(view)
-                if back is None:
+                try:
+                    same = back is not None and back is page0 \
+                        and view.url() == url0
+                except RuntimeError:
+                    same = False
+                if not same:
+                    # another page now (or none): not into its focused box
+                    QGuiApplication.clipboard().setText(text)
+                    self.flash(self._ui_str("shotCopied"))
                     return
                 code = ("(function (text) {"
                         " var el = window.__editTarget"
@@ -31875,7 +31939,15 @@ class Browser(QMainWindow):
                 except RuntimeError:
                     pass
 
+            def failed(err):
+                if err == QProcess.ProcessError.FailedToStart:
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+
             proc.finished.connect(done)
+            proc.errorOccurred.connect(failed)
             proc.start(program, command.split()[1:] + [str(path)])
 
         page.runJavaScript(
@@ -35981,8 +36053,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         minutes = _sane_number(self.config.get("lockAfter", 0)) or 0
         if minutes <= 0 or not self.browser_lock_set() or self.locked_now():
             return False
-        idle = time.monotonic() - getattr(self, "_last_touch",
-                                          time.monotonic())
+        idle = _awake_clock() - getattr(self, "_last_touch", _awake_clock())
         if idle < minutes * 60:
             return False
         return self.lock_browser()
@@ -36436,7 +36507,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             note = drawer.daily_note()
             body = "> %s\n\n[%s](%s)" % (
                 text.replace("\n", "\n> ")[:4000], title or url, url)
-            drawer.append_note(note["id"], body)
+            # a folder that cannot be written answers None: note["id"] on
+            # it raised, and a failed append still said "saved"
+            if note is None or drawer.append_note(note["id"], body) is None:
+                self.flash(self._ui_str("readSaveFailed"))
+                return
             self.flash(self._ui_str("clipSaved"))
             if then is not None:
                 then(body)
@@ -36457,7 +36532,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         note = drawer.save_note(title=title or url,
                                 body="[%s](%s)\n" % (title or url, url),
                                 link=url)
-        self.flash(self._ui_str("noteMade"))
+        self.flash(self._ui_str("noteMade" if note is not None
+                                else "readSaveFailed"))
         return note
 
     def tab_to_todo(self, index=None, close=True):
@@ -36500,7 +36576,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if url:
             body += "\n\n[%s](%s)" % (self._view_title(view) or url, url)
         note = drawer.daily_note()
-        drawer.append_note(note["id"], body)
+        if note is None or drawer.append_note(note["id"], body) is None:
+            # typed into the box, and then lost with a traceback (or with
+            # "saved" on screen when only the append failed)
+            self.flash(self._ui_str("readSaveFailed"))
+            return None
         self.flash(self._ui_str("captureSaved"))
         return note
 
@@ -36651,6 +36731,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return drawer.add_todo(str(want.get("text") or ""),
                                    str(want.get("link") or ""),
                                    _sane_number(want.get("due")))
+        if verb in ("toggleTodo", "deleteTodo", "moveTodo") \
+                and "text" in want:
+            # the row the panel showed, checked by its words: the id is a
+            # line of todo.md, and with the file changed under an open
+            # panel (a synced edit) a tick or a delete landed on another
+            # to-do. Not the same one any more: nothing done, fresh rows
+            tid = _sane_number(want.get("id"))
+            row = next((r for r in drawer.todos() if r["id"] == tid), None)
+            if row is None or str(row.get("text") or "") \
+                    != str(want.get("text") or ""):
+                return drawer.todos()
         if verb == "toggleTodo":
             tid = _sane_number(want.get("id"))
             before = {r["id"]: r["done"] for r in drawer.todos()}
@@ -36988,17 +37079,27 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.flash(self._ui_str("todoDueNow") % row["text"], ms=8000)
                 self.notify_desktop(self._ui_str("todoDueNow") % row["text"])
             self._todo_said = now_said
-        self.note_site_time(20)
+        # the time on a site counts in the window he is using (each one
+        # only counts while it is the active one), and sleeping and
+        # closing tabs reach every window's tabs: run from the one window
+        # that keeps this timer, they only ever saw that window
+        self._live_window().note_site_time(20)
         self._break_tick()
         # what the timer's comment always said it did: snoozed tabs and
         # daily pages came back only at a start; "sleep after" and
         # "close tabs not looked at" had no caller at all
         self.wake_snoozed()
         self.run_scheduled_tabs()
-        self.auto_sleep()
-        if now - getattr(self, "_stale_checked", 0) > 600:
+        stale = now - getattr(self, "_stale_checked", 0) > 600
+        if stale:
             self._stale_checked = now
-            self.close_stale_tabs()
+        for win in self._all_windows():
+            try:
+                win.auto_sleep()
+                if stale:
+                    win.close_stale_tabs()
+            except RuntimeError:
+                continue
         return True
 
     def _break_tick(self):
@@ -37007,18 +37108,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         minutes = _sane_number(self.config.get("breakAfter", 0))
         if not minutes:
             return False
-        since = time.monotonic() - getattr(self, "_break_from",
-                                           time.monotonic())
-        idle = time.monotonic() - getattr(self, "_last_touch",
-                                          time.monotonic())
+        now = _awake_clock()
+        since = now - getattr(self, "_break_from", now)
+        idle = now - getattr(self, "_last_touch", now)
         if idle > 300:
             # he has been away: that was the break
-            self._break_from = time.monotonic()
+            self._break_from = now
             return False
         if since < minutes * 60:
             return False
-        self._break_from = time.monotonic()
-        self.flash(self._ui_str("breakNow") % int(minutes), ms=9000)
+        self._break_from = now
+        # where he is looking, not in the window that keeps the desk timer
+        self._live_window().flash(self._ui_str("breakNow") % int(minutes),
+                                  ms=9000)
         return True
 
     def notify_desktop(self, text, title=""):
@@ -37129,8 +37231,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return at
 
     def snoozed_tabs(self):
-        return [r for r in (self.config.get("snoozed") or [])
+        rows = [r for r in (self.config.get("snoozed") or [])
                 if isinstance(r, dict) and r.get("url")]
+        for row in rows:
+            at = row.get("at")
+            if isinstance(at, bool) or not isinstance(at, (int, float)):
+                # "at": "tomorrow" (a hand-edited or imported config)
+                # raised in every desk tick, and scheduled tabs, auto-sleep
+                # and the stale-tab tidy all stopped with it. A time that
+                # cannot be read is now: the tab comes back, not lost
+                row["at"] = _sane_number(at)
+        return rows
 
     def wake_snoozed(self, everything=False):
         """The ones whose time has come, opened in the background --
@@ -38084,7 +38195,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not self.config.get("readResume", False):
             return False
         try:
-            url = view.url().toString()
+            url = getattr(view, "_read_url", "") or view.url().toString()
         except RuntimeError:
             return False
         if not url or is_internal_page(QUrl(url)):
@@ -38728,6 +38839,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return
             path = Path(name)
             proc = QProcess(self)
+            # the page the text came from, as it was
+            page0 = self._live_page(view)
+            try:
+                url0 = view.url()
+            except RuntimeError:
+                url0 = QUrl()
 
             def back(*_a):
                 try:
@@ -38739,11 +38856,44 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 except OSError:
                     pass
                 if new is not None:
-                    self.desk_tool("bigeditor", view=view, arg=new)
-                    self.flash(self._ui_str("editorBack"))
-                proc.deleteLater()
+                    try:
+                        same = (self._live_page(view) is page0
+                                and page0 is not None
+                                and view.url() == url0)
+                    except RuntimeError:
+                        same = False
+                    if same:
+                        self.desk_tool("bigeditor", view=view, arg=new)
+                        self.flash(self._ui_str("editorBack"))
+                    else:
+                        # the tab went to another page (or closed) while
+                        # the editor was open: written into whatever box
+                        # had the focus there, another site read it --
+                        # or it was lost. On the clipboard instead.
+                        QGuiApplication.clipboard().setText(new)
+                        self.flash(self._ui_str("shotCopied"))
+                try:
+                    proc.deleteLater()
+                except RuntimeError:
+                    pass
+
+            def never(err):
+                # it never opened: no edit came back, nothing to put back
+                # (or over the clipboard) -- the file goes, and he is told
+                if err != QProcess.ProcessError.FailedToStart:
+                    return
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                self.flash(self._ui_str("keyNoEditor") % Path(program).name)
+                try:
+                    proc.deleteLater()
+                except RuntimeError:
+                    pass
 
             proc.finished.connect(back)
+            proc.errorOccurred.connect(never)
             proc.start(launch[0], launch[1:] + [str(path)])
             self.flash(self._ui_str("editorOpened")
                        % Path(program).name)
@@ -41373,6 +41523,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         base = str(self.config.get("liveApi", "")).rstrip("/") \
             or "https://www.twitch.tv"
+        # one round at a time: a tick over a slow round reset its count
+        # and its finds (a round older than five minutes is given up)
+        if getattr(self, "_live_pending", 0) > 0 \
+                and time.time() - getattr(self, "_live_started", 0) < 300:
+            if then:
+                then(list(getattr(self, "_live_found", None) or []))
+            return False
+        self._live_started = time.time()
         self._live_pending = len(rows)
         self._live_found = []
         for name in rows:
@@ -41384,11 +41542,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def _live_answer(self, reply, name, then=None):
         body = bytes(reply.readAll()).decode("utf-8", "replace")
+        failed = reply.error() != QNetworkReply.NetworkError.NoError
         reply.deleteLater()
         live = "isLiveBroadcast" in body
         was = self.config.setdefault("liveWas", {})
         if not isinstance(was, dict):
             was = self.config["liveWas"] = {}
+        if failed:
+            # no answer is not "offline": written down as offline, the
+            # next good check said "is live" a second time
+            live = bool(was.get(name))
         if live and not was.get(name):
             self.notify_desktop(self._ui_str("liveNow") % name,
                                 self._ui_str("liveMenu"))
@@ -42408,15 +42571,26 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         want = url.host(QUrl.ComponentFormattingOption.FullyEncoded)
         if ":" in want:
             want = "[%s]" % want       # location.hostname brackets IPv6
+        submit = bool(self.config.get("autoSubmitSites")) \
+            and host in self.auto_submit_sites()
+
         def fill(password, page=page):
             try:
                 page.runJavaScript(
-                    "location.hostname === %s && window.__bpw && "
-                    "window.__bpw.choose(%s, %s);"
+                    "(location.hostname === %s && window.__bpw) ? "
+                    "(window.__bpw.choose(%s, %s), true) : false;"
                     % (json.dumps(want),
                        json.dumps(entry.get("username", "")),
                        json.dumps(password or "")),
-                    PW_WORLD_ID, lambda _r: None)
+                    PW_WORLD_ID,
+                    # sent once it is filled, on that host only: on a
+                    # 250 ms timer it went before 1Password had answered
+                    # (an empty form, a locked account) or into the page
+                    # the tab had moved on to, whatever its site
+                    lambda filled: (
+                        self._submit_after_fill(page, want)
+                        if submit and filled is True and password
+                        else None))
             except RuntimeError:
                 pass             # the tab closed while 1Password answered
 
@@ -42430,10 +42604,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.flash(self._ui_str("fillLinked") % entry["linked_from"])
         else:
             self.flash(self._ui_str("fillDone") % entry.get("username", ""))
-        if self.config.get("autoSubmitSites") and host in \
-                self.auto_submit_sites():
-            QTimer.singleShot(250, lambda: self.form_tool("submitnow",
-                                                          view=view))
+        return True
+
+    def _submit_after_fill(self, page, host):
+        """The form sent, on the page that was filled and only while it is
+        still on that host."""
+        try:
+            page.runJavaScript(
+                "location.hostname === %s ? %s : 'moved'"
+                % (json.dumps(host), FORM_TOOLS["submitnow"]),
+                MAIN_WORLD_ID, lambda _r: None)
+        except RuntimeError:
+            pass
         return True
 
     def linked_lines(self):
@@ -44516,6 +44698,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if request is None:
             return False
         try:
+            request._cap_paused = False
             request.pause() if on else request.resume()
         except RuntimeError:
             return False
@@ -44539,6 +44722,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if limit <= 0 or self.downloads_running() <= limit:
             return False
         try:
+            request._cap_paused = False
             request.pause()
         except RuntimeError:
             return False
@@ -44627,15 +44811,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             try:
                 if not request.isPaused():
                     request.pause()
+                    # marked, so the release a moment from now is for this
+                    # pause only (see _let_go)
+                    request._cap_paused = True
                     QTimer.singleShot(700, lambda r=request: self._let_go(r))
             except RuntimeError:
                 continue
         return int(total)
 
     def _let_go(self, request):
+        """The end of the speed cap's own pause. A pause he made in the
+        meantime (or the queue's "waiting") clears the mark, and stays:
+        this resumed anything paused, so his Pause was undone within the
+        second, with the row saying Paused over a running download."""
         try:
-            if request.isPaused():
+            if getattr(request, "_cap_paused", False) \
+                    and request.isPaused():
                 request.resume()
+            request._cap_paused = False
         except RuntimeError:
             pass
         return True
@@ -52375,7 +52568,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if event.type() in (QEvent.Type.KeyPress,
                             QEvent.Type.MouseButtonPress,
                             QEvent.Type.Wheel):
-            self._last_touch = time.monotonic()
+            self._last_touch = _awake_clock()
         # the star rides along inside the address bar, and so does
         # the account chooser's handle at the other end
         if (obj is getattr(self, "urlbar", None)
@@ -52530,6 +52723,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return super().eventFilter(obj, event)
 
     def _tab_changed(self, index):
+        if self.config.get("pageThemeColour", False):
+            # the tab now in front gives the chrome its colour (or none)
+            QTimer.singleShot(0, self.page_theme_colour)
         # the tab he was on before this one: what "go back to the last
         # tab" after a close means, and what Ctrl+Tab's MRU order is
         # built from
@@ -55496,10 +55692,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.unduck_others()
         if getattr(view, "private", False):
             return
+        # a tab going quiet stays the player: paused from the keys or the
+        # page, it was dropped two seconds later, the desktop showed
+        # "Stopped" and the play key reached nothing. Another tab that
+        # starts playing takes over; a closed one is gone in _audible_view
         if audible:
             self._audible = view
-        elif self._audible is view:
-            self._audible = None
         self._media_poll()
         # the front tab has started making a noise: the others drop to
         # the level he set rather than stopping (off at 0)
@@ -59053,6 +59251,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                     then=then)
 
         pull.finished.connect(pulled)
+        # a program that does not start never says "finished": nothing
+        # answered, and the folder with the video's sound stayed behind
+        pull.errorOccurred.connect(
+            lambda err: pulled(-1) if err == QProcess.ProcessError.FailedToStart else None)
         pull.start()
         return True
 
@@ -59060,6 +59262,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """The whole file in words, with its times, as WebVTT."""
         out = sound.parent / "autocap"
         args = transcriber.split()
+        # "~/bin/whisper-cli" passed the check (expanded there) and never
+        # started here
+        args[0] = str(Path(args[0]).expanduser())
         name = Path(args[0]).name
         model = str(self.config.get("captionModel") or "")
         if name.startswith("whisper-cli") or name.startswith("whisper.cpp"):
@@ -59104,6 +59309,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.put_captions_on_video(vtt, view=view, then=then)
 
         proc.finished.connect(done)
+        proc.errorOccurred.connect(
+            lambda err: done(-1) if err == QProcess.ProcessError.FailedToStart else None)
         proc.start()
         return True
 
@@ -64771,6 +64978,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if then:
                 then("")
             return ""
+        if image.hasAlphaChannel():
+            # on white first: with the alpha dropped, a code drawn on a
+            # transparent background was one black box, and read as none
+            flat = QImage(image.size(), QImage.Format.Format_RGB32)
+            flat.fill(QColor("white"))
+            painter = QPainter(flat)
+            painter.drawImage(0, 0, image)
+            painter.end()
+            image = flat
         image = image.convertToFormat(QImage.Format.Format_Grayscale8)
         width, height = image.width(), image.height()
         if width < 21 or height < 21 or width * height > 4_000_000:
@@ -65404,6 +65620,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if timer is not None:
                 timer.stop()
                 self._caption_timer = None
+            # the recorder and the transcriber go too: they ran on (on
+            # the CPU, for minutes) after captions were switched off
+            for name in ("_caption_proc", "_caption_words"):
+                proc = getattr(self, name, None)
+                try:
+                    if (proc is not None and proc.state()
+                            != QProcess.ProcessState.NotRunning):
+                        proc.kill()
+                except RuntimeError:
+                    pass
             folder = getattr(self, "_caption_dir", None)
             if folder and Path(folder).name.startswith("browser-caption-"):
                 shutil.rmtree(folder, ignore_errors=True)
@@ -65472,6 +65698,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         old = getattr(self, "_caption_proc", None)
         try:
             if (old is not None and old.state()
+                    != QProcess.ProcessState.NotRunning):
+                return False
+        except RuntimeError:
+            pass
+        # nor while the last chunk is still being turned into words: a
+        # transcriber slower than a chunk (whisper on the CPU) started one
+        # more every few seconds, without end
+        words = getattr(self, "_caption_words", None)
+        try:
+            if (words is not None and words.state()
                     != QProcess.ProcessState.NotRunning):
                 return False
         except RuntimeError:
@@ -65568,7 +65804,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                      view=getattr(self, "_caption_view",
                                                   None))
 
+        def failed(err):
+            if err == QProcess.ProcessError.FailedToStart:
+                try:
+                    Path(path).unlink()    # it stayed until captions stopped
+                except OSError:
+                    pass
+
         proc.finished.connect(done)
+        proc.errorOccurred.connect(failed)
         proc.start(args[0], args[1:])
         return True
 
@@ -67053,6 +67297,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         page = self._live_page(view)
         if page is None:
+            # nothing to read (a group pill in front): the last site's
+            # colour does not stay on over it
+            if self.config.get("pageThemeColour", False) \
+                    and getattr(self, "_page_mark", ""):
+                self._page_mark = ""
+                self.apply_chrome_style()
             if then:
                 then("")
             return False
@@ -67061,9 +67311,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             colour = str(raw or "")
             if not re.fullmatch(r"#[0-9a-fA-F]{6}", colour):
                 colour = ""
-            if self.config.get("pageThemeColour", False) and colour:
-                self._page_mark = colour
-                self.apply_chrome_style()
+            # only for the tab still in front, never a private one's, and
+            # a page with none takes the last site's colour off: it stayed
+            # on the chrome over every page after
+            try:
+                still = self.current() is view
+            except RuntimeError:
+                still = False
+            if self.config.get("pageThemeColour", False) and still:
+                mark = "" if getattr(view, "private", False) else colour
+                if mark != str(getattr(self, "_page_mark", "") or ""):
+                    self._page_mark = mark
+                    self.apply_chrome_style()
             if then:
                 then(colour)
 
@@ -70908,6 +71167,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     win.vault = self.vault
                     # their in-flight vault jobs answer the old vault
                     win._vault_epoch = getattr(win, "_vault_epoch", 0) + 1
+                    # ...and a store check among them is dropped with the
+                    # rest: its "still reaching 1Password" was never taken
+                    # down, and that window's pages said so for good
+                    # (the window that rebuilt the vault runs and reports
+                    # its own check)
+                    win.vault_checking = ""
+                    win.vault_fell_back = ""
                 win._sync_acct()
                 other = getattr(win, "bridge", None)
                 if other is not None and other is not bridge:
@@ -73216,13 +73482,16 @@ SNIPPET_JS = r"""
     if (node.isContentEditable) return node;
     return null;
   }
-  document.addEventListener("keyup", function (e) {
+  function finished(e) {
     /* his own key presses only: a page that writes a snippet's key into
        a field and fires a made-up keyup would otherwise have his
        address (or whatever the snippet holds) typed out for it to read */
     if (!e.isTrusted) return;
-    /* only when a word has just been finished: space, tab or enter */
-    if (e.key !== " " && e.key !== "Tab" && e.key !== "Enter") return;
+    /* only when a word has just been finished: space or enter after the
+       key is in (keyup), tab before it takes the focus away (keydown: on
+       keyup the field was the NEXT one, which got rewritten instead) */
+    if (e.type === "keydown" ? e.key !== "Tab"
+        : (e.key !== " " && e.key !== "Enter")) return;
     var field = fieldOf(e.target);
     if (!field) return;
     if (field.isContentEditable) return;   /* left alone on purpose */
@@ -73232,6 +73501,9 @@ SNIPPET_JS = r"""
     var word = before.replace(/\s+$/, "");
     var start = Math.max(0, word.length - longest);
     for (var n = start; n < word.length; n++) {
+      /* a whole word only: with a snippet "ty", "pretty " became "pre"
+         and the snippet */
+      if (n > 0 && !/\s/.test(word.charAt(n - 1))) continue;
       var maybe = word.slice(n);
       if (!Object.prototype.hasOwnProperty.call(TABLE, maybe)) continue;
       var tail = String(field.value || "").slice(at);
@@ -73242,7 +73514,9 @@ SNIPPET_JS = r"""
       field.dispatchEvent(new Event("input", {bubbles: true}));
       return;
     }
-  }, true);
+  }
+  document.addEventListener("keyup", finished, true);
+  document.addEventListener("keydown", finished, true);
 })();
 """
 

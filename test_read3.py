@@ -91,6 +91,9 @@ stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
 
 print("\n(1) two tabs side by side")
 second = win.new_tab(url=QUrl(srv.url("/two")), switch=False)
+# the page itself, not a fixed wait (under a CPU quota 600 ms was not
+# always enough for it to load)
+H.wait_for(lambda: "/two" in second.url().toString(), 8000)
 H.spin(600)
 check("there is no split to start with", win.split_showing() is False)
 check("one tab cannot be split with itself",
@@ -107,7 +110,17 @@ check("scrolling together can be switched on",
       win.split_scroll_sync(True) is True)
 check("...and it is a real timer", win._sync_timer.isActive() is True)
 js("window.scrollTo(0, 400)")
-H.spin(900)
+
+
+def _followed():
+    try:
+        got = H.js(second, "Math.round(window.scrollY)", APP)
+    except AssertionError:
+        return None
+    return got if got and int(got) > 300 else None
+
+
+H.wait_for(_followed, 5000)
 other = H.js(second, "Math.round(window.scrollY)", APP)
 check("...and the other half followed", other and int(other) > 300, other)
 check("...and it can be switched off",

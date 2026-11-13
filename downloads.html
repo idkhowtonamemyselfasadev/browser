@@ -142,7 +142,9 @@
     const d = new Date(t * 1000), now = new Date();
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     if (d >= midnight) return STR.today;
-    if (d >= new Date(midnight - 86400000)) return STR.yesterday;
+    // by the calendar: 24 hours back is the wrong day after a clock change
+    if (d >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
+      return STR.yesterday;
     return d.toLocaleDateString(STR.lang || [],
       { weekday: "long", day: "numeric", month: "long" });
   }

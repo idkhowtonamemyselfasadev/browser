@@ -145,6 +145,8 @@ def branch_ended(chromium_major):
 def kev_since(when):
     """Chrome/Chromium entries on CISA's known-exploited list added
     after `when` — the vulnerabilities that are actually being used."""
+    if when is None:
+        return None             # no date to be newer than: unknown
     data = try_fetch("CISA's known-exploited-vulnerabilities list", KEV_URL)
     if not data:
         return None
@@ -159,7 +161,7 @@ def kev_since(when):
                 item["dateAdded"]).replace(tzinfo=timezone.utc)
         except (KeyError, ValueError):
             continue
-        if when is None or added > when:
+        if added > when:
             hits.append({"cve": item.get("cveID"), "added": item["dateAdded"],
                          "what": item.get("vulnerabilityName", ""),
                          "product": item.get("product", "")})
@@ -204,7 +206,13 @@ def collect(invariants):
 
     ended = branch_ended(major(chromium)) if chromium else None
     ctx["branch_ended"] = ended.date().isoformat() if ended else None
-    kev = kev_since(ended) if chromium else None
+    # only against a date: with none, every Chrome hole CISA ever listed
+    # counted as "newer than this engine" -- hundreds of CVEs, a body
+    # past GitHub's limit and a crashed job. No date means either the
+    # release history could not be read (try_fetch has put that under
+    # "could not be checked") or no newer branch exists yet, when there
+    # is nothing newer to compare with.
+    kev = kev_since(ended) if chromium and ended is not None else None
     ctx["kev"] = kev
 
     # ---- act: the invariant checks
@@ -296,7 +304,7 @@ def engine_paragraph(chromium, stable, gap, ended):
     if stable:
         bits.append("Google's current Chrome is **%s**%s."
                     % (stable, ", %d major versions ahead" % gap
-                       if gap else ""))
+                       if gap and gap > 0 else ""))
     if ended:
         bits.append("Chromium %s stopped being the current branch on %s."
                     % (major(chromium), ended.date().isoformat()))
@@ -317,8 +325,12 @@ def markdown(report):
     elif watch:
         out += ["## Nothing to install, but worth knowing", ""]
     else:
+        # "everything checked out" only when everything was checked
         out += ["## Nothing to do", "",
-                "Everything checked out. No action needed.", ""]
+                ("Everything checked out. No action needed."
+                 if not report["unknown"] else
+                 "Nothing to act on in what could be checked; see below "
+                 "for what could not."), ""]
 
     for finding in act + watch:
         out += ["### %s" % finding["title"], "", finding["detail"], ""]

@@ -45,6 +45,7 @@ request a page makes and one that cannot.
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 #: what a resource type is called in a filter list, mapped to the
 #: words the browser's own interceptor already uses
@@ -269,11 +270,11 @@ def parse_line(line):
     empty line.
     """
     line = (line or "").strip()
-    if not line or line[0] in "!#[" and not line.startswith("##"):
-        if line.startswith("##"):
-            pass
-        else:
-            return None, None
+    # "#@#.sponsored" (an exception everywhere) starts with "#" too: read
+    # as a comment, it was dropped without even being counted
+    if not line or line[0] in "!#[" \
+            and not line.startswith(("##", "#@#")):
+        return None, None
     # element hiding, before the network rules: the separator decides
     if "##" in line or "#@#" in line or "#?#" in line:
         for sep, unhide in (("#@#", True), ("#?#", False), ("##", False)):
@@ -294,6 +295,13 @@ def parse_line(line):
             if selector.startswith("^") or "{" in selector \
                     or "}" in selector or _PROCEDURAL.search(selector):
                 return "skip", "extended selector"
+            # an unclosed bracket or quote, or a comment, runs on to the
+            # end of the stylesheet the rules are joined into: one such
+            # line and every hiding rule after it was gone
+            if selector.count("(") != selector.count(")") \
+                    or selector.count("[") != selector.count("]") \
+                    or selector.count('"') % 2 or "/*" in selector:
+                return "skip", "broken selector"
             hosts = [one.strip().lower().removeprefix("www.")
                      for one in left.split(",") if one.strip()]
             return "hide", (hosts, selector, unhide)
@@ -433,7 +441,8 @@ class Rules:
             if kind == "hide":
                 hosts, selector, unhide = value
                 if unhide:
-                    for one in hosts:
+                    # no site named: an exception everywhere, kept under ""
+                    for one in hosts or [""]:
                         self.unhide_host.setdefault(one, []).append(selector)
                 elif hosts:
                     for one in hosts:
@@ -513,10 +522,17 @@ class Rules:
         broken by the rule the @@ exists for.
         """
         url = str(url or "")
-        if not url.startswith(("http://", "https://")):
+        # ws:// and wss:// too: a $websocket rule, or a plain ||host^
+        # one, never saw a socket at all
+        if not url.startswith(("http://", "https://", "ws://", "wss://")):
             return None
-        host = re.sub(r"^https?://", "", url).split("/")[0] \
-            .split(":")[0].lower()
+        # the host as the URL has it: cut only at "/" and ":", a "?" or
+        # "#" straight after it, a user name in front or an IPv6 address
+        # made a host no rule was filed under
+        try:
+            host = (urlsplit(url).hostname or "").lower()
+        except ValueError:
+            return None
         page_host = str(page_host or "").lower().removeprefix("www.")
         # by site, not by exact host: static.example.com on a page at
         # m.example.com is the site's own, and $third-party rules took
@@ -546,7 +562,7 @@ class Rules:
         for one in _host_parents(host):
             out.extend(self.hide_host.get(one, ()))
         out.extend(self.hide_global)
-        never = set()
+        never = set(self.unhide_host.get("", ()))
         for one in _host_parents(host):
             never.update(self.unhide_host.get(one, ()))
         return [one for one in dict.fromkeys(out) if one not in never]

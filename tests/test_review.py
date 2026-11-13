@@ -1760,7 +1760,11 @@ else:
 
 # what is kept or copied is the page's title, not the strip's label
 v25 = br.new_tab(); H.spin(300)
-H.load(v25, srv.url("/twhome")); H.spin(600)
+H.load(v25, srv.url("/twhome"))
+# the page itself and its title (H.load can return on the start page's
+# load, and the title was still "New tab")
+H.wait_for(lambda: "twhome" in v25.url().toString() and v25.title() == "tw",
+           10000)
 br.tabs.setCurrentWidget(v25); H.spin(100)
 _i25 = br.tabs.indexOf(v25)
 v25.page().setAudioMuted(True); br._refresh_tab_label(v25); H.spin(100)
@@ -2414,7 +2418,13 @@ H.wait_for(lambda: "k31=v31" in (jsq(_pv, "document.cookie",
 _pc = H.js(_pv, "document.cookie", B.MAIN_WORLD_ID) or ""
 _nv = br.new_tab(url=None); H.spin(200)
 H.load(_nv, srv.url("/twhome"))
-_nc = H.js(_nv, "document.cookie", B.MAIN_WORLD_ID) or ""
+# the page itself (H.load can return on the start page's load, and a js()
+# sent while the tab swaps from our page's channel to the web one waited
+# out its 5 s: 2 runs in 6 under the CPU quota)
+H.wait_for(lambda: "twhome" in _nv.url().toString() and _nv.title() == "tw",
+           10000)
+H.spin(300)
+_nc = jsq(_nv, "document.cookie", B.MAIN_WORLD_ID) or ""
 br.tabs.setCurrentWidget(_pv); H.spin(200)
 _rows = [r for r in br.site_cookies() if r.get("name") == "k31"]
 check("a cookie set in a private tab reaches that tab",
@@ -8597,6 +8607,260 @@ H.spin(400)
 _busy159 = [t for t in _w159.findChildren(B.QTimer) if t.isActive()]
 check("a closed second window has no timer still running",
       not _busy159, str(len(_busy159)))
+# ===== fifteenth pass: downloads, notes, agent, adblock, qr, mpris, CI ===
+import importlib.util as _ilu167
+_spec167 = _ilu167.spec_from_file_location(
+    "manage_issue167", str(B.APP_DIR / ".github" / "scripts" / "manage_issue.py"))
+_mi167 = _ilu167.module_from_spec(_spec167)
+_spec167.loader.exec_module(_mi167)
+check("a check where every source failed does not close the open issue",
+      _mi167.decide([], {"number": 1, "state": "OPEN", "body": ""},
+                    ["PyPI could not be read"])[0] == "silent"
+      and _mi167.decide([], {"number": 1, "state": "OPEN", "body": ""},
+                        [])[0] == "close")
+_spec167b = _ilu167.spec_from_file_location(
+    "security_report167",
+    str(B.APP_DIR / ".github" / "scripts" / "security_report.py"))
+_sr167 = _ilu167.module_from_spec(_spec167b)
+_spec167b.loader.exec_module(_sr167)
+_sr167.try_fetch = lambda *a, **k: {"vulnerabilities": [
+    {"vendorProject": "Google", "product": "Chromium V8",
+     "dateAdded": "2019-01-01", "cveID": "CVE-2019-0001"}]}
+check("with no date for the engine's branch, no exploited hole counts as "
+      "newer than it", _sr167.kev_since(None) is None)
+
+
+class _Req167:
+    def __init__(self):
+        self.paused = True
+        self.resumed = 0
+
+    def isPaused(self):
+        return self.paused
+
+    def resume(self):
+        self.resumed += 1
+        self.paused = False
+
+
+_r167 = _Req167()
+br._let_go(_r167)
+_r167b = _Req167()
+_r167b._cap_paused = True
+br._let_go(_r167b)
+check("the speed cap's release leaves a pause it did not make alone",
+      _r167.resumed == 0 and _r167b.resumed == 1,
+      str((_r167.resumed, _r167b.resumed)))
+_e167 = {"id": 916701, "state": "active", "queued": True, "name": "q.bin",
+         "url": "https://q167.example/q.bin"}
+br.downloads.append(_e167)
+_q167 = list(getattr(br, "_dl_queue", None) or [])
+br._dl_queue = _q167 + [916701]
+
+
+class _Can167(_Req167):
+    def cancel(self):
+        self.cancelled = True
+
+
+br.dl_active[916701] = _Can167()
+br.bridge.cancelDownload(br._page_key, 916701)
+_left167 = (916701 in (br._dl_queue or []), _e167.get("queued"))
+br.dl_active.pop(916701, None)
+br.downloads.remove(_e167)
+br._dl_queue = _q167
+check("a waiting download that is cancelled leaves the queue",
+      _left167 == (False, None), str(_left167))
+if br.desk() is not None:
+    _dk167 = br.desk()
+    _tp167 = _dk167.todo_path()
+    _was167 = _tp167.read_text() if _tp167.exists() else None
+    _tp167.write_text("- [ ] first167\n- [ ] second167\n")
+    _rows167 = _dk167.todos()
+    _id167 = _rows167[0]["id"]
+    # the file changed under the panel: the row it showed is "first167"
+    _tp167.write_text("- [ ] inserted167\n- [ ] first167\n- [ ] second167\n")
+    br.desk_do("deleteTodo", json.dumps({"id": _id167, "text": "first167"}))
+    _after167 = [r["text"] for r in _dk167.todos()]
+    if _was167 is None:
+        _tp167.unlink()
+    else:
+        _tp167.write_text(_was167)
+    check("a to-do panel out of date does not delete another to-do",
+          _after167 == ["inserted167", "first167", "second167"],
+          str(_after167))
+_ab167 = B.adblock.Rules() if B.adblock is not None else None
+if _ab167 is not None:
+    _ab167.load_text("||tracker167.example^\n##div:not(.x\n##.ad167\n"
+                     "#@#.sp167\n##.sp167\n")
+    check("ad blocking reaches web sockets and a '?' straight after the host",
+          bool(_ab167.blocks("wss://tracker167.example/s", "p.example",
+                             "websocket"))
+          and bool(_ab167.blocks("https://a.tracker167.example?x=1",
+                                 "p.example", "script")))
+    check("a broken hiding rule is skipped and a global exception holds",
+          _ab167.hide_for("any167.example") == [".ad167"],
+          str(_ab167.hide_for("any167.example")))
+if B.qr is not None:
+    _m167 = B.qr.matrix("https://qr167.example/")
+    _sc167 = 8
+    _n167 = len(_m167) + 8
+    _img167 = B.QImage(_n167 * _sc167, _n167 * _sc167,
+                       B.QImage.Format.Format_ARGB32)
+    _img167.fill(B.QColor(0, 0, 0, 0))
+    _pt167 = B.QPainter(_img167)
+    for _y, _row in enumerate(_m167):
+        for _x, _on in enumerate(_row):
+            if _on:
+                _pt167.fillRect((_x + 4) * _sc167, (_y + 4) * _sc167,
+                                _sc167, _sc167, B.QColor("black"))
+    _pt167.end()
+    _qr167 = br._read_qr_image_object(_img167)
+    check("a QR code on a transparent background is read",
+          _qr167 == "https://qr167.example/", str(_qr167))
+if B.mpris is not None and getattr(B.mpris, "HAVE_DBUS", False):
+    _seek167 = []
+    _fv167 = object()
+    _svc167 = B.mpris.Service(br)
+    _pl167 = B.mpris.Player(_svc167)
+    br._audible_anywhere = lambda: (br, _fv167)
+    br.media_seek = lambda secs=0, absolute=None, view=None: \
+        _seek167.append((secs, view))
+    try:
+        _pl167.Seek(-500000)
+    finally:
+        br.__dict__.pop("_audible_anywhere", None)
+        br.__dict__.pop("media_seek", None)
+    check("the media keys' seek moves the tab that is playing, by the time "
+          "asked", _seek167 == [(-0.5, _fv167)], str(_seek167))
+import socket as _so167
+import threading as _th167
+import agent as _ag167
+import agent_socket as _as167
+# a short folder: a socket path has a 108-byte limit
+_dir167 = _Path(_tempfile.mkdtemp(prefix="ag167-"))
+_stale167 = str(_dir167 / "stale.sock")
+_live167 = str(_dir167 / "live.sock")
+_s1 = _so167.socket(_so167.AF_UNIX, _so167.SOCK_STREAM)
+_s1.bind(_stale167)
+_s1.close()                      # the file stays, nobody listens
+_srv167 = _so167.socket(_so167.AF_UNIX, _so167.SOCK_STREAM)
+_srv167.bind(_live167)
+_srv167.listen(1)
+
+
+def _answer167():
+    try:
+        conn, _ = _srv167.accept()
+        conn.recv(65536)
+        conn.sendall(b'{"ok": true, "who": "live"}\n')
+        conn.close()
+    except OSError:
+        pass
+
+
+_t167 = _th167.Thread(target=_answer167, daemon=True)
+_t167.start()
+_cand167, _ours167 = _as167.candidate_paths, _as167.is_ours
+_as167.candidate_paths = lambda: [_stale167, _live167]
+_as167.is_ours = lambda path: True
+try:
+    _who167 = _ag167.call({"op": "info"}, timeout=5).get("who")
+except Exception as _e167:
+    _who167 = repr(_e167)
+finally:
+    _as167.candidate_paths, _as167.is_ours = _cand167, _ours167
+    _srv167.close()
+    __import__("shutil").rmtree(str(_dir167), ignore_errors=True)
+check("the agent client passes a dead browser's socket and reaches the "
+      "live one", _who167 == "live", str(_who167))
+# ===== sixteenth pass: late answers, time, schedules =====================
+import inspect as _in173
+_sn173 = list(br.config.get("snoozed") or [])
+br.config["snoozed"] = [{"url": "https://snooze173.example/", "at": "tomorrow"}]
+try:
+    _ok173 = isinstance(br.snoozed_tabs()[0]["at"], int)
+except Exception as _e173:
+    _ok173 = repr(_e173)
+br.config["snoozed"] = _sn173
+check("a snoozed tab with a time that cannot be read does not stop the desk "
+      "tick", _ok173 is True, str(_ok173))
+_rr173 = br.config.get("readResume", False)
+_rp173 = dict(br.reading_places())
+br.config["readResume"] = True
+_rv173 = br.new_tab(); H.spin(300)
+H.load(_rv173, srv.url("/twhome"))
+H.wait_for(lambda: "twhome" in _rv173.url().toString(), 8000)
+_rv173._read_url = "https://read173.example/article"
+_real_rpt173 = br.read_page_tool
+br.read_page_tool = lambda name, view=None, then=None, **k: then(5000)
+try:
+    br.note_reading_place(_rv173)
+finally:
+    br.__dict__.pop("read_page_tool", None)
+_got173 = br.reading_places().get("https://read173.example/article")
+br.reading_places().pop("https://read173.example/article", None)
+br.config["readResume"] = _rr173
+_close_if_open(_rv173)
+check("the reading place is filed under the page being left",
+      _got173 == 5000, str(_got173))
+check("a filled login is sent after the password is in, not on a timer",
+      'QTimer.singleShot(250, lambda: self.form_tool("submitnow"'
+      not in _in173.getsource(B.Browser.fill_login_now)
+      and hasattr(br, "_submit_after_fill"))
+check("Settings' page-colour switch goes through its own setter",
+      "set_page_theme_colour" in _in173.getsource(B.Bridge.setSetting))
+check("another 1Password vault reaches every window",
+      "_vault_changed()" in _in173.getsource(B.Bridge.setOpVault))
+_w173 = br.new_window(); H.spin(700)
+_w173.vault_checking = "1password"
+_w173.vault = object()
+br._vault_changed()
+_chk173 = (_w173.vault is br.vault, _w173.vault_checking)
+_slept173 = []
+_real_sleep173 = _w173.auto_sleep
+_w173.auto_sleep = lambda *a, **k: _slept173.append(1)
+try:
+    br._desk_tick()
+finally:
+    _w173.__dict__.pop("auto_sleep", None)
+_shared173 = (_w173._last_touch is br._last_touch or
+              _w173._last_touch == br._last_touch,
+              _w173._todo_said is br._todo_said)
+try:
+    _w173._closing_anyway = True
+    _w173.close()
+except RuntimeError:
+    pass
+H.spin(300)
+check("a store change in one window takes down another window's check",
+      _chk173 == (True, ""), str(_chk173))
+check("auto-sleep reaches the tabs of every window", bool(_slept173))
+check("idle time and the to-dos already said are one for the browser",
+      _shared173 == (True, True), str(_shared173))
+
+
+class _Reply173:
+    def readAll(self):
+        return b""
+
+    def error(self):
+        return B.QNetworkReply.NetworkError.HostNotFoundError
+
+    def deleteLater(self):
+        pass
+
+
+_lw173 = dict(br.config.get("liveWas") or {})
+br.config["liveWas"] = {"chan173": True}
+br._live_pending = 1
+br._live_answer(_Reply173(), "chan173")
+_kept173 = br.config["liveWas"].get("chan173")
+br.config["liveWas"] = _lw173
+check("a live check that failed does not write the channel down as offline",
+      _kept173 is True, str(_kept173))
+check("downloads say Yesterday by the calendar",
+      "now.getDate() - 1" in (B.APP_DIR / "downloads.html").read_text())
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

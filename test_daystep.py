@@ -110,6 +110,11 @@ class Fake:
     def __init__(self):
         self.history = []
 
+    def visible_history(self):
+        # what the readers go through since a sealed history is hidden
+        # while the vault is locked; nothing is sealed here
+        return self.history
+
     def site_streak(self, host):
         return B.Browser.site_streak(self, host)
 

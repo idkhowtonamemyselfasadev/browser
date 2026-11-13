@@ -426,9 +426,20 @@ def js(view, code, world=None):
 
 
 def load(view, url):
+    want_file = QUrl(url).scheme() == "file"
     box = {"done": False}
 
     def fin(ok):
+        # the page asked for, not the start page a tab made a moment ago
+        # was still loading: on THAT loadFinished this returned at once,
+        # and the test went on against the wrong document (behind most of
+        # the reds that came only under a CPU quota, 2026-11-13)
+        if not want_file:
+            try:
+                if view.url().scheme() == "file":
+                    return
+            except RuntimeError:
+                pass
         box["done"] = True
     c = view.loadFinished.connect(fin)
     view.load(QUrl(url))

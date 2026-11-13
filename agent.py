@@ -118,18 +118,61 @@ def _dial(sock, path):
     sock.connect(path)
 
 
+def _connect(timeout):
+    """A socket connected to the first browser of ours that answers.
+
+    Every candidate that is ours is tried in turn: a browser killed
+    with -9 leaves its socket file behind, and taking the first file
+    that existed sent every command at that dead one while a headless
+    browser was listening on the next path."""
+    paths = [path for path in agent_socket.candidate_paths()
+             if agent_socket.is_ours(path)] \
+        or [agent_socket.socket_path(False)]
+    last = None
+    for path in paths:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            _dial(s, path)
+            return s
+        except (ConnectionRefusedError, FileNotFoundError) as e:
+            # a dead browser's file, or none: the next one (these are
+            # ConnectionErrors too, and were taken for the refusal below)
+            s.close()
+            last = e
+        except ConnectionError:
+            s.close()
+            raise                    # not this user's socket: never dialled
+        except OSError as e:
+            s.close()
+            last = e
+    raise ConnectionError("browser not running (or bridge off): %s" % last)
+
+
+#: the ops that name a file on the caller's side of the socket
+_FILE_OPS = ("shot", "pdf", "download")
+
+
+def _local_paths(req):
+    """Paths as the caller meant them: relative to where the caller is.
+    The CLI did this for its own arguments; a batch file's steps and the
+    module's functions sent "out.png" as it was, and the browser wrote
+    it into its own working directory."""
+    if req.get("op") in _FILE_OPS and isinstance(req.get("path"), str) \
+            and req["path"]:
+        req["path"] = os.path.abspath(os.path.expanduser(req["path"]))
+    if req.get("op") == "upload" and isinstance(req.get("paths"), list):
+        req["paths"] = [os.path.abspath(os.path.expanduser(one))
+                        if isinstance(one, str) else one
+                        for one in req["paths"]]
+    return req
+
+
 def call(req, timeout=60.0):
     """One request, one reply. Raises ConnectionError when nobody
     listens (browser not running, or started before the bridge existed)."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(timeout)
-    try:
-        _dial(s, socket_path())
-    except ConnectionError:
-        s.close()
-        raise
-    except OSError as e:
-        raise ConnectionError("browser not running (or bridge off): %s" % e)
+    s = _connect(timeout)
+    req = _local_paths(dict(req))
     with s:
         s.sendall((json.dumps(req) + "\n").encode())
         buf = b""
@@ -315,9 +358,7 @@ def stream(kinds=None, tab=None, on_event=None, timeout=None):
     Yields each event as it arrives (and calls on_event too, for the
     scripts that would rather hand in a function). The connection is
     the subscription: hanging up ends it."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(timeout or 3600)
-    _dial(s, socket_path())
+    s = _connect(timeout or 3600)
     req = {"op": "events"}
     if kinds:
         req["kinds"] = list(kinds)
@@ -327,7 +368,13 @@ def stream(kinds=None, tab=None, on_event=None, timeout=None):
     buf = b""
     try:
         while True:
-            chunk = s.recv(65536)
+            try:
+                chunk = s.recv(65536)
+            except socket.timeout:
+                # the time he gave it ran out with nothing more to say:
+                # that is the end of the stream, not an error (it was
+                # printed as "error: timed out" with exit status 1)
+                return
             if not chunk:
                 return
             buf += chunk

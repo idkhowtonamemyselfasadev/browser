@@ -163,7 +163,18 @@ class Player(QDBusAbstractAdaptor):
 
     @pyqtSlot("qlonglong")
     def Seek(self, offset):
-        self.state.browser.media_seek(secs=int(offset) // 1000000)
+        # what is playing, as Play and Pause find it: this went to the tab
+        # in front, a private one included. And exact (microseconds in,
+        # seconds out, fractions kept): floor division made half a second
+        # back a whole one and half a second on nothing
+        browser = self.state.browser
+        try:
+            win, view = browser._audible_anywhere()
+        except (AttributeError, RuntimeError):
+            return
+        if view is None:
+            return
+        win.media_seek(secs=int(offset) / 1000000.0, view=view)
 
     @pyqtProperty(str)
     def PlaybackStatus(self):
@@ -225,8 +236,11 @@ class Service(QObject):
         if not available():
             return False
         bus = QDBusConnection.sessionBus()
-        self._root = Root(self)
-        self._player = Player(self)
+        # made once: a second pair on the same object is two adaptors for
+        # one interface
+        if self._root is None:
+            self._root = Root(self)
+            self._player = Player(self)
         # the adaptors are what is exported: ExportAllContents is this
         # object's own slots and properties and leaves adaptors out
         if not bus.registerObject(PATH, self,
@@ -234,15 +248,20 @@ class Service(QObject):
                                   .ExportAdaptors):
             return False
         if not bus.registerService(SERVICE):
+            # the name is someone else's (another copy of the browser):
+            # the path goes back too, or every later try failed on it and
+            # the keys could not be switched on even once that one quit
+            bus.unregisterObject(PATH)
             return False
         self.registered = True
         return True
 
     def stop(self):
-        if not self.registered or not available():
+        if not available():
             return False
         bus = QDBusConnection.sessionBus()
-        bus.unregisterService(SERVICE)
+        if self.registered:
+            bus.unregisterService(SERVICE)
         bus.unregisterObject(PATH)
         self.registered = False
         return True

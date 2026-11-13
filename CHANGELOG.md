@@ -1,5 +1,58 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part forty: fifteenth and sixteenth passes)
+
+The fifteenth search read the smaller files whole (the Downloads and Notes
+pages, the agent's command-line client, the ad blocker, the QR reader,
+the media keys, the security check that runs on GitHub). The sixteenth
+looked at answers that come back late (from other programs, workers and
+pages) and at everything that runs on a clock. Together they confirmed
+33 bugs, fixed here:
+
+- **Downloads.** Pausing a download while the speed cap is on keeps it
+  paused. A waiting download that is cancelled leaves the queue. The
+  "Yesterday" label is right on the days the clocks change.
+- **Notes.** A note that cannot be saved stays open with what you typed,
+  and says so (as do "clip" and "quick capture"). Ticking or deleting a
+  to-do while the file changed underneath acts on the right one. The
+  preview follows "This page". Text snippets expand only for a whole
+  word, and on Tab in the box you typed in.
+- **Logins.** "Fill and send" sends the form only once the password is
+  in it, and only on the site it was filled for.
+- **The external editor.** Text edited there goes back only to the page
+  it came from; if the tab moved on it is put on the clipboard. Its file
+  no longer sits in the settings folder.
+- **Captions.** A transcriber named with "~" works for whole videos, a
+  program that will not start no longer leaves the video's audio in a
+  temporary folder, and switching live captions off stops the programs
+  behind them.
+- **The ad blocker** also blocks web sockets and addresses with "?"
+  right after the host, skips a broken hiding rule instead of losing
+  every rule after it, and honours list-wide "#@#" exceptions.
+- **The media keys and the bar's player:** a paused tab stays the player
+  (play resumes it, the bar shows Paused), seeking moves the tab that is
+  playing, and turning the keys on works again after another program
+  held the name.
+- **Several windows:** idle time, break reminders, auto-sleep, closing
+  old tabs and site time limits count every window; the window lock's
+  idle clock keeps running while the laptop sleeps; to-dos are not
+  announced again when the first window closes; a password store change
+  reaches every window.
+- **Smaller fixes:**
+  - QR codes on a transparent background are read.
+  - The reading position is saved for the page you leave, not the next.
+  - The chrome's page colour follows the tab in front and can be switched
+    from Settings.
+  - A snoozed tab with an unreadable time no longer stops the snooze,
+    scheduled-tab and sleep timers.
+  - A failed live-channel check no longer causes a second "is live"
+    notice.
+  - The library update offer appears in a window you can see.
+  - The agent client finds a running browser past a dead one's socket,
+    ends a quiet event stream cleanly and sends file paths as you meant
+    them.
+  - The scheduled security check no longer closes its issue when the
+    sources could not be read, nor floods it when a date is unknown.
 ## 2026-11-13 — line-by-line review, day 3 (part thirty-nine: fourteenth pass, several windows)
 
 The fourteenth search looked only at what goes wrong with more than one
