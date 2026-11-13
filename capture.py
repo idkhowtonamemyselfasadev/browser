@@ -16,6 +16,7 @@ something on it that should not be in a picture at all — a password in a
 field — so that can be blurred before the shutter.
 """
 
+import os
 import time
 
 from PyQt6.QtCore import (QBuffer, QByteArray, QEventLoop, QIODevice, QRect,
@@ -578,6 +579,9 @@ def frames_to_video(frames, path, fps=10, ffmpeg="ffmpeg", quality="good"):
         codec = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
     else:
         codec = ["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p"]
+    # yuv420p needs an even width and height; a 1279 px wide grab was
+    # refused and the whole recording lost
+    codec = ["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2"] + codec
     rate = {"best": ["-crf", "20"], "good": ["-crf", "32"],
             "small": ["-crf", "42"]}.get(quality, ["-crf", "32"])
     args = [ffmpeg, "-y", "-f", "image2pipe", "-framerate", str(int(fps)),
@@ -596,10 +600,23 @@ def frames_to_video(frames, path, fps=10, ffmpeg="ffmpeg", quality="good"):
     except (OSError, BrokenPipeError, subprocess.TimeoutExpired):
         try:
             proc.kill()
-        except OSError:
+            proc.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
             pass
+        _drop_partial(path)
         return ""
-    return str(path) if proc.returncode == 0 else ""
+    if proc.returncode != 0:
+        _drop_partial(path)
+        return ""
+    return str(path)
+
+
+def _drop_partial(path):
+    """A failed or killed ffmpeg leaves a part-written file behind."""
+    try:
+        os.remove(str(path))
+    except OSError:
+        pass
 
 
 # =====================================================================
@@ -631,8 +648,10 @@ class Annotator:
             QRect(0, 0, self.image.width(), self.image.height()))
         if box.isEmpty():
             return False
+        # base stays the picture as it came: undo replays every step,
+        # the crop included, from it. Moving it here made the replay cut
+        # the crop out of an already cropped picture.
         self.image = self.image.copy(box)
-        self.base = QImage(self.image)
         self.steps.append(("crop", box.x(), box.y(), box.width(),
                            box.height()))
         return True
@@ -742,7 +761,6 @@ class Annotator:
                          Qt.AlignmentFlag.AlignVCenter, str(words))
         painter.end()
         self.image = sheet
-        self.base = QImage(sheet)
         self.steps.append(("stamp", str(words), where))
         return True
 

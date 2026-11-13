@@ -742,7 +742,7 @@
             <span class="wname" id="t_barRowsName">Rows in the drop-down</span>
             <span class="wsub" id="t_barRowsHint">How many suggestions to show.</span>
           </span>
-          <input type="number" id="barrows" min="3" max="30"
+          <input type="number" id="barrows" data-zero="no" min="3" max="30"
                  style="width:100px">
         </div>
         <div class="wrow">
@@ -750,7 +750,7 @@
             <span class="wname" id="t_barTextSizeName">Address bar text size</span>
             <span class="wsub" id="t_barTextSizeHint">Per cent, apart from the rest of the chrome.</span>
           </span>
-          <input type="number" id="bartextsize" min="70" max="200"
+          <input type="number" id="bartextsize" data-zero="no" min="70" max="200"
                  style="width:100px">
         </div>
         <div class="wrow">
@@ -1291,7 +1291,7 @@
         <div class="group">
         <div class="wrow">
           <span class="wlabel"><span class="wname" id="t_recFpsName">Frames a second</span></span>
-          <input type="number" id="recfps" min="1" max="30" style="width:80px">
+          <input type="number" id="recfps" data-zero="no" min="1" max="30" style="width:80px">
         </div>
         <div class="wrow">
           <span class="wlabel"><span class="wname" id="t_recFormatName">Recordings are saved as</span></span>
@@ -1311,7 +1311,7 @@
         </div>
         <div class="wrow">
           <span class="wlabel"><span class="wname" id="t_recBufferName">How many seconds the replay buffer keeps</span></span>
-          <input type="number" id="recbufferseconds" min="5" max="600" style="width:90px">
+          <input type="number" id="recbufferseconds" data-zero="no" min="5" max="600" style="width:90px">
         </div>
         <label class="wrow">
           <span class="wlabel">
@@ -1322,7 +1322,7 @@
         </label>
         <div class="wrow">
           <span class="wlabel"><span class="wname" id="t_shotTimelapse">Capture this page every few minutes</span></span>
-          <input type="number" id="lapseminutes" min="1" max="1440" style="width:90px">
+          <input type="number" id="lapseminutes" data-zero="no" min="1" max="1440" style="width:90px">
         </div>
         <div class="wrow">
           <span class="wlabel">
@@ -2087,7 +2087,7 @@
             <span class="wname" id="t_tabMinWidthName">Narrowest a tab gets</span>
             <span class="wsub" id="t_tabMinWidthHint">Below this the strip scrolls.</span>
           </span>
-          <input type="number" id="tabminwidth" min="28" max="220"
+          <input type="number" id="tabminwidth" data-zero="no" min="28" max="220"
                  style="width:90px">
         </div>
         <div class="wrow">
@@ -3761,7 +3761,9 @@
   let allLangs = [];
   function fillLangs(filter) {
     const sel = document.getElementById("translatelang");
-    const current = sel.value || window._tlang;
+    // the saved language, not whatever the box fell back to when the
+    // filter removed it from the list
+    const current = window._tlang || sel.value;
     const needle = (filter || "").trim().toLowerCase();
     sel.innerHTML = "";
     for (const [code, native, english] of allLangs) {
@@ -4509,10 +4511,19 @@
       if (!el) continue;
       const send = () => {
         let n = parseInt(el.value, 10);
-        if (isNaN(n)) n = 0;
+        if (isNaN(n) || n < 0) n = 0;
+        // Outside its own range the browser skips the value, so the box
+        // would show something that is not in effect. 0 stays: it is how
+        // the box says "not set".
+        const lo = parseInt(el.min, 10), hi = parseInt(el.max, 10);
+        if (!isNaN(hi) && n > hi) n = hi;
+        if (!isNaN(lo) && n > 0 && n < lo) n = lo;
+        if (el.type !== "range") el.value = n;
         saveSetting(key, n);
         const out = document.getElementById(id + "val");
-        if (out) out.textContent = n + (el.type === "range" ? "%" : "");
+        // the radius is in pixels, the other sliders are percentages
+        if (out) out.textContent = n + (el.type === "range"
+          ? (id === "cornerradius" ? "px" : "%") : "");
         if (el.type === "range") paintRange(el);
       };
       el.oninput = el.type === "range" ? send : null;
@@ -4563,8 +4574,11 @@
                               ["appearancereset", "appearanceReset"],
                               ["appearanceundo", "appearanceUndo"]]) {
       const el = document.getElementById(id);
-      if (!el || !bridge || !bridge.appearanceAction) continue;
+      if (!el) continue;
       el.onclick = () => {
+        // bridge only exists once the channel is up, long after this
+        // ran, so it is looked at on the click and not at bind time
+        if (!bridge || !bridge.appearanceAction) return;
         const name = document.getElementById("themenewname");
         bridge.appearanceAction(slot, (name && name.value) || "", (j) => {
           // Both, not one: saving, importing, starring or resetting a
@@ -5902,6 +5916,15 @@
           for (const [id, key] of Object.entries(map)) {
             const el = document.getElementById(id);
             if (el && S[key]) el.textContent = S[key];
+          }
+          // Most of the hint and name lines were never written into the
+          // map above, so they stayed empty (or English in German). Any
+          // t_ element the map does not name takes the string whose key
+          // is its id without the t_ and with a lower-case first letter.
+          for (const el of document.querySelectorAll("[id^='t_']")) {
+            if (map[el.id] !== undefined || el.children.length) continue;
+            const k = el.id.slice(2, 3).toLowerCase() + el.id.slice(3);
+            if (typeof S[k] === "string" && S[k]) el.textContent = S[k];
           }
           for (const el of document.querySelectorAll("[data-str]")) {
             const v = S[el.dataset.str];

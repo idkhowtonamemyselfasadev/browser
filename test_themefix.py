@@ -89,8 +89,18 @@ def site_tab(win, html="<b>hi</b>"):
     view = win.new_tab()
     spin(200)
     view.setHtml(html, QUrl(SITE))
-    spin(400)
+    # the darkening is set when the URL commits; a fixed 400 ms was
+    # sometimes before that under a CPU quota (red at main too)
+    wait_url(view, SITE)
     return view
+
+
+def wait_url(view, url, ms=8000):
+    waited = 0
+    while view.url().toString() != url and waited < ms:
+        spin(50)
+        waited += 50
+    spin(150)
 
 
 def page_fd(view):
@@ -149,7 +159,7 @@ fresh = site_tab(win)
 check("a tab opened after the switch comes up undarkened",
       page_fd(fresh) is False, str(page_fd(fresh)))
 existing.setHtml("<b>again</b>", QUrl("https://example.org/"))
-spin(400)
+wait_url(existing, "https://example.org/")
 check("and so does one that navigates again",
       page_fd(existing) is False, str(page_fd(existing)))
 check("the setting itself is left where he put it",

@@ -1283,12 +1283,16 @@
 
   window.addEventListener("wheel", (e) => {
     if (lookNow() !== "circle" || !links.length) return;
+    // the wizard and the settings panel scroll on their own; the wheel
+    // over them used to be cancelled and spun the ring hidden behind
+    if (wizOpen || (e.target.closest && e.target.closest("#settings"))) return;
     e.preventDefault();          // the wheel turns; the page does not scroll
     turnRing(e.deltaY * 0.03);
   }, { passive: false });
 
   window.addEventListener("keydown", (e) => {
     if (lookNow() !== "circle" || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (wizOpen) return;         // the arrows belong to the wizard in front
     const on = document.activeElement;
     if (on && (on.tagName === "INPUT" || on.tagName === "TEXTAREA")) return;
     if (e.key === "ArrowLeft") turnRing(-6);
@@ -1803,7 +1807,7 @@
     const m = wizDraft.startMsg;
     if (m) {
       msg.textContent = String(STR["startUrl" + m[0]] || "")
-        .replace("{a}", m[1] || "");
+        .replace("{a}", () => m[1] || "");
       msg.className = "urlmsg on" + (m[0] === "Bad" ? " bad" : "");
     }
     box.appendChild(msg);
@@ -1943,7 +1947,7 @@
     const r = document.createElement("input");
     r.type = "range";
     r.id = "wizzoom";
-    r.min = "80"; r.max = "150"; r.step = "5";
+    r.min = "50"; r.max = "200"; r.step = "5";
     r.value = wizDraft.zoom || String(Math.round(setVal("zoom", 1) * 100));
     const val = el("div", "val", r.value + "%");
     r.oninput = () => { wizDraft.zoom = r.value; val.textContent = r.value + "%"; };

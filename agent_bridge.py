@@ -349,13 +349,23 @@ _FILL_JS = """
     if (!el) { missed.push(sel); return; }
     var value = pairs[sel];
     var tag = el.tagName.toLowerCase();
+    /* the instance setter updates the framework's own value tracker, so
+       the input event that follows looked like no change and a React
+       form kept its old state; the prototype's setter does not */
+    var setValue = function (v) {
+      var proto = tag === "select" ? HTMLSelectElement.prototype
+        : tag === "textarea" ? HTMLTextAreaElement.prototype
+        : tag === "input" ? HTMLInputElement.prototype : null;
+      var d = proto && Object.getOwnPropertyDescriptor(proto, "value");
+      if (d && d.set) d.set.call(el, v); else el.value = v;
+    };
     if (tag === "select") {
-      el.value = value;
+      setValue(value);
     } else if (el.type === "checkbox" || el.type === "radio") {
       el.checked = !!value && value !== "false";
     } else {
       el.focus();
-      el.value = value;
+      setValue(value);
     }
     el.dispatchEvent(new Event("input", {bubbles: true}));
     el.dispatchEvent(new Event("change", {bubbles: true}));
@@ -443,11 +453,17 @@ _FINDTEXT_JS = """
   var all = document.querySelectorAll("a, button, input, [role=button],"
     + " label, h1, h2, h3, h4, li, td, th, span, div, p, summary");
   function selectorFor(el) {
-    if (el.id) return "#" + CSS.escape(el.id);
+    var own = function (e) {
+      return e.id && document.querySelectorAll(
+        "#" + CSS.escape(e.id)).length === 1;
+    };
+    if (own(el)) return "#" + CSS.escape(el.id);
     var parts = [];
-    while (el && el.nodeType === 1 && parts.length < 6) {
+    /* up to an id that is the only one, or to the root: six levels of
+       "div > div" matched other nodes, and click took the first match */
+    while (el && el.nodeType === 1) {
       var part = el.tagName.toLowerCase();
-      if (el.id) { parts.unshift("#" + CSS.escape(el.id)); break; }
+      if (own(el)) { parts.unshift("#" + CSS.escape(el.id)); break; }
       var parent = el.parentElement;
       if (parent) {
         var same = [].slice.call(parent.children).filter(function (k) {
@@ -616,7 +632,10 @@ class AgentBridge:
         try:
             if conn.state() != QLocalSocket.LocalSocketState.ConnectedState:
                 return
-            conn.write((json.dumps(payload) + "\n").encode())
+            # a Date comes back from the page as a QDateTime and a buffer
+            # as a QByteArray: json.dumps raised, nothing was written and
+            # the client waited for its own timeout
+            conn.write((json.dumps(payload, default=str) + "\n").encode())
             conn.flush()
         except RuntimeError:
             return
@@ -1423,10 +1442,14 @@ class AgentBridge:
         return "";
       };
       var name = function (el) {
+        /* a typed or filled password, and a card number, are not a name:
+           the tree is a read op and handed them to a read-only client */
+        var secret = el.type === "password"
+          || /(^|\\s)cc-/.test(el.getAttribute("autocomplete") || "");
         var text = (el.getAttribute("aria-label")
           || el.getAttribute("alt")
           || el.getAttribute("placeholder")
-          || el.value
+          || (secret ? "" : el.value)
           || (el.textContent || "")).trim();
         return text.replace(/\\s+/g, " ").slice(0, 80);
       };
@@ -1654,6 +1677,11 @@ class AgentBridge:
         both honest and all the page will allow."""
         v = self._need_view(conn, req)
         if v is None:
+            return
+        # the first tick drops a private tab's watch, and the reply
+        # still handed out an id for it
+        if getattr(v, "private", False):
+            self._reply(conn, {"ok": False, "error": "private-tab"})
             return
         selector = str(req.get("selector") or "body")
         every = max(2, int(req.get("every") or 60))
@@ -1964,7 +1992,8 @@ class AgentBridge:
         selector per site, clicked once when it appears. Kept per site
         and done in the page, because the whole point is that it
         happens while nobody is looking."""
-        host = str(req.get("host") or "")
+        # the page compares a lower-case name without "www." with the key
+        host = self._clean_host(req.get("host")) or ""
         selector = str(req.get("selector") or "")
         rows = dict((self.config or {}).get("autoClick") or {})
         if req.get("remove"):
@@ -2254,20 +2283,32 @@ class AgentBridge:
                 self._reply(conn, {"ok": False, "error": "no-such-tab"})
                 return
             if group in (None, "", False):
-                was = self.win._group_of(v)
-                if was:
-                    self.win.ungroup(was)
+                # only this tab leaves: ungroup() dissolved the group and
+                # took every other member out with it
+                if self.win._group_of(v):
+                    self.win._move_tab_to_group(index, None)
             else:
                 name = str(group)
+                # a private tab is never put in a group, and the header
+                # registered for it stayed behind empty
+                if getattr(v, "private", False):
+                    self._reply(conn, {"ok": False, "error": "private-tab"})
+                    return
+                made = self.win._header_index(name) is None
                 # a group the browser has never heard of has no header
                 # to move the tab next to, so it is registered first
-                if self.win._header_index(name) is None:
+                if made:
                     import browser as _b
                     colours = getattr(_b, "GROUP_COLORS", None) \
                         or [("Blue", "#89b4fa")]
                     self.win._register_group(name, colours[0][1])
                     index = self.win.tabs.indexOf(v)
                 self.win._move_tab_to_group(index, name)
+                if self.win._group_of(v) != name:
+                    if made:
+                        self.win._cleanup_group_if_empty(name)
+                    self._reply(conn, {"ok": False, "error": "not-moved"})
+                    return
             self._reply(conn, {"ok": True,
                                "group": self.win._group_of(v) or ""})
             return
@@ -2289,6 +2330,9 @@ class AgentBridge:
             title = str(row.get("title") or "")
             if text and text not in url.lower() \
                     and text not in title.lower():
+                continue
+            # held to his site list like the tabs, bookmarks and cookies
+            if not self.site_ok(url):
                 continue
             rows.append({"url": url, "title": title,
                          "t": row.get("t")})

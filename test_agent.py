@@ -48,7 +48,7 @@ document.getElementById('i').addEventListener('keydown', function(ev){
   if (ev.key === 'Enter') document.getElementById('k').textContent = 'enter';
 });
 setTimeout(function(){ var l = document.createElement('p'); l.id = 'late';
-  l.textContent = 'late'; document.body.appendChild(l); }, 1200);
+  l.textContent = 'late'; document.body.appendChild(l); }, 6000);
 </script>"""
 
 app = H.app()
@@ -124,6 +124,8 @@ check("js returns a value", r.get("result") == 3, r)
 r = client("jsmain", {"op": "js", "tab": tid, "code": "document.title", "world": "main"})
 check("js in the main world", r.get("result") == "Bridge page", r)
 
+# the node comes 6 s after the load: at 1.2 s, under a CPU quota the
+# checks above took longer than that and the wait found it at once
 r = client("late", {"op": "wait", "tab": tid, "selector": "#late", "timeout": 10000})
 check("wait polls until a late node appears", r.get("ok") and r.get("waited", 0) > 0, r)
 

@@ -226,6 +226,7 @@ class Service(QObject):
         self.browser = browser
         self.status = "Stopped"
         self.metadata = {}
+        self._announced = None
         self._root = None
         self._player = None
         self.registered = False
@@ -280,7 +281,11 @@ class Service(QObject):
                 "xesam:url": str(url or ""),
             }
         self.metadata = meta
-        self._announce()
+        # the poll runs every couple of seconds: said again with nothing
+        # changed, playerctl --follow and bars redrew for nothing
+        now = (self.status, meta)
+        if now != self._announced and self._announce():
+            self._announced = now
         return self.status
 
     def bus_metadata(self):

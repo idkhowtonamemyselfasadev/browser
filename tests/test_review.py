@@ -1028,13 +1028,18 @@ _os.environ["PATH"] = _path_was
 br.config["downloadDir"] = str(_xdir)
 (_xdir / "other.md").write_text("his own notes")
 v15 = br.new_tab(); H.spin(300)
-H.load(v15, srv.url("/twother")); H.spin(600)
+H.load(v15, srv.url("/twother"))
+# the file is named after the title: read before it came (a CPU quota),
+# the name was made from the address instead
+H.wait_for(lambda: v15.title() == "other", 6000)
 _md = []
 br.save_page_markdown(view=v15, then=_md.append)
 H.wait_for(lambda: _md, 6000)
 check("a saved page does not replace his file of the same name",
       (_xdir / "other.md").read_text() == "his own notes" and _md
-      and _md[0].endswith("other (1).md"), str(_md))
+      and _md[0].endswith("other (1).md"),
+      str((_md, v15.title(), getattr(v15, "_last_title", None),
+           v15.url().toString())))
 H.load(_pv, srv.url("/twother")); H.spin(800)
 _rows_before = len(br.downloads)
 _md2 = []
@@ -1215,7 +1220,12 @@ if _gkey and B.page_guard is not None:
     _hdrs = str(H.js(v18, "document.body.innerText"))
     check("with the GPC guard on, Sec-GPC is sent (ad blocking off)",
           "sec-gpc: 1" in _hdrs.lower(), _hdrs[:300])
-    br.config[_gkey] = _gpc_was
+    # put back as it was: a key that was not there is taken out again,
+    # not left as null (guard_menu later raised on it)
+    if _gpc_was is None:
+        br.config.pop(_gkey, None)
+    else:
+        br.config[_gkey] = _gpc_was
 
 # "allow this time" is this time: the engine does not write it down
 # behind the browser's back, and the next visit asks again
@@ -9637,7 +9647,12 @@ check("the recorded tab's label keeps its mark",
 
 # J47: pinned, locked and game tabs are not "unused"
 _cur187 = br.current()
-br.tabs.setCurrentWidget(v15 if v15 is not _v187 else _cur187)
+# another live tab in front, so _v187 is a tab in the background (v15,
+# used here first, was closed long before this point)
+_front187 = next((v for _i, v in br._real_tabs() if v is not _v187), None)
+if _front187 is None:
+    _front187 = br.new_tab()
+br.tabs.setCurrentWidget(_front187)
 H.spin(100)
 _v187._last_seen = 1
 _res187 = {}
@@ -9997,8 +10012,8 @@ check("dedupe uses a prototype-free table",
 
 # J70: turn and zoom compose one transform
 check("turn and zoom write through one shared transform",
-      "xform(m)" in B.MEDIA_TOOLS["turn"]
-      and "xform(m)" in B.MEDIA_TOOLS["zoom"]
+      "xform(m)" in B.MEDIA_TOOLS2["turn"]
+      and "xform(m)" in B.MEDIA_TOOLS2["zoom"]
       and "scale(\" + z.scale" in B.MEDIA_XFORM
       and "rotate(\" + t.deg" in B.MEDIA_XFORM)
 
@@ -10026,6 +10041,344 @@ finally:
     br.__dict__.pop("media_tool2", None)
 check("media links keep only http and https rows",
       [r["title"] for r in _rows190] == ["a", "d"], str(_rows190))
+# ===== K0-K8: agent bridge reply, fill, find, groups, watch, tree, autoclick, history =====
+import agent_bridge as _AB191
+import inspect as _insp191
+_ab191 = _AB191.AgentBridge(br)
+# a second bridge counts its tab ids from 1 again, so a tab the suite's
+# earlier bridges numbered could answer to a new tab's id: start above
+# every id handed out so far
+_ab191._next_id = 1 + max([10 ** 6] + [
+    int(getattr(br.tabs.widget(_i), "_agent_id", 0) or 0)
+    for _i in range(br.tabs.count())])
+_out191 = []
+_ab191._reply = lambda conn, payload: _out191.append(payload)
+
+# K0: _reply copes with a value json cannot serialize
+class _Conn191:
+    def __init__(self):
+        self.data = b""
+    def state(self):
+        return _AB191.QLocalSocket.LocalSocketState.ConnectedState
+    def write(self, b):
+        self.data += b
+    def flush(self):
+        pass
+_c191 = _Conn191()
+try:
+    # a value json itself refuses (a QDateTime comes back from a page's
+    # Date much like this): written as text, not dropped with a TypeError
+    import datetime as _dt191
+    _AB191.AgentBridge._reply(_ab191, _c191,
+                              {"ok": True, "result": _dt191.datetime(2020, 1, 1)})
+    _k0_191 = json.loads(_c191.data.decode().strip().splitlines()[-1]) \
+        .get("result", "").startswith("2020-01-01")
+except TypeError:
+    _k0_191 = False
+check("a reply holding an unserializable value is still written",
+      _k0_191, str(_c191.data))
+
+# K1, K2, K6: page code
+check("fill sets values through the prototype setter",
+      "getOwnPropertyDescriptor" in _AB191._FILL_JS)
+check("find's selectors climb to a unique id or the root",
+      "parts.length < 6" not in _AB191._FINDTEXT_JS)
+check("the tree does not name a password field with its value",
+      'el.type === "password"' in _AB191.AgentBridge.TREE_JS)
+
+# K3 / K4: groups
+_ga191 = br.new_tab(url=srv.url("/twhome?g1=1"), switch=False)
+_gb191 = br.new_tab(url=srv.url("/twhome?g2=1"), switch=False)
+H.wait_for(lambda: "/twhome" in _ga191.url().toString()
+           and "/twhome" in _gb191.url().toString(), 8000)
+_pv191 = br.new_tab(url=srv.url("/twhome?g3=1"), switch=False, private=True)
+H.wait_for(lambda: "/twhome" in _pv191.url().toString(), 8000)
+try:
+    _ab191._views()
+    _out191.clear()
+    _ab191.op_groups(None, {"move": _ga191._agent_id, "group": "g191"})
+    _ab191.op_groups(None, {"move": _gb191._agent_id, "group": "g191"})
+    _ab191.op_groups(None, {"move": _ga191._agent_id, "group": ""})
+    check("moving one tab out of a group leaves the others in it",
+          br._group_of(_ga191) is None and br._group_of(_gb191) == "g191"
+          and "g191" in br.groups,
+          str((br._group_of(_ga191), br._group_of(_gb191), br.groups)))
+    _out191.clear()
+    _ab191.op_groups(None, {"move": _pv191._agent_id, "group": "p191"})
+    check("a private tab is refused before a group header is made",
+          _out191 and _out191[-1].get("error") == "private-tab"
+          and "p191" not in br.groups, str((_out191, br.groups)))
+finally:
+    for _g191 in ("g191", "p191"):
+        if _g191 in br.groups:
+            br.ungroup(_g191)
+    for _v191 in (_ga191, _gb191, _pv191):
+        br.close_tab(br.tabs.indexOf(_v191), ask=False)
+
+# K5: a watch on a private tab is refused
+_pw191 = br.new_tab(url=srv.url("/twhome?w=1"), switch=False, private=True)
+H.wait_for(lambda: "/twhome" in _pw191.url().toString(), 8000)
+try:
+    _ab191._views()
+    _out191.clear()
+    _n191 = len(_ab191.watches)
+    _ab191.op_watch(None, {"tab": _pw191._agent_id})
+    check("a watch on a private tab is refused, not started and dropped",
+          _out191 and _out191[-1].get("error") == "private-tab"
+          and len(_ab191.watches) == _n191, str(_out191[-1:]))
+finally:
+    br.close_tab(br.tabs.indexOf(_pw191), ask=False)
+
+# K7: autoclick keeps the host the page matches
+_ac191 = br.config.get("autoClick", "__absent__")
+try:
+    _out191.clear()
+    _ab191.op_autoclick(None, {"host": "WWW.Example.COM",
+                               "selector": "button.accept"})
+    check("an autoclick rule is stored under the lower-case host without www.",
+          (br.config.get("autoClick") or {}).get("example.com")
+          == ["button.accept"], str(br.config.get("autoClick")))
+    _ab191.op_autoclick(None, {"host": "www.example.com", "remove": True})
+    check("...and removed by either spelling",
+          "example.com" not in (br.config.get("autoClick") or {}),
+          str(br.config.get("autoClick")))
+finally:
+    if _ac191 == "__absent__":
+        br.config.pop("autoClick", None)
+    else:
+        br.config["autoClick"] = _ac191
+
+# K8: history held to the site list
+_sites191 = br.config.get("bridgeSites", "__absent__")
+_hist191 = list(br.history or [])
+try:
+    br.history[:] = [{"url": "https://a191.example/x", "title": "a", "t": 1},
+                     {"url": "https://b191.example/y", "title": "b", "t": 2}]
+    br.config["bridgeSites"] = ["a191.example"]
+    _out191.clear()
+    _ab191.op_history(None, {})
+    _urls191 = [r["url"] for r in _out191[-1].get("history", [])]
+    check("history returns only the sites on the list",
+          _urls191 == ["https://a191.example/x"], str(_urls191))
+finally:
+    br.history[:] = _hist191
+    if _sites191 == "__absent__":
+        br.config.pop("bridgeSites", None)
+    else:
+        br.config["bridgeSites"] = _sites191
+# ===== batch 192: split view theming, aero buttons, theme-this-site, media list, frames, undo, mp4
+import inspect as _insp192
+import os as _os192
+import theme_web as _tw192
+import page_guard as _pg192
+import capture as _cap192
+from PyQt6.QtGui import QImage as _QI192, QColor as _QC192
+
+# K9: the split view's page is visited by _open_sites
+class _SplitStub192:
+    def page(self):
+        return None
+
+    class _U:
+        def scheme(self):
+            return "https"
+
+    def url(self):
+        return self._U()
+
+
+_stub192 = _SplitStub192()
+_old192 = getattr(br, "_split_view", None)
+br._split_view = _stub192
+try:
+    _seen192 = list(_tw192._open_sites(br))
+finally:
+    br._split_view = _old192
+check("the right half of a split view is among the open sites",
+      any(v is _stub192 for v in _seen192), str(len(_seen192)))
+
+# K10: the aero gloss does not override an icon's background image
+_css192 = _tw192._aero({"accentLt": "#88f"})
+_gloss192 = _css192[_css192.index("button {"):_css192.index("box-shadow")]
+check("the aero gloss is not !important", "!important" not in _gloss192,
+      _gloss192)
+
+# K11: Theme this site works for a host also in the other exclusion list
+_cfg192 = (list(br.config.get("themeWebSkip") or []),
+           list(br.config.get("darkSiteRules") or []),
+           br.config.get("themeWeb", True))
+try:
+    br.config["themeWeb"] = True
+    br.config["themeWebSkip"] = ["both192.example"]
+    br.config["darkSiteRules"] = ["both192.example"]
+    _themed192 = _tw192.toggle_host(br, "both192.example")
+    check("a host in both lists is themed after 'Theme this site'",
+          _themed192 is True and "both192.example" not in
+          (br.config.get("darkSiteRules") or []), str(br.config.get(
+              "darkSiteRules")))
+finally:
+    br.config["themeWebSkip"], br.config["darkSiteRules"] = _cfg192[0], _cfg192[1]
+    br.config["themeWeb"] = _cfg192[2]
+    br.set_dark_site_rules(_cfg192[1])
+    br.save_config()
+
+# K12: the media list is recomputed on read, and dead streams dropped
+_src192 = _insp192.getsource(_pg192)
+check("the guard exposes a relist and prunes ended streams",
+      "window.__guardRelist = relist" in _src192
+      and "window.__guardStreams = kept" in _src192)
+check("the browser asks for a fresh media list before reading it",
+      "__guardRelist" in _insp192.getsource(B.Browser.media_users))
+
+# K13: a sibling subdomain is the same site
+check("noFrames compares registrable names",
+      "siteOf(other) !== siteOf(host)" in _src192)
+
+# K14: undo after crop then box does not crop twice
+_img192 = _QI192(300, 300, _QI192.Format.Format_RGB32)
+_img192.fill(_QC192("#ffffff"))
+_an192 = _cap192.Annotator(_img192)
+_an192.crop(100, 100, 200, 200)
+_an192.box(10, 10, 50, 50)
+_an192.box(20, 20, 30, 30)
+_an192.undo()
+check("undo after a crop keeps the cropped size",
+      (_an192.image.width(), _an192.image.height()) == (200, 200),
+      str((_an192.image.width(), _an192.image.height())))
+_an192.stamp("x")
+_an192.undo()
+check("undo of a stamp leaves one strip's worth less",
+      _an192.image.height() == 200, str(_an192.image.height()))
+
+# K15: odd sizes scaled to even, partial file removed
+_vsrc192 = _insp192.getsource(_cap192.frames_to_video)
+check("mp4 and webm frames are scaled to an even size",
+      "scale=trunc(iw/2)*2:trunc(ih/2)*2" in _vsrc192)
+_tmp192 = _Path(_tempfile.mkdtemp()) / "x.mp4"
+_tmp192.write_bytes(b"partial")
+_cap192._drop_partial(_tmp192)
+check("a partial video file is removed", not _tmp192.exists())
+# ===== K16 K17 K18 KS1 KS2: notes, clips, mpris, adblock =====
+import adblock as _ad193
+_pn193 = B.notes.parse_note("---\ntitle: T\n---\na b\x0bc\x0cd\r\ne\n\n")
+check("a note body keeps its own line breaks and trailing newlines",
+      _pn193["body"] == "a b\x0bc\x0cd\r\ne\n\n", repr(_pn193["body"]))
+_rt193 = B.notes.parse_note(B.notes.note_text(_pn193))
+check("...through a save and a read",
+      _rt193["body"] == _pn193["body"], repr(_rt193["body"]))
+
+_desk193 = B.notes.Desk(_tempfile.mkdtemp())
+_big193 = "x" * 30000
+_desk193.add_clip(_big193)
+_i193 = _desk193.clip_index(0, text=_big193)
+_desk193._clips[_i193]["pinned"] = True
+_desk193.add_clip(_big193)
+check("a clip over the cap dedupes, stays pinned and is found by text",
+      len(_desk193._clips) == 1 and _i193 == 0
+      and _desk193._clips[0]["pinned"], str(len(_desk193._clips)))
+
+import inspect as _insp193
+import mpris as _mp193
+_svc193 = _mp193.Service.__new__(_mp193.Service)
+_svc193.status, _svc193.metadata, _svc193._announced = "Stopped", {}, None
+_svc193._calls = 0
+def _ann193():
+    _svc193._calls += 1
+    return True
+_svc193._announce = _ann193
+_mp193.Service.update(_svc193, True, "t", "a")
+_mp193.Service.update(_svc193, True, "t", "a")
+_mp193.Service.update(_svc193, False, "t", "a")
+check("an unchanged status and track is announced once, a change again",
+      _svc193._calls == 2, str(_svc193._calls))
+
+_rs193 = _ad193.Rules()
+_rs193.load_text("foo.js|\n/ads/*.swf|\n")
+check("an end anchor matches a last part that also occurs earlier",
+      _rs193.blocks("https://x.com/foo.js?y=foo.js") == "foo.js|"
+      and _rs193.blocks("https://x.com/a/foo.js") == "foo.js|"
+      and _rs193.blocks("https://x.com/ads/a.swf/b.swf") == "/ads/*.swf|"
+      and _rs193.blocks("https://x.com/foo.js?y=1") is None, "")
+_rs193.load_text("~ok193.com##.neg193\na193.com,~b193.com##.mix193\n")
+check("negated hosts leave a site out instead of naming one",
+      ".neg193" in _rs193.hide_for("other.com")
+      and ".neg193" not in _rs193.hide_for("www.ok193.com")
+      and ".mix193" in _rs193.hide_for("a193.com")
+      and ".mix193" not in _rs193.hide_for("b193.com")
+      and ".mix193" not in _rs193.hide_for("c.com"), "")
+# ---- 194: settings page number boxes, buttons, language picker and text fill ----
+_set_x194 = (_Path(B.__file__).parent / "settings.html").read_text()
+for _id_x194 in ("recfps", "recbufferseconds", "lapseminutes", "barrows",
+                 "bartextsize", "tabminwidth"):
+    _m_x194 = [l for l in _set_x194.split("<input") if 'id="%s"' % _id_x194 in l]
+    check("%s: 0 clamps to the minimum (data-zero=no)" % _id_x194,
+          bool(_m_x194) and 'data-zero="no"' in _m_x194[0].split(">")[0])
+check("appearance numbers clamp to min and max",
+      "if (!isNaN(hi) && n > hi) n = hi;" in
+      _set_x194.split("function bindAppearance")[1].split("LOOK_TEXTS")[0])
+check("corner radius label keeps px while dragged",
+      'id === "cornerradius" ? "px" : "%"' in _set_x194)
+check("appearance buttons are bound without waiting for the bridge",
+      "if (!el || !bridge || !bridge.appearanceAction) continue;"
+      not in _set_x194
+      and "if (!bridge || !bridge.appearanceAction) return;" in _set_x194)
+check("language picker keeps the saved language",
+      "const current = window._tlang || sel.value;" in _set_x194)
+check("settings text fill covers every t_ element",
+      "[id^='t_']" in _set_x194)
+# ---- 195: start wizard, passwords, history and mic test page fixes ----
+_dir_x195 = _Path(B.__file__).parent
+_st_x195 = (_dir_x195 / "start.html").read_text()
+_pw_x195 = (_dir_x195 / "passwords.html").read_text()
+_hi_x195 = (_dir_x195 / "history.html").read_text()
+_mi_x195 = (_dir_x195 / "mictest.html").read_text()
+check("195 K28 ring wheel and arrows leave the wizard and settings alone",
+      "if (wizOpen || (e.target.closest && e.target.closest(\"#settings\"))) return;" in _st_x195
+      and "if (wizOpen) return;         // the arrows" in _st_x195)
+check("195 K29 wizard zoom slider covers 50-200",
+      'r.min = "50"; r.max = "200"; r.step = "5";' in _st_x195)
+check("195 K30 start-url message uses a function replacement",
+      '.replace("{a}", () => m[1] || "")' in _st_x195)
+check("195 K31 passwords drops a filter whose chip is gone",
+      "filter.flag = \"\";" in _pw_x195
+      and "!VAULT.tags.includes(filter.tag)) filter.tag = \"\"" in _pw_x195
+      and "filter.fav = false; filter.flag = \"\"" in _pw_x195)
+check("195 K32 history groups and icons are Maps",
+      "let icons = new Map();" in _hi_x195
+      and "const groups = new Map();" in _hi_x195
+      and "groups[host]" not in _hi_x195)
+check("195 K33 passwords replacements are functions",
+      'replace("{}", () => titleOf(it))' in _pw_x195
+      and 'replace("{}", () => d.path)' in _pw_x195
+      and 'replace("{}", titleOf(it))' not in _pw_x195)
+check("195 K34 a cut recording says nothing and old URLs are revoked",
+      "recorder.cut = true" in _mi_x195 and "if (recorder.cut) return;" in _mi_x195
+      and "URL.revokeObjectURL(recorded)" in _mi_x195
+      and _mi_x195.count("cutRecorder();") == 2)
+check("195 KS6 Start cancels the running meter loop",
+      "if (raf) cancelAnimationFrame(raf);\n      meter();" in _mi_x195)
+
+# ---- fix207: a null guard key in config.json still opens the menu ----
+_gk207 = next(iter(B.Browser.GUARD_KEY.values()), None) \
+    if B.page_guard is not None else None
+if _gk207:
+    _had207 = _gk207 in br.config
+    _was207 = br.config.get(_gk207)
+    br.config[_gk207] = None
+    try:
+        _m207 = br.guard_menu()
+        check("207 a null guard setting does not stop the guard menu",
+              _m207 is not None and len(_m207.actions()) > 0)
+        _m207.deleteLater()
+    except TypeError as _e207:
+        check("207 a null guard setting does not stop the guard menu",
+              False, str(_e207))
+    finally:
+        if _had207:
+            br.config[_gk207] = _was207
+        else:
+            br.config.pop(_gk207, None)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

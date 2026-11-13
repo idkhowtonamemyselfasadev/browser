@@ -113,6 +113,15 @@
     } catch (e) {}
   }
 
+  // The recorder ends when its tracks stop, long before the five
+  // seconds are up. A cut recording says nothing and keeps no playback.
+  function cutRecorder() {
+    if (recorder && recorder.state === "recording") {
+      recorder.cut = true;
+      try { recorder.stop(); } catch (e) {}
+    }
+  }
+
   function meter() {
     if (!analyser) return;
     const data = new Uint8Array(analyser.frequencyBinCount);
@@ -142,6 +151,7 @@
         {audio: id ? {deviceId: {exact: id}} : true});
       if (ask !== micAsk) { fresh.getTracks().forEach((t) => t.stop());
                             return; }
+      cutRecorder();
       if (micStream) micStream.getTracks().forEach((t) => t.stop());
       if (micSource) { try { micSource.disconnect(); } catch (e) {} }
       micStream = fresh;
@@ -151,6 +161,7 @@
       analyser.fftSize = 512;
       source.connect(analyser);
       peak = 0;
+      if (raf) cancelAnimationFrame(raf);
       meter();
       await devices();
       say("t_micnote", STR.micOn || "Listening. The level should move when "
@@ -168,6 +179,7 @@
     micAsk++;
     if (micSource) { try { micSource.disconnect(); } catch (e) {} }
     micSource = null;
+    cutRecorder();
     if (micStream) micStream.getTracks().forEach((t) => t.stop());
     micStream = null;
     document.getElementById("level").style.width = "0";
@@ -199,6 +211,8 @@
     recorder = new MediaRecorder(micStream);
     recorder.ondataavailable = (e) => chunks.push(e.data);
     recorder.onstop = () => {
+      if (recorder.cut) return;
+      if (recorded) URL.revokeObjectURL(recorded);
       recorded = URL.createObjectURL(new Blob(chunks, {type: "audio/webm"}));
       document.getElementById("playback").disabled = false;
       say("t_micnote", STR.recDone || "Five seconds recorded. Play it back.");

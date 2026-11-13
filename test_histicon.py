@@ -112,7 +112,7 @@ check("...and Browser can answer it without a fetch",
 print("\n(4) the page asks for every host it is about to draw")
 page = (HERE / "history.html").read_text()
 check("it keeps a map of icons rather than a URL per row",
-      "let icons = {}" in page)
+      "let icons = {}" in page or "let icons = new Map()" in page)
 check("it asks the browser for them", "bridge.siteIcons(" in page)
 check("the list view asks before it draws",
       re.search(r"withIcons\(.*renderList", page, re.S) is not None)
@@ -125,7 +125,7 @@ check("a site with no icon draws a placeholder instead of fetching",
 check("...and the placeholder is styled, so the row does not jump",
       "img.noicon" in page)
 check("a host that comes back without an icon is not asked for twice",
-      'icons[host] = ""' in page)
+      ('icons[host] = ""' in page or 'icons.set(host, "")' in page))
 
 print("\n%d checks failed" % len(fails))
 for name in fails:

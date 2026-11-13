@@ -196,7 +196,18 @@ class Rule:
             url = low if low is not None else url.lower()
         at = 0
         seps = self.seps
+        last = len(self.parts) - 1
         for n, part in enumerate(self.parts):
+            if n == last and self.anchor_end:
+                # the last part has to sit at the very end: the first
+                # hit of it ("foo.js?y=foo.js") is not the one that does
+                found = len(url) - len(part)
+                if found < at or not url.endswith(part):
+                    return False
+                if n == 0 and self.anchor_start and found != 0:
+                    return False
+                at = len(url)
+                break
             found = url.find(part, at)
             if n < len(seps) and seps[n]:
                 # "^": what follows has to be a separator or the end --
@@ -420,6 +431,9 @@ class Rules:
         self.hide_global = []
         self.hide_host = {}
         self.unhide_host = {}
+        #: hide and unhide rules that name sites to leave out:
+        #: (hosts, left-out hosts, selector, unhide)
+        self.hide_not = []
         self.counts = {"rules": 0, "allow": 0, "hide": 0, "skipped": 0,
                        "lines": 0, "lists": 0}
         self.skipped_why = {}
@@ -440,7 +454,15 @@ class Rules:
                 continue
             if kind == "hide":
                 hosts, selector, unhide = value
-                if unhide:
+                # "~b.com" is every site but b.com: filed under a host
+                # of that name it never matched anything
+                negs = [one[1:].strip().removeprefix("www.")
+                        for one in hosts if one.startswith("~")]
+                hosts = [one for one in hosts if not one.startswith("~")]
+                negs = [one for one in negs if one]
+                if negs:
+                    self.hide_not.append((hosts, negs, selector, unhide))
+                elif unhide:
                     # no site named: an exception everywhere, kept under ""
                     for one in hosts or [""]:
                         self.unhide_host.setdefault(one, []).append(selector)
@@ -561,10 +583,20 @@ class Rules:
         out = []
         for one in _host_parents(host):
             out.extend(self.hide_host.get(one, ()))
-        out.extend(self.hide_global)
+        parents = set(_host_parents(host))
         never = set(self.unhide_host.get("", ()))
-        for one in _host_parents(host):
+        for one in parents:
             never.update(self.unhide_host.get(one, ()))
+        for hosts, negs, selector, unhide in self.hide_not:
+            if parents.intersection(negs):
+                continue
+            if hosts and not parents.intersection(hosts):
+                continue
+            if unhide:
+                never.add(selector)
+            else:
+                out.append(selector)
+        out.extend(self.hide_global)
         return [one for one in dict.fromkeys(out) if one not in never]
 
     def what_it_skipped(self, top=6):

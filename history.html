@@ -231,11 +231,11 @@
   // been, handed to one company, every time he opened the page that
   // exists to be private. A site with no kept icon gets a quiet dot,
   // not a request.
-  let icons = {};
+  let icons = new Map();
 
   function iconFor(host) {
     const img = document.createElement("img");
-    const kept = icons[host];
+    const kept = icons.get(host);
     if (kept) {
       img.src = kept;
     } else {
@@ -248,17 +248,17 @@
   // Every host on screen, asked for in one call before the rows are
   // drawn, so no row has to wait on its own round trip.
   function withIcons(hosts, done) {
-    const want = hosts.filter((h) => h && !(h in icons));
+    const want = hosts.filter((h) => h && !icons.has(h));
     if (!bridge || !want.length) { done(); return; }
     bridge.siteIcons(JSON.stringify(want), (json) => {
       try {
         const got = JSON.parse(json);
-        for (const host in got) { icons[host] = got[host]; }
+        for (const host of Object.keys(got)) { icons.set(host, got[host]); }
       } catch (err) { /* no icons is not a broken page */ }
       // a host asked for and not answered is remembered as "none", so
       // the next render does not ask for it again
       for (const host of want) {
-        if (!(host in icons)) { icons[host] = ""; }
+        if (!icons.has(host)) { icons.set(host, ""); }
       }
       done();
     });
@@ -372,15 +372,15 @@
       return;
     }
     // many visits to one site, folded into one row
-    const groups = {};
+    const groups = new Map();
     const order = [];
     for (const e of entries) {
       const host = hostOf(e.url) || "?";
-      if (!groups[host]) { groups[host] = []; order.push(host); }
-      groups[host].push(e);
+      if (!groups.has(host)) { groups.set(host, []); order.push(host); }
+      groups.get(host).push(e);
     }
     for (const host of order) {
-      const rows = groups[host];
+      const rows = groups.get(host);
       const fold = document.createElement("div");
       fold.className = "fold";
       const count = document.createElement("span");

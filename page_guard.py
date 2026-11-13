@@ -417,18 +417,28 @@ _JS = r"""
     var md = navigator.mediaDevices;
     var relist = function () {
       var live = [];
+      var kept = [];
       for (var i = 0; i < window.__guardStreams.length; i++) {
         var tracks = [];
+        var any = false;
         try { tracks = window.__guardStreams[i].getTracks(); } catch (e) {}
         for (var j = 0; j < tracks.length; j++) {
           if (tracks[j].readyState !== "live") continue;
+          any = true;
           var kind = tracks[j].kind === "video" ? "camera" : "microphone";
           if (window.__guardStreams[i].__guardScreen) kind = "screen";
           if (live.indexOf(kind) < 0) live.push(kind);
         }
+        /* a stream whose tracks have all ended is of no use to anybody */
+        if (any) kept.push(window.__guardStreams[i]);
       }
+      window.__guardStreams = kept;
       window.__guardMedia = live;
     };
+    /* "ended" is not fired when the page itself calls track.stop(), the
+       usual way a call hangs up, so the browser asks for a fresh look
+       whenever it reads the list */
+    window.__guardRelist = relist;
     var watch = function (stream, screen) {
       try {
         if (screen) stream.__guardScreen = true;
@@ -529,10 +539,35 @@ _JS = r"""
         try { at = new URL(src, location.href); } catch (e) {}
         if (!at || !/^https?:$/i.test(at.protocol)) continue;
         var other = at.hostname.toLowerCase().replace(/^www\./, "");
+        /* the registrable name: the last two labels, three under a
+           country's own second level (co.uk), one more under a host
+           whose subdomains belong to different people (github.io: the
+           same list as adblock._SHARED_HOSTS), and an address as it is */
+        var SHARED = ["github.io", "gitlab.io", "blogspot.com", "pages.dev",
+          "netlify.app", "vercel.app", "herokuapp.com", "appspot.com",
+          "web.app", "firebaseapp.com", "azurewebsites.net",
+          "cloudfront.net", "workers.dev", "glitch.me", "neocities.org",
+          "wordpress.com", "tumblr.com", "s3.amazonaws.com"];
+        var siteOf = function (name) {
+          if (/^[0-9.]+$/.test(name) || name.indexOf(":") >= 0) return name;
+          var parts = name.split(".");
+          if (parts.length <= 2) return name;
+          if (parts.length >= 4
+              && SHARED.indexOf(parts.slice(-3).join(".")) >= 0) {
+            return parts.slice(-4).join(".");
+          }
+          if (SHARED.indexOf(parts.slice(-2).join(".")) >= 0) {
+            return parts.slice(-3).join(".");
+          }
+          var take = parts[parts.length - 1].length === 2
+            && /^(co|com|org|net|gov|edu|ac|ne|or|go)$/.test(
+              parts[parts.length - 2]) ? 3 : 2;
+          return parts.slice(-take).join(".");
+        };
         /* the same site or a part of it, by the END of the name:
            indexOf found ".example.com" inside ads.example.com.evil.net
            and kept that frame on example.com */
-        if (other && other !== host
+        if (other && other !== host && siteOf(other) !== siteOf(host)
             && other.slice(-(host.length + 1)) !== "." + host
             && host.slice(-(other.length + 1)) !== "." + other) {
           frames[i].remove();

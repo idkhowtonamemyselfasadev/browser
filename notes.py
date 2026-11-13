@@ -68,7 +68,10 @@ def parse_note(text):
     folder looks like, and it is still a note."""
     out = {"title": "", "link": "", "tags": [], "t": 0, "edited": 0,
            "body": str(text or "")}
-    lines = str(text or "").splitlines()
+    # split on "\n" only: splitlines also cuts at U+2028, \x0b, \x0c and
+    # "\r", and the join below then turned each of them (and the last
+    # newline) into something else on every save
+    lines = str(text or "").split("\n")
     if not lines or lines[0].strip() != "---":
         return out
     body_at = None
@@ -568,14 +571,16 @@ class Desk:
         and private messages. It lives as long as the browser does and
         not a moment longer, and a private tab never feeds it (see
         Browser.remember_clip)."""
-        text = str(text or "")
+        # cut first: it is the cut text that is stored, so it is the cut
+        # text a copy of the same thing has to be compared with
+        text = str(text or "")[:20000]
         if not text.strip():
             return self._clips
         # a pinned one copied again stays pinned (it lost its star, and
         # then the next Clear or the cap took it)
         was = any(c["text"] == text and c.get("pinned") for c in self._clips)
         self._clips = [c for c in self._clips if c["text"] != text]
-        self._clips.insert(0, {"text": text[:20000], "kind": str(kind),
+        self._clips.insert(0, {"text": text, "kind": str(kind),
                                "t": int(time.time()), "pinned": was})
         pinned = [c for c in self._clips if c["pinned"]]
         rest = [c for c in self._clips if not c["pinned"]][:CLIPS_MAX]
@@ -590,7 +595,7 @@ class Desk:
         each), so the text names it; the number is only the fallback."""
         if text is not None:
             for at, clip in enumerate(self._clips):
-                if clip["text"] == str(text):
+                if clip["text"] == str(text)[:20000]:
                     return at
             return -1
         try:

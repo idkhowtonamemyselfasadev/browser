@@ -1,5 +1,59 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part forty-two: twentieth pass)
+
+The twentieth search read every module next to browser.py and every page of
+the browser's own line by line: the agent bridge, the site themer, the page
+guard, the capture tools, notes, the media keys, the ad blocker, Settings,
+the start page, history, passwords and the mic test. It confirmed 38 bugs,
+fixed here:
+
+- **Settings.** Seven buttons in Appearance did nothing (they were wired up
+  before the page could talk to the browser). About sixty explanation lines
+  in Appearance, Keys, Recording, Performance, Navigation, Reading and Theme
+  were blank and are filled. Number boxes no longer accept or show values
+  the browser would ignore (a 0 where 0 means nothing, a font size out of
+  range); the corner radius keeps its unit; the language picker shows the
+  saved language.
+- **The agent.** A result the page returns as a date or a buffer gets an
+  answer instead of a timeout; "fill" types the way a person does, so React
+  and Vue forms take it; "find" gives selectors that pick one element;
+  moving a tab out of a group removes only that tab; a private tab is not
+  put into a group or watched; the page outline no longer reads out what is
+  typed in password boxes; auto-click rules match www. and capitals; the
+  history answer keeps to the sites the agent may see.
+- **Site looks.** The right half of a split view follows a theme change;
+  Frutiger Aero keeps buttons whose icon is a background picture; "Theme this
+  site" says when Settings leaves that site alone; "block frames from other
+  sites" keeps frames from the same site's other subdomains (and keeps shared
+  hosts such as github.io apart).
+- **Capture and recording.** Undo in the screenshot editor no longer applies
+  a crop or stamp twice; MP4 export works for odd-sized frames and leaves no
+  half file; the camera and mic light goes off when a page stops its track.
+- **Notes and clips.** A note keeps its own line breaks when saved; long
+  clips keep their pin, are not stored twice and can be searched.
+- **Media keys.** The desktop is only told about a change when something
+  changed, not on every poll.
+- **Ad blocker.** Rules ending in | are checked against every match, and
+  rules for "every site but ~this one" work.
+- **Start page, history and passwords.** The setup wizard scrolls; its zoom
+  slider shows a saved zoom outside its range truthfully; an address or name
+  with $ in it is shown as written; the health filter clears when its chip
+  goes; history grouped by site copes with any host name.
+- **Mic test.** Restarting the mic mid-recording says how long was really
+  recorded, and pressing Start twice no longer runs two meters.
+- **Guard menu.** A guard setting left as null in config.json (a hand edit,
+  or a test putting a missing key back) made the whole guard menu fail to
+  open; the clip history toggle had the same weak spot.
+
+Tests: the review suite had stopped at that guard menu since the previous
+part, so its last hundred checks were not running; they run again, and one
+of them (unused tabs) used a tab closed earlier and is mended. Nine suites
+read the page a fixed time after loading it and went red when the machine
+was busy (dark pages, the circle look's swing, the agent's wait, video
+length, a saved page's name, the start page's setup wizard over the
+circle look); they now wait for the thing itself.
+
 ## 2026-11-13 — line-by-line review, day 3 (part forty-one: seventeenth to nineteenth passes)
 
 The seventeenth search looked at private tabs action by action, the menus,

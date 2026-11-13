@@ -317,6 +317,9 @@ check("and in all %d palettes a look never names a colour that is not in "
 
 # ---------------------------------------------------------------- (8)
 print("\n(8) the start page in each look")
+# set up already: on a first run the setup wizard sits over the start
+# page, and the wheel and the arrows rightly go to it, not the ring
+win.config.setdefault("startPage", {})["setupDone"] = True
 view = win.new_tab()
 page = view.page()
 for _ in range(60):        # software rendering makes this slow, not stuck
@@ -629,21 +632,33 @@ check("the big background disc is drawn in the circle look",
       disc)
 js(page, """window.dispatchEvent(new WheelEvent("wheel",
       {deltaY: 500, cancelable: true, bubbles: true}))""")
-spin(80)
-swung = js(page, """(function () {
+# polled, not read once after a fixed 80 ms: the swing runs on animation
+# frames, and under a CPU quota the first ones came later than that
+m_swung, swung = None, ""
+for _ in range(30):
+    spin(50)
+    swung = js(page, """(function () {
   var one = document.querySelector("#ring .ritem");
   return one ? one.style.transform : "";
 })()""") or ""
-m_swung = re.search(r"translateX\(([-0-9.]+)px\)", swung)
+    m_swung = re.search(r"translateX\(([-0-9.]+)px\)", swung)
+    if m_swung is not None and abs(float(m_swung.group(1))) > 0.5:
+        break
 check("mid-swing a pin is translated sideways - the pendulum swings",
       m_swung is not None and abs(float(m_swung.group(1))) > 0.5,
       repr(swung)[:70])
-spin(1600)
-settled = js(page, """(function () {
+# the spring settles in frames, not milliseconds: polled for up to 6 s
+# rather than read once after 1.6 s, which a CPU quota stretched past
+m_settled, settled = None, ""
+for _ in range(60):
+    spin(100)
+    settled = js(page, """(function () {
   var one = document.querySelector("#ring .ritem");
   return one ? one.style.transform : "";
 })()""") or ""
-m_settled = re.search(r"translateX\(([-0-9.]+)px\)", settled)
+    m_settled = re.search(r"translateX\(([-0-9.]+)px\)", settled)
+    if m_settled is not None and abs(float(m_settled.group(1))) < 1.0:
+        break
 check("and the sway settles back to rest",
       m_settled is not None and abs(float(m_settled.group(1))) < 1.0,
       repr(settled)[:70])

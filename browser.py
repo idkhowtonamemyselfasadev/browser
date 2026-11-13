@@ -34978,7 +34978,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         for name in page_guard.GUARDS:
             action = menu.addAction(ui("guard" + name[0].upper() + name[1:]))
             action.setCheckable(True)
-            action.setChecked(self.config.get(self.GUARD_KEY[name], False))
+            # bool(): a null in config.json raised TypeError here and the
+            # whole menu never opened
+            action.setChecked(bool(self.config.get(self.GUARD_KEY[name],
+                                                   False)))
             action.triggered.connect(
                 lambda _c=False, n=name: self.toggle_guard(n))
         private = self._private_of(view)
@@ -35742,7 +35745,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             waiting["n"] += 1
             try:
                 view.page().runJavaScript(
-                    "JSON.stringify(window.__guardMedia || [])",
+                    "(function(){try{if(window.__guardRelist&&"
+                    "window.__guardStreams&&window.__guardStreams.length)"
+                    "window.__guardRelist();}catch(e){}"
+                    "return JSON.stringify(window.__guardMedia || []);})()",
                     MAIN_WORLD_ID,
                     lambda raw, v=view: collect(v, raw))
             except RuntimeError:
@@ -38566,7 +38572,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.urlbar.mapToGlobal(QPoint(0, 24))))
         clips = menu.addAction(ui("clipHistoryName"))
         clips.setCheckable(True)
-        clips.setChecked(self.config.get("clipHistory", False))
+        clips.setChecked(bool(self.config.get("clipHistory", False)))
         clips.triggered.connect(lambda on: self.watch_clipboard(on))
         return menu
 

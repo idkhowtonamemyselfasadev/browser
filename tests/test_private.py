@@ -453,7 +453,11 @@ for want in ("Ctrl+=", "Ctrl++", "Ctrl+-", "Ctrl+0", "Ctrl+Shift+N"):
 # and a real Ctrl+wheel over the page
 wheeler = br.new_tab(url=url("/cookies"))
 show(wheeler)
-H.spin(700)
+# zoom acts on a web page only (_zoom_target): a fixed 700 ms was
+# sometimes before the address committed under a CPU quota, and the
+# zoom went nowhere (red on main too)
+H.wait_for(lambda: "/cookies" in wheeler.url().toString(), 8000)
+H.spin(300)
 br.bridge.setSetting("zoom", "1.0")
 H.spin(150)
 target = wheeler.focusProxy() or wheeler
@@ -477,7 +481,8 @@ br.bridge.setSetting("zoom", "1.0")
 H.spin(150)
 behind = br.new_tab(url=url("/cookies"))
 show(behind)
-H.spin(700)
+H.wait_for(lambda: "/cookies" in behind.url().toString(), 8000)
+H.spin(300)
 br.zoom_by(1)
 check("the tab in front zooms normally",
       abs(behind.zoomFactor() - 1.1) < 1e-6, behind.zoomFactor())

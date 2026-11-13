@@ -59,7 +59,20 @@ win.show()
 H.spin(400)
 view = win.new_tab(url=None)
 H.load(view, srv.url("/player"))
-H.spin(600)
+
+
+def _meta_ready():
+    # the video's own metadata, not a fixed 600 ms: under a CPU quota
+    # that was sometimes too short and the duration read 0
+    try:
+        return H.js(view, "(function(){var v=document.getElementById('v');"
+                    "return !!v && v.readyState >= 1;})()",
+                    B.MAIN_WORLD_ID) is True
+    except AssertionError:
+        return False
+
+
+H.wait_for(_meta_ready, 10000)
 
 
 def js(code):

@@ -151,6 +151,21 @@ def toggle_host(browser, host):
         own.append(host)
     browser.config["themeWebSkip"] = sorted(own)
     browser.save_config()
+    if host not in own:
+        # Settings' "Sites to leave alone" held the same host, so taking it
+        # off this list changed nothing and the item came back every time;
+        # a themed host is taken off that one too
+        dark = [h for h in (browser.config.get("darkSiteRules") or [])
+                if isinstance(h, str)]
+        left = [h for h in dark
+                if h.strip().lower().removeprefix("www.") != host]
+        if len(left) != len(dark):
+            setter = getattr(browser, "set_dark_site_rules", None)
+            if setter is not None:
+                setter(left)
+            else:
+                browser.config["darkSiteRules"] = left
+                browser.save_config()
     refresh(browser)
     return themes_host(browser, host)
 
@@ -411,8 +426,11 @@ def _aero(p):
     white = "rgba(255,255,255"
     return f"""
 button, input, select, textarea, img {{ border-radius: 12px !important; }}
+/* no !important on the gloss: a button whose icon is a background
+   image (sprite, url(), data-URI svg) keeps it, because the author's
+   own rule wins over this one; a plain button still gets the gloss */
 button {{
-  background-image: linear-gradient({white},.35), {white},.05) 46%, transparent 47%) !important;
+  background-image: linear-gradient({white},.35), {white},.05) 46%, transparent 47%);
   box-shadow: inset 0 1px 0 {white},.45), 0 4px 12px rgba(6,39,68,.35) !important; }}
 html::before {{ {_OVERLAY}
   background:
@@ -1732,9 +1750,20 @@ def _open_sites(browser):
             count = win.tabs.count()
         except (AttributeError, RuntimeError):
             continue
+        views = []
         for i in range(count):
             try:
-                view = win.tabs.widget(i)
+                views.append(win.tabs.widget(i))
+            except (AttributeError, RuntimeError):
+                continue
+        # the right half of a split view leaves the strip while it shows,
+        # so the loop above never met it: it kept the old theme, or stayed
+        # themed after "off", until the split was closed and opened again
+        views.append(getattr(win, "_split_view", None))
+        for view in views:
+            if view is None:
+                continue
+            try:
                 if win._is_header(view) or not hasattr(view, "page"):
                     continue
                 if view.url().scheme() == "file":
