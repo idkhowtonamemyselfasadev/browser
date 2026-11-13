@@ -97,6 +97,10 @@ ALLOWED_AT = {
         "ours, and it has to match the game it is previewing",
     ("#ffffff", "minimessage_html"):
         "Minecraft chat text, same reason",
+    ("#2b2b2b", "_chat_page"):
+        "Minecraft's chat background, drawn by minimessage_html's page",
+    ("#ffffff", "_chat_page"):
+        "Minecraft chat text, same reason",
     ("#000", "MEDIA_TOOLS2.winfull"):
         "the letterbox behind a video at full screen - black is the "
         "absence of a frame, not a surface, and it must not take the "

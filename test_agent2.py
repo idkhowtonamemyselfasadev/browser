@@ -346,6 +346,49 @@ r = ask("autooff", {"op": "autoclick", "host": "127.0.0.1",
 check("...and the rule can be taken away",
       not (r.get("rules") or {}).get("127.0.0.1"), r)
 
+# a client held to one site sees only that site's tabs, cannot search,
+# and cannot ask about another site's cookies
+win.config["bridgeSites"] = ["example.com"]
+try:
+    _rt = ask("tabsheld", {"op": "tabs"})
+    _rs = ask("searchheld", {"op": "search", "text": "x"})
+    _rc = ask("cookiesheld", {"op": "cookies", "host": "other.example"})
+    _rc2 = ask("cookiesall", {"op": "cookies"})
+finally:
+    win.config.pop("bridgeSites", None)
+check("a client held to one site is shown only that site's tabs",
+      _rt.get("ok") and _rt.get("tabs") == [], _rt)
+check("...cannot search, and cannot read another site's cookies",
+      _rs.get("error") == "site-not-allowed"
+      and _rc.get("error") == "site-not-allowed"
+      and _rc2.get("error") == "site-not-allowed", (_rs, _rc, _rc2))
+
+# "ask" in a tab it has just opened waits for the page before it types
+_real_nt81 = win.new_tab
+win.new_tab = lambda url=None, switch=False, **k: _real_nt81(
+    url=srv.url("/askbox"), switch=switch)
+try:
+    r = ask("askfresh", {"op": "ask", "which": "claude", "text": "hello"},
+            timeout=40)
+finally:
+    win.new_tab = _real_nt81
+check("asking in a tab it has just opened types once the page is there",
+      r.get("ok") is True and r.get("state") == "typed", r)
+
+# read-only means read-only, for the writing forms of "read" ops too
+win.config["bridgeLevel"] = "read"
+try:
+    _ra = ask("auditclear", {"op": "audit", "clear": True})
+    _rb = ask("bmadd", {"op": "bookmarks", "action": "add",
+                        "url": "https://x.example/"})
+    _rl = ask("auditlist", {"op": "audit"})
+finally:
+    win.config.pop("bridgeLevel", None)
+check("at read level an agent cannot clear the audit or add a bookmark",
+      _ra.get("error") == "bridge-read-only"
+      and _rb.get("error") == "bridge-read-only" and _rl.get("ok"),
+      (_ra, _rb, _rl))
+
 print("\n(10) the tabs the agent owns")
 r = ask("mine", {"op": "mine", "do": "list"})
 check("the tabs it opened are its own",
@@ -355,6 +398,35 @@ check("an idle time can be set", r.get("ok") and r.get("after") == 3600, r)
 check("...and nothing is closed before it",
       bridge.close_idle_agent_tabs() == [],
       bridge.close_idle_agent_tabs())
+# a tab the agent is still working in is not idle, however old it is
+_old_tab = bridge._find(tid)
+_old_tab._agent_touched = time.time() - 7200
+win.config["agentTabIdle"] = 60
+ask("stilluse", {"op": "info", "tab": tid})
+check("a tab the agent keeps using is not swept as idle",
+      bridge.close_idle_agent_tabs() == [] and bridge._find(tid) is not None)
+win.config["agentTabIdle"] = 3600
+# a search marks its own tab, not the last one on the strip
+_pos_was = win.config.get("newTabPos")
+win.config["newTabPos"] = "after"
+# one of HIS tabs at the end of the strip (earlier ops left agent tabs)
+_last = win.new_tab(url=srv.url("/other"), switch=False, at_end=True)
+H.spin(300)
+win.tabs.setCurrentIndex(0)
+_real_sf = win.search_for
+win.search_for = lambda text, new_tab=True: (
+    win.new_tab(url=srv.url("/page")) and srv.url("/page"))
+try:
+    r = ask("search", {"op": "search", "text": "x"})
+finally:
+    win.search_for = _real_sf
+    if _pos_was is None:
+        win.config.pop("newTabPos", None)
+    else:
+        win.config["newTabPos"] = _pos_was
+check("a search marks the tab it opened, not his last tab",
+      not getattr(_last, "_agent_owned", False) and r.get("ok"),
+      (getattr(_last, "_agent_owned", None), r.get("tab")))
 r = ask("open2", {"op": "open", "url": srv.url("/other")})
 spare = r["tab"]["id"]
 before = len(bridge._views())

@@ -15,6 +15,10 @@ H.Handler.pages = PG.pages(HOP_TARGET)
 
 br = B.Browser()
 br.config["savePasswords"] = True
+# the form-draft feature is not what is tested here: its 60 s tick could
+# save an address typed in an earlier section and put it back into a
+# fresh tab on the same page, which read as the vault filling tab B
+br.config["formDraftsOn"] = False
 br.show()
 H.spin(300)
 view = br.current()

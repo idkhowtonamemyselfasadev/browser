@@ -114,13 +114,16 @@ check("launched firefox with the url",
       calls == [("firefox", "https://mail.google.com/")], calls)
 
 
-print("\n(3) the three user-initiated nav types all hand off")
+print("\n(3) the two user-initiated nav types hand off; a form submit does not")
 for label, t in (("typed", NT.NavigationTypeTyped),
-                 ("link-clicked", NT.NavigationTypeLinkClicked),
-                 ("form-submit", NT.NavigationTypeFormSubmitted)):
+                 ("link-clicked", NT.NavigationTypeLinkClicked)):
     calls.clear()
     r = win.maybe_open_external(ACCT, t, None)
     check("%s hands off" % label, r is True and len(calls) == 1, (r, calls))
+calls.clear()
+r = win.maybe_open_external(ACCT, NT.NavigationTypeFormSubmitted, None)
+check("a form submit stays here (its POST body cannot be handed over)",
+      r is False and calls == [], (r, calls))
 
 
 print("\n(4) redirects / back-forward / sub-frame are left alone")

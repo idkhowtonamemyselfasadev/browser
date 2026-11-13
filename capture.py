@@ -190,12 +190,22 @@ def full_page(view, world, settle=160, limit=30000):
                 break
             top = int(y * scale)
             if y + inner_h > height:
-                # the last screen: the page cannot scroll any further,
-                # so take the bottom of it and put it at the bottom
+                # the last screen. Where the page really is matters: one
+                # that ends here could not scroll to y, so what is wanted
+                # is lower on the screen; one that goes on past the limit
+                # did scroll to y, and what is wanted is at the TOP --
+                # taking the bottom there pasted content from beyond the
+                # limit into the last band of the picture.
+                at = _js(view, "window.scrollY", world)
+                try:
+                    at = float(at)
+                except (TypeError, ValueError):
+                    at = float(max(0, height - inner_h))
                 keep = int((height - y) * scale)
+                start = max(0, min(screen.height() - keep,
+                                   int((y - at) * scale)))
                 painter.drawImage(0, out.height() - keep, screen,
-                                  0, screen.height() - keep,
-                                  screen.width(), keep)
+                                  0, start, screen.width(), keep)
                 break
             painter.drawImage(0, top, screen)
             y += inner_h

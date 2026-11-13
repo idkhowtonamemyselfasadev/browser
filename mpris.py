@@ -23,12 +23,16 @@ import json
 try:
     from PyQt6.QtDBus import (QDBusConnection, QDBusMessage,
                               QDBusAbstractAdaptor)
-    from PyQt6.QtCore import QObject, pyqtSlot, pyqtProperty, QVariant
+    from PyQt6.QtCore import (QObject, pyqtSlot, pyqtProperty, QVariant,
+                              pyqtClassInfo)
     HAVE_DBUS = True
 except ImportError:  # pragma: no cover - Qt built without QtDBus
     HAVE_DBUS = False
     QDBusAbstractAdaptor = object
     QObject = object
+
+    def pyqtClassInfo(_name, _value):
+        return lambda cls: cls
 
 #: the name the browser takes on the bus. The suffix is what playerctl
 #: and waybar show, so it is the browser's own name and not a number.
@@ -43,11 +47,14 @@ def available():
     return QDBusConnection.sessionBus().isConnected()
 
 
+# The interface name an adaptor answers to is its "D-Bus Interface"
+# class info; without it Qt exports no interface at all. Measured on the
+# session bus: an adaptor with no class info showed only the standard
+# Introspectable/Peer/Properties, so playerctl and the media keys found
+# nothing to call while Settings said the keys reached the browser.
+@pyqtClassInfo("D-Bus Interface", "org.mpris.MediaPlayer2")
 class Root(QDBusAbstractAdaptor):
     """org.mpris.MediaPlayer2 -- who the player is."""
-
-    if HAVE_DBUS:
-        Q_CLASSINFO = None   # set up in __init__ by the metaobject below
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -94,6 +101,7 @@ class Root(QDBusAbstractAdaptor):
         return []
 
 
+@pyqtClassInfo("D-Bus Interface", "org.mpris.MediaPlayer2.Player")
 class Player(QDBusAbstractAdaptor):
     """org.mpris.MediaPlayer2.Player -- the transport and the metadata.
 
@@ -125,11 +133,12 @@ class Player(QDBusAbstractAdaptor):
 
     @pyqtSlot()
     def Next(self):
-        self.state.browser.media_do("next")
+        # the Media Session's own names: "next" matched no handler
+        self.state.browser.media_do("nexttrack")
 
     @pyqtSlot()
     def Previous(self):
-        self.state.browser.media_do("prev")
+        self.state.browser.media_do("previoustrack")
 
     @pyqtSlot("qlonglong")
     def Seek(self, offset):
@@ -197,9 +206,11 @@ class Service(QObject):
         bus = QDBusConnection.sessionBus()
         self._root = Root(self)
         self._player = Player(self)
+        # the adaptors are what is exported: ExportAllContents is this
+        # object's own slots and properties and leaves adaptors out
         if not bus.registerObject(PATH, self,
                                   QDBusConnection.RegisterOption
-                                  .ExportAllContents):
+                                  .ExportAdaptors):
             return False
         if not bus.registerService(SERVICE):
             return False

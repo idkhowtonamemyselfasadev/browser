@@ -162,11 +162,10 @@ class FakePermission:
         self.answered = "deny"
 
 
-def ask(storable=True, private=False):
+def ask(storable=True, private=False, key="https://a.test|use the camera"):
     perm = FakePermission()
     win._perm_queue.append((perm, None, "a.test", "use the camera",
-                            "https://a.test|use the camera",
-                            "https://a.test", storable, private))
+                            key, key.split("|")[0], storable, private))
     win._next_permission()
     H.spin(150)
     card = win._perm_widget
@@ -200,7 +199,9 @@ check("a plain allow is remembered",
       win.config.get("permissions", {}).get(
           "https://a.test|use the camera") is True,
       win.config.get("permissions"))
-perm, card, buttons = ask(storable=False)
+# a key of its own: the one above was just answered "allow", and a queued
+# question whose answer is already in is now answered without a card
+perm, card, buttons = ask(storable=False, key="file:///review|use the camera")
 check("a page with no origin worth the name gets no “this time”",
       len(buttons) == 2, [b.text() for b in buttons])
 [b for b in buttons if b.text() == win._ui_str("permDeny")][0].click()

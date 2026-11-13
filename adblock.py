@@ -149,7 +149,8 @@ class Rule:
 
     __slots__ = ("raw", "host", "parts", "anchor_host", "anchor_start",
                  "anchor_end", "third", "first", "kinds", "not_kinds",
-                 "domains", "not_domains", "exception")
+                 "domains", "not_domains", "exception", "match_case",
+                 "seps")
 
     def __init__(self, raw):
         self.raw = raw
@@ -165,8 +166,10 @@ class Rule:
         self.domains = []
         self.not_domains = []
         self.exception = False
+        self.match_case = False
+        self.seps = []
 
-    def matches(self, url, page_host, kind, third_party):
+    def matches(self, url, page_host, kind, third_party, low=None):
         if self.third and not third_party:
             return False
         if self.first and third_party:
@@ -174,6 +177,11 @@ class Rule:
         if self.kinds and kind not in self.kinds:
             return False
         if kind in self.not_kinds:
+            return False
+        # the page itself only for a rule that says $document: a plain
+        # "/banner/" or "||tracker.example^" refused a link he clicked
+        # (or an address he typed) to a page whose address has it
+        if kind == "document" and "document" not in self.kinds:
             return False
         if self.domains or self.not_domains:
             where = _host_parents(page_host)
@@ -183,9 +191,18 @@ class Rule:
             if self.domains and not any(one in where
                                         for one in self.domains):
                 return False
+        if not self.match_case:
+            url = low if low is not None else url.lower()
         at = 0
+        seps = self.seps
         for n, part in enumerate(self.parts):
             found = url.find(part, at)
+            if n < len(seps) and seps[n]:
+                # "^": what follows has to be a separator or the end --
+                # "||cdn.example/ad^" is not /ads-good/ nor /adobe/, and
+                # "||example.com^" is not example.com.evil
+                while found >= 0 and not _separated(url, found + len(part)):
+                    found = url.find(part, found + 1)
             if found < 0:
                 return False
             if n == 0 and self.anchor_start and found != 0:
@@ -204,6 +221,44 @@ _PROCEDURAL = re.compile(
     r"matches-css(?:-before|-after)?|matches-path|matches-attr|"
     r"matches-media|matches-prop|min-text-length|watch-attr|others|"
     r"if|if-not|nth-ancestor|contains|properties|spath)\(")
+
+
+def _separated(url, at):
+    """A "^" in a list: the end of the address, or a character that is
+    not a letter, a digit, or one of _ - . %."""
+    if at >= len(url):
+        return True
+    ch = url[at]
+    return not (ch.isalnum() or ch in "_-.%")
+
+
+def _site_of(host):
+    """The registrable part of a host, near enough: the last two labels,
+    or three under a two-letter country code with a co/com/org-style
+    second level (example.co.uk)."""
+    host = str(host or "").lower().strip("[]").rstrip(".")
+    bits = [one for one in host.split(".") if one]
+    # an address is its own site (192.168.1.5 and 10.9.1.5 both ended
+    # in "1.5"), and so is each tenant of a shared host
+    if ":" in host or (bits and all(one.isdigit() for one in bits)):
+        return host
+    if len(bits) >= 4 and ".".join(bits[-3:]) in _SHARED_HOSTS:
+        return ".".join(bits[-4:])        # bucket.s3.amazonaws.com
+    if len(bits) >= 3 and ".".join(bits[-2:]) in _SHARED_HOSTS:
+        return ".".join(bits[-3:])
+    if len(bits) >= 3 and len(bits[-1]) == 2 and bits[-2] in (
+            "co", "com", "org", "net", "gov", "ac", "edu", "or", "ne"):
+        return ".".join(bits[-3:])
+    return ".".join(bits[-2:])
+
+
+#: hosts whose subdomains belong to different people
+_SHARED_HOSTS = frozenset((
+    "github.io", "gitlab.io", "blogspot.com", "pages.dev", "netlify.app",
+    "vercel.app", "herokuapp.com", "appspot.com", "web.app",
+    "firebaseapp.com", "azurewebsites.net", "cloudfront.net",
+    "workers.dev", "glitch.me", "neocities.org", "wordpress.com",
+    "tumblr.com", "s3.amazonaws.com"))
 
 
 def parse_line(line):
@@ -286,18 +341,32 @@ def parse_line(line):
             else:
                 rule.kinds.add(KINDS[name])
             continue
-        if name in ("match-case", "popup", "object", "object-subrequest",
-                    "image-set", "beacon", "webrtc", "document-blocking"):
-            continue      # harmless here: either a hint or already covered
+        if name == "match-case":
+            rule.match_case = not negated
+            continue
+        if name in ("popup", "object", "object-subrequest", "image-set",
+                    "beacon", "webrtc", "document-blocking"):
+            # these narrow a rule to one kind of request. Dropped, the
+            # rule held for every request to the host -- scripts,
+            # pictures, the page itself. Negated, the rule still covers
+            # everything the interceptor can tell apart.
+            if negated:
+                continue
+            return "skip", "option $" + name
         return "skip", "option $" + name
     if body.startswith("||"):
         rule.anchor_host = True
         body = body[2:]
         host = re.split(r"[\^/*?]", body, 1)[0]
+        after = body[len(host):len(host) + 1]
         # without the port: `blocks()` looks a request up by its host,
         # and `||127.0.0.1:8000/x` must still be found under
         # 127.0.0.1. The port stays in what has to match.
         rule.host = host.lower().split(":")[0]
+        if after == "*" or rule.host.endswith(".") or not rule.host:
+            # "||ad*.example.com^", "||ads.*/banner": filed under "ad" or
+            # "ads." a request host never is, the rule never matched
+            rule.host = ""
     elif body.startswith("|"):
         rule.anchor_start = True
         body = body[1:]
@@ -311,10 +380,16 @@ def parse_line(line):
     pieces = [one for one in re.split(r"[*^]", body) if one]
     if not pieces:
         return "skip", "nothing to match"
-    rule.parts = pieces
-    if rule.anchor_host:
-        # ||host^ has to match the host, not any address containing it
-        rule.parts = pieces
+    # which pieces a "^" follows (the matcher checks the next character)
+    seps, at = [], 0
+    for piece in pieces:
+        at = body.find(piece, at) + len(piece)
+        seps.append(body[at:at + 1] == "^")
+    rule.seps = seps
+    # lower-cased like the address they are compared with, host rules
+    # included ("||cdn.example.com/AdServer/" matched nothing at all)
+    rule.parts = pieces if rule.match_case \
+        else [one.lower() for one in pieces]
     return "net", rule
 
 
@@ -443,28 +518,34 @@ class Rules:
         host = re.sub(r"^https?://", "", url).split("/")[0] \
             .split(":")[0].lower()
         page_host = str(page_host or "").lower().removeprefix("www.")
-        third = bool(page_host) and host.removeprefix("www.") != page_host \
-            and not host.endswith("." + page_host)
+        # by site, not by exact host: static.example.com on a page at
+        # m.example.com is the site's own, and $third-party rules took
+        # its scripts away
+        third = bool(page_host) and _site_of(host) != _site_of(page_host)
+        low = url.lower()
         for rule in self._candidates(host, url, self.by_host_allow,
                                      self.by_word_allow,
                                      self.generic_allow,
                                      self.by_prefix_allow,
                                      self.by_suffix_allow):
-            if rule.matches(url, page_host, kind, third):
+            if rule.matches(url, page_host, kind, third, low):
                 return None
         for rule in self._candidates(host, url, self.by_host,
                                      self.by_word, self.generic,
                                      self.by_prefix, self.by_suffix):
-            if rule.matches(url, page_host, kind, third):
+            if rule.matches(url, page_host, kind, third, low):
                 return rule.raw
         return None
 
     def hide_for(self, host):
         """The selectors to hide on this site."""
         host = str(host or "").lower().removeprefix("www.")
-        out = list(self.hide_global)
+        # the site's own first: the browser caps the list, and a long
+        # generic list pushed exactly the rules for this page past it
+        out = []
         for one in _host_parents(host):
             out.extend(self.hide_host.get(one, ()))
+        out.extend(self.hide_global)
         never = set()
         for one in _host_parents(host):
             never.update(self.unhide_host.get(one, ()))

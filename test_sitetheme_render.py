@@ -314,6 +314,14 @@ check("undo gives the site its own colours back",
 check("undo takes the stylesheet out too",
       not H.js(view, "!!document.getElementById('__sitetheme')",
                B.MAIN_WORLD_ID))
+H.js(view, "var p = document.createElement('p'); p.id = 'late2';"
+          " p.style.color = '#000'; p.textContent = 'late';"
+          " document.body.appendChild(p);"
+          " window.dispatchEvent(new Event('scroll')); 1", B.MAIN_WORLD_ID)
+H.spin(2500)
+check("...and what the page adds after the undo keeps its own colours",
+      css_of(view, "#late2", "color") == "rgb(0, 0, 0)",
+      css_of(view, "#late2", "color"))
 
 print("\n(10) a web view always paints something opaque")
 load("/trans")

@@ -145,6 +145,17 @@
      couple of them a ring that cannot be seen at all. */
   ::selection { background: #cdd6f4; color: #000000; }
   :focus-visible { outline: 2px solid #cdd6f4; outline-offset: 2px; }
+  /* the bar that offers the delete back, as on the history page */
+  #undo {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: rgba(13, 13, 18, 0.97);
+    border: 1px solid rgba(137, 180, 250, 0.45);
+    border-radius: 12px; padding: 10px 16px; font-size: 13px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  #undo button { background: none; border: none; color: #89b4fa;
+                 font: inherit; cursor: pointer; }
+  #undo[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -159,6 +170,10 @@
     <div id="list"></div>
     <div id="empty" hidden>No bookmarks.</div>
   </div>
+  <div id="undo" hidden>
+    <span id="undotext"></span>
+    <button id="undobtn">Undo</button>
+  </div>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
   // the browser puts this run's key in our URL; without it every
@@ -171,7 +186,19 @@
     bmRename: "Rename", bmDelete: "Delete", bmUp: "Up", bmDown: "Down",
     bmSave: "Save", bmCancel: "Cancel", bmEmptyFolder: "Empty",
     bmFolderName: "Folder name", bmName: "Name", bmUrl: "Address",
-    bmSure: "Sure?"};
+    bmSure: "Sure?", bmDeleted: "Bookmark deleted", histUndo: "Undo"};
+  let undoTimer = null;
+  // a delete can be taken back for a few seconds: the browser has kept
+  // the snapshot all along, and nothing on screen offered it
+  function offerUndo() {
+    const box = document.getElementById("undo");
+    document.getElementById("undotext").textContent =
+      STR.bmDeleted || "Bookmark deleted";
+    document.getElementById("undobtn").textContent = STR.histUndo || "Undo";
+    box.hidden = false;
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => { box.hidden = true; }, 8000);
+  }
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -332,7 +359,9 @@
     const kids = entry.type === "folder" ? childrenOf(entry.id).length : 0;
     const b = btn(STR.bmDelete, "danger", () => {
       if (!kids || b.dataset.armed) {
-        if (bridge) bridge.removeBookmark(KEY, entry.id);
+        // the undo only when something went: a locked folder stays put
+        if (bridge) bridge.removeBookmark(KEY, entry.id,
+                                          (gone) => { if (gone) offerUndo(); });
         return;
       }
       b.dataset.armed = "1";
@@ -456,6 +485,13 @@
         refresh();
       });
       bridge.bookmarksChanged.connect(refresh);
+      document.getElementById("undobtn").onclick = () => {
+        if (!bridge || !bridge.undoBookmark) return;
+        bridge.undoBookmark(KEY, () => {
+          document.getElementById("undo").hidden = true;
+          refresh();
+        });
+      };
     });
   } else {
     render();

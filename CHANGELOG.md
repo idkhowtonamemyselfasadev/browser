@@ -1,5 +1,444 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part thirty-three: eighth pass)
+
+The eighth search covered the panes, the browser's own widgets, the notes and
+start pages, the rest of Settings, virtual browsers, history, bookmarks,
+privacy and the window chrome. It confirmed 37 bugs. Fixed here:
+
+- **Throwaway and clean-room browsers keep nothing.** They wrote history,
+  saved their tabs and groups, and came back at the next start. They no
+  longer do.
+- **"Domain = browser name" rules work.** Settings asked for a browser's name
+  and the lookup only compared ids, so no rule written that way ever matched.
+- **Bookmarks.** The browser's own JSON export imports back (it made an empty
+  folder). Exporting a folder includes its sub-folders. A deleted bookmark's
+  id is never handed to a new one, so a new bookmark no longer inherits an old
+  reminder or offline copy. The dead-link check finishes even when a server
+  refuses both HEAD and GET. A keyword with a space is refused instead of
+  saved and never working.
+- **Behind the window lock**, the account chooser and the screen-share picker
+  no longer appear, and anything already open closes when the lock goes on.
+- **History.** No page pictures are kept next to an encrypted history, and
+  pictures and page words are never taken from a page that history skips or
+  that the tab left meanwhile. The oldest entries trimmed by the history cap
+  take their page words and pictures with them. Restoring a busy day brings
+  back its pages (up to 60 different ones), each in its own virtual browser.
+- **Notes.** Saving a note that changed on disk meanwhile (a clip, quick
+  capture, a sync) no longer writes over it; your version is saved beside it.
+  Copying a pinned clip again keeps it pinned. Collections with names in
+  other alphabets get files of their own. Moving a to-do up skips the done
+  ones in between. A clip copied back from the history is recorded again
+  when you copy it later.
+- **Favourites.** Undocking no longer leaves the panel empty, the button
+  while docked no longer opens an invisible sheet, and the docked list
+  updates when bookmarks change.
+- **Smaller fixes:**
+  - The Passwords pane shows a login saved from a page (or a site marked
+    "never") when reopened.
+  - Guard exceptions for a site cover its subdomains in the page too.
+  - A malformed privacy file can't break the guards.
+  - Window-sized video gives the chrome back the way it was (sidebar,
+    hidden strip, auto-hide).
+  - The saved window position is used for the first window only, on a screen
+    that exists (also above or left of the main one).
+  - Every window's toolbar follows a change.
+  - The minimum font slider reloads tabs once, when let go.
+  - Settings' "Clear cookies" clears the active browser's jar, never a
+    private tab's by accident.
+  - The zoom slider's reset of site levels is saved.
+  - Pins added before setup is finished show on the start page, and a value
+    removed in one browser is removed in the others.
+  - A reserved proxy name is no longer drawn as if it had been saved.
+  - A cookie reported after a window closed no longer crashes the browser
+    on its way out.
+  - Sites on the "clean room" list now really open in a clean room (the
+    setting was saved but never used).
+  - A failed load in a tab that hasn't shown anything yet no longer offers
+    the insecure address of an earlier upgrade.
+  - Only a change to a setting Settings shows makes the open panes reload;
+    the browser's own bookkeeping no longer does.
+  - A tab moved to a new window stays in its virtual browser even when that
+    browser was made a moment ago in another window (it landed in the main
+    browser's cookie jar), and the new window shows that browser instead of
+    an extra blank tab.
+  - Editing a 1Password item no longer clears fields the editor never
+    loaded (a rename wiped the item's note, saving a card its holder and
+    expiry).
+  - A site's search engine name can no longer add lines of its own to the
+    engine list in Settings.
+  - Game mode switched on twice (hotkey, then the game window) unmutes the
+    tabs again when it goes off.
+  - Switching a site rule off works when the site and a parent site are
+    both listed.
+  - Reading text from a picture always answers, even when the OCR program
+    cannot start.
+  - "Set keyword" says so when it refuses a keyword with a space; an import
+    that brought nothing leaves no empty folders; mobile view gives the
+    agent back only to the site it was taken from.
+
+## 2026-11-13 — line-by-line review, day 3 (part thirty-two: seventh pass)
+
+The seventh search covered media, reading, forms, network, updates, backups,
+screens, games, the developer tools and desktop integration. It confirmed 42
+bugs. A review of the fifth and sixth passes' fixes found 8 slips in them.
+Fixed here:
+
+- **Private stays private, part six.** A private page's source opens in a
+  private tab. Looking at a certificate no longer writes the site to your
+  settings (only watched sites are recorded, and never from a private tab).
+  A private tab's microphone or camera use is no longer written into the
+  permission log. Stopping a private tab's camera takes back the private
+  answer and leaves your normal "always allow" alone. Removing a cookie in a
+  private or work tab no longer also deletes it from the main browser.
+  Snapshots of open tabs leave out "never restore" sites and are cleared
+  with the history.
+- **Crash recovery** brings each tab back in its own virtual browser, with
+  its pin, lock and name.
+- **The connection box** no longer shows a proxy's user name and password,
+  and says which proxy is in use when there are no per-site rules (it said
+  "Direct").
+- **Forms.** "Remember what I type into forms" now records something. An
+  empty page no longer deletes the draft it hasn't put back yet. A card is
+  only filled into the page that was checked for https, even if the page or
+  the tab changed while you typed the CVV. The password eye buttons can be
+  switched back on.
+- **Screen and sleep.** Game mode's "keep the screen awake" is no longer let
+  go after two seconds, and the systemd-inhibit helper ends when the browser
+  quits. The media keys come back on after a restart.
+- **Captions.** Turning captions off clears them on the tab they were on,
+  late results don't bring them back, and they stop when that tab closes.
+  Recorder and transcriber paths with `~` work.
+- **Updates** read git's answers in English whatever the desktop language,
+  and an update's result never lands on the save-password question.
+- **Game mode.** Leaving it after closing a sleeping tab no longer fails half
+  way, and tabs you had muted yourself stay muted. A gesture's "close tab"
+  asks before closing a game or locked tab.
+- **Smaller fixes:**
+  - A failed automatic vault backup waits an hour instead of retrying every
+    minute.
+  - `browser --later` with a page already listed keeps it listed, and
+    refused commands end with a failing exit status.
+  - The selection bar answers within a moment instead of up to 20 seconds.
+  - "Next page" never follows a page's file:// link and never changes the
+    host or port.
+  - Links handed to the browser never land in a site-as-app window.
+  - `--mute-discord` finds Discord in any window, and the Discord keys never
+    go to a look-alike site.
+  - Mobile view gives the site's own user agent back when switched off.
+  - The sleep timer pauses and never resumes.
+  - The page outline jumps to the right heading when ids repeat.
+  - The held-notifications summary is no longer wiped by the next toast.
+  - A restart keeps the flags the browser was started with.
+  - The media menu leaves private tabs out.
+  - Two tabs translating at once no longer mix up each other's paragraphs.
+- **Fixes to the last batch's fixes:** an imported login whose update the
+  store refuses stays listed; switching history encryption off with the vault
+  locked writes nothing; host rules with capitals in their path block again;
+  IP addresses and shared hosts like github.io count as separate sites; a
+  site's own search engine keeps its id through a Settings edit; "download
+  again"'s marker can't skip the naming template later; re-muted tabs show
+  as muted; Record can't be pressed twice while the microphone is being
+  asked for.
+
+## 2026-11-13 — line-by-line review, day 3 (part thirty-one: fifth and sixth passes)
+
+Two more searches, each splitting the browser into ten areas with a finder
+per area and two skeptics per claim, confirmed 89 more bugs. A review of the
+fourth pass's own fixes found 6 smaller slips in them. All are fixed here,
+except a few noted at the end.
+
+- **Encrypted history is safe now.** Changing the master passphrase made an
+  encrypted history unreadable (or wrote a few rows over it), and switching
+  the master password off stranded it and stopped history from being saved
+  at all. The history now moves to the new key, or back to plain text, before
+  the old key goes. A file that still cannot be opened is set aside instead
+  of overwritten. The "encrypt history" switch in Settings goes through the
+  proper check, so it can't leave history unsaved.
+- **Behind the window lock.** The engine pane (Ctrl+Shift+E) and actions
+  picked in the command palette no longer run behind the lock.
+- **Private stays private, part five.** A certificate you trust from a private
+  tab is remembered only while private tabs are open, and normal tabs don't
+  inherit it. The agent bridge's audit log no longer records private
+  addresses. The bridge can't bookmark a private tab. The per-site ad-block
+  switch and "add this site's search" can't be used from a private tab. The
+  private download folder is emptied when the last private tab closes, as the
+  setting promised. "Print selection" from a private tab fetches nothing.
+- **Settings that did nothing now work.** The whole Appearance section was
+  sent none of its saved values, so it showed every switch off and empty
+  boxes. Its switches and boxes now show what is saved. Also fixed: the
+  media-keys switch, "spell check in two languages", keyboard shortcuts
+  changed in Settings (they now work without a restart), "side mouse buttons
+  go back and forward", the gamepad switch in every tab, "drop finished
+  downloads after N days", "sleep tabs after N minutes", "close tabs not
+  looked at", "Sites to leave alone" for website theming, snoozed tabs and
+  daily pages (now while the browser runs, not only at start), and "bring
+  back N now". A duck level of 0 means off again instead of mute.
+- **Ad blocking matches the list format.** Rules such as `$popup` no longer
+  block everything on a host. Rules without `$document` no longer block the
+  page you clicked. Matching ignores case. `^` is a real separator. Host
+  rules with a wildcard work. A site's own subdomains count as the same
+  site. A site's own hiding rules come before the generic ones.
+- **The agent bridge.** Files queued for a file chooser are only handed to
+  the site they were queued for, and only within a minute. Watches and
+  auto-refreshes stop when the bridge is switched off or the site is no
+  longer allowed, and when their tab closes. Stopping a macro after the page
+  moved on keeps the saved macro. A malformed macro gets an error reply.
+- **Passwords.** "Lock now" locks everything. A held sign-in attempt is
+  forgotten after 30 seconds and at lock. 1Password logins fill their
+  password (they filled only the username). Fill, copy and the breach check
+  no longer freeze the window while 1Password answers. Signing in with an
+  unchanged 1Password password no longer asks to update it. A new 1Password
+  vault name takes effect at once. An export can't write an empty file if the
+  vault locks during the dialog. The 1Password token is never written
+  unsealed while the vault is locked. Importing the same CSV twice no longer
+  doubles every login.
+- **Keys.** The chord leader (Ctrl+Alt+.) now reads the next letter instead of
+  blocking every key for two seconds. "Repeat last action" can't repeat
+  itself forever. Ctrl++ is bound once, so it works. A rebound action stops
+  answering to its old layout keys.
+- **Smaller fixes:**
+  - The recording is saved when the recorded tab closes, instead of crashing.
+  - Translated paragraphs come back whole, not as their last 220 characters.
+    A translator path with `~` works, and one that can't start no longer
+    stalls the translation.
+  - Element and selection screenshots crop the right area on a zoomed tab.
+  - Suggestions only go to Google when Google is your search engine.
+  - A stale search offer from the previous page can't be saved under the
+    current site. Engines added from a site stay in the engines text, and a
+    changed engine keyword stops the old one working. A site's own engine is
+    listed once.
+  - A refused navigation can't vouch for that host's login box. A mailto
+    link only opens a compose tab when you click or type it. Sites on the
+    popup allow list may really open windows.
+  - A used permission is no longer forgotten as "unused". A second request
+    for the same permission isn't asked again.
+  - Shift-click after closing the anchor tab works. A pinned tab dragged into
+    a group stays pinned. The tab rail redraws on colour, tint, badge and
+    selection changes. The rail only closes a tab where it draws the cross.
+  - Userscripts with `@match <all_urls>` run.
+  - Notes that only start with `---` keep their text, and a note's own front
+    matter keys survive a save. To-do reminders no longer get lost when
+    another to-do above them is deleted.
+  - Locked bookmark folders are protected from deleting a parent folder and
+    from renames, and a refused move shows correctly on the Bookmarks page.
+    History rows you bookmark keep their titles. "Clear all" on the History
+    page always offers Undo.
+  - "Download again" keeps the file's name instead of applying the naming
+    template twice. Deleting an old row's file can't delete a newer download
+    with the same name. Files saved through "ask where to save" play the done
+    tone and open afterwards if you asked for that.
+  - Saving Settings no longer empties the clipboard history.
+  - Quitting after closing the first window saves the session again, a link
+    handed to the browser goes to a window that is still open, and a private
+    window never takes over writing the session.
+  - Text zoom also grows text that sits straight in divs, table headers and
+    similar elements. Each game controller has its own button memory.
+  - The most specific site stylesheet wins.
+- **Not fixed yet:** "add to dictionary" still has no effect on the spell
+  checker (the engine offers no way to add a word).
+
+## 2026-11-13 — line-by-line review, day 3 (part thirty: fourth pass)
+
+A fourth search, by ten finders with a skeptic checking each claim, found 52
+more bugs. All of them are fixed here.
+
+- **Popping a tab out.** Popping out the only tab quit the browser (or closed
+  the window and the tab with it). The window stays now, with a fresh tab. A
+  tab that comes back from a mini window only rejoins its group if that group
+  still exists, and a tab whose virtual browser was closed meanwhile goes away
+  with it.
+- **Private stays private, part four.** From a private tab: a generated
+  password is filled in but not saved, page notes are kept only until the
+  private tabs close, a wiki lookup uses a private panel, and cookie rules
+  can't be set (they were saved by site name). The start page's search box
+  uses the private search engine.
+- **The save-password question.** Another message pushing it away no longer
+  leaves your password held in memory.
+- **Tabs keep what they are.** A tab moved to its own window keeps its
+  virtual browser, pin, lock and name. Grouped tabs keep their lock and name
+  across a restart. The split view's second tab is saved with the session and
+  closed with its window. "Close this site's tabs" and "stack this site's
+  tabs" stay in the current virtual browser and leave private, locked and
+  pinned tabs alone. Switching tab sets leaves private tabs open. A new tab
+  opened next to a pinned tab lands after the pinned ones.
+- **Closing windows and tabs.** Closing the first window while others stay
+  open no longer wipes the saved session. "Go back to the last tab" after a
+  close really goes back to it.
+- **Sound.** A remembered volume lands on the right level. Calls pause and
+  then resume the music. Ducked tabs get their volume back. The media keys'
+  Next and Previous work.
+- **Address bar.** Bookmarklets and local-only searches (@notes, @tabs...)
+  are no longer sent to the suggestion service. "Paste and go" reads the
+  clipboard first. mailto: and about: addresses open instead of being mangled
+  or searched. A flag passed at launch is never opened as an address.
+- **Settings.** A setting changed from a menu shows in an already-opened
+  Settings pane. "Follow the desktop's light/dark" and "follow a colour file"
+  keep working after a restart. The gamepad switch starts the gamepad. A card
+  change in Settings is not undone by a restart. "Clear cookies on exit" for
+  one virtual browser no longer wipes the others.
+- **Reader and highlights.** Changing a reader option redraws instead of
+  switching the reader off. "Next page" follows the page's own next link and
+  comes back in reader mode. A highlight marks the words you selected, and the
+  highlight library lists the newest first.
+- **Smaller fixes:**
+  - Typing the router's address while a web page is open is no longer refused.
+  - A submitted form is no longer re-sent as a GET to clean its address.
+  - The side panel, the favourites dock and the split view no longer fight
+    over the window's width; "translate side by side" works with a split open.
+  - A login picked from the key menu is only filled on the site it belongs to.
+  - The password manager searches what you see (not field names), says when
+    an export fails, keeps a generated password through Esc, and a slow
+    two-factor code no longer stops the next item's timer.
+  - The start page takes the shared quick links (pins added elsewhere are no
+    longer overwritten) and stops a slideshow that was switched off.
+  - An emptied site-font box takes effect at once.
+  - A headless --agent start never waits on the card chooser, and a restarted
+    agent browser stays headless.
+
+## 2026-11-13 — line-by-line review, day 3 (part twenty-nine: third pass)
+
+A third search over the parts that had fewer findings so far turned up 40
+more bugs. Each was confirmed against the code before it was fixed.
+
+- **Secrets on the clipboard.** A password from the generator, a copied TOTP
+  code and a password shown in the manager now all go through the secret
+  path: marked for clipboard managers, cleared after your clipClear time, and
+  written in the access log.
+- **Private stays private, part three.** From a private tab: the "always
+  allow for this site" box for torrent and TeamSpeak links no longer writes the
+  site to your settings, webmail for a mailto link opens in a private tab, and
+  an agent macro recorded there is not saved under a name. "Download again"
+  always uses a normal tab.
+- **Restores keep their virtual browser.** Tabs restored from a snapshot, a
+  crash, a saved set or a closed window opened in whichever virtual browser
+  was active, with its cookies. Each one goes back to its own now, and a
+  site you marked "never restore" stays out of saved tab groups too.
+- **Downloads.** A scheduled download no longer disappears if no normal tab
+  is in front when it's due. A download still arriving can't be "forgotten"
+  out from under itself. Resume on a waiting download takes it out of the
+  queue.
+- **The element hider hides what you clicked.** It could pick an outer
+  container by its id (hiding a whole content area on every visit) or, from a
+  click on empty space, the whole page.
+- **Privacy guards leave the browser's own pages alone.** "Switch WebRTC off"
+  made the microphone test refuse every device. The fingerprint guard now
+  masks WebGL2 as well, and its audio noise is stable and never zero.
+- **The agent bridge.** At "read only" an agent can no longer clear the audit
+  log, add bookmarks or regroup tabs. Its downloads and bookmarks lists keep to
+  the site list. Typing by reference presses Enter when asked and works with
+  React inputs. "Idle" no longer comes too early on busy pages. Downloads wait
+  as long as they are given. A broken selector is reported as broken.
+  Recorded macros survive ids like ":r1:".
+- **Settings shows the truth.** "Ask at every start which card" shows its real
+  state, "leave copied passwords there" (0) no longer shows as 30 seconds, a
+  countdown keeps its time of day through a Save, "keys through" sites are
+  matched however you type them, and "As it comes" for the video cap no longer
+  drops the playing video to 480p.
+- **Smaller fixes:**
+  - The agenda shows UTC events at your own clock time, all-day spans on
+    every day they cover, and folded summaries in full.
+  - A theme change, an exclusion or "theme websites off" reaches every
+    window, not only the one you changed it in.
+  - Bookmark undo also works when a new bookmark took the deleted one's id.
+  - A history delete that removes nothing keeps the previous undo.
+  - The start page updates when its settings change in another tab.
+  - Typing in the notes search while editing no longer throws away your text.
+  - Collections dropped into the folder can be opened and deleted.
+  - A CSV import keeps the password it replaces in the history.
+  - A .torrent link with a query string reaches the torrent client.
+  - A form submit is no longer handed to the external browser as a bare GET.
+  - The history page gets icons for all its sites, not just the first 400.
+
+## 2026-11-13 — line-by-line review, day 2 (part twenty-eight)
+
+- **The media keys reach the browser for real.** The MPRIS service took its
+  name on the desktop bus but answered to no interface, so playerctl, waybar
+  and the play/pause keys found nothing to call while Settings said they were
+  connected. Checked on the bus itself: both MPRIS interfaces are there now.
+- **Pages can't reach `http://router/`.** "Keep pages off the home network"
+  let a web page send a frame to a bare name like router or nas (and to .lan
+  and fritz.box names). Those count as the home network now.
+- **The agent bridge keeps to its site list.** A client limited to some sites
+  could still list every open tab, run a search, or read the cookie names of
+  any site. It now sees only its own sites' tabs. A tab it keeps working in is
+  no longer closed as idle, a search marks its own tab rather than your last
+  one, and "ask" waits for a freshly opened page before typing.
+- **Proxied traffic keeps to the block lists.** With per-site proxy rules, the
+  local proxy resolved names itself and the block lists never applied. It
+  refuses blocked sites and their subdomains now.
+- **History deletes take what you see.** "Delete this range" with a site or
+  search typed in wiped every site in those days, hidden rows too. It deletes
+  only the rows on screen now. Undo puts them back without losing pages you
+  visited after the delete, and it no longer works hours later.
+- **Identity fill keeps your name out of the username box.** A sign-up form's
+  username, display-name or company box got your full name. Those boxes, and
+  look-alike labels (hotel, passport, e-mail address), are left alone.
+- **The "Dismiss cookie banners" starter clicks only cookie banners.** It
+  pressed any "accept" button, "Accept friend request" included, every second
+  on every site. It now only acts inside a cookie or consent box, for the
+  first 30 seconds. A copy you already installed keeps the old script until
+  you reinstall it.
+- **Text zoom scales text properly.** Nested text was enlarged twice (a span
+  in a paragraph at 2.25×) and every heading came out the same size. Each text
+  is now scaled from its own size, including text added later.
+- **Per-site accessibility settings stick.** A switch set for one site was
+  dropped on the next page load. It now applies every time.
+- **1Password items edit correctly.** An emptied username or note is cleared
+  in 1Password (it used to come back), nothing else is touched, and a title or
+  password change no longer collapses the login's web addresses into one.
+  Imports (Bitwarden, CSV, an encrypted vault) into 1Password now really reach
+  it; they used to say "Imported N" and keep nothing. A TOTP code is fetched
+  once while it is valid instead of starting a new `op` process every second.
+- **Notes and to-dos.** A note dropped into the folder ("Meeting Notes.md")
+  can be opened, edited and deleted. A link or tags you empty stay empty. A
+  to-do's due text the browser can't read is kept. Clip pin/drop/copy hit the
+  clip you clicked even after something new was copied.
+- **Bookmarks.** A delete can be undone from the bookmarks page, and the undo
+  keeps bookmarks made since. Merging duplicates keeps one copy per virtual
+  browser and never deletes one from a locked folder. An address with :// in
+  its query can be bookmarked.
+- **Menus.** Reopening a submenu within the same popup no longer lists its
+  rows twice. That was 31 submenus, including page info, cookies and snippets.
+  The developer menu has its own row in the command palette again.
+- **Smaller fixes:**
+  - The live captions run one recorder at a time, each chunk in a temporary
+    file deleted after reading.
+  - Stream-safe mode gives notifications and history suggestions back after a
+    restart.
+  - Switching site theming off stops the theming of content added afterwards.
+  - Do Not Disturb says how many notifications it held when it ends.
+  - A saved controller setting switches tabs from the start.
+  - A video's resume point is saved for that video when YouTube moves to the
+    next one without a page load.
+  - A userscript's `@match` works on pages with a port (localhost:3000).
+  - The player stops at the end of its queue, and file names with ? play.
+  - "Close duplicate tabs" leaves private and other-browser copies alone.
+  - Tracker stripping keeps every other parameter exactly as written.
+  - Two filter lists with the same file name no longer overwrite each other.
+  - A privacy file with the wrong shape for a setting is not imported.
+  - Mod jars with an odd fabric.mod.json are read instead of raising.
+  - Ctrl+Enter leaves a search phrase alone.
+  - A full-page screenshot cut at its length limit ends with the right part.
+  - A site rule set for example.com can be switched off from a subdomain.
+  - Readline keys go off in one click.
+  - Form history works past an odd field name.
+  - Tooltips show "&" and quotes as themselves.
+  - A terminal editor (vim, nano) opens in a terminal.
+  - The MiniMessage preview shows JSON components on chat's grey.
+  - The calendar, the bar calculator, .srt times, maxlength=-1, the Shorts
+    player off YouTube, the daily log's note count and the page-info menu were
+    each simply wrong, and are fixed.
+  - Second look at the batches above: the inspector closed with its own X
+    opens again on one press; the slow-connection menu no longer undoes an
+    offline switch you made yourself; "no user agent" chosen in a private tab
+    holds against a parent site's rule; touching the autoplay switch while lite
+    mode is on keeps autoplay blocked until lite goes off; an undo after two
+    appearance resets no longer brings back a setting that was already at its
+    default; pre-restore bookmark copies no longer push daily backups out; a
+    transcript of blank captions makes no empty note; the popup menu says when
+    nothing it refused can be offered.
+
 ## 2026-11-12 — line-by-line review, day 2 (part twenty-seven)
 
 - **No DevTools port unless you turn it on.** Every start opened the DevTools

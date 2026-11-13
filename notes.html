@@ -201,8 +201,11 @@
       const bar = el("div", "row wrap");
       const save = el("button", "act", STR.noteSave || "Save");
       save.onclick = () => {
+        // with the version it was opened at, so a note changed on disk
+        // meanwhile is not written over (see desk_do)
         desk("saveNote", {id: note.id, title: title.value,
-                          body: text.value, tags: tags.value.split(",")},
+                          body: text.value, tags: tags.value.split(","),
+                          edited: note.edited || 0},
              (saved) => { open = saved ? saved.id : null; render(); });
       };
       const back = el("button", "act", STR.noteBack || "Back");
@@ -315,11 +318,15 @@
         const item = el("div", "item");
         const grow = el("div", "grow pre", clip.text.slice(0, 300));
         const copy = el("button", "act", STR.clipCopy || "Copy");
-        copy.onclick = () => desk("copyClip", {index: i});
+        // named by its text, not only its row: a clip copied since the
+        // list was drawn moves every row down by one
+        copy.onclick = () => desk("copyClip", {index: i, text: clip.text});
         const pin = el("button", "act", clip.pinned ? "★" : "☆");
-        pin.onclick = () => desk("pinClip", {index: i}, () => render());
+        pin.onclick = () => desk("pinClip", {index: i, text: clip.text},
+                                 () => render());
         const drop = el("button", "act warn", "✕");
-        drop.onclick = () => desk("dropClip", {index: i}, () => render());
+        drop.onclick = () => desk("dropClip", {index: i, text: clip.text},
+                                  () => render());
         item.append(grow, el("span", "when", when(clip.t)), copy, pin, drop);
         body.appendChild(item);
       });
@@ -416,7 +423,12 @@
     render();
   }
 
-  document.getElementById("q").oninput = render;
+  // not while a note is open: render() rebuilt the editor from disk
+  // and the text he had not saved yet was gone
+  document.getElementById("q").oninput = () => {
+    if (view === "notes" && open !== null) return;
+    render();
+  };
   document.getElementById("newnote").onclick = () => {
     if (view === "notes") {
       desk("daily", {}, (note) => { open = note ? note.id : null; render(); });

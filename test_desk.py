@@ -174,8 +174,12 @@ check("one can be ticked off", desk.todos()[0]["done"])
 check("and the file says so",
       (win.notes_folder() / "todo.md").read_text().startswith("- [x]"))
 desk.move_todo(1, -1)
-check("the order can be changed",
-      desk.todos()[0]["text"] == "pay the server",
+# the panel lists the open ones and the done ones apart, so an open
+# to-do moved "up" past a done one would not move on screen at all:
+# it stays (REVIEW E28); a move among the open ones is a move
+check("an open to-do is not moved past a done one",
+      [r["text"] for r in desk.todos()] == ["fix the plugin",
+                                            "pay the server"],
       [r["text"] for r in desk.todos()])
 check("one that is due is reported", len(desk.due_todos()) == 1,
       desk.due_todos())

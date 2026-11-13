@@ -253,7 +253,8 @@ rows = win._own_suggestions("pancake")
 check("a bookmark is still offered, even one about pancakes",
       any(r.startswith("★") for r in rows), rows)
 other = win.new_tab(url=srv.url("/b"))
-H.spin(600)
+# its title, not a fixed spin: at a 30% CPU quota "Beta" was not in yet
+H.wait_for(lambda: "Beta" in (other.title() or ""), 8000)
 win.tabs.setCurrentIndex(win.tabs.indexOf(view))
 H.spin(100)
 rows = win._own_suggestions("Beta")

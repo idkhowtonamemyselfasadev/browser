@@ -123,7 +123,13 @@
     raf = requestAnimationFrame(meter);
   }
 
-  document.getElementById("micstart").onclick = async () => {
+  let micStarting = null, recAsking = false;
+  document.getElementById("micstart").onclick = () => {
+    // kept, so Record can wait for the real answer instead of 400 ms
+    micStarting = startMic();
+    return micStarting;
+  };
+  const startMic = async () => {
     try {
       const id = document.getElementById("mics").value;
       const ask = ++micAsk;
@@ -164,8 +170,22 @@
   };
 
   document.getElementById("rec").onclick = async () => {
-    if (!micStream) { document.getElementById("micstart").click();
-                      await new Promise((r) => setTimeout(r, 400)); }
+    // one recording at a time: a second press replaced the recorder
+    // and the first timer then stopped the new one early -- and one
+    // press at a time while the microphone is still being asked for
+    if (recorder && recorder.state === "recording") return;
+    if (recAsking) return;
+    if (!micStream) {
+      // the real answer, permission card and all: 400 ms said "this
+      // build cannot record" while the card was still up
+      recAsking = true;
+      try {
+        document.getElementById("micstart").click();
+        try { await micStarting; } catch (e) {}
+      } finally { recAsking = false; }
+      // refused: that is what the line already says, not "cannot record"
+      if (!micStream) return;
+    }
     if (!micStream || !window.MediaRecorder) {
       say("t_micnote", STR.recNone || "This build cannot record.", true);
       return;
@@ -180,7 +200,8 @@
     };
     recorder.start();
     say("t_micnote", STR.recNow || "Recording… say something.");
-    setTimeout(() => { try { recorder.stop(); } catch (e) {} }, 5000);
+    const mine = recorder;
+    setTimeout(() => { try { mine.stop(); } catch (e) {} }, 5000);
   };
 
   document.getElementById("playback").onclick = () => {

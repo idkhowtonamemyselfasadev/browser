@@ -48,7 +48,9 @@ check("the page's own parameters are kept",
       "th=1" in privacy.strip_tracking("https://amazon.de/dp/X?th=1&utm_id=9"))
 for host, local in (("localhost", True), ("127.0.0.1", True),
                     ("192.0.2.50", True), ("10.0.0.5", True),
-                    ("fritz.box", False), ("printer.local", True),
+                    # the router's own name (AVM boxes answer it on the
+                    # home network): local since the review's fourth pass
+                    ("fritz.box", True), ("printer.local", True),
                     ("example.com", False), ("8.8.8.8", False)):
     check("%s is %slocal" % (host, "" if local else "not "),
           privacy.is_local(host) == local, privacy.is_local(host))

@@ -80,6 +80,13 @@ if os.environ.get("BH_CHILD") == "safe-start":
         H.spin(300)
         page = fresh.new_tab(url=None)
         H.load(page, srv.url("/media"))
+        # the page itself: under a CPU quota H.load can return on the
+        # start page's own load (see the harness note)
+        H.wait_for(lambda: "/media" in page.url().toString(), 6000)
+        try:
+            H.wait_for(lambda: H.js(page, "document.title") == "Media", 6000)
+        except AssertionError:
+            pass
         check("...and the window it gave browses",
               H.js(page, "document.title") == "Media")
         H.spin(2200)

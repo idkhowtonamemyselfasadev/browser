@@ -193,8 +193,13 @@ check("...and nothing scrolls sideways",
       "overflow-x: hidden" in sheet())
 check("the text alone can be zoomed", win.set_a11y("textZoom", 150) == 150)
 H.spin(400)
+# each text element scaled from its own size (data-tz/--tz), by a sheet
+# of its own -- not "1.5em" on every tag, which compounded
+_zs = H.js(view, "(document.getElementById('__a11yzoom')||{}).textContent"
+                 " || ''", APP) or ""
 check("...and only the text is bigger",
-      "font-size: 1.5em" in sheet(), sheet()[:80])
+      "calc(var(--tz) * 1.5)" in _zs
+      and bool(js("!!document.querySelector('[data-tz]')", MAIN)), _zs[:80])
 win.set_a11y("textZoom", 100)
 check("a zoom out of range is clamped", win.set_a11y("textZoom", 900) == 300)
 win.set_a11y("textZoom", 100)

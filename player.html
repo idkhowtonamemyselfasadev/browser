@@ -102,7 +102,10 @@
         clock(media.currentTime) + " / " + clock(media.duration);
     });
     media.addEventListener("ended", () => {
-      if (!looping) load(at + 1);
+      // on to the next one, and at the end of the queue: stop. load()
+      // wraps round (for the next/previous keys), so a single file or
+      // the last track started again for ever with Loop off
+      if (!looping && at + 1 < queue.length) load(at + 1);
     });
     stage.appendChild(media);
     if (isAudio(item.url)) {
@@ -135,8 +138,11 @@
   window.__playerLoad = function (files) {
     queue = (files || []).map((item) => {
       const url = String(item);
+      // encodeURI leaves ? and # alone: a file called what?.mp3 became a
+      // file:// address with a query, and the engine looked for "what"
       const full = url.indexOf("://") > 0 ? url
-        : "file://" + encodeURI(url).replace(/#/g, "%23");
+        : "file://" + encodeURI(url).replace(/#/g, "%23")
+                                    .replace(/\?/g, "%3F");
       const name = url.split("/").pop() || url;
       return {url: full, title: name};
     });

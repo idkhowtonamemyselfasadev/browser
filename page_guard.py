@@ -96,12 +96,17 @@ def rules(config):
         on[name] = bool(config.get("guard" + name[0].upper() + name[1:],
                                    False))
     off = {}
+    guard_off = config.get("guardOff")
+    guard_off = guard_off if isinstance(guard_off, dict) else {}
     for name in GUARDS:
-        for host in config.get("guardOff", {}).get(name, []) or []:
+        hosts = guard_off.get(name)
+        for host in hosts if isinstance(hosts, list) else []:
             off.setdefault(_host(host), []).append(name)
     apis = {}
-    for host, names in (config.get("blockApis") or {}).items():
-        wanted = [n for n in (names or []) if n in API_TARGETS]
+    block = config.get("blockApis")
+    for host, names in (block if isinstance(block, dict) else {}).items():
+        wanted = [n for n in (names if isinstance(names, list) else [])
+                  if n in API_TARGETS]
         if wanted:
             apis[_host(host)] = sorted(
                 {target for name in wanted for target in API_TARGETS[name]})
@@ -114,8 +119,12 @@ def rules(config):
             continue
         places[_host(host)] = {"lat": lat, "lon": lon}
     hide = {}
-    for host, selectors in (config.get("hideElements") or {}).items():
-        clean = [str(sel)[:300] for sel in (selectors or []) if str(sel).strip()]
+    hidden = config.get("hideElements")
+    for host, selectors in (hidden if isinstance(hidden, dict)
+                            else {}).items():
+        clean = [str(sel)[:300]
+                 for sel in (selectors if isinstance(selectors, list) else [])
+                 if str(sel).strip()]
         if clean:
             hide[_host(host)] = clean[:200]
     return {
@@ -146,8 +155,31 @@ def rules(config):
 _JS = r"""
 (function () {
   var R = __GUARD_RULES__;
+  if (R.own && location.protocol === "file:"
+      && location.pathname.indexOf(R.own) === 0) return;
   var host = location.hostname.toLowerCase().replace(/^www\./, "");
-  var off = R.off[host] || [];
+  /* an exception for example.com covers login.example.com, as the
+     browser's own menu says it does: looked up by the exact host only,
+     the guards still ran on every subdomain */
+  var parents = [];
+  for (var h = host; h; ) {
+    parents.push(h);
+    var dot = h.indexOf(".");
+    if (dot < 0) break;
+    h = h.slice(dot + 1);
+  }
+  var mine = function (table) {
+    var out = [];
+    for (var i = 0; i < parents.length; i++)
+      if (table && table[parents[i]]) out = out.concat(table[parents[i]]);
+    return out;
+  };
+  var under = function (list) {
+    for (var i = 0; i < parents.length; i++)
+      if (list && list.indexOf(parents[i]) >= 0) return true;
+    return false;
+  };
+  var off = mine(R.off);
   function on(name) {
     return !!R.on[name] && off.indexOf(name) < 0;
   }
@@ -206,22 +238,33 @@ _JS = r"""
     keep(navigator, "hardwareConcurrency", 4);
     keep(navigator, "deviceMemory", 8);
     keep(navigator, "maxTouchPoints", 0);
-    if (window.WebGLRenderingContext) {
-      var realParam = WebGLRenderingContext.prototype.getParameter;
-      WebGLRenderingContext.prototype.getParameter = function (p) {
-        /* UNMASKED_VENDOR_WEBGL / UNMASKED_RENDERER_WEBGL */
-        if (p === 37445) return "Mesa";
-        if (p === 37446) return "Mesa Software Renderer";
-        return realParam.apply(this, arguments);
-      };
-    }
+    /* WebGL2 has a getParameter of its own: masking only WebGL left
+       the real GPU name one getContext("webgl2") away */
+    [window.WebGLRenderingContext, window.WebGL2RenderingContext]
+      .forEach(function (Ctx) {
+        if (!Ctx) return;
+        var realParam = Ctx.prototype.getParameter;
+        Ctx.prototype.getParameter = function (p) {
+          /* UNMASKED_VENDOR_WEBGL / UNMASKED_RENDERER_WEBGL */
+          if (p === 37445) return "Mesa";
+          if (p === 37446) return "Mesa Software Renderer";
+          return realParam.apply(this, arguments);
+        };
+      });
     if (window.AudioBuffer) {
       var realChannel = AudioBuffer.prototype.getChannelData;
+      var nudged = new WeakSet();
       AudioBuffer.prototype.getChannelData = function () {
         var out = realChannel.apply(this, arguments);
+        /* once per buffer (the view is live: every read added the noise
+           again, an answer that changed between reads), and never zero
+           (seed % 7 was 0 for one host in seven: no noise at all) */
         try {
-          for (var i = 0; i < out.length; i += 1000) {
-            out[i] = out[i] + (seed % 7) * 1e-7;
+          if (!nudged.has(out)) {
+            nudged.add(out);
+            for (var i = 0; i < out.length; i += 1000) {
+              out[i] = out[i] + ((seed % 7) + 1) * 1e-7;
+            }
           }
         } catch (e) {}
         return out;
@@ -256,7 +299,7 @@ _JS = r"""
   }
 
   /* ---- the "Leave site?" box -------------------------------------- */
-  if (on("leaveTrap") && R.keep.indexOf(host) < 0) {
+  if (on("leaveTrap") && !under(R.keep)) {
     try {
       Object.defineProperty(window, "onbeforeunload",
                             {get: function () { return null; },
@@ -291,7 +334,7 @@ _JS = r"""
   }
 
   /* ---- what the page may not use at all --------------------------- */
-  var gone = R.apis[host] || [];
+  var gone = mine(R.apis);
   for (var g = 0; g < gone.length; g++) {
     try { delete window[gone[g]]; } catch (e) {}
     try { window[gone[g]] = undefined; } catch (e) {}
@@ -322,7 +365,7 @@ _JS = r"""
      refusal and writes down what was refused, so the address bar can
      say so and he can open that one himself. A site on his own allow
      list is not touched at all. */
-  if (on("popups") && R.allow.indexOf(host) < 0) {
+  if (on("popups") && !under(R.allow)) {
     window.__guardPopups = [];
     window.open = function (url) {
       try {
@@ -440,7 +483,7 @@ _JS = r"""
     }
   }
 
-  var hide = R.hide[host] || [];
+  var hide = mine(R.hide);
   if (hide.length) {
     /* his own hidden elements, as a stylesheet rather than a script
        walking the page: a rule keeps working when the site rebuilds
@@ -541,10 +584,15 @@ _JS = r"""
 """
 
 
-def source(config):
-    """The guard script for this config, with the rule table baked in."""
+def source(config, own=""):
+    """The guard script for this config, with the rule table baked in.
+    `own` is the path of the browser's own folder as a file:// URL path:
+    its pages are not websites, and "switch WebRTC off" turned the
+    microphone test into a page that refused every device."""
+    table = rules(config)
+    table["own"] = str(own or "")
     return _JS.replace("__GUARD_RULES__",
-                       json.dumps(rules(config), separators=(",", ":")))
+                       json.dumps(table, separators=(",", ":")))
 
 
 def wanted(config):
@@ -563,15 +611,26 @@ def selector_for(path):
     one, otherwise the tag with its own classes, a couple of levels
     deep -- enough to be specific without being a path that breaks the
     next time the site renders."""
+    steps = list(path or [])
+    # the picker lists the clicked element LAST. Walked from the outside
+    # in, an ancestor's id won: an <li> in <div id=main> came out as
+    # "#main" and the whole content area was hidden on every visit. So
+    # from the clicked element outwards, stopping at the first id.
+    if steps:
+        last = re.sub(r"[^a-zA-Z0-9-]", "",
+                      str(steps[-1].get("tag") or "")).lower()
+        if last in ("html", "body"):
+            return ""      # a click on blank space: never "the page"
     parts = []
-    for step in list(path or [])[-3:]:
+    for step in reversed(steps[-3:]):
         tag = re.sub(r"[^a-zA-Z0-9-]", "", str(step.get("tag") or "")).lower()
-        if not tag:
+        if not tag or tag in ("html", "body"):
             continue
         ident = str(step.get("id") or "").strip()
         if ident and re.fullmatch(r"[A-Za-z][\w-]*", ident):
-            return "#" + ident
+            parts.insert(0, "#" + ident)
+            break
         classes = [c for c in str(step.get("class") or "").split()
                    if re.fullmatch(r"[A-Za-z][\w-]*", c)][:2]
-        parts.append(tag + "".join("." + c for c in classes))
+        parts.insert(0, tag + "".join("." + c for c in classes))
     return " > ".join(parts)

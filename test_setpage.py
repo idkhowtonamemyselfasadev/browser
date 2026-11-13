@@ -237,6 +237,7 @@ win.config.update({
     "chatHide": "spoiler\nleak", "blockHosts": ["ads.example"],
     "tabWidth": "fixed", "snippetsText": ";a=b", "spoilerShield": True,
     "pauseForCalls": True, "urlRules": "x.example -> block"})
+win.config["gpuAsk"] = True
 win.open_settings()
 H.spin(2500)
 view = settings_view(win)
@@ -320,6 +321,8 @@ if view is not None:
       boxes[1].checked = true; boxes[1].dispatchEvent(new Event('change'));
       return 2; })()""")
     H.spin(400)
+    check("the ask-which-card switch shows what is saved",
+          H.js(view, "document.getElementById('gpuask').checked") is True)
     check("ticking two curated flags keeps both",
           _nflags == 2 and len(win.config.get("safeFlags") or []) == 2,
           (_nflags, win.config.get("safeFlags")))

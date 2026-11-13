@@ -30,7 +30,10 @@ CLIPS_MAX = 60
 #: already understands.
 FIELDS = ("title", "link", "tags", "t", "edited")
 
-_SLUG = re.compile(r"[^a-z0-9]+")
+# letters of any alphabet are kept: with [a-z0-9] only, "Küche" and
+# "Kuche" (or 日本 and 中文) all became one file
+_SLUG = re.compile(r"[\W_]+", re.UNICODE)
+_SLUG_OLD = re.compile(r"[^a-z0-9]+")
 
 
 def _write_atomic(path, text):
@@ -49,6 +52,12 @@ def slug(text, fallback="note"):
     return (out or fallback)[:48]
 
 
+def slug_old(text, fallback="note"):
+    """The name an older version gave the file, for finding it again."""
+    out = _SLUG_OLD.sub("-", str(text or "").lower()).strip("-")
+    return (out or fallback)[:48]
+
+
 def today():
     return time.strftime("%Y-%m-%d")
 
@@ -63,14 +72,27 @@ def parse_note(text):
     if not lines or lines[0].strip() != "---":
         return out
     body_at = None
+    plain = dict(out)
+    extra = []
     for i, line in enumerate(lines[1:], 1):
         if line.strip() == "---":
             body_at = i + 1
             break
-        key, _, value = line.partition(":")
+        key, colon, value = line.partition(":")
+        if not colon:
+            if line[:1] in (" ", "\t", "-") or not line.strip():
+                if line.strip():
+                    extra.append(line)   # a YAML list under a key of his
+                continue
+            # "---" then a line of text: a rule at the top of a note,
+            # not front matter. Read as fields, the text was dropped
+            # and the next Save wrote the file back without it.
+            return plain
         key = key.strip().lower()
         value = value.strip()
         if key not in FIELDS:
+            # his own keys (date:, aliases:) are kept and written back
+            extra.append(line)
             continue
         if key == "tags":
             out["tags"] = [t.strip() for t in value.split(",") if t.strip()]
@@ -81,7 +103,11 @@ def parse_note(text):
                 out[key] = 0
         else:
             out[key] = value
-    out["body"] = "\n".join(lines[body_at:]) if body_at is not None else ""
+    if body_at is None:
+        return plain       # no closing line: none of it was front matter
+    out["body"] = "\n".join(lines[body_at:])
+    if extra:
+        out["extra"] = extra
     return out
 
 
@@ -95,6 +121,7 @@ def note_text(note):
         if value in (None, "", 0, []):
             continue
         head.append("%s: %s" % (key, value))
+    head.extend(str(line) for line in note.get("extra") or [])
     head.append("---")
     return "\n".join(head) + "\n" + str(note.get("body") or "")
 
@@ -171,6 +198,21 @@ class Desk:
         """A note's file name, never the to-do list's: a note called
         "Todo" is todo.md by its slug, and written there it was read as
         the list and wiped by the next to-do added."""
+        raw = str(nid or "")
+        # a file that is there under exactly this name is that note: one
+        # dropped into the folder ("Meeting Notes.md", "README.md") is
+        # listed by its own stem, and its slug named a different file,
+        # so it could be listed but not opened, edited or deleted -- and
+        # saving it wrote a second copy beside it. Only a plain name in
+        # this folder, never a path, and never the to-do list.
+        if (raw and "/" not in raw and "\\" not in raw
+                and not raw.startswith(".") and "\0" not in raw
+                and raw + ".md" != self.TODO_FILE):
+            try:
+                if (self.folder / (raw + ".md")).is_file():
+                    return raw
+            except (OSError, ValueError):
+                pass
         nid = slug(nid)
         if nid + ".md" == self.TODO_FILE:
             nid += "-note"
@@ -188,10 +230,16 @@ class Desk:
         note["id"] = path.stem
         return note
 
-    def save_note(self, nid=None, title="", body="", link="", tags=()):
+    def save_note(self, nid=None, title=None, body=None, link=None,
+                  tags=None):
         """Write a note. Without an id it is a new one, named after its
         title so the folder reads like a folder of notes rather than a
-        folder of numbers."""
+        folder of numbers.
+
+        None keeps what the note has; anything else, an empty string or
+        an empty list included, is the new value. It was "or the old
+        one", so a link or the tags emptied in the panel came back on
+        the next load."""
         now = int(time.time())
         if nid:
             note = self.note(nid) or {}
@@ -202,10 +250,13 @@ class Desk:
             if (self.folder / (nid + ".md")).exists():
                 nid = "%s-%d" % (nid, now % 100000)
         note.update({
-            "title": str(title or note.get("title") or "")[:200],
+            "title": str((note.get("title") or "") if title is None
+                         else title)[:200],
             "body": str(body if body is not None else note.get("body", "")),
-            "link": str(link or note.get("link") or "")[:2000],
-            "tags": [str(t)[:40] for t in (tags or note.get("tags") or [])],
+            "link": str((note.get("link") or "") if link is None
+                        else link)[:2000],
+            "tags": [str(t)[:40] for t in
+                     ((note.get("tags") or []) if tags is None else tags)],
             "t": note.get("t") or now,
             "edited": now,
         })
@@ -276,7 +327,11 @@ class Desk:
             when = re.search(r"\(due:\s*([^)]+)\)", text)
             if when:
                 due = self._parse_due(when.group(1))
-                text = text.replace(when.group(0), "").strip()
+                # only taken out when it was read: "(due: tomorrow)" was
+                # dropped and the line rewritten without it the next
+                # time any to-do in the file was ticked or moved
+                if due:
+                    text = text.replace(when.group(0), "").strip()
             out.append({"id": i, "text": text, "done": found.group(1) != " ",
                         "link": link, "due": due})
         return out
@@ -372,8 +427,19 @@ class Desk:
         at = next((i for i, r in enumerate(rows) if r["id"] == int(tid)), None)
         if at is None:
             return rows
-        to = max(0, min(len(rows) - 1, at + int(delta)))
-        rows.insert(to, rows.pop(at))
+        step = int(delta)
+        if step in (-1, 1):
+            # the panel shows open and done ones apart: moved past a done
+            # one, an open to-do did not move on screen at all
+            j = at + step
+            while 0 <= j < len(rows) and rows[j]["done"] != rows[at]["done"]:
+                j += step
+            if not 0 <= j < len(rows):
+                return self.todos()
+            rows[at], rows[j] = rows[j], rows[at]
+        else:
+            to = max(0, min(len(rows) - 1, at + step))
+            rows.insert(to, rows.pop(at))
         self._write_todos(rows)
         return self.todos()
 
@@ -397,8 +463,35 @@ class Desk:
         except OSError:
             return []
 
+    def _collection_path(self, name):
+        """A collection's file: the one by exactly this name if it is
+        there ("Reading List.md", dropped in by hand), else the slug's.
+        Listed by its own name and looked up by its slug, it showed
+        empty and could not be deleted."""
+        raw = str(name or "")
+        if (raw and "/" not in raw and "\\" not in raw
+                and not raw.startswith(".") and "\0" not in raw):
+            try:
+                path = self.folder / "collections" / (raw + ".md")
+                if path.is_file():
+                    return path
+            except (OSError, ValueError):
+                pass
+        new = self.folder / "collections" / (slug(name) + ".md")
+        old = self.folder / "collections" / (slug_old(name) + ".md")
+        try:
+            # only when the old name was a real one: every name in another
+            # alphabet used to fall back to "note", and that file is not
+            # this collection's
+            if not new.is_file() and old.is_file() \
+                    and slug_old(name, fallback=""):
+                return old     # written by an older version: still found
+        except OSError:
+            pass
+        return new
+
     def collection(self, name):
-        path = self.folder / "collections" / (slug(name) + ".md")
+        path = self._collection_path(name)
         try:
             return path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -407,7 +500,10 @@ class Desk:
     def add_to_collection(self, name, title, url="", note=""):
         """One line per thing, as a Markdown list -- which means the
         file is already the export."""
-        path = self._dir("collections", slug(name) + ".md")
+        # the file it is read from: "Reading List.md" dropped in by hand
+        # got a second "reading-list.md" beside it, never shown
+        path = self._collection_path(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
         line = "- "
         line += ("[%s](%s)" % (title or url, url)) if url else (title or "")
         if note:
@@ -421,7 +517,7 @@ class Desk:
 
     def delete_collection(self, name):
         try:
-            (self.folder / "collections" / (slug(name) + ".md")).unlink()
+            self._collection_path(name).unlink()
         except OSError:
             return False
         return True
@@ -474,13 +570,32 @@ class Desk:
         text = str(text or "")
         if not text.strip():
             return self._clips
+        # a pinned one copied again stays pinned (it lost its star, and
+        # then the next Clear or the cap took it)
+        was = any(c["text"] == text and c.get("pinned") for c in self._clips)
         self._clips = [c for c in self._clips if c["text"] != text]
         self._clips.insert(0, {"text": text[:20000], "kind": str(kind),
-                               "t": int(time.time()), "pinned": False})
+                               "t": int(time.time()), "pinned": was})
         pinned = [c for c in self._clips if c["pinned"]]
         rest = [c for c in self._clips if not c["pinned"]][:CLIPS_MAX]
         self._clips = pinned + [c for c in rest if c not in pinned]
         return self._clips
+
+    def clip_index(self, index, text=None):
+        """Where a clip is NOW. The panel's row number goes stale the
+        moment something new is copied (the newest goes on top), and
+        pin, drop and copy then hit the clip below the one he clicked.
+        A clip's text is unique in the list (add_clip keeps one of
+        each), so the text names it; the number is only the fallback."""
+        if text is not None:
+            for at, clip in enumerate(self._clips):
+                if clip["text"] == str(text):
+                    return at
+            return -1
+        try:
+            return int(index)
+        except (TypeError, ValueError):
+            return -1
 
     def pin_clip(self, index, on=None):
         if not (0 <= int(index) < len(self._clips)):

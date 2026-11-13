@@ -159,7 +159,8 @@ _HTML_JS = """
   return h.length > cap ? h.slice(0, cap) : h;
 })(%s, %d)""".replace("FIND", _FIND)
 
-_EXISTS_JS = ("!!" + _FIND + "(%s, 0)")
+_EXISTS_JS = ("(function (sel) { try { return !!" + _FIND
+              + "(sel, 0); } catch (e) { return 'bad-selector'; } })(%s)")
 
 # a ref from the last tree: the element is still in window.__agentRefs,
 # which is what makes "click 7" possible at all
@@ -182,19 +183,36 @@ _CLICK_REF_JS = """
 
 _TYPE_REF_JS = """
 (function(at, text, clear){
+  /* the same typing as _TYPE_JS, on the element a tree ref names: a
+     plain .value assignment was ignored by React and Vue inputs, and a
+     contenteditable lost its content even with clear off */
   var el = (window.__agentRefs || [])[at];
   if (!el) return "no-ref";
+  el.scrollIntoView({block: "center"});
   el.focus();
-  if (clear && "value" in el) el.value = "";
-  if ("value" in el) {
-    el.value = (el.value || "") + text;
+  var tag = (el.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea") {
+    var proto = tag === "input" ? HTMLInputElement.prototype
+                                : HTMLTextAreaElement.prototype;
+    var set = Object.getOwnPropertyDescriptor(proto, "value").set;
+    set.call(el, clear ? text : (el.value + text));
     el.dispatchEvent(new Event("input", {bubbles: true}));
     el.dispatchEvent(new Event("change", {bubbles: true}));
-  } else {
-    el.textContent = text;
-    el.dispatchEvent(new Event("input", {bubbles: true}));
+    return "typed";
   }
-  return "typed";
+  if (el.isContentEditable) {
+    if (clear) {
+      document.execCommand("selectAll", false, null);
+      document.execCommand("delete", false, null);
+    }
+    if (!document.execCommand("insertText", false, text)) {
+      el.textContent = (clear ? "" : el.textContent) + text;
+      el.dispatchEvent(new InputEvent("input", {bubbles: true,
+                       inputType: "insertText", data: text}));
+    }
+    return "typed";
+  }
+  return "not-editable";
 })(%d, %s, %s)"""
 
 _CLICK_JS = """
@@ -347,8 +365,16 @@ _FILL_JS = """
 
 _IDLE_COUNT_JS = """
 (function () {
-  try { return performance.getEntriesByType("resource").length; }
-  catch (e) { return 0; }
+  /* the timing buffer holds 250 entries by default; past that the count
+     stood still and a busy page read as idle. A bigger buffer, and the
+     number of entries ever seen kept as the buffer refills */
+  try {
+    if (!window.__agentIdleBuf) {
+      window.__agentIdleBuf = true;
+      performance.setResourceTimingBufferSize(100000);
+    }
+    return performance.getEntriesByType("resource").length;
+  } catch (e) { return 0; }
 })()"""
 
 _IDLE_JS = """
@@ -611,7 +637,28 @@ class AgentBridge:
         want = str((self.config or {}).get("bridgeLevel") or "full")
         return want if want in ("off", "read", "full") else "full"
 
-    def allowed(self, op, url="", tab_url=""):
+    @staticmethod
+    def _writes(op, req):
+        """Whether this request to a read op changes something."""
+        req = req if isinstance(req, dict) else {}
+        if op == "audit":
+            return bool(req.get("clear"))
+        if op == "bookmarks":
+            return str(req.get("action") or "") not in ("", "list", "search")
+        if op == "groups":
+            return bool(req.get("move") or req.get("name") and req.get("tab"))
+        return False
+
+    def site_ok(self, url):
+        """The address is on his site list, or there is no list."""
+        sites = (self.config or {}).get("bridgeSites")
+        if not (isinstance(sites, list) and sites):
+            return True
+        host = QUrl(str(url or "")).host().lower().removeprefix("www.")
+        return any(host and (host == one or host.endswith("." + one))
+                   for one in sites)
+
+    def allowed(self, op, url="", tab_url="", host=""):
         """Whether this op may run at all, and on this page.
 
         Three gates, in order: the level, his list of ops, and his list
@@ -629,6 +676,10 @@ class AgentBridge:
             return False, "bridge-off"
         if level == "read" and op not in self.READ_OPS:
             return False, "bridge-read-only"
+        if level == "read" and self._writes(op, getattr(self, "_req", None)):
+            # a read op used to write: audit clear, a bookmark added, a
+            # tab moved into a group -- the level said "look only"
+            return False, "bridge-read-only"
         if op in self.GUARDED_OPS \
                 and not (self.config or {}).get("bridgeHistory", False):
             return False, "op-not-allowed"
@@ -641,12 +692,20 @@ class AgentBridge:
             # the first was checked, and only ops that carry a "url" do:
             # js, text, click, type and the rest name a tab, so a client
             # held to one site ran script in every other tab he had open
-            for one_url in (url, tab_url):
+            # ...and the ops that name a site by "host" (cookies,
+            # autoclick rules) or open one of their own choosing (a
+            # search goes to the engine and reads what came back): with
+            # url and tab_url both empty these skipped the list entirely
+            if op == "search":
+                return False, "site-not-allowed"
+            if op == "cookies" and not host:
+                # no host means every cookie seen this run, every site's
+                return False, "site-not-allowed"
+            named = ("https://" + host) if host else ""
+            for one_url in (url, tab_url, named):
                 if not one_url:
                     continue
-                host = QUrl(one_url).host().lower().removeprefix("www.")
-                if not any(host and (host == one or host.endswith("." + one))
-                           for one in sites):
+                if not self.site_ok(one_url):
                     return False, "site-not-allowed"
         return True, ""
 
@@ -686,12 +745,27 @@ class AgentBridge:
                 v = self._find(req.get("tab"))
                 if v is not None and not self._gone(v):
                     tab_url = self._view_url(v)
-            ok, why = self.allowed(op, str(req.get("url") or ""), tab_url)
+                    if getattr(v, "private", False):
+                        target = "(private)"
+            if req.get("private"):
+                # the log is in config.json: a private open's address
+                # (query string and all) went there with it
+                target = "(private)"
+            self._req = req
+            ok, why = self.allowed(op, str(req.get("url") or ""), tab_url,
+                                   host=str(req.get("host") or "").strip())
+            self._req = None
             if not ok:
                 self.note(op, target, why)
                 self._reply(conn, {"ok": False, "error": why})
                 return
             self.note(op, target, "run")
+            # used now, so not idle: the sweep counted from when the tab
+            # was opened and closed one the agent was still working in
+            if op in self.TAB_OPS:
+                v = self._find(req.get("tab"))
+                if v is not None and getattr(v, "_agent_owned", False):
+                    v._agent_touched = time.time()
             handler(conn, req)
         except Exception as e:  # never let one bad request kill the bridge
             self._reply(conn, {"ok": False, "error": "%s: %s"
@@ -716,8 +790,11 @@ class AgentBridge:
         self._reply(conn, {"ok": True, "pid": os.getpid()})
 
     def op_tabs(self, conn, req):
-        self._reply(conn, {"ok": True, "tabs": [self._tab_info(i, v)
-                                                 for i, v in self._views()]})
+        # only the tabs on his site list: a client held to one site was
+        # handed the address and title of every tab he had open
+        self._reply(conn, {"ok": True, "tabs": [
+            self._tab_info(i, v) for i, v in self._views()
+            if self.site_ok(self._view_url(v))]})
 
     def watch_window(self):
         """Hook the window's own signals, so an event stream has
@@ -881,6 +958,12 @@ class AgentBridge:
 
         def poll():
             def got(r):
+                if r == "bad-selector":
+                    # a selector that throws read as "not there", so
+                    # gone=true answered "it went" at once
+                    self._reply(conn, {"ok": False,
+                                       "error": "invalid-selector"})
+                    return
                 found = bool(r)
                 if found != gone:
                     self._reply(conn, {"ok": True, "found": found,
@@ -924,22 +1007,21 @@ class AgentBridge:
 
     def op_type(self, conn, req):
         v = self._need_view(conn, req)
-        if v is not None and req.get("ref") not in (None, ""):
-            code = _TYPE_REF_JS % (int(req.get("ref")) - 1,
-                                   _js_string(str(req.get("text") or "")),
-                                   "true" if req.get("clear") else "false")
-            self._run(v, code, lambda r: self._reply(
-                conn, {"ok": r == "typed", "result": r}))
-            return
         if v is None:
             return
-        sel = str(req.get("selector") or "")
-        if not sel:
-            raise ValueError("selector required")
         text = str(req.get("text") or "")
         clear = "true" if req.get("clear", False) else "false"
         enter = bool(req.get("enter", False))
-        code = _TYPE_JS % (_js_string(sel), _js_string(text), clear)
+        if req.get("ref") not in (None, ""):
+            # through the same done() as a selector: "enter" was ignored
+            # for a ref and the form never sent
+            code = _TYPE_REF_JS % (int(req.get("ref")) - 1,
+                                   _js_string(text), clear)
+        else:
+            sel = str(req.get("selector") or "")
+            if not sel:
+                raise ValueError("selector required")
+            code = _TYPE_JS % (_js_string(sel), _js_string(text), clear)
 
         def done(r):
             if r == "typed" and enter:
@@ -1174,7 +1256,17 @@ class AgentBridge:
             url = str(req.get("url") or "")
             if not url:
                 v = self._find(req.get("tab")) or self.win.current()
+                if v is not None and getattr(v, "private", False):
+                    # a private tab's address is never written down
+                    self._reply(conn, {"ok": False, "error": "private-tab"})
+                    return
                 url = v.url().toString() if v is not None else ""
+                if url and not self.site_ok(url):
+                    # the tab in front, off his list: neither saved nor
+                    # read back to the client
+                    self._reply(conn, {"ok": False,
+                                       "error": "site-not-allowed"})
+                    return
             ok = bool(url) and self.win.add_bookmark_url(
                 url, str(req.get("title") or ""))
             self._reply(conn, {"ok": bool(ok), "url": url})
@@ -1182,7 +1274,7 @@ class AgentBridge:
         want = str(req.get("text") or "").lower()
         out = [{"title": e.get("title", ""), "url": e.get("url", "")}
                for e in self.win.bookmarks
-               if e.get("type") == "link"
+               if e.get("type") == "link" and self.site_ok(e.get("url"))
                and (not want or want in (e.get("title", "")
                                          + " " + e.get("url", "")).lower())]
         self._reply(conn, {"ok": True, "bookmarks": out[:200]})
@@ -1200,7 +1292,8 @@ class AgentBridge:
         """What has been downloaded, and what is still coming."""
         out = []
         for entry in (self.win.downloads_data() or [])[:200]:
-            if isinstance(entry, dict):
+            # a client held to some sites sees their downloads only
+            if isinstance(entry, dict) and self.site_ok(entry.get("url")):
                 out.append({k: entry.get(k) for k in
                             ("name", "path", "state", "bytes", "total", "url",
                              "done", "size")
@@ -1370,11 +1463,21 @@ class AgentBridge:
                                "bytes": len(data),
                                "sha256": hashlib.sha256(data).hexdigest()})
 
-        def wait_for_file(tries=40):
+        # as long as he says (default two minutes): 40 tries at 150 ms
+        # gave a 60 MB file six seconds and left its base64 in the page
+        try:
+            limit = max(1.0, min(1800.0, float(req.get("timeout") or 120)))
+        except (TypeError, ValueError):
+            limit = 120.0
+        tries_for = int(limit * 1000 / 150)
+
+        def wait_for_file(tries=tries_for):
             if self._gone(v):
                 self._reply(conn, {"ok": False, "error": "tab-gone"})
                 return
-            self._run(v, "window.__agentFile || ''", lambda raw: (
+            self._run(v, "(function () { var f = window.__agentFile || '';"
+                         " if (f) window.__agentFile = ''; return f; })()",
+                      lambda raw: (
                 finish(raw) if raw else
                 (QTimer.singleShot(150, lambda: wait_for_file(tries - 1))
                  if tries > 0 else
@@ -1483,6 +1586,13 @@ class AgentBridge:
         if v is None or self._gone(v):
             self.stop_watch(which)
             return
+        # asked again at every tick: narrowing the level or the site
+        # list (or the tab going somewhere off it) left the watch
+        # reading the page and sending its text out
+        ok, _why = self.allowed("watch", "", self._view_url(v))
+        if not ok or getattr(v, "private", False):
+            self.stop_watch(which)
+            return
         code = ("(function(sel){var el=document.querySelector(sel);"
                 "return el ? (el.textContent || '').trim().slice(0, 4000)"
                 " : '';})(%s)" % _js_string(row["selector"]))
@@ -1546,7 +1656,19 @@ class AgentBridge:
         self._reply(conn, {"ok": True, "every": every})
 
     def _refresh_tick(self, v):
-        if self._gone(v):
+        ok = not self._gone(v)
+        if ok:
+            ok, _why = self.allowed("refresh", "", self._view_url(v))
+        if not ok:
+            # a closed tab's timer fired for ever; a narrowed level or
+            # site list kept reloading the page
+            timer = getattr(v, "_agent_refresh", None)
+            if timer is not None:
+                timer.stop()
+                try:
+                    v._agent_refresh = None
+                except RuntimeError:
+                    pass
             return
         # not while he is typing in it: the page says when it last saw
         # a key, and a reload mid-sentence is unforgivable
@@ -1575,7 +1697,8 @@ class AgentBridge:
             if v is None:
                 return
             self.macro = {"tab": getattr(v, "_agent_id", None),
-                          "steps": [], "started": time.time()}
+                          "steps": [], "started": time.time(),
+                          "private": bool(getattr(v, "private", False))}
             self._run(v, self.MACRO_JS, lambda _r: self._reply(
                 conn, {"ok": True, "recording": True}))
             return
@@ -1590,6 +1713,22 @@ class AgentBridge:
             def finish(raw):
                 steps = _json_or(raw, []) or []
                 self.macro["steps"] = steps
+                # what was typed in a private tab (a search, an address,
+                # a card number) is handed back, never written to
+                # config.json under a name
+                if name and self.macro.get("private"):
+                    self.macro = None
+                    self._reply(conn, {"ok": False, "steps": list(steps),
+                                       "error": "private-tab-not-saved"})
+                    return
+                if name and not steps:
+                    # nothing came back: the page navigated and took the
+                    # recorder with it. Saved, that wrote an empty macro
+                    # over the one of that name
+                    self.macro = None
+                    self._reply(conn, {"ok": False, "steps": [],
+                                       "error": "nothing-recorded"})
+                    return
                 if name and self.config is not None:
                     rows = dict(self.config.get("macros") or {})
                     rows[name] = steps
@@ -1617,6 +1756,12 @@ class AgentBridge:
             if not steps:
                 self._reply(conn, {"ok": False, "error": "no-such-macro"})
                 return
+            if not isinstance(steps, list) or not all(
+                    isinstance(one, dict) for one in steps):
+                # a bad step raised later in a timer, and the client
+                # waited out its timeout for a reply that never came
+                self._reply(conn, {"ok": False, "error": "bad-steps"})
+                return
             v = self._need_view(conn, req)
             if v is None:
                 return
@@ -1639,7 +1784,7 @@ class AgentBridge:
       window.__macroSteps = [];
       var path = function (el) {
         if (!el || el === document.body) return "body";
-        if (el.id) return "#" + el.id;
+        if (el.id) return "#" + CSS.escape(el.id);
         if (el.name) return el.tagName.toLowerCase()
           + '[name=' + JSON.stringify(el.name) + ']';
         var at = 0, sib = el;
@@ -1853,11 +1998,15 @@ class AgentBridge:
         text = str(req.get("text") or "")
         if not text:
             raise ValueError("text required")
+        before = {id(v) for _i, v in self._views()}
         url = self.win.search_for(text, new_tab=True)
         if not url:
             self._reply(conn, {"ok": False, "error": "no-engine"})
             return
-        rows = [(i, v) for i, v in self._views()]
+        # the tab the search opened -- with new tabs placed after the
+        # current one, the LAST tab is one of his, and it was marked the
+        # agent's own (so "mine close" or the idle sweep closed it)
+        rows = [(i, v) for i, v in self._views() if id(v) not in before]
         v = rows[-1][1] if rows else None
         if v is None:
             self._reply(conn, {"ok": False, "error": "no-tab"})
@@ -1941,6 +2090,9 @@ class AgentBridge:
                 self._reply(conn, {"ok": False, "error": "no-tab"})
                 return
             v._agent_owned = True
+            fresh = True
+        else:
+            fresh = False
         v._agent_touched = time.time()
         code = """(function (box, text) {
           var el = document.querySelector(box);
@@ -1951,11 +2103,25 @@ class AgentBridge:
           el.dispatchEvent(new Event("input", {bubbles: true}));
           return "typed";
         })(%s, %s)""" % (_js_string(plan["box"]), _js_string(text))
-        self._run(v, code, lambda raw: self._reply(conn, {
-            "ok": str(raw or "") == "typed", "state": str(raw or ""),
-            "tab": self._tab_info(self.win.tabs.indexOf(v), v),
-            "note": "the answer is read with the text op once it has "
-                    "finished streaming"}))
+        def go():
+            self._run(v, code, lambda raw: self._reply(conn, {
+                "ok": str(raw or "") == "typed", "state": str(raw or ""),
+                "tab": self._tab_info(self.win.tabs.indexOf(v), v),
+                "note": "the answer is read with the text op once it has "
+                        "finished streaming"}))
+
+        if not fresh:
+            go()
+            return
+        # a tab it has just opened is still loading: typing into it at
+        # once found no box, every time, and said so ("no-box")
+        def loaded(_ok=True):
+            try:
+                v.loadFinished.disconnect(loaded)
+            except (TypeError, RuntimeError):
+                pass
+            QTimer.singleShot(1500, go)
+        v.loadFinished.connect(loaded)
 
     def op_viewport(self, conn, req):
         """A tab's size, or a phone's, for a capture."""
@@ -2054,6 +2220,10 @@ class AgentBridge:
             return
         page = v.page()
         page._agent_files = rows
+        # for the page it was asked on, and for a minute: armed with no
+        # chooser opening, it answered the next chooser of any site the
+        # tab went to later, with his local file
+        page._agent_files_for = (v.url().host(), time.monotonic())
         selector = str(req.get("selector") or "")
         if selector:
             code = ("(function(sel){var el=document.querySelector(sel);"

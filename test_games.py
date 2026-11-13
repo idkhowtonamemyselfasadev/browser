@@ -304,6 +304,15 @@ check("the player url carries the file's own version",
       "v=" in win.player_url().query())
 player = win.open_player()
 H.spin(600)
+# the page itself, not a fixed spin: under a CPU quota the script had
+# not run yet when this was read (and read once more, it had)
+H.wait_for(lambda: player is not None and "player.html" in
+           player.url().toString(), 6000)
+try:
+    H.wait_for(lambda: js(player, "typeof window.__playerLoad")
+               == "function", 6000)
+except AssertionError:
+    pass
 check("it opens as a tab", player is not None)
 check("...on the player page",
       "player.html" in player.url().toString(), player.url().toString())
@@ -314,6 +323,9 @@ check("and it answers with how many it took",
       == "2")
 mic = win.open_mic_test()
 H.spin(600)
+# a new tab's url() is "" for a while under a quota: wait for it
+H.wait_for(lambda: mic is not None and "mictest.html" in
+           mic.url().toString(), 6000)
 check("the microphone test opens too",
       mic is not None and "mictest.html" in mic.url().toString())
 check("it asks for nothing until pressed",

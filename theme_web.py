@@ -115,8 +115,13 @@ def _skipped(browser):
     """Hosts never themed: dark by design, Google, and his own list."""
     mod = _mod(browser)
     own = browser.config.get("themeWebSkip") or []
+    # ...and Settings' "Sites to leave alone", which said "never
+    # darkened or re-themed" and was never read here
+    dark = browser.config.get("darkSiteRules") or []
     return sorted(set(mod.NATIVE_DARK_SITES)
-                  | {h for h in own if isinstance(h, str) and h})
+                  | {h for h in own if isinstance(h, str) and h}
+                  | {h.strip().lower().removeprefix("www.") for h in dark
+                     if isinstance(h, str) and h.strip()})
 
 
 def _host(host):
@@ -1553,6 +1558,11 @@ SITE_JS = """(function () {
 
   // switched off in Settings: take back everything this put on the page
   window.__stUndo = function () {
+    // this run is over: its scroll listener and the timers it left
+    // (up to a minute after load) ask current() before they touch
+    // anything, and it said yes, so whatever the page added after the
+    // undo was themed again on a page that was meant to be its own
+    window.__stRun = (window.__stRun || 0) + 1;
     var el = document.getElementById("__sitetheme");
     if (el) el.remove();
     if (window.__stSheet && document.adoptedStyleSheets)
@@ -1704,16 +1714,28 @@ def refresh(browser):
 
 
 def _open_sites(browser):
-    for i in range(browser.tabs.count()):
-        view = browser.tabs.widget(i)
-        if browser._is_header(view) or not hasattr(view, "page"):
-            continue
+    """Every website tab in EVERY window: a second window (Ctrl+N) has a
+    strip of its own, and a theme change, an exclusion or "off" made in
+    the first left its pages themed the old way, run still going."""
+    try:
+        windows = browser.windows() or [browser]
+    except (AttributeError, RuntimeError):
+        windows = [browser]
+    for win in windows:
         try:
-            if view.url().scheme() == "file":
-                continue
-        except AttributeError:
+            count = win.tabs.count()
+        except (AttributeError, RuntimeError):
             continue
-        yield view
+        for i in range(count):
+            try:
+                view = win.tabs.widget(i)
+                if win._is_header(view) or not hasattr(view, "page"):
+                    continue
+                if view.url().scheme() == "file":
+                    continue
+            except (AttributeError, RuntimeError):
+                continue
+            yield view
 
 
 def undo_open_sites(browser):
@@ -1730,13 +1752,8 @@ def repaint_open_sites(browser):
         return
     mod = _mod(browser)
     source = _source(browser)
-    for i in range(browser.tabs.count()):
-        view = browser.tabs.widget(i)
-        if browser._is_header(view) or not hasattr(view, "page"):
-            continue
+    for view in _open_sites(browser):
         try:
-            if view.url().scheme() == "file":
-                continue
-        except AttributeError:
+            view.page().runJavaScript(source, mod.APP_WORLD_ID)
+        except RuntimeError:
             continue
-        view.page().runJavaScript(source, mod.APP_WORLD_ID)

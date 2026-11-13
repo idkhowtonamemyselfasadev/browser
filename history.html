@@ -538,8 +538,9 @@
   };
   document.getElementById("delrange").onclick = () => {
     if (!bridge) return;
-    const [since, until] = rangeOf();
-    bridge.deleteHistory(JSON.stringify({since: since, until: until}),
+    // the rows on screen, every filter included: the range alone took
+    // every site in those days, whatever was typed in the site box
+    bridge.deleteHistory(filterJson({scoped: true}),
       (n) => { offerUndo(n); load(); });
   };
   document.getElementById("popen").onclick = () => {
@@ -575,8 +576,9 @@
   };
   document.getElementById("clear").onclick = () => {
     if (bridge) {
-      bridge.clearHistory();
-      offerUndo(entries.length);
+      // what was cleared (the whole history), as the browser counts
+      // it: the list on screen could be a filtered view or another tab
+      bridge.clearHistory((n) => { offerUndo(n); load(); });
     }
     entries = [];
     renderList();

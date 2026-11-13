@@ -4038,7 +4038,9 @@
       for (const line of through.value.split("\n")) {
         const parts = line.trim().split(/\s+/).filter(Boolean);
         if (parts.length < 2) continue;
-        rows[parts[0]] = parts.slice(1);
+        // folded as the lookup folds it: "www.Discord.com" never matched
+        const host = parts[0].toLowerCase().replace(/^www\./, "");
+        rows[host] = (rows[host] || []).concat(parts.slice(1));
       }
       saveSetting("keysThrough", rows);
     };
@@ -4152,6 +4154,7 @@
       open.onclick = () => { if (bridge) bridge.openWindowsGraphics(() => {}); };
     }
     const askrow = document.getElementById("gpuask");
+    if (askrow) askrow.checked = !!s.gpuAsk;   // bound, and never shown
     if (askrow && askrow.closest(".wrow")) {
       askrow.closest(".wrow").hidden = !choose;
     }
@@ -4744,7 +4747,10 @@
     document.getElementById("catchscriptlogins").checked = s.catchScriptLogins === undefined ? true : !!s.catchScriptLogins;
     document.getElementById("warnforms").checked = s.warnForms === undefined ? true : !!s.warnForms;
     document.getElementById("breachcheck").checked = !!s.breachCheck;
-    document.getElementById("clipclear").value = s.clipClear || 30;
+    // 0 is an answer ("leave them there"); shown as 30 he believed his
+    // passwords were being cleared
+    document.getElementById("clipclear").value =
+      (s.clipClear === undefined || s.clipClear === null) ? 30 : s.clipClear;
     document.getElementById("expirywarn").value = s.expiryWarn || 30;
     document.getElementById("unuseddays").value = s.unusedDays || 365;
     document.getElementById("vaultbackupkeep").value = s.vaultBackupKeep || 10;
@@ -4835,9 +4841,18 @@
       s.desktopNotify === undefined ? true : !!s.desktopNotify;
     document.getElementById("breakafter").value = s.breakAfter || 0;
     document.getElementById("notesfolder").value = s.notesFolder || "";
+    // local date and time, which Date.parse reads back as the same
+    // moment: the date alone came back as UTC midnight on the next Save
+    // and the time he had typed was gone
+    const two = (n) => String(n).padStart(2, "0");
+    const localWhen = (t) => {
+      const d = new Date((t || 0) * 1000);
+      return d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" +
+        two(d.getDate()) + " " + two(d.getHours()) + ":" + two(d.getMinutes());
+    };
     document.getElementById("countdowns").value =
       (s.countdowns || []).map((c) => (c.name || "") + " = " +
-        new Date((c.t || 0) * 1000).toISOString().slice(0, 10)).join("\n");
+        localWhen(c.t)).join("\n");
     document.getElementById("guardmedialog").checked = !!s.guardMediaLog;
     document.getElementById("trackerbadge").checked = !!s.trackerBadge;
     document.getElementById("permdays").value = s.permissionDays || 0;
@@ -6463,7 +6478,11 @@
     document.getElementById("minfontval").textContent =
       v ? v + "px" : ((window.STR && window.STR.off) || "Off");
     paintRange(e.target);
-    saveSetting("minFont", v);
+  };
+  // saved (and every web tab reloaded) once, when the slider is let
+  // go: on every step of a drag each tab reloaded a dozen times
+  document.getElementById("minfont").onchange = (e) => {
+    saveSetting("minFont", parseInt(e.target.value) || 0);
   };
   document.getElementById("libdays").oninput = (e) => {
     const v = parseInt(e.target.value) || 0;
@@ -6628,6 +6647,8 @@
       host: document.getElementById("phost").value.trim(),
       port: parseInt(document.getElementById("pport").value) || 0};
     if (!prof.name || !prof.host || prof.port < 1 || prof.port > 65535) return;
+    // the browser keeps these two names for itself and refuses them
+    if (prof.name === "system" || prof.name === "direct") return;
     if (bridge) bridge.saveProxyProfile(JSON.stringify(prof));
     window._proxyProfiles = (window._proxyProfiles||[]).filter(p=>p.name!==prof.name).concat([prof]);
     document.getElementById("pname").value = "";

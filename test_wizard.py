@@ -397,6 +397,13 @@ _qp = _qv.page()
 js(_qp, 'localStorage.setItem("quicklinks", JSON.stringify(['
         '{name: "planted", url: "javascript:window.__pwned=1"},'
         '{name: "fine", url: "https://ok.example/"}])); return 1;')
+# ...and in the shared store, which is the one list once setup is done:
+# a start page loading takes its links from there, over this jar's copy
+_sp_store = win.config.get("startPage")
+if isinstance(_sp_store, dict):
+    _sp_store["quicklinks"] = json.dumps(
+        [{"name": "planted", "url": "javascript:window.__pwned=1"},
+         {"name": "fine", "url": "https://ok.example/"}])
 _qv.reload()
 spin(3000)
 _ql = json.loads(js(_qp, """

@@ -17,7 +17,7 @@ this machine, and it is only read when he switches blocking on.
 
 import ipaddress
 import re
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 from PyQt6.QtCore import QUrl
 
@@ -74,12 +74,19 @@ def strip_tracking(url):
         return url
     if not parts.query:
         return url
-    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-            if k.lower() not in TRACKING]
-    if len(kept) == len(parse_qsl(parts.query, keep_blank_values=True)):
+    # by the raw pieces of the query, so what stays is left exactly as
+    # it was written: rebuilt through parse_qsl/urlencode, a value with
+    # a %-escape it could not decode came back as U+FFFD, and every kept
+    # parameter was re-encoded. And compared folded on both sides --
+    # "trkCampaign" in the list could never equal a lower-cased key.
+    tracking = {name.lower() for name in TRACKING}
+    pieces = parts.query.split("&")
+    kept = [piece for piece in pieces
+            if unquote_plus(piece.split("=", 1)[0]).lower() not in tracking]
+    if len(kept) == len(pieces):
         return url
     return urlunsplit((parts.scheme, parts.netloc, parts.path,
-                       urlencode(kept), parts.fragment))
+                       "&".join(kept), parts.fragment))
 
 
 def is_local(host):
@@ -87,11 +94,19 @@ def is_local(host):
 
     Names first (localhost, anything .local or .home.arpa, a bare name
     with no dot — a router's own name), then the address itself."""
-    host = (host or "").lower().strip("[]")
+    host = (host or "").lower().strip("[]").rstrip(".")
     if not host:
         return False
-    if host == "localhost" or host.endswith((".localhost", ".local",
-                                             ".home.arpa", ".internal")):
+    if host in ("localhost", "fritz.box") or host.endswith((
+            ".localhost", ".local", ".home.arpa", ".internal", ".lan",
+            ".fritz.box")):
+        return True
+    # the bare name the docstring promises: http://router/, http://nas/
+    # were let through to a web page while "keep pages off the home
+    # network" was on. A dotless number is an address too (3232235777
+    # is 192.168.1.1 to the engine), and no site on the web has a
+    # one-label name.
+    if "." not in host and ":" not in host:
         return True
     try:
         addr = ipaddress.ip_address(host)

@@ -2578,15 +2578,29 @@
       bridge.getStartData((json) => {
         try {
           const data = JSON.parse(json || "{}");
-          if (!localStorage.getItem("setupDone") && data.setupDone) {
-            for (const k of SHARED_KEYS)
+          if (data.setupDone) {
+            // the shared store is the one list: pins from the taskbar
+            // land there while this jar's start page is shut. A jar
+            // that had run setup kept its old copy, and its next edit
+            // wrote that copy back over the pins.
+            for (const k of SHARED_KEYS) {
               if (data[k] !== undefined) localStorage.setItem(k, data[k]);
+              // taken away elsewhere (Center for the search box):
+              // kept here, the old value was written back
+              else if (k !== "setupDone") localStorage.removeItem(k);
+            }
             links = JSON.parse(localStorage.getItem("quicklinks") || "null") || DEFAULTS;
             render();
             applyBg();
             applySearchPos();
           } else if (localStorage.getItem("setupDone") && !data.setupDone) {
             syncStartData();  // seed the shared store from this jar
+          } else if (data.quicklinks !== undefined) {
+            // pins added before setup was finished (the taskbar's +):
+            // the wizard showed the defaults and its save wiped them
+            localStorage.setItem("quicklinks", data.quicklinks);
+            links = JSON.parse(data.quicklinks || "null") || DEFAULTS;
+            render();
           }
         } catch (e) {}
         maybeStartSetup();
@@ -2710,6 +2724,10 @@
     });
   }
   // tabs opened earlier would show stale switches; re-sync when shown
+  // what refresh_own_pages calls after Settings changes the layout or
+  // the wallpaper: nothing here defined it, so an open start page kept
+  // the old clock, search position and pictures until reloaded
+  window.__settingsChanged = () => { loadExtras(); };
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) syncSettings();
   });
@@ -2755,8 +2773,18 @@
   // nothing is copied; "every 0 minutes" means a new one on each new
   // tab, which is what a new tab is.
   function applyWallpapers(rows) {
+    // the rotation from the last call stops first, whatever this call
+    // decides: an interval of 0 or an emptied folder returned early and
+    // left the old pictures rotating
+    if (window.__wallTimer) { clearInterval(window.__wallTimer);
+                              window.__wallTimer = null; }
     const shots = (rows && rows.shots) || [];
-    if (!shots.length) return;
+    if (!shots.length) {
+      // switched off or emptied: its picture goes with it
+      if (window.__wallShown) { window.__wallShown = false; applyBg(); }
+      return;
+    }
+    window.__wallShown = true;
     const every = Math.max(0, Number(rows.every) || 0);
     const pick = () => {
       let at = 0;
@@ -2769,7 +2797,17 @@
       document.body.classList.add("hasbg");
     };
     if (every === 0) {
-      pick();
+      // "every new tab": once per page load, not at every change in
+      // Settings (each one used to move the picture on)
+      if (!window.__wallPicked) {
+        window.__wallPicked = true;
+        pick();
+        return;
+      }
+      let at = 0;
+      try { at = Number(localStorage.getItem("wallat") || "0") || 0; } catch (e) {}
+      document.body.style.backgroundImage = 'url("' + shots[at % shots.length] + '")';
+      document.body.classList.add("hasbg");
       return;
     }
     let last = 0;
@@ -2784,7 +2822,7 @@
       document.body.style.backgroundImage = 'url("' + shots[at % shots.length] + '")';
       document.body.classList.add("hasbg");
     }
-    setInterval(pick, Math.max(60, every * 60) * 1000);
+    window.__wallTimer = setInterval(pick, Math.max(60, every * 60) * 1000);
   }
 
   function tick() {
