@@ -1007,7 +1007,12 @@ VIDEO_WATCH_JS = r"""(function () {
                    ? (fact.pixels.mean <= 2) : fact.pixels].join("/");
     if (state !== last || ticks % 12 === 1) {
       last = state;
-      console.log("[gpu-frame] " + JSON.stringify(fact));
+      // the key is what tells this line from one a page printed
+      // itself: the page cannot read this world's source, and the
+      // reader drops every line that does not carry it
+      var said = {key: "__FRAME_KEY__"};
+      for (var name in fact) { said[name] = fact[name]; }
+      console.log("[gpu-frame] " + JSON.stringify(said));
     }
     return fact;
   }
@@ -1085,13 +1090,26 @@ MEDIA_PROBE_JS = r"""(function () {
 #: says to the console
 _FRAME_MARK = "[gpu-frame] "
 
+#: what the sampler's world says on every line, made fresh each run. A
+#: page can print a "[gpu-frame]" line of its own; without this it would
+#: land in the record on disk as if the sampler had said it.
+_FRAME_KEY = secrets.token_hex(8)
 
-def _video_frames(logs, limit=8):
+#: the only fields of a report that are kept: anything else a line
+#: carried is not the sampler's
+_FRAME_FIELDS = frozenset((
+    "host", "tick", "videos", "at", "w", "h", "ready", "network",
+    "paused", "src", "buffered", "decoded", "dropped", "mse", "wall",
+    "error", "pixels"))
+
+
+def _video_frames(logs, limit=8, key=None):
     """The sampler's reports, out of what the pages have said.
 
     `logs` are the pages' own console records, which they keep anyway
     for the agent bridge -- so this reads something that was already
-    being written down rather than opening a channel of its own."""
+    being written down rather than opening a channel of its own. With
+    a `key`, only lines that carry it count."""
     out = []
     for log in logs or ():
         for line in log or ():
@@ -1103,8 +1121,12 @@ def _video_frames(logs, limit=8):
                 fact = json.loads(text[len(_FRAME_MARK):])
             except ValueError:
                 continue
-            if isinstance(fact, dict):
-                out.append(fact)
+            if not isinstance(fact, dict):
+                continue
+            if key is not None and fact.get("key") != key:
+                continue
+            out.append(dict((name, value) for name, value in fact.items()
+                            if name in _FRAME_FIELDS))
     return out[-limit:]
 
 
@@ -2029,6 +2051,11 @@ def _url_text(url):
     return str(url or "")
 
 
+#: TRACKING_PARAMS lower-cased, for the comparison in clean_url:
+#: "trkCampaign" never matched the lower-cased name it was compared with
+_TRACKING_LOWER = frozenset(p.lower() for p in TRACKING_PARAMS)
+
+
 def clean_url(text):
     """The same address with the tracking taken off.
 
@@ -2041,7 +2068,7 @@ def clean_url(text):
     query = QUrlQuery(url.query())
     kept = [(k, v) for k, v in query.queryItems(
         QUrl.ComponentFormattingOption.FullyEncoded)
-        if k.lower() not in TRACKING_PARAMS]
+        if k.lower() not in _TRACKING_LOWER]
     fresh = QUrlQuery()
     for k, v in kept:
         fresh.addQueryItem(k, v)
@@ -2775,9 +2802,13 @@ def tidy_typed(text):
     text = _strip_pasted(text)
     if not text:
         return ""
-    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", text):
+    _scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*):\s*(//)?", text)
+    if _scheme and (_scheme.group(2) or _scheme.group(1).lower() in (
+            "http", "https", "file", "ftp", "about", "mailto", "data",
+            "view-source", "javascript", "blob", "ws", "wss")):
         # a scheme: the spaces a paste leaves after it or after the
-        # slashes are a mistake, and nothing else here is
+        # slashes are a mistake, and nothing else here is. "why: is the
+        # sky blue" only looks like one, and is a search as typed.
         head, _colon, rest = text.partition(":")
         rest = rest.lstrip()
         if rest.startswith("//"):
@@ -3497,6 +3528,24 @@ MEDIA_PICK = r"""
       return (b.clientWidth * b.clientHeight) - (a.clientWidth * a.clientHeight);
     });
     return pool[0];
+  }
+"""
+
+#: the one transform a video wears: the zoom and the turn each used to
+#: write the whole property from their own state, so the second one
+#: wiped the first while both still said they were on
+MEDIA_XFORM = r"""
+  function xform(m) {
+    var t = window.__mediaTurn || {deg: 0, flip: false};
+    var z = window.__mediaZoom || {scale: 1, x: 0, y: 0, crop: false};
+    var css = "scale(" + z.scale + ") translate(" + z.x + "px," + z.y
+            + "px) rotate(" + t.deg + "deg)" + (t.flip ? " scaleX(-1)" : "");
+    /* a quarter turn in a box made for landscape has to be scaled back
+       in, or the sides are cut off */
+    if (t.deg % 180 === 90 && m.clientWidth && m.clientHeight) {
+      css += " scale(" + Math.min(1, m.clientHeight / m.clientWidth) + ")";
+    }
+    m.style.setProperty("transform", css, "important");
   }
 """
 
@@ -5485,6 +5534,12 @@ def _migrate_permission_config(config):
     and nothing is widened. The version marker makes this run once, on
     a config the old browser wrote and never on one this browser did.
     """
+    # null, a list or a string (a hand edit, an old tool) holds no grant:
+    # left as it was, every permission request raised in its slot and
+    # was never answered
+    if "permissions" in config and not isinstance(config["permissions"],
+                                                  dict):
+        config["permissions"] = {}
     if config.get("permissionsKeyVersion", 1) >= 2:
         return config
     old = config.get("permissions")
@@ -5730,7 +5785,7 @@ UI_STRINGS = {
 "nowPlaying":"Now playing","mediaPlay":"Play / Pause","mediaPrev":"Previous","mediaNext":"Next",
 "masterPw":"Master password","masterPwName":"Lock the vault with a master password","masterPwHint":"Your passwords are locked behind a passphrase you type \u2014 no key file on disk. Until you unlock, nothing on this computer can read them.","masterWarnT":"If you forget it, your passwords are gone.","masterWarnB":"There is no way to reset a master password and no way round it. Nobody can recover it \u2014 not you, not this browser, not whoever wrote it. The passwords stay on this computer and stay unreadable for ever. Export them first if you want a way back, and keep that file somewhere safe.","masterSetT":"Set a master password","masterSetGo":"Switch it on","masterNewPh":"Master password","masterAgainPh":"Type it again","masterPassPh":"Master password","masterCurrentPh":"Current master password","masterMinHint":"At least 8 characters. A few memorable words beat a short one with symbols.","masterMismatch":"The two do not match.","masterShort":"Too short \u2014 8 characters at the very least.","masterExportFirst":"Export passwords first\u2026","masterUnlockT":"Unlock passwords","masterUnlockAsk":"Type your master password to unlock the vault.","masterUnlockGo":"Unlock","masterWrong":"That was not it.","masterChangeT":"Change master password","masterChangeAsk":"Your saved passwords are not touched \u2014 only the key changes.","masterChangeGo":"Change it","masterChangeDone":"Master password changed \u2713","masterOnDone":"The vault is locked with your master password \u2713","masterOffT":"Switch the master password off?","masterOffB":"Your passwords all stay exactly where they are. But the key goes back into a file next to them, so anyone who can use this computer account will be able to read them again.","masterOffDone":"Master password removed","masterFailed":"That did not work \u2014 nothing was changed.","masterLockNow":"Lock now","masterChangeBtn":"Change master password\u2026","masterAuto":"Lock again after","masterAutoHint":"Locks itself again after this long idle.","masterAutoNever":"Never","masterMinutes":"{} minutes","masterHour":"1 hour","masterOn":"On \u2014 unlocked","masterShut":"On \u2014 locked","masterOffState":"Off","masterLockedTitle":"The vault is locked","masterLockedBody":"Your saved passwords are unreadable until you type your master password.","masterUnlockBtn":"Unlock\u2026","masterLockedLine":"Locked \u2014 unlock the password manager to see what is saved.","masterEncHint":"Encrypted on this computer with your master password. Locked, nothing here can read them.",
 "externalTitle":"Open some sites in another browser","externalHint":"Some sites refuse to work in this browser \u2014 Gmail and Google sign-in among them. Rather than a wall, they open in your other browser.","externalHandoff":"Hand these sites to another browser","externalHandoffSub":"Off = they load here like any other page.","externalSites":"Sites to open elsewhere","externalSitesSub":"One domain a line. A domain covers its sub-domains too.","externalOpened":"Opened in {}","externalMissing":"{} is not installed \u2014 opening here instead","externalSaved":"Saved \u2713","tabDuplicate":"Duplicate tab","tabPin":"Pin tab","tabUnpin":"Unpin tab","tabMute":"Mute tab","tabUnmute":"Unmute tab","tabSolo":"Play sound only here","tabLock":"Lock tab","tabUnlock":"Unlock tab","tabLocked":"Locked tab","tabLockedAsk":"Close \u201c%s\u201d? It is locked.","tabPinnedStays":"Pinned tab \u2014 close it from its own menu.","tabRename":"Rename tab","tabRenameAsk":"Name for this tab (the page cannot change it):","tabInPrivate":"Open this page in a private tab","tabInSession":"Open in another browser","tabCopy":"Copy address","tabCopyThis":"This tab","tabCopyAll":"Every tab","tabCopyMd":"Every tab as Markdown","tabsFromClipboard":"Open addresses from the clipboard","tabsBookmarkAll":"Bookmark every tab","tabsSort":"Sort tabs","tabsSortSite":"By site","tabsSortTitle":"By title","tabsGroupSite":"Group every tab of this site","tabsReload":"Reload every tab","tabsReloadGroup":"Reload every tab in this group","tabsClosed":"Recently closed","closedNone":"Nothing closed yet.","tabClose":"Close tab","tabCloseOthers":"Close other tabs","tabCloseRight":"Close tabs to the right","tabCloseLeft":"Close tabs to the left","tabCloseDupes":"Close duplicate tabs","tabCloseSite":"Close every tab of this site","tabsCopied":"Copied \u2713","tabsOpened":"%d tabs opened","tabsBookmarked":"%d tabs bookmarked \u2713","tabWheelName":"Mouse wheel over the tab strip","tabWheelHint":"Off = the wheel does nothing there.","tabWheelOff":"Nothing","tabWheelScroll":"Scroll a strip that is too long","tabWheelSwitch":"Switch tabs","tabCountName":"Show the number of tabs","tabCountHint":"A plain count at the end of the strip.","closeFocusName":"After closing a tab, go to","closeFocusHint":"Which tab the browser lands on.","closeFocusRight":"The tab to the right","closeFocusLeft":"The tab to the left","closeFocusLast":"The tab you were on before","pinnedSiteName":"Pinned tabs stay on their site","pinnedSiteHint":"A link to another site opens in a new tab instead of taking the pinned tab away.","barCopied":"Copied \u2713","barForgot":"Taken out of the history","pasteAndGo":"Paste and go","copyClean":"Copy clean address","copyPageAs":"Copy page as","copyMarkdown":"Markdown link","copyHtml":"HTML link","copyPlain":"Title \u2014 address","searchFor":"Search for \u201c%s\u201d","searchWith":"Search with","searchThisSite":"Search this site","searchImage":"Search for this image","searchImageAsk":"Send this picture\u2019s address to Google Lens?\n\n%s","searchInBarName":"Show the search text in the address bar","searchInBarHint":"On a results page the bar shows what you searched for, ready to edit.","pageTools":"Page tools","toolUnlock":"Allow copying and right-click","toolUnstick":"Unpin fixed bars","toolStopMedia":"Stop everything moving","toolExpand":"Expand everything","toolEdit":"Edit this page","toolVisited":"Mark visited links","toolToTop":"Scroll-to-top button","toolShowPw":"Show the password as text","toolFreeze":"Freeze the page","toolThaw":"Let the page run again","toolTextLink":"Copy a link to the selection","toolFeeds":"Feeds on this page","feedsNone":"This page offers no feed.","linkReal":"Open where this really goes","linkPrivate":"Open link in a private tab","linkInSession":"Open link in another browser","linkCopyAs":"Copy link as","linkCopyText":"Link text","reloadHard":"Reload without the cache","reloadSiteStart":"Back to this site\u2019s first page","hoverLinkName":"Show the link under the mouse","hoverLinkHint":"A line at the bottom left with the real target, redirects unwrapped.","frameCopied":"Frame copied \u2713","frameFailed":"That frame could not be taken.","mediaPaused":"Everything paused","mediaResumed":"Playing again","mediaNoSound":"Nothing is playing.","mediaGoTo":"Go to this tab","mediaPlayPause":"Play / pause","mediaBoost":"Volume %s","sleepSet":"Everything stops in %d minutes","sleepOff":"Sleep timer off","sleepDone":"Sleep timer: everything paused","mediaMenu":"Video and sound","mediaSpeed":"Speed %s","mediaLoop":"Loop from here (A / B / off)","mediaFrameBack":"One frame back","mediaFrameFwd":"One frame on","mediaFrameCopy":"Copy this frame","mediaTimeLink":"Copy the link at this moment","mediaLive":"Jump to live","mediaNoNext":"Do not start the next video","sleepTimer":"Sleep timer","sleepMinutes":"in %d minutes","mediaPerSiteName":"Remember speed and volume per site","mediaPerSiteHint":"A podcast stays at 1.5x and a loud site stays turned down.","wheelVolumeName":"Mouse wheel over a video sets the volume","wheelVolumeHint":"Off = the wheel scrolls the page, as everywhere else.","shotMenu":"Screenshot","shotVisible":"What is on screen","shotFull":"The whole page","shotElement":"This element","shotPin":"Keep it on top","shotDiscord":"Small enough for Discord","shotTimed":"In a moment","shotSeconds":"in %d seconds","shotIn":"Capture in %d seconds\u2026","shotWorking":"Taking the whole page\u2026","shotCopied":"On the clipboard \u2713","shotFailed":"That capture did not work.","shotDirName":"Where screenshots go","shotDirHint":"Empty = a Screenshots folder beside your downloads.","shotNameName":"Screenshot file name","shotNameHint":"strftime marks, {title} and {site}.","shotFormatName":"Screenshot format","shotRedactName":"Blur password fields in captures","shotRedactHint":"What is typed in a password field is blurred before the picture is taken.","privTrackers":"Trackers and the home network","privConnections":"Connections","privMenu":"Privacy","privNoScript":"No JavaScript on %s","privNoImages":"No images on %s","privAlways":"Always open %s privately","privNoHistory":"Never remember %s","privClearSite":"Clear what %s has stored","privForget":"Forget %s entirely","privCleared":"%s cleared","privForgotten":"%s forgotten","privReport":"%d requests refused, %d addresses cleaned","streamerOn":"Streamer mode on \u2014 the address bar is hidden","streamerOff":"Streamer mode off","blockLocalName":"Keep websites off the home network","blockLocalHint":"A page on the internet may not reach 192.168.x.x, localhost or a .local name.","stripTrackingName":"Strip tracking from addresses","stripTrackingHint":"utm_*, fbclid and the rest are taken off before the request goes out.","devMenu":"Developer","viewSource":"Page source","devJson":"JSON as a tree","devPretty":"Format this file","devCsv":"Show as a table","devCodeCopy":"Copy buttons on code blocks","devCurl":"Copy as curl","devSelector":"Copy this element as","devCss":"CSS selector","devXpath":"XPath","devHtml":"HTML","devColour":"Pick the colour here","devServers":"Servers on this machine","devNoServers":"Nothing is listening.","actNewTab":"New tab","actCloseTab":"Close tab","actReopen":"Reopen closed tab","actTabSearch":"Search open tabs","actNextTab":"Next tab","actPrevTab":"Previous tab","actMoveTabRight":"Move tab right","actMoveTabLeft":"Move tab left","actNextSession":"Next virtual browser","actPrevSession":"Previous virtual browser","actAddress":"Address bar","actSearch":"Search from the address bar","actUpALevel":"Up a level","actNextPage":"Next page","actPrevPage":"Previous page","actNextHeading":"Next heading","actPrevHeading":"Previous heading","actFind":"Find on page","actBookmark":"Bookmark this page","actGenPassword":"Copy a new password","actAccounts":"Choose the account","actExternal":"Play in the external player","actCopyUrl":"Copy title and address","actSearchSelection":"Search for the selection","actPanic":"Panic","actStreamer":"Streamer mode","actMediaForward":"Ten seconds on","actMediaBack":"Ten seconds back","actMediaFaster":"Faster","actMediaSlower":"Slower","actNoisyTab":"Go to the tab making the noise","actPauseAll":"Pause everything","actPalette":"Run a command\u2026","actCheatSheet":"Keyboard shortcuts","actFocusCycle":"Move the focus on","actQuit":"Quit","actZoomIn":"Zoom in","actZoomOut":"Zoom out","actZoomReset":"Zoom back to normal","actTabNumber":"Go to that tab","actTabSidebar":"Tabs down the side","actSidebarFold":"Fold the tab sidebar to icons","tabWhereName":"Where the tabs are","tabWhereHint":"Down either side they are a list you can read the titles in, with the groups folding. F9 switches between the top and the side; Shift+F9 folds the list to icons.","tabWhereTop":"Along the top","tabWhereBottom":"Below the page","tabWhereLeft":"Down the left","tabWhereRight":"Down the right","mouseButtonsName":"Side mouse buttons go back and forward","readMenu":"Reading","readerMode":"Reader mode","readerNone":"No article found on this page.","readOutline":"Headings","outlineNone":"No headings on this page.","readWords":"Word count","wordsLine":"%d words \u00b7 about %d min","readHints":"Link hints","readAloud":"Read aloud","readStop":"Stop reading","sayMissing":"No speech program installed (spd-say).","sayNothing":"Nothing to read.","sayStarted":"Reading\u2026","sayFailed":"The speech program would not speak.","readHighlight":"Highlight the selection","readUnhighlight":"Clear the highlights","hlAdded":"Highlighted \u2713","hlNone":"Nothing is selected.","accContrast":"High contrast","accReadable":"Readable font","accSpacing":"Wider text spacing","accMotion":"Stop animations","accStillGifs":"Stop animated images","accCursor":"Big cursor","accFocus":"Always show the focus ring","accMinFont":"Smallest text on this site","accMinFontOff":"No minimum","panelSite":"Panel","panelToggle":"Side panel","panelThisPage":"This page","panelPrivateNo":"A private page does not go into the side panel.","panelTwitch":"Twitch chat","panelOther":"Another site","panelAsk":"Address or channel:","panelToTab":"Open as a tab","gameMode":"Game mode","gameOn":"Game mode on \u2014 other tabs asleep, nothing playing","gameOff":"Game mode off","sleepOthers":"Put the other tabs to sleep","sleptTabs":"%d tabs asleep","blockNotifName":"Never ask about notifications","blockNotifHint":"Sites asking to send notifications are told no without a card.","mcServers":"Minecraft servers","mcNone":"No servers in the list yet.","mcDown":"not answering","mcRefresh":"Ask again now","mcUp":"%s is back","mcGone":"%s stopped answering","dcMute":"Discord: mute","dcDeafen":"Discord: deafen","discordNone":"No Discord tab is open.","dlMenu":"Download from this page","dlImages":"Every picture","dlMedia":"Every video and sound","dlLinked":"Every linked file","dlNothing":"Nothing of that kind on this page.","dlManyTitle":"That is a lot of files","dlMany":"Download all %d files?","dlStarted":"%d downloads started","sortDownloadsName":"Sort downloads into folders","sortDownloadsHint":"Pictures, Video, Music, Documents, Archives, Programs, Mods \u2014 beside the downloads folder.","openAfterName":"Open the folder when a download finishes","laterAdd":"Read later","laterList":"The read-later list","laterAdded":"On the read-later list \u2713","laterGone":"Taken off the list","laterNone":"Nothing on the list.","laterClear":"Clear the list","indexPagesName":"Search history by what was on the page","indexPagesHint":"Keeps a few hundred words of each page you visit, on this computer, so you can find it by its contents. Never from a private tab.","taskManager":"What the tabs are costing","taskTotal":"%d tabs \u00b7 %s","taskShared":"shares a process","taskAsleep":"asleep","taskSleep":"Put this tab to sleep","taskCpu":"%.1f s of processor time","liteMode":"Lite mode","liteOn":"Lite mode on \u2014 no images, nothing autoplaying","liteOff":"Lite mode off","cacheCleared":"Cache cleared in %d virtual browsers","sleepAfterName":"Put a tab to sleep after","sleepAfterHint":"Minutes without looking at it. 0 = never.","startupName":"This browser started in","styleEdit":"My CSS for this site","styleTitle":"Your own CSS for %s","styleHint":"This is put on the page last, so it wins over the site and the theme.","styleSaved":"Saved for %s \u2713","zoomPerSiteName":"Remember the zoom per site","zoomPerSiteHint":"A site opens at the level you last read it at.","ytAdSkipName":"Skip YouTube\u2019s ads","ytAdSkipHint":"Off, because YouTube notices: it counts the videos, then puts its \u201callow ads\u201d wall where the player was and nothing plays at all. Takes hold at the next start.","privatePermHint":"Only in this private tab.",
-"mprisName":"Answer the keyboard's media keys","mprisHint":"The desktop asks what is playing and may pause it (MPRIS over D-Bus). Nothing leaves the machine.","mprisNoBus":"No desktop session bus here \u2014 the media keys stay with whatever has them","mprisOn":"The media keys reach this browser","mprisOff":"The media keys no longer reach this browser","mprisMissing":"mpris.py is not next to the browser.","winFull":"Fill the window with the video","winFullOff":"Back to the page","awakeName":"Keep the screen awake while a video plays","awakeHint":"Only while something is actually playing in the tab in front, and only through systemd-inhibit.","awakeOn":"The screen stays awake while this plays","awakeOff":"The screen may sleep again","awakeNo":"systemd-inhibit is not here \u2014 the screen is not held","playerTitle":"Play a file","playerOpen":"Open the player","playerPick":"Pick video or audio files","playerNone":"Nothing picked.","mictestTitle":"Test the microphone and camera","micTestTitle":"Microphone and camera","micTestSub":"All of this stays on this computer: nothing is sent anywhere, and the recording is thrown away when you leave the page.","micWord":"Microphone","camWord":"Camera","micLevel":"now %d%%, loudest %d%%","micOn":"Listening. The level should move when you speak.","micOff":"Stopped.","micFailed":"The microphone was refused: %s","camOn":"%s, %d×%d","camOff":"Stopped.","camFailed":"The camera was refused: %s","recNone":"This build cannot record.","recNow":"Recording… say something.","recDone":"Five seconds recorded. Play it back.","on":"On","playerLoop":"Loop: %s","playerQueue":"%d in the queue","watchLater":"Watch later","watchAdd":"Watch this later","watchAdded":"Put on the watch-later list","watchEmpty":"The watch-later list is empty.","watchPlay":"Play the next one","watchClear":"Empty the list","watchGone":"Taken off the list","momentMenu":"Moments in this video","momentAdd":"Mark this moment","momentNote":"A word about this moment (optional)","momentMade":"Marked at %s","momentNone":"No moments in this video yet.","momentNoTime":"Nothing is playing here.","pauseLockName":"Pause what is playing when the browser locks","pauseLockHint":"Also when you have been away for the idle time.","pausedAway":"Paused while you were away","screenMenu":"Full screen on","screenNone":"There is no screen attached here.","sponsorName":"Skip the sponsor in a video","sponsorHint":"Asks the SponsorBlock service about this video. Only the first four characters of its hashed id are sent, and only when this is on.","sponsorSkipped":"Skipped %s","sponsorNone":"Nothing marked in this video.","sponsorOff":"Sponsor skipping is off \u2014 Settings has the switch.","lyricsName":"Fetch lyrics","lyricsHint":"Asks lrclib for the words using title, artist and length. Off = nothing is asked.","lyricsTitle":"Lyrics","lyricsNone":"No lyrics found for this one.","lyricsOff":"Lyrics are off \u2014 Settings has the switch.","playMenu":"Games and streaming","streamGroup":"While you are streaming","gameGroup":"Games","streamSafe":"Stream-safe mode","streamSafeOn":"Stream-safe: private data blurred, no notifications, no suggestions from history","streamSafeOff":"Stream-safe off","blurPrivate":"Blur addresses and private data","blurOn":"%d things blurred \u2014 hover to read one","blurOff":"Nothing is blurred any more","blurWordsName":"Also blur these words","blurWordsHint":"One a line: a name, a street, anything that should not be legible on the stream.","keysShow":"Show the keys I press","keysOn":"The keys you press are shown at the bottom","keysOff":"The key overlay is gone","fpsShow":"Show frames per second","fpsOn":"Frames per second, top right","fpsOff":"The counter is gone","obsMenu":"OBS","obsName":"Let me drive OBS","obsHint":"Over obs-websocket on this machine. Address and password below; empty address = off.","obsUrlName":"OBS address","obsUrlHint":"ws://127.0.0.1:4455 is what OBS uses by default.","obsPwName":"OBS password","obsPwHint":"From OBS: Tools \u2192 WebSocket Server Settings.","obsStart":"Start recording","obsStop":"Stop recording","obsStream":"Start streaming","obsStreamStop":"Stop streaming","obsScene":"Switch scene","obsOff":"OBS driving is off \u2014 Settings has the address.","obsNo":"OBS did not answer at %s","obsDid":"OBS: %s","modSearch":"Find a mod","modAsk":"What are you looking for?","modNone":"Nothing found for \u201c%s\u201d.","modFound":"%d found","modInstall":"Put it in an instance","mcInstancesName":"Minecraft instances","mcInstancesHint":"One folder a line. A mod is written into <folder>/mods and nowhere else.","modNoInstance":"No instance folder is set \u2014 Settings has the list.","modInstalled":"Written to %s","modFailed":"That did not download.","serverCopy":"Copy the server address","serverNone":"No server address on this page.","serverCopied":"Copied %s","serverPanel":"Server page in the panel","playerLookup":"Look this player up","playerNoName":"Select a player name first.","wikiLookup":"Look it up in the wiki","wikiAsk":"What should I look up?","gridTitle":"Several streams at once","gridAsk":"Channel names, separated by commas","gridNone":"No usable channel name there.","gridMade":"%d streams","pointsName":"Claim channel points","pointsHint":"Presses Twitch's own bonus button when it appears.","pointsOn":"Channel points are claimed as they appear","adsName":"Mute and dim through ads","adsHint":"On Twitch: the sound goes off and the picture goes dark until the ad is over.","adsOn":"Ads are muted and dimmed","chatMenu":"Chat","chatHideName":"Hide chat lines containing","chatHideHint":"One a line.","chatUsersName":"Hide these chatters","chatUsersHint":"One name a line.","chatMeName":"Highlight lines containing","chatMeHint":"Your own name, say. One a line.","chatOn":"Chat filters are on here","liveMenu":"Tell me when they go live","liveAdd":"Watch this channel","liveWatchName":"Channels being watched","liveWatchHint":"One a line. Each is asked about once every few minutes, and only while the interval below is set.","liveEveryName":"Ask every","liveEveryHint":"Minutes. 0 = never ask.","liveNow":"%s is live","liveNone":"Nobody is watched yet.","liveAdded":"Watching %s","delayName":"Stream delay","delayHint":"Seconds. The timer counts this down so you know when a chat reaction belongs to what you just did.","delayStart":"Start the delay timer","delayRunning":"Delay: %ds","delayDone":"The delay is up","clipMark":"Mark a clip here","clipMarked":"Clip marked at %s","clipList":"Clips marked","clipNone":"No clips marked yet.","clipLink":"Copy a clean clip link","clipCleaned":"Copied without the tracking bits","discordRouteName":"Open Discord links in the Discord tab","discordRouteHint":"Rather than a new tab each time.","discordWent":"Sent to the Discord tab","discordBadgeName":"Show Discord's unread count","discordBadgeHint":"In the tab's title, from Discord's own count.","ts3Open":"Open in TeamSpeak","ts3No":"TeamSpeak is not installed here.","handoffTitle":"Open another program?","handoffAsk":"%s wants to open this in %s:\n\n%s","handoffNoSite":"A page","handoffAlways":"Always allow %s to do this","ts3Went":"Handed to TeamSpeak","gameProtect":"Protect this tab while playing","gameProtectHint":"It is never discarded, never put to sleep, and asks before it closes.","gameProtectOn":"This tab is protected","gameProtectOff":"No longer protected","gameClose":"That tab is a game \u2014 close it anyway?","cloudGame":"Cloud gaming here","cloudGameHint":"Keeps the screen awake, lets the gamepad through, hides the cursor and never throttles the tab.","cloudOn":"Cloud gaming is on for %s","cloudOff":"Cloud gaming is off for %s","padName":"Let a gamepad scroll and play","padHint":"The sticks scroll, the shoulders change tab, A plays or pauses. The Gamepad API, nothing else.","padOn":"The gamepad works here","padNo":"No gamepad API in this page.","streamPreview":"Watch it in a small window","theaterName":"Big player by default","theaterHint":"On Twitch and YouTube: the player fills the page without being asked each time.","checklist":"Before going live","checkMic":"Microphone picked and at the right level","checkCam":"Camera on and pointing the right way","checkSound":"Desktop sound in the mix","checkScene":"The right scene is up","checkChat":"Chat open and filtered","checkTitle":"Title and category set","checkPrivate":"Nothing private on screen","checkNotify":"Notifications off","streamChecksName":"My own checklist","streamChecksHint":"One item a line. Empty = the standard list.","checkDone":"%d of %d done","gameModeName":"Game mode when a game is in front","gameModeHint":"Asks the window manager what is in front; on this machine there is none, so nothing happens.","gameModeNo":"No window manager to ask here.","gameModeOn":"Game mode: nothing interrupts you","formsMenu":"Forms and passwords","fillLogin":"Fill the login here","fillDone":"Filled in as %s","fillLinked":"Filled from %s \u2014 the same account, another address","fillNone":"Nothing saved for this site.","identMenu":"Fill an address","identNone":"No address saved yet.","identFilled":"%d boxes filled","cardMenu":"Fill a card","cardNone":"No card saved yet.","cardFilled":"%d boxes filled","cardFrame":"That checkout is inside the payment company\u2019s own frame \u2014 nothing outside it can fill it in, by design","cardInsecure":"This page is not encrypted (no https), so a card is not filled into it","cardCvvAsk":"The card\u2019s security number","cardCvvHint":"Asked every time: it is the number that is supposed to prove somebody is holding the card.","anyFieldMenu":"Fill this box from the vault","aliasFill":"Fill a plus-address","aliasFilled":"Filled in %s","aliasNotSet":"No address to build one from \u2014 Settings has the box.","genMenu":"Make a password","genPassword":"A strong password","genPassphrase":"A passphrase of words","genMade":"Made, filled in and saved \u2014 strength %d","genNoField":"No password box on this page.","genBits":"%d words from %d \u2014 about %d bits","otpMenu":"Two-factor codes","otpFilled":"Code %s filled in","otpCopied":"The code is in the clipboard","otpNoCode":"No code saved for this login.","otpNoLogin":"No login saved for this site.","otpRead":"Take the setup secret off this page","otpNone":"No setup secret on this page.","otpSaved":"The secret is saved with the login","otpBad":"That secret was not taken.","otpNoQr":"A drawn QR code cannot be read here \u2014 use the \u201ccan\u2019t scan it?\u201d secret beside it","secretCopied":"Copied \u2014 the clipboard is cleared again shortly","clipCleared":"The clipboard is cleared","clipClearName":"Clear copied passwords from the clipboard after","clipClearHint":"Seconds. 0 = leave them there.","draftMenu":"What I typed here","draftSave":"Keep this draft now","draftBack":"%d boxes put back","draftNone":"Nothing was kept for this page.","draftDrop":"Forget this draft","formDraftsOnName":"Keep what I type in forms","formDraftsOnHint":"Kept on this computer and put back after a crash or a misclick. Never a password, never a private tab.","historyMenu":"Values this site has seen","historyClear":"Forget them","formHistoryOnName":"Remember what I type in boxes","formHistoryOnHint":"Offered again on the next visit, per site. Off in private tabs, and never a password.","pwEyeName":"An eye in every password box","pwEyeHint":"To see what you typed. The browser\u2019s own button, not the page\u2019s.","pwEyeAction":"Show what is in the password boxes","pasteAllow":"Allow pasting here","pasteRemember":"Always allow pasting here","pasteOn":"Pasting works in %d boxes now","autocompleteFix":"Ignore \u201cdo not save this\u201d here","autocompleteRemember":"Always ignore it here","bigEdit":"Edit this box in a big window","bigEditTitle":"Edit","bigEditSave":"Put it back","testData":"Fill with test data","testFilled":"%d boxes filled with nonsense","warnFormsName":"Say something about the form in front of me","warnFormsHint":"A password box on an unencrypted page, and a sign-up form on a site you already have a login for.","formInsecure":"This page came over http \u2014 a password typed here goes out in the clear","formKnown":"You already have a login here: %s","catchName":"Offer to save logins sent by scripts","catchHint":"Sites that sign in without submitting a form \u2014 which is most of them now.","reuseWarn":"That is the password saved for %s \u2014 check the address bar before you press anything","breachName":"Check my passwords against known leaks","breachHint":"Sends the first five characters of each password\u2019s SHA-1 and compares the answer here, so the service never learns which password was asked about.","breachRun":"Check against known leaks","breachOff":"The leak check is off \u2014 Settings has the switch.","breachFound":"%d of your passwords are in known leaks, including the one for %s","breachClean":"None of your passwords are in the lists checked","keyTitle":"Security key","keyAccount":"Which account on the key?","keyPin":"The key\u2019s PIN","keyTouch":"Touch your security key","configBroken":"Your settings file could not be read, so this window uses the defaults. The old file is kept as %s.","keyDone":"The key answered","keyFailed":"The key did not answer.","authTitle":"This site wants a login","authUser":"Username for %s","authPassword":"Password","authFilled":"Filled in the saved login for %s","dupMenu":"Logins saved twice","dupNone":"Nothing is saved twice.","mergeAll":"Fold them together","mergeDone":"%d folded together","unusedMenu":"Not used for a year","unusedNone":"Everything has been used this year.","unusedDaysName":"Call a login unused after","unusedDaysHint":"Days.","twofaMenu":"Could have two-factor and has not","twofaNone":"Every login that could have a code has one.","expiringMenu":"Running out","expiringNone":"Nothing is running out.","expiryWarnName":"Warn about keys and cards","expiryWarnHint":"Days before the date.","accessLog":"What was looked at","accessNone":"Nothing has been revealed yet.","accessClear":"Clear that list","pwHistory":"Earlier passwords","pwHistoryNone":"No earlier password kept.","pwHistoryRow":"%s \u2014 %d characters","customFields":"Extra fields","customAdd":"Add an extra field","customName":"What is it called?","customValue":"What is in it?","customSecret":"Keep it hidden like a password","customNone":"No extra fields.","codesMenu":"Recovery codes","codesLeft":"%d of %d left","codesUse":"Mark as used","codesNone":"No recovery codes saved.","usernameOnly":"Save just the username here","usernameSaved":"Saved %s with no password","vaultExportTitle":"Export the vault, encrypted","vaultExportAsk":"A passphrase for the file","vaultExported":"%d items written","vaultExportFailed":"Nothing was written.","vaultImportTitle":"Import a vault file","vaultImported":"%d items taken in","vaultImportBad":"That file was not read \u2014 wrong passphrase, or not a vault file.","vaultImportFile":"Import from another manager","backupNow":"Back the vault up now","backupDone":"Backed up","backupFailed":"The backup was not written.","backupNotSet":"No backup folder or passphrase \u2014 Settings has both.","backupDirName":"Keep encrypted vault backups in","backupDirHint":"A folder on this machine. Empty = no backups.","backupWordName":"Passphrase for the backups","backupWordHint":"Without it nothing is written: a backup nobody can read is not a backup.","backupKeepName":"Keep this many backups","backupKeepHint":"The older ones are deleted.","backupDaysName":"Back up every","backupDaysHint":"Days. 0 = only when you ask.","autoSubmitHere":"Send the form off after filling here","fillOnLoadHere":"Fill the login as this page loads","sessionTie":"Only offer this login in this browser","linkedName":"Sites that are the same account","linkedHint":"One group a line, hosts separated by spaces. amazon.de and amazon.com are built in.","aliasEmailName":"My address for plus-addresses","aliasEmailHint":"name@example.com becomes name+site@example.com on sign-up forms.","passLangName":"Passphrase language","passLangHint":"Which word list the word passphrases come from.","quickSearch":"Search the vault","quickSearchAsk":"Title, site, username or tag","quickNone":"Nothing matched.","vaultLockNow":"Lock the vault now","vaultLockedNow":"The vault is locked","vaultLockedShort":"The vault is locked.","vaultNoMaster":"There is no master password to lock it with.","changePw":"Open this site\u2019s change-password page","weakWalk":"Open the weak ones, one tab each","spellBothName":"Check spelling in both languages","spellBothHint":"German and English at once, where the dictionaries are installed.","cancel":"Cancel","dlFiles":"Downloads and files","dlNoSource":"The page this came from was not written down.","dlSource":"Open the page it came from","dlHash":"Work out the checksum","dlDeleteTitle":"Delete the file?","dlDeleteAsk":"Take \u201c%s\u201d off the disk as well as off the list?","dlDeleteFailed":"That file could not be deleted.","dlDelete":"Delete the file too","dlForget":"Take it off the list","dlKeepDaysName":"Drop finished downloads from the list after","dlKeepDaysHint":"Days. 0 = keep them. The files are never touched.","dlExport":"Export the list as CSV","dlExported":"%d rows written","dlLinkCopied":"The address is in the clipboard","dlCopyLink":"Copy the address","dlAgain":"Fetching %s again","dlAgainAction":"Download it again","dlNoneYet":"Nothing has finished downloading yet.","dlOpenLast":"Open the last download","dlGone":"That file is not there any more.","dlRunTitle":"Run a downloaded program?","dlRunAsk":"\u201c%s\u201d is a program from the internet. Open it?","dlNoOpener":"There is no xdg-open on this machine.","dlOpenFailed":"That did not open.","dlOpenWith":"Open this kind with\u2026","dlOpenWithName":"Open these kinds with your own program","dlOpenWithHint":"One rule a line: stl=prusa-slicer. A program that is not installed is ignored.","dlOpenWithMissing":"Not installed: %s","dlTemplateName":"Name saved files like this","dlTemplateHint":"{name} {ext} {site} {title} {date} {time} {n}. Empty = the name the site gives.","dlBlockedName":"Never download these kinds by themselves","dlBlockedHint":"Endings, separated by spaces. You are still asked rather than refused.","dlBlockedTitle":"Download this kind?","dlBlockedAsk":"\u201c%s\u201d is one of the kinds you said not to download on its own. Fetch it anyway?","dlAskForName":"Ask where to save only these kinds","dlAskForHint":"Endings, separated by spaces. The rest are saved without asking.","dlBigMbName":"Ask before a download bigger than","dlBigMbHint":"Megabytes. 0 = never ask.","dlBigTitle":"A big download","dlBigAsk":"\u201c%s\u201d is %s. Start it?","dlNoSpaceAsk":"\u201c%s\u201d is %s and there is not enough room for it. Start it anyway?","dlTwiceTitle":"Already downloaded","dlTwiceAsk":"\u201c%s\u201d is already in your downloads. Fetch it again?","dlTwiceKept":"The one you have was kept","privateDlName":"Private tabs download into","privateDlHint":"A folder of their own. Empty = the ordinary downloads folder. The file is yours either way; what a private tab never keeps is the record.","privateDlWipeName":"Empty that folder when the last private tab closes","privateDlWipeHint":"Only files, only that folder.","dlOriginName":"Write the source address into the file","dlOriginHint":"The xdg.origin.url attribute every file manager reads. It travels with the file.","dlCarryOn":"Carry on","dlHold":"Hold it","dlAtOnceName":"Downloads running at once","dlAtOnceHint":"The rest wait in a queue. 0 = no limit.","dlQueued":"Waiting","dlSpeedName":"Total download speed at most","dlSpeedHint":"Kilobytes a second. 0 = no cap. The engine has no rate limit, so this is done by holding downloads back for part of each second \u2014 a cap on average.","dlLaterStarted":"%d scheduled downloads started","dlLater":"Start it later\u2026","dlLaterAsk":"In how many minutes?","dlNotArchive":"That is not an archive this can read.","dlArchiveUnsafe":"That archive wants to write outside its folder (%s) \u2014 nothing was unpacked","dlExtractTitle":"Unpack it?","dlExtractAsk":"Unpack %d files into \u201c%s\u201d?","dlExtracted":"%d files unpacked into %s","dlExtractFailed":"Unpacking failed (%s).","dlExtract":"Unpack it","dlArchiveList":"Look inside","dlAutoExtractName":"Offer to unpack archives when they land","dlAutoExtractHint":"Into a folder of the archive\u2019s own name.","dlModTitle":"Into an instance?","dlModAsk":"Put \u201c%s\u201d into %s/mods?","dlRouteModsName":"Offer to put downloaded mods into an instance","dlRouteModsHint":"For a .jar, with the instance list from the games page.","dlModInfo":"What this mod says about itself","dlModInfoNone":"That jar says nothing about itself.","dlModInfoRow":"%s %s \u2014 %s, Minecraft %s","imgNotRead":"That picture could not be read.","imgNotWritten":"That picture could not be written.","imgConverted":"Saved as %s","imgConvert":"Save as PNG or JPEG","imgNoneBig":"No pictures big enough on this page.","imgSavingMany":"Saving %d pictures","imgSaveAll":"Save the pictures on this page","imgLeastName":"Only save pictures at least","imgLeastHint":"Pixels on the longer side. 0 = all of them.","imgBiggestName":"Fetch the full-size version where there is one","imgBiggestHint":"Only where the site\u2019s own addresses say how (Twitter, Wikimedia, Reddit).","dlNoTorrent":"No torrent client is installed here.","dlTorrentWent":"Handed to %s","dlNoYtdlp":"yt-dlp is not installed here.","dlYtdlp":"Save this video with yt-dlp","dlYtdlpAudio":"Save just the sound","dlYtdlpRow":"yt-dlp download","dlYtdlpStarted":"yt-dlp is running","dlNoClam":"clamscan is not installed here \u2014 nothing was scanned","dlScanName":"Scan finished downloads with ClamAV","dlScanHint":"Only if clamscan is installed. \u201cNo scanner\u201d and \u201cclean\u201d are never shown as the same thing.","dlScan":"Scan it","dlClean":"Clean","dlInfected":"ClamAV says \u201c%s\u201d is infected","dlNotGcode":"That is not a G-code file.","dlNoPrinter":"No printer address is set \u2014 Settings has the box.","dlPrinterSent":"%s sent to the printer","dlPrinterFailed":"The printer did not take %s.","dlPrinter":"Send it to the printer","printerUrlName":"3D printer (Moonraker) address","printerUrlHint":"http://printer.local:7125 \u2014 your own machine on your own network. Empty = off.","dlHashAllName":"Work out a checksum for every download","dlHashAllHint":"SHA-256, on this machine. Slower for very big files.","dlNotifyName":"Say when a download finishes","dlNotifyHint":"Only when you are in another window.","dlDoneTitle":"Download finished","dlDoneBody":"%s is ready","dlNoPreview":"There is nothing to preview in that file.","dlPreview":"Have a look at it","dlOpenIt":"Open it","dlBatchTitle":"Download a list","dlBatchAsk":"One address a line.","dlBatchNone":"No usable address in that list.","dlBatchStarted":"%d downloads started","dlBatch":"Download a list of addresses\u2026","dlLinkSaving":"Saving %s","altSaveName":"Alt+click on a link saves it","altSaveHint":"Instead of going there.","upNoImage":"There is no picture in the clipboard.","upNoBox":"There is no upload box on this page.","upPasted":"Put in the upload box","upPaste":"Paste the clipboard picture into the upload box","upRecent":"Upload something recent","upNoRecent":"Nothing recent to upload.","upStripped":"The camera data was taken out first","stripUploadName":"Take the camera data out of pictures before uploading","stripUploadHint":"EXIF and GPS. Done by writing the picture out again, so nothing else travels with it.","exifKeepHere":"Keep the camera data on this site","pageSaveOne":"Save the page as one file","pageSaved":"Saved as %s","pageSavedPart":"Saved as %s \u2014 %d pictures could not be read into it","pageSaveFailed":"That page could not be saved.","pageSaveMd":"Save the article as Markdown","mdSaved":"Saved as %s","mdNothing":"There is no article on this page to save.","dlSearch":"Search the downloads","dlSearchAsk":"Name, address or site","dlFilterKind":"Only this kind","dlFilterSite":"Only from this site","dlQueueMenu":"Waiting","dlQueueUp":"Up the queue","dlQueueDown":"Down the queue","sessionDlName":"This browser downloads into","sessionDlHint":"A folder for this virtual browser. Empty = the ordinary one.","barMenu":"The address bar","barPlaceholder":"Search or enter address","barNotSecure":"Not secure","barNotSecureTip":"This page came over http. Anything typed here goes out in the clear.","barSecure":"Secure connection","barLookalike":"This name is dressed up as another one","barLookalikeTip":"It reads like %s. Look at the address before you type anything.","barInUseTip":"This page is using the camera, the microphone or the screen","barNoPage":"No page here.","barCertLook":"Look at the certificate","barCertNone":"No certificate came back.","barCertTitle":"Certificate for %s","barCookieRule":"Cookies: %s","barCookieAsIs":"as the browser is set","barAllowed":"What this site may do","barLockTip":"What this page is allowed to do, and who it says it is","barCopyTip":"Copy the address","barClearTip":"Clear the bar","barQrTip":"Show the address as a QR code","barAnswerCopied":"Copied: %s","barSettingRow":"Settings: %s","barDidYouMean":"Did you mean %s?","barSearchSite":"Search %s \u2014 type what you are looking for","barBackground":"Opened in a background tab","barKeywordTitle":"A keyword for this","barKeywordAsk":"The word that opens \u201c%s\u201d","barKeywordSet":"\u201c%s\u201d opens it now","barKeywordBad":"A keyword is one word, with no spaces \u2014 nothing was set.","barNeverSuggest":"Never suggest this site again","barNeverAgain":"%s will not be suggested again","barOtherWindow":"In another window","barEngines":"Search with","barScopeHint":"@tabs, @bookmarks, @history, @settings, @downloads, @notes","barProgressName":"Show the loading progress in the address bar","barProgressHint":"A thin line along the bottom of the bar.","barDimPathName":"Show the domain bright and the rest dim","barDimPathHint":"So paypal.com.evil.ru reads as evil.ru. Only while you are not editing the address.","barDecodeName":"Show addresses as readable text","barDecodeHint":"%20 and %C3%BC and punycode shown as the letters they stand for. Copying still gives the real address.","barHideSchemeName":"Leave out https:// and www.","barHideSchemeHint":"The address comes back in full the moment you start editing.","barInlineName":"Complete a domain as I type","barInlineHint":"From the sites you actually visit, with the rest selected.","barRowsName":"Rows in the drop-down","barRowsHint":"How many suggestions to show.","barTextSizeName":"Address bar text size","barTextSizeHint":"Per cent, apart from the rest of the chrome.","barLockName":"Show the lock in the address bar","barLockHint":"Click it for what the page is allowed to do.","barCopyBtnName":"A copy button in the address bar","barCopyBtnHint":"At the right-hand end.","barClearBtnName":"A clear button while editing","barClearBtnHint":"An \u00d7 at the right-hand end.","barQrBtnName":"A QR button in the address bar","barQrBtnHint":"Shows the address as a QR code to point a phone at.","barBottomName":"Put the toolbar under the page","barBottomHint":"The whole chrome, address bar included.","barSourcesName":"What the drop-down may suggest","barSourcesHint":"history, bookmarks, tabs, answers, search, settings, windows \u2014 leave out the ones you do not want.","privateEngineName":"Private tabs search with","privateEngineHint":"The name of an engine, or empty for the usual one.","langEnginesName":"German searches go to","langEnginesHint":"An engine name for de and one for en, as de=name en=name. Empty = always the default.","moneyRatesName":"Fetch exchange rates for \u201c20 usd in eur\u201d","moneyRatesHint":"Once a day at most, from the European Central Bank's own daily file. Off = the answer says so rather than guessing.","moneyFetched":"Exchange rates for %d currencies","moneyFailed":"The rates could not be fetched.","enginesName":"My own search engines","enginesHint":"One a line: name|https://example.com/?q=%s|keyword. The address has to say where the words go.","barOpenSearch":"Add this site's search","barOpenSearchAdded":"%s can be searched from the bar now","devRequests":"What this page fetched","devLogRow":"Write the requests down","devLogOn":"Requests are being written down","devLogOff":"The request log is off and empty","devLogEmpty":"Nothing in the request log.","devLogClear":"Clear the log","devLogHar":"Write a HAR file","devHarWritten":"%d requests written \u2014 the responses are not in it, because this browser sees requests","devRuleAdded":"%s is blocked now","devRulesName":"Addresses to block or send elsewhere","devRulesHint":"One a line: a piece of an address blocks it, and \u201cwhat -> where\u201d sends it to a file or another address.","devAgentMenu":"Tell this site the browser is","devAgentSet":"This site is told the browser is %s (%s)","devAgentOff":"%s is told the truth again","devAgentOffRow":"The truth","devHeadersName":"Headers to add","devHeadersHint":"One a line: \u201cName: value\u201d for every site, or \u201chost | Name: value\u201d for one.","devHeadersMenu":"What the server sent","devHeadersGot":"HTTP %d, %d headers, %d security headers missing","devHdrMissing":"Missing: %s","devHdrHsts":"HSTS","devHdrCsp":"a content policy","devHdrNosniff":"no-sniff","devHdrFrames":"frame rules","devHdrReferrer":"a referrer policy","devHdrPermissions":"a permissions policy","devHttp":"Send a request","devHttpAsk":"Method and address, as \u201cGET https://example.com/\u201d","devHttpHeaders":"Headers, one a line (Name: value). Empty for none.","devHttpBody":"The body","devHttpBad":"That is not an http address.","devWsMenu":"WebSockets","devWsOff":"Switch \u201cnote the live connections\u201d on in the page guards first.","devWsNone":"This page has opened none.","devWsOpen":"open","devWsClosed":"closed","devTimingMenu":"How long it took","devTiming":"First byte after %d ms, loaded after %d ms","devTtfb":"First byte: %d ms","devLoaded":"Loaded: %d ms","themeMine":"My themes","themeEditor":"Edit this theme","themeEditorSub":"Change the eight colours a theme is made of and save it under a name of your own.","themeSave":"Save as my theme","themeSaved":"Saved as \u201c%s\u201d","themeName":"A name for it","themeDrop":"Delete \u201c%s\u201d","themeExport":"Save this theme as a file","themeExported":"Written to %s","themeImport":"Read a theme from a file","themeImported":"\u201c%s\u201d is yours now","themeImportBad":"No colours could be read out of that file.","themeAccent":"Another accent colour","themeAccentSuffix":"(my accent)","themeFaint":"%s on %s is %.1f:1, and wants %.1f:1","themeFaintNone":"Everything in it can be read.","uiSizeName":"The size of the browser's own furniture","uiSizeHint":"Tabs, toolbar, menus and panes. The pages themselves are not touched \u2014 that is page zoom.","uiSize_compact":"Compact","uiSize_normal":"Normal","uiSize_big":"Big","uiSizeSet":"Chrome: %s","uiFontName":"The font the browser is lettered in","uiFontHint":"Its own menus, tabs and panes. Monospace families are listed first.","uiRadiusName":"How round the corners are","uiRadiusHint":"0 is square. Applies in every look.","uiGlassName":"How see-through Glass is","uiGlassHint":"Only the Glass look reads this.","uiLabelsName":"Words on the toolbar instead of glyphs","uiLabelsHint":"The buttons keep their icons; the words are added beside them.","uiFocusName":"How keyboard focus is drawn","uiFocusHint":"In the browser's own windows, not on websites.","uiFocus_normal":"As usual","uiFocus_thick":"A thick outline","uiFocus_underline":"An underline","uiFocus_off":"Not at all","uiAnimName":"Animate the browser's own chrome","uiAnimHint":"Off = tabs, panes and menus appear instead of sliding.","uiTabMinName":"Narrowest a tab may get","uiTabMaxName":"Widest a tab may get","uiToolbarName":"How tall the toolbar is","uiPlainMenusName":"Plain menus with bigger rows","uiPlainMenusHint":"No icons, more room between the rows.","appearanceResetName":"Put appearance back as it came","appearanceResetHint":"Theme, look, fonts, sizes and site styles. One backup is kept so this can be undone.","appearanceReset":"Appearance is back as it came","appearanceUndo":"Undo that reset","pageLookName":"How websites are shown","nightDimName":"Dim pages in the evening","nightDimHint":"Lowers the brightness of the page only \u2014 the browser's own windows keep theirs.","nightFromName":"From","nightToName":"until","warmNightName":"Warmer colours in the evening","warmNightHint":"The same hours as the dimmer.","warmStrengthName":"How warm","greyName":"Show pages in grey","greyHint":"Everywhere, or per site from the page menu.","greyHere":"Show %s in grey","greyOn":"Grey","greyOff":"Colour again","scrollbarsName":"Scrollbars on websites","scrollbarsHint":"A site that draws its own can be excused from the page menu.","scrollbars_normal":"As the site made them","scrollbars_thin":"Thin","scrollbars_themed":"Thin and in my colours","scrollbars_hidden":"Not drawn","scrollbarsHere":"Leave %s's scrollbars alone","selectionName":"Selected text in my accent colour","selectionHint":"On websites. The browser's own windows already use it.","unstyledName":"Give pages with no background of their own mine","unstyledHint":"A plain .txt or an old page is otherwise engine-white.","siteFontSizeName":"Text size for this site","siteFontSizeAsk":"Font size in pixels for %s. Empty = as it comes.","siteFontSizeSet":"%s is %dpx now","siteFontsName":"The fonts websites fall back to","siteFontsHint":"When a page names no font of its own.","siteFont_standard":"Standard","siteFont_serif":"Serif","siteFont_sans":"Sans-serif","siteFont_mono":"Monospace","siteFont_emoji":"Colour emoji","emojiFontHint":"Chromium's pictograph family \u2014 what it uses when a page asks for an emoji.","sessionTintName":"This virtual browser's own colour","sessionTintHint":"On the tab strip and the address bar, so which account is in use is never a guess.","privateTintName":"The colour of private tabs","privateTintHint":"Their name in the strip and a line over the toolbar.","monoFaviconsName":"Favicons in one colour","monoFaviconsHint":"The shapes are kept, the brand colours are not. Bookmarks keep theirs.","statusLineName":"Where a link under the mouse is said","statusLineHint":"Bottom left over the page, in the address bar, or nowhere.","statusLine_bottom":"Bottom left","statusLine_bar":"In the address bar","statusLine_off":"Nowhere","statusSizeName":"How big that line is","titleFormatName":"What the window is called","titleFormatHint":"Hyprland rules and the task switcher have nothing else to tell two windows apart by.","titleFormat_full":"Page \u2014 browser","titleFormat_page":"The page only","titleFormat_site":"The site only","titleFormat_session":"Page \u2014 virtual browser \u2014 browser","autoHideName":"Hide the tabs and the toolbar until I want them","autoHideHint":"They come back when the mouse reaches the top edge, or with Ctrl+L.","revealFsName":"Show the chrome at the top edge in fullscreen","revealFsHint":"In F11 fullscreen, not while a video has the screen.","pageColourName":"Let a site tint the toolbar","pageColourHint":"Its own theme-color meta tag. A virtual browser's colour wins over it.","themedErrorsName":"Show failed loads in the browser's own style","themedErrorsHint":"Plain, in your palette, with Enter to try again.","errTitle":"That page did not load","errUnknown":"The server did not answer.","errAgain":"Try again (Enter)","startLayoutName":"What the start page shows","startClockName":"The clock","startSecondsName":"With seconds","startDateName":"The date","startHour24Name":"Twenty-four hour clock","startSearchName":"Where the search box sits","startSearch_middle":"In the middle","startSearch_top":"At the top","startSearch_bottom":"At the bottom","startQuickName":"How big the quick links are","wallFolderName":"A folder of wallpapers","wallFolderHint":"The start page rotates through the pictures in it. Nothing is copied and nothing is fetched.","wallEveryName":"Change the picture every","wallEveryHint":"0 = a different one on every new tab.","darkSiteName":"Sites to leave alone","darkSiteHint":"One host a line. These are never darkened or re-themed \u2014 the browser's own list of already-dark sites is added to it.","darkSiteBuiltin":"The browser already leaves these alone: %s","darkSiteHere":"Leave %s alone","darkSiteOn":"%s is left alone now","darkSiteOff":"%s is themed again","lookFlat":"Flat mono","lookFlatSub":"Square corners, no shadows, no cards, lettered like a terminal.","followSchemeName":"Follow the desktop's light or dark setting","followSchemeHint":"Reads the XDG portal's colour-scheme and switches between your two picks.","schemeDarkName":"The dark theme to use","schemeLightName":"The light theme to use","colourFileName":"Follow a colour file","colourFileHint":"A kitty.conf, base16 YAML or VS Code theme. The browser re-themes when that file changes \u2014 nothing is fetched.","colourFileWatching":"Following %s","themeStarName":"Favourite themes","themeStarHint":"\u201cNext favourite theme\u201d steps through the ones you starred; Settings\u2019 keyboard list can give it a key.","themeStar":"Star this theme","themeUnstar":"Take the star off","themeCycle":"Next favourite theme","themeCycled":"%s","themeNoStars":"Star a theme or two first \u2014 Settings has the list.","rawViewName":"Plain files on my background","rawViewHint":"A .txt, a .json or an image opened on its own gets the theme's background instead of engine-white.","rawCheckerName":"A checkerboard behind images","rawCheckerHint":"So a transparent PNG is readable.","darkPdfName":"Dark PDF pages","darkPdfHint":"Inverts the page and puts the pictures back.","devtoolsDarkName":"DevTools in the browser's colours","devtoolsDarkHint":"Dark or light to match the theme, set before the window opens.","rawViewsHere":"Plain files on my background","lookMenuName":"The shape of it","appearanceMenu":"How it looks","a11yName":"Reading a page","a11yMenu":"Reading help","a11yNoAlt":"no alt text","a11yUnderlineLinks":"Always underline links","a11yBigTargets":"Bigger things to click","a11yFixContrast":"Darken text that is too faint","a11yAltText":"Alt text on hover, and mark pictures with none","a11yBoldStarts":"Bold the start of each word","a11yBigBars":"Bigger scrollbars on pages","a11yHyphenate":"Hyphenate long words","a11yReflow":"Wrap text to the window instead of scrolling sideways","a11yNoSticky":"Unstick headers and footers","a11yNoRefresh":"Stop pages reloading themselves on a timer","a11yEscapeOverlays":"Esc closes a dialog the site will not","a11yFocusInView":"Keep the focused thing in the middle","a11yFocusTooltips":"Show tooltips on keyboard focus","a11yHoverZoom":"Show a bigger copy of a picture on hover","a11yAltDragSelect":"Alt-drag selects a link's words","a11ySpatial":"Arrow keys move between links and buttons","a11yCaret":"Caret browsing (F7)","a11yCaretStyle":"A caret in my accent colour","a11yMonoAudio":"Mix page sound to mono","a11yBalance":"Left and right balance","a11yTextZoom":"Text size only","a11yFont":"A font for pages","a11yFontHint":"A dyslexia-friendly family, if one is installed. Empty = the page's own.","a11yColourFilter":"Colour-blindness filter","a11yFilter_":"Off","a11yFilter_fixrg":"Correct red-green","a11yFilter_fixby":"Correct blue-yellow","a11yFilter_protan":"Simulate protanopia","a11yFilter_deutan":"Simulate deuteranopia","a11yFilter_tritan":"Simulate tritanopia","a11ySpacing":"Line, word and letter spacing","a11ySiteOnly":"Only on %s","a11ySiteCleared":"%s reads the usual answers again","a11yAuditName":"What is wrong with this page","a11yAuditRow":"%d fields with no label, %d pictures with no alt text, %d faint, %d heading jumps","a11yAuditClean":"Nothing obvious is wrong with it.","a11yJumpHeading":"Next heading","a11yJumpHeadingBack":"Previous heading","a11yJumpLandmark":"Next landmark","a11yJumpField":"Next form field","a11yMain":"Skip to the content","a11yField":"Into the first text field","a11yCaretOn":"Caret browsing is on \u2014 the arrow keys move a cursor, Shift selects","a11yCaretOff":"Caret browsing is off","a11yFindCursor":"Ctrl on its own flashes a ring round the pointer","a11yTextOnlyZoom":"Zoom only the text, not the pictures","a11yMagnifier":"A magnifying lens that follows the pointer","a11yLensScale":"How much the lens magnifies","a11ySoundCues":"A short sound when a page or a download finishes","a11ySoundCuesHint":"Two tones made by the browser itself. Nothing is downloaded.","a11yTabStrip":"Next tab from the keyboard","a11yTabStripBack":"Previous tab from the keyboard","a11yTabMenu":"This tab's menu, from the keyboard","a11yPageMenu":"The page menu at what has the focus","a11yNames":"Name the browser's own buttons for a screen reader","a11yNamesDone":"%d things named","a11yPanel":"Reading help for this page","a11yCapOn":"Captions on \u2014 recorded and transcribed on this machine","a11yCapOff":"Captions off","a11yCapName":"Live captions for what a tab is playing","a11yCapHint":"Records the machine's own output a few seconds at a time and transcribes it with the program you name. Nothing is bundled, nothing is downloaded and no sound leaves the machine.","a11yCapNoTool":"That needs a recorder and a transcriber \u2014 name them in Settings (parec and whisper-cli, for example).","a11yCapNoTranslator":"That needs a translator on this machine \u2014 name one in Settings (trans or argos-translate).","a11yCapRecorder":"The recorder","a11yCapTranscriber":"The transcriber","a11yCapTranslator":"The translator","a11yCapModel":"The model file","a11yCapTranslate":"Translate the captions","a11yCapTranslateHint":"A video's own captions, translated by the program you name, line by line.","a11yCapFound":"Found: %s","a11yCapMissing":"not installed","descA11y":"Reading a page: contrast, spacing, the keys that move through it, captions and sound.","a11ySpacingLine":"Line spacing","a11ySpacingWord":"Word spacing","a11ySpacingLetter":"Letter spacing","a11yPanelHint":"Every one of these can be set for one site alone from the reading-help popup.","navMenu":"Getting around","navAutoScroll":"Middle-click and move to scroll","navBoxLinks":"Alt-drag a box over links","navClickableUrls":"Make plain-text addresses clickable","navNoScrollHijack":"Stop the site hijacking the scroll","navNoKeyGrab":"Stop the site grabbing keys","navStopRefresh":"Stop the site refreshing itself","navRefreshStopped":"A refresh this page wanted was stopped","navAllowRefresh":"Allow it this once","navOpenedLinks":"%d links opened in the background","navNoLinks":"No links in the selection.","navNoUrlThere":"That selection is not an address.","navOpenSelection":"Go to the selected address","navOpenAllLinks":"Open every link in the selection","navBoxOpen":"Open the links the box caught","navImages":"The pictures on this page","navNoImages":"No pictures on this page.","navImgOpen":"Open it","navImgCopy":"Copy its address","navImgSave":"Save it","navImgCopyAll":"Copy every address","navViewImage":"Show a picture full size","navStructure":"The shape of this page","navFrames":"The frames in this page","navNoFrames":"This page has no frames.","navFrameBlocked":"not drawn","navReloadFrame":"Reload a frame","navFindAll":"Find in every tab","navNoMatches":"Nothing in any tab.","navFindLink":"Find a link by its words","navFindMarks":"Mark every match","navMobileOn":"The mobile version \u2014 phone width and a phone's user agent","navMobileOff":"Back to the full version","navRewriteName":"Addresses to rewrite before loading","navRewriteHint":"One rule a line, as from -> to. For example reddit.com -> old.reddit.com","navNoteName":"A note on this page","navNoteAsk":"What should this page remind you of? It comes back whenever you visit it.","navBackOnline":"Back online \u2014 loaded","navArchiveName":"The archived copy","navArchiveAsk":"Open the newest archived copy of %s? That asks archive.org for it, which tells them you looked.","navErr_dns":"That name could not be looked up.","navErr_refused":"The server refused the connection.","navErr_timeout":"The server did not answer in time.","navErr_cert":"The certificate could not be trusted.","navErr_unknown":"The load failed and the engine said nothing about why.","navErr_other":"The load failed.","navOtherBrowser":"Open in the other browser","navPlayer":"Open with the player","navNoPlayer":"%s is not installed.","navHandedToPlayer":"Handed to %s","navPlayerName":"The external player","navPlayerHint":"mpv, or whatever plays a stream better than a web page does.","navCacheCleared":"%s's cache and workers are gone \u2014 reloading","navPrintSelection":"Print the selection","navNoSelection":"Nothing is selected.","navPrinted":"Written to %s","navRetryName":"Try a failed load again when the network is back","navRetryHint":"A check every few seconds, and the page loads itself once there is an answer.","navAppName":"Which program should open this?","navAppAsk":"A %s: address from %s. Which program should open it? The answer is remembered.","navNoApp":"Nothing on this machine can open a %s: address.","navAppFailed":"%s would not start.","navHandedTo":"Handed to %s (%s:)","navShellName":"Open this somewhere else?","navShellAsk":"A %s: address from %s. Let Windows open it with whatever program owns that kind of address? The answer is remembered.","navShellGave":"Handed to Windows (%s:)","navNoAppsYet":"Nothing has been asked yet.","navAppForgotten":"%s is asked again next time","navPreviewName":"Look at a link without going there","navPreviewKeep":"Keep it as a tab","navPreviewClose":"Close","navInfoName":"What this page is made of","navInfoLinks":"Its links","navInfoMeta":"Its meta data","navInfoMedia":"Its media","navPane":"Open in the side pane","navQrName":"What the code says","navQrRead":"Read the QR code","navQrNone":"No readable QR code in that picture.","navQrOpen":"Open it","navClearCache":"Clear this site's cache and reload","linkPreviewName":"Shift and hover shows the linked page","linkPreviewHint":"A small window, in a private jar, that can be kept as a tab.","descNav":"Getting around a page: what it is made of, what to do with a selection, and the page's own cleverness out of the way.","navHint":"These can be set for one site alone from the getting-around popup.","navErrProxy":"A proxy is switched on \u2014 it may be the proxy that failed, not the site.","perfMenu":"What this is costing","perfFreed":"%d tabs asleep","perfFreeNow":"Free memory now","perfKeepAwake":"Never sleep this site","perfKeepAwakeName":"Sites that are never slept or frozen","perfKeepAwakeHint":"Amazon Music stops when its tab is discarded, Discord drops the call. One host a line.","perfFreeze":"Freeze the idle tabs","perfFreezeName":"Freeze a background tab after","perfFreezeHint":"Frozen keeps the page and runs no timers; asleep gives the whole renderer back. 0 = never.","perfHog":"%s has been using %d%% of a processor in the background","perfHogName":"Say when a background tab keeps the processor busy","perfHogHint":"Measured over half a minute, and only for tabs you are not looking at.","perfStopped":"That tab's renderer was stopped \u2014 reloading","perfStop":"Stop this page's process","perfNice":"Give background tabs a lower claim on the processor","perfNiceHint":"Only ever downwards, so nothing can be starved \u2014 the front tab and a game just win.","perfPressure":"The machine is short of memory \u2014 %d tabs asleep","pressureNoPsi":"This machine has no memory-pressure counter, so that cannot be watched here \u2014 set a total memory budget instead, which works anywhere.","perfPressureName":"Sleep background tabs before the machine swaps","perfPressureHint":"Reads the kernel's own memory-pressure figure (PSI), not a free-memory guess.","perfBudgetName":"Total memory budget","perfBudgetHint":"Above this, the tabs you have not touched longest go to sleep. 0 = no budget.","perfLeak":"%s has grown by %s and keeps growing \u2014 a reload would give it back","perfLeakName":"Notice a tab whose memory keeps climbing","perfRecovered":"That tab crashed (%s) and was loaded again where you were","perfCrashUnknown":"no reason given","perfBadge":"%d ms \u00b7 %s \u00b7 %d requests","perfBadgeName":"How long this page took","perfData":"What each tab has pulled down","perfLazyName":"Make off-screen pictures wait","perfLazyDone":"%d pictures told to wait","perfVideoCapName":"Cap video quality at","perfVideoCapHint":"YouTube through its own player, Twitch through the setting it reads.","perfTimerFloor":"Slow this site's timers to at least","perfPauseHidden":"Pause animations in tabs nobody is looking at","perfStopHiddenVideo":"Stop silent video in a tab you cannot see","perfSoftReload":"Reload and keep my place","perfGpu":"What the graphics card is doing","gpuPickName":"Which graphics card draws the pages","gpuPickHint":"On a machine with more than one card the system picks for you, and the quiet card is the slow one. Applies when the browser is started again.","gpuAskName":"Ask at every start which card to use","gpuAskHint":"A window before the browser opens, listing every card this machine has.","gpuAuto":"Let the system decide","gpuBoot":"the one the system starts on","gpuDrives":"your screens are on this one","gpuRestart":"Saved \u2014 it takes effect the next time the browser starts.","gpuNone":"Only one graphics card here, so there is nothing to choose.","gpuWindows":"Windows decides which card a program draws with, in Settings \u2192 System \u2192 Display \u2192 Graphics. These are the cards it has to offer.","gpuOpenWindows":"Open Windows' graphics settings","gpuMac":"macOS decides which card a program draws with and gives no way to change it per program. These are the cards it has.","perfGpuNone":"chrome://gpu said nothing.","perfVaapiName":"Hardware video decoding (VA-API)","perfVaapiRestart":"Hardware video decoding applies after a restart","perfFlags":"Chromium flags worth having","perfFlagRestart":"That flag applies after a restart","flagGpuRaster":"draw pages on the graphics card","flagZeroCopy":"pass textures without copying them","flagSmooth":"smooth scrolling in the engine","flagNoDirect":"turn off the direct video decoder","flagIgnoreBlock":"use the GPU even when Chromium distrusts the driver","flagVaapi":"hardware video decode and encode","flagNoWorkarounds":"skip Chromium's driver workarounds","flagProcLimit":"at most four renderer processes","flagPerSite":"one process per site, not per tab","flagNoThrottle":"do not throttle background timers","perfCacheName":"Cache on disk, at most","perfCacheMemoryName":"Keep the cache in memory only","perfStartup":"Where the start-up time went","perfScripts":"What each userscript cost","perfPreloadName":"Fetch a link the mouse rests on","perfPreloadHint":"Off for private tabs, always: a prefetch is a visit as far as the server is concerned.","perfPreconnectName":"Open connections early to the sites I use most","perfPreconnectHint":"It tells those sites the browser is running before you have asked for anything.","perfHousekeep":"Tidy up now","perfHeavy":"%s used %s last time \u2014 open it in a lite tab?","perfLogName":"Keep a small log of start-up time and memory","perfUnusedName":"Offer to close tabs not looked at for","perfClosedUnused":"%d tabs closed, %d of them bookmarked first","perfCloseUnused":"Close the tabs I have not used","perfStageName":"Restore a big session in stages","perfStageHint":"Only the tab you were on is loaded; the rest wait until you open them.","perfTabMemory":"%s of memory","descPerf":"What the browser is costing: memory, the processor, what pages pull down, and the engine's own knobs.","perfHousekeepName":"Tidy up when I am not using it","perfCapOff":"As it comes","recMenu":"Recording and captures","recOn":"Recording this tab","recBuffer":"Keeping the last seconds of this tab","recOff":"Recording stopped","recSaved":"Written to %s","recClip":"Clip written to %s","recFailed":"Nothing could be written.","recNoBuffer":"Nothing is being kept \u2014 start the replay buffer first.","recNoFfmpeg":"ffmpeg is not installed \u2014 written as a GIF instead.","recNoAudio":"No recorder named for the sound \u2014 the picture is recorded without it.","recStart":"Record this tab","recStop":"Stop recording","recRegion":"Record part of the tab","recBufferStart":"Keep the last seconds","recSaveClip":"Save the last seconds","recAudioOnly":"Record only the sound","recVoice":"Record with the microphone","recFpsName":"Frames a second","recFormatName":"Recordings are saved as","recQualityName":"Recording quality","recQuality_best":"Best","recQuality_good":"Good","recQuality_small":"Small","recBufferName":"How many seconds the replay buffer keeps","recClicksName":"Draw clicks and keys into a recording","recClicksHint":"For a tutorial: a ring where you click and the key you pressed, in the recording only.","recTrim":"Cut the ends before saving","recTrimAsk":"Seconds to cut from the start and the end, separated by a comma.","shotNone":"No captures yet.","shotHistory":"Recent captures","shotCopyImage":"Copy the picture","shotAnnotate":"Mark it up","shotDelete":"Delete it","shotDeleteAll":"Delete them all","shotDeleted":"%d deleted","shotNoImage":"That is not a picture this can open.","shotCopiedLink":"Copied, with the page's address","shotMarkdown":"Copied as Markdown, with the source","shotStamp":"Add the address and the date","shotStampName":"Put the address and the date on a capture","shotAnnotateName":"Mark up a capture","shotSelectionImage":"The selection as a picture","shotMobile":"Capture it at phone width","shotHidpi":"Capture it at twice the size","shotInner":"Capture a scrolling area","shotPdfQuick":"Save as PDF, no questions","shotPdfLong":"Save as one long PDF page","shotAllTabs":"Capture every tab","shotAllTabsDone":"%d tabs captured into %s","shotContactSheet":"A contact sheet of every tab","shotBackground":"Capture this tab without going to it","shotTimelapse":"Capture this page every few minutes","shotTimelapseOn":"Capturing %s every %d minutes","shotTimelapseOff":"Timelapse stopped","shotDiff":"Compare with the last capture","shotDiffNone":"There is nothing to compare with yet.","shotDiffDone":"%d pixels changed","shotDiffSized":"%d pixels changed in the part both pictures share: they are not the same size (%s and %s)","shotOcr":"Copy the text out of a picture","shotOcrNone":"tesseract is not installed \u2014 name it in Settings if it is somewhere else.","shotOcrDone":"%d characters copied","shotQrArea":"Read a QR code in the selected area","shotUpload":"Upload it to my server","shotUploadName":"Where a capture is uploaded","shotUploadHint":"An https:// address it is PUT to, or user@host:/path for scp. Opt-in, and nothing is uploaded until you pick this.","shotUploaded":"Uploaded \u2014 the link is on the clipboard","shotUploadFailed":"That upload did not work.","shotUploadOff":"No upload address is set.","shotDrag":"Drag a capture out","ocrPathName":"The OCR program","ffmpegPathName":"The ffmpeg program","descRecord":"Recording a tab, the replay buffer, and what happens to a capture afterwards.","keyMenu":"Keys and the mouse","keyGuardName":"Keys to ignore","keyGuardHint":"F1, Insert and the other strays. One key a line, as Qt writes them.","keyThroughName":"Sites that keep their own keys","keyThroughHint":"Ctrl+K belongs to Discord's search and Ctrl+S to an editor in a tab.","keyThroughHere":"Let %s keep %s","keyOffHere":"Turn this shortcut off on %s","keyChordName":"Two-step keys","keyChordHint":"The leader key, then a letter. For the commands that are worth a key but not a key of their own.","keyChordWaiting":"\u2026then a letter","keyChordNone":"Nothing is bound to \u201c%s\u201d.","keyNoLast":"Nothing has been run yet.","keyRepeat":"Do that again","keyQuitAgain":"Press Ctrl+Q again to close the window","keySessionNumber":"Go to virtual browser %d","keyGroupCycle":"Next tab in this group","keyPeek":"Peek at the tab I was on","keyMru":"Ctrl+Tab goes in most-recently-used order","keyMruHint":"Off: Ctrl+Tab goes along the strip, as it always did.","keyReadline":"Terminal keys in the address bar","keyReadlineHint":"Ctrl+W, Ctrl+U, Ctrl+A, Ctrl+E, Alt+B and Alt+F, as a shell has them.","keyEditor":"Edit a text box in my editor","keyEditorName":"The editor for a text box","keyEditorHint":"kitty nvim, or whatever opens on a file and exits when it is done.","keyNoEditor":"%s is not installed.","keyNoField":"There is no text box with the caret in it.","keyEditedBack":"Written back into the page","keyRecover":"Bring back text the page lost","keyNoLostText":"Nothing was kept for this field.","keyDraftName":"Keep what I type, in case the page reloads","keyDraftHint":"In the page's own session storage, which dies with the tab. Nothing is written to disk.","keyScriptName":"The script a key runs","keyScriptHint":"A file in the plugins folder, or the title of a javascript: bookmark.","keyScriptRan":"%s ran on this page","keyNoScript":"No script called \u201c%s\u201d.","keyFirstField":"Into the page's first text box","keyVimName":"Vim keys on a page","keyVimHint":"j and k scroll, gg and G jump, H and L are history, gt and gT are tabs, / finds, gi goes to the first box.","keySwipeBack":"Back","keySwipeForward":"Forward","keyGlobalName":"Global keys, for the window manager","keyGlobalHint":"The commands to bind in Hyprland. The browser answers them on its single-instance socket.","mouseMenu":"The mouse","mouseSuperDrag":"Drag a link to open it, drag text to search it","mouseLasso":"Drag a box over links to open them","mouseSwipeNav":"Two fingers sideways go back and forward","mouseAutoScroll":"Middle-click and move to scroll","mouseAutoScrollHint":"Off by default: middle-click pastes on this desktop.","mouseHoverSwitch":"Hovering a tab while dragging switches to it","mouseTabDouble":"Double-click on a tab","mouseTabMiddle":"Middle-click on a tab","mouseBarDouble":"Double-click on the empty strip","mouseAct_close":"Close it","mouseAct_duplicate":"Duplicate it","mouseAct_newtab":"New tab","mouseAct_mute":"Mute it","mouseAct_pin":"Pin it","mouseAct_reload":"Reload it","mouseAct_nothing":"Nothing","mouseNewTabMiddle":"Middle-click on the new-tab button opens the clipboard","mouseWheelStep":"Wheel step","mouseKeyStep":"Arrow-key step","mouseStepHint":"0 = as the engine does it.","mouseGestureHelp":"Hold the right button to see this","keyLayoutName":"Shortcuts follow the key, not the letter","keyLayoutHint":"On a German keyboard Ctrl+Z, Ctrl+/ and Ctrl++ are somewhere else: both keys are bound so the right one fires.","keyGlobalRaise":"Bring the browser to the front","ctxOpenLinkTab":"Open the link under the pointer in a tab","ctxCopyLink":"Copy the link under the pointer","ctxSaveImage":"Save the picture under the pointer","ctxCopyImage":"Copy the picture's address","ctxOpenImage":"Open the picture","ctxSearchSelection":"Search for what is selected","ctxNothingThere":"There is nothing of that kind under the pointer.","keyOffHereNow":"That shortcut is switched off on this site.","descKeys":"The keys, the keys a site keeps, and what the mouse does.","splitView":"Two pages side by side","splitOn":"Split view","splitOff":"One page again","splitNeedsTwo":"That needs a second tab to put beside this one.","splitSync":"Scroll both halves together","splitLink":"Open the link beside this page","tabStripName":"Where the tabs are","tabStrip_top":"Above the page","tabStrip_bottom":"Below the page","tabStrip_left":"Down the left side","tabStrip_right":"Down the right side","tabStripWidthName":"How wide a side strip is","tabRowsName":"Rows of tabs","tabRowsHint":"More than one row instead of scrolling. Qt's tab bar does not wrap, so the tabs are squeezed to fit across \u2014 two rows is readable, ten is not.","stackSite":"Fold this site's tabs into one","stackNeedsTwo":"There is only one tab on this site.","stackDone":"%d tabs of %s folded together","wsMenu":"Sets of tabs","wsSave":"Keep these tabs as a set","wsAsk":"What should this set of tabs be called?","wsSaved":"\u201c%s\u201d keeps %d tabs","wsOpened":"\u201c%s\u201d \u2014 %d tabs","wsNone":"No sets of tabs yet.","wsDrop":"Forget \u201c%s\u201d","outsideAskName":"Links from other apps ask which virtual browser","outsideAskHint":"A link from Discord or the terminal can go into the browser you are signed in to for that site.","outsideAsk":"Which virtual browser should open %s?","outsideRuleName":"Rules for links from other apps","outsideRuleHint":"One a line, as host = virtual browser. Everything else asks, or uses the one in front.","windowStateName":"Each window comes back as it was","windowStateHint":"Its tabs, its virtual browser, its size and where it was on the screen.","trbarSaid":"This page looks like it is in %s.","trbarOnce":"Translate it","trbarAlways":"Always translate %s","trbarNever":"Never translate %s","trbarNo":"Not now","trOfferName":"Offer to translate a page in another language","trOfferHint":"A plain bar at the top, once per language per tab. Your own translator is used when you have one named.","trWorking":"Translating %d blocks on this machine\u2026","trDone":"Translated","trNothing":"There is nothing on this page to translate.","trUndone":"%d blocks back as they were","trUndo":"Put the original words back","trSide":"The page and its translation side by side","trNow":"Translate this page","trRulesName":"Languages you have decided about","trLocalHint":"With a translator named in Settings the page's text never leaves the machine; without one, translating sends the page to Google Translate.","pdfKeys":"PDF keys","pdfNext":"Next page in this PDF","pdfPrev":"Previous page in this PDF","pdfFit":"Fit the width","pdfRotate":"Rotate it","pdfBackTo":"Back to page %d, where you were","pdfPlaceName":"Remember where I was in a PDF","readerPrint":"Print the article without the furniture","readerPrinted":"Written to %s","synMenu":"Synonyms","synNoDict":"That needs the dict program and a thesaurus installed.","synNone":"No other words for \u201c%s\u201d.","spellAdd":"Add \u201c%s\u201d to my words","spellIgnore":"Ignore it here","spellAdded":"\u201c%s\u201d is a word now","lookupWord":"What this word means in the other language","lookupNoTool":"That needs a translator on this machine \u2014 name one in Settings.","cleanPasteName":"Strip tracking from an address I paste into a page","cleanPasteHint":"The same cleaning the address bar does, where it is pasted.","epubOpen":"Open a book (.epub)","epubOpened":"%s \u2014 %d chapters","epubBad":"That is not a book this can read.","epubEmpty":"There is nothing readable in that book.","permWants":"%s wants to %s.","permThisRun":"Only until you close the browser.","permMic":"use your microphone","permCam":"use your camera","permMicCam":"use your microphone and camera","permNotify":"show notifications","permMouse":"take hold of your mouse pointer","ownName":"What the browser itself sends","ownNone":"It has not fetched anything for itself yet.","ownClear":"Clear this list","ownWatch":"Keep writing it down","ownWatchHint":"Connections the browser makes for itself \u2014 suggestions, the update check, favicons. Pages are not in this list; they are the engine's.","usName":"Userscripts on this page","usNone":"You have no userscripts installed.","usRanHere":"Ran on this page","usNotHere":"Did not run here","usWhen":"Runs at: %s","torName":"Open a window through Tor","torNone":"Tor is not listening on 127.0.0.1:9050.","torOpened":"A window of its own, through Tor.","torHint":"Its own process, its own data, everything in it through the SOCKS port. Chromium reads its proxy at start-up, so it cannot be one tab of this window.","fsAskName":"Ask before a site takes the whole screen","fsAskHint":"The engine's request cannot wait for an answer, so the screen is given and a bar offers to take it back and remember that for the site.","fsBarSaid":"%s has the whole screen.","fsBarKeep":"That is fine","fsBarStop":"Give it back","fsBarNever":"Never for this site","fsDenied":"%s may not take the screen.","offlineName":"Keep a copy of the page when I bookmark it","offlineHint":"One MHTML file per bookmark, here on the disk, so the page can still be read after it goes away.","offlineKept":"A copy of the page is kept.","offlineNone":"There is no kept copy of that one.","offlineOpen":"Read the kept copy","trailName":"How I got here","trailNone":"Nothing is written down yet.","trailOpen":"Open this one","treeName":"History as a tree","thumbsName":"A day in pictures","thumbsNone":"No pictures for that day.","thumbsKeep":"Keep a small picture of every page I read","thumbsHint":"A 240-pixel PNG per address, in your own folder. Nothing is uploaded, and a private tab is never kept.","impHistName":"Import history from another browser","impHistNone":"No Chrome or Firefox history found.","impHistBad":"That history file could not be read.","impHistDone":"%d pages taken over.","movedName":"The page has moved","movedAsk":"This bookmark now ends up somewhere else.\n\nWas: %s\nNow: %s\n\nUpdate the bookmark?","movedYes":"Update it","movedNo":"Leave it","movedDone":"The bookmark points at the new address.","wbName":"Look for an archived copy","wbHint":"Asks archive.org whether it has a copy. This is the one thing here that sends an address off this machine, and only when you ask for it.","wbNone":"The archive has no copy of that page.","wbFound":"The archive's copy from %s.","remName":"Remind me about this bookmark","remAsk":"On which day? (YYYY-MM-DD)","remNone":"Nothing is due.","remDue":"%d bookmarks are due \u2014 %s","favDockName":"Keep Favourites open beside the page","favDockHint":"The same panel, in the window rather than over it.","histEncName":"Keep the history encrypted","histEncHint":"Under a key of your vault's. While the vault is locked the history is not readable and is not written over.","histEncNeedsVault":"Unlock the vault first \u2014 the key comes from it.","k1Name":"What the printer is doing","k1Asking":"Asking the printer\u2026","k1NoAnswer":"The printer did not answer.","k1State":"State: %s","k1Done":"Done: %s%%","k1Left":"Left: %s","k1Nozzle":"Nozzle: %s \u00b0C of %s","k1Bed":"Bed: %s \u00b0C of %s","spellNoDicts":"No German or English dictionary is installed for the engine.","panelName":"Send the selection to the side panel","panelNone":"Nothing is open in the side panel.","panelNoSel":"Nothing is selected.","panelTyped":"Put into the panel.","feedName":"Hide recommendations I did not ask for","feedHint":"The YouTube home grid, the Shorts shelves and Twitch's recommended channels. What it hides is listed below, not hidden in a blob.","webmailName":"Open mailto: links in","webmailHint":"A compose page of your webmail instead of a desktop mail program. None = leave it to the desktop.","floatName":"Pin a part of this page on top","floatAsk":"Which part? (a CSS selector, e.g. #chat)","floatOn":"That part is in a window on top.","floatOff":"The floating parts are closed.","modeName":"Modes","modeSave":"Keep this setup as a mode\u2026","modeAsk":"What is this mode called?","modeSaved":"\u201c%s\u201d is kept.","modeOn":"Mode: %s","modeNone":"You have no modes yet.","modeDrop":"Forget \u201c%s\u201d","phoneName":"Send this tab to my phone","phoneNoTool":"That needs kdeconnect-cli installed.","phoneNoDevice":"KDE Connect sees no paired device.","phoneSent":"Sent to %s.","ocrName":"Copy the text out of this picture","ocrNoImage":"No picture found on this page.","transNoteName":"Save the transcript as a note","transNoneHere":"This video has no captions to read.","transNoted":"%d lines kept as a note.","icsName":"Make a calendar file from the selection","icsNoDate":"No date in what you selected.","icsSaved":"Written to %s.","agendaName":"Calendar file for today's agenda","agendaHint":"A local or LAN .ics file. Repeating events (RRULE) are not worked out \u2014 they are left out rather than shown on the wrong day.","agendaNone":"Nothing today.","logName":"The day","logLine":"%d notes, %d to-dos done, %d minutes on sites with a limit.","logNoteName":"Keep the daily summary as a note","autocapName":"Make captions for this video","autocapNoTool":"That needs ffmpeg and a transcriber (whisper) on this machine.","autocapNoVideo":"No video on this page.","autocapHasTracks":"This video already has subtitles.","autocapRefused":"That video is not at a web address this page may hand over, so no captions are made for it.","autocapBlob":"This player feeds itself through the page (a blob: source), which nothing outside it can read. Use the live captions for that.","autocapWorking":"Pulling the sound out and listening to it\u2026","autocapNoSound":"No sound could be read out of that video.","autocapNoWords":"The transcriber returned nothing.","autocapDone":"%d captions, on the video.","adName":"Block ads and trackers by list","adHint":"EasyList-format .txt files in your own folder. Nothing is fetched unless you ask: the lists are files you put there, or addresses you name below.","adHere":"Block on %s","adDirName":"Folder your filter lists are in","adUrlsName":"Addresses to fetch lists from","adUrlsHint":"One per line, and only when you press \u201cFetch the lists\u201d. A blocker that quietly phones a list server is telling somebody what to serve you.","adCounts":"%d rules, %d hiding rules, from %d lists","adSkipped":"%d lines these lists ask for that this does not do","adBlockedHere":"%d blocked on this page","adReload":"Read the folder again","adFetch":"Fetch the lists","adLoaded":"%d lists, %d rules.","adFetched":"%d lists fetched.","adNoUrls":"No list addresses are named in Settings.","adNoModule":"adblock.py is not next to the browser.","thirdCookieName":"Refuse cookies from other sites","thirdCookieHint":"Only the site you are on may set one. Sign-ins that go through another site need that site on the list below, which the page menu can add in one click.","thirdCookieHere":"Let them through on %s","thirdCookieCount":"%d refused on this site","gestName":"Mouse gestures, the rocker and buttons 4-9","gestHint":"Hold the right button and draw: left is back, right is forward, up reloads, down opens a tab, down-right closes one, up-down brings one back. Right held + left click is back, left held + right click is forward, right held + the wheel walks the tabs.","gestList":"What a gesture means","gestButtons":"What buttons 4-9 do","barKeyTip":"A login is saved for this site","barKeyName":"Show the key in the address bar","barKeyNone":"No login saved for this site.","barKeyFill":"Fill it in","barKeyCopy":"Copy the password","barKeyOpen":"Open the entry","barKeyManage":"All passwords\u2026","barKeyCopied":"Copied. The clipboard is cleared in a minute.","barKeyNoSecret":"That entry has no password to copy.","mediaCatchUp":"Catch up to live at 1.1x","barCopyAddress":"Copy the address","tabsName":"Tabs","devTools":"Developer tools","devLook":"Look at the page","devPretend":"Pretend to be","devWorkbench":"Workbench","devEngine":"The engine","devOn":"%s is on","devOff":"%s is off","devRuler":"Ruler","devOutlines":"Outline every box","devHidden":"Show hidden form fields","devNoCss":"Without any CSS","devPerf":"Frames, long tasks and shifts","devKeys":"Show key codes","devFonts":"Fonts on this page","devFontsWait":"Reading the fonts\u2026","devFontFiles":"Font files it loaded","devPalette":"Colours on this page","devPaletteWait":"Reading the colours\u2026","devNothing":"Nothing to show here.","devImage":"What this picture really is","devNoImage":"No picture found on this page.","devImageInfo":"%d\u00d7%d, drawn at %d\u00d7%d, %s","devOverlay":"Lay a mockup over the page","devAuditRun":"Look the page over","devAudit":"%d elements, %d things to look at: %s","devLinkCheck":"Check the links on this page","devLinkCheckOff":"Link checking is off \u2014 Settings has the switch (it visits every address on the page).","devLinksBad":"%d links are broken, starting with %s","devLinksOk":"Every link answered","devSizes":"At another size","devSize":"%s \u2014 %d\u00d7%d","devSizeOff":"Back to the window","devMediaMenu":"As another kind of screen","devMediaDarkRow":"Dark","devMediaLightRow":"Light","devMediaPrint":"Print","devMediaMotion":"Reduced motion","devMediaOff":"Off","devMediaDark":"The page is told it is dark","devMediaLight":"The page is told it is light","devMedia":"The page is told: %s","devPlaceRow":"Somewhere else","devPlaceAsk":"Latitude, longitude, time zone, locale \u2014 whichever you want (52.5, 13.4, Europe/Berlin, de-DE)","devPlace":"The page is told: %s","devThrottleMenu":"A worse connection","devThrottleSlow":"Slow","devThrottleVerySlow":"Very slow","devThrottleOffline":"Offline","devThrottleOff":"Normal again","devThrottle":"This tab is on a %s connection","devOffline":"This tab is offline","devRegex":"Regular expression","devRegexAsk":"The pattern","devRegexText":"The text to try it on","devRegexBad":"That pattern does not compile: %s","devDiff":"Compare two texts","devDiffLeft":"The first text","devDiffRight":"The second text","devMini":"MiniMessage preview","devMiniAsk":"MiniMessage, legacy codes, or a JSON component","devOpenFile":"Open a file to read","devSnippets":"Snippets","devNoSnippets":"No snippets saved.","devSnippetNew":"A new snippet","devSnippetName":"What is it called?","devSnippetCode":"The JavaScript to run on the page","devSnippetRan":"\u2192 %s","devClipboard":"What is on the clipboard","devClipEmpty":"The clipboard is empty.","devOpenGraph":"As a link embed","devOgMissing":"Missing: %s","devErrorsMenu":"Errors on this page","devErrors":"%d errors on this page","devNoErrors":"No errors on this page.","devClearErrors":"Clear them","devStorage":"Local and session storage","devCopyValue":"Copy the value","devRemove":"Remove it","devCookies":"Cookies of this site","devNoCookies":"No cookies seen for this site.","devCookieNew":"A new cookie","devCookieName":"Its name","devCookieValue":"Its value","devCookiesTxt":"Write a cookies.txt","devCookiesTitle":"Write cookies.txt","devCookiesWritten":"%d cookies written \u2014 anything that reads that file is you, to those sites","devCert":"The certificate","devWorkers":"Service workers","devNoWorkers":"No service workers here.","devDropWorkers":"Unregister them","devSwDropped":"%d service workers unregistered","devCacheRow":"No cache for this tab","devCacheOff":"This tab is not using the cache","devCacheOn":"This tab uses the cache again","devHardReloadRow":"Clear this site's cache and reload","devHardReload":"Cache cleared, loading again","devNoJsRow":"Reload once without JavaScript","devNoJs":"Loading once without JavaScript","devWatch":"Reload when a folder changes","devWatching":"Watching %s","devInternals":"Chromium's own pages","devGpu":"Graphics","devMediaInternals":"Media","devMedia2":"Media","devWebrtc":"WebRTC","devNetExport":"Network log","devHistograms":"Histograms","devProcesses":"Processes","devQuota":"Storage quota","devUkm":"Metrics","devDebugRow":"Remote debugging port","devDebugOn":"The debugging port is on after a restart \u2014 anything on this machine that can reach it can drive this browser","devDebugOff":"The debugging port is off after a restart","devLocalCerts":"Accept self-signed certificates on this network","devLocalCertsOn":"Self-signed certificates are accepted on localhost and the home network only","devLocalCertAccepted":"%s accepted \u2014 it is on this machine or this network","devLocalCertsOff":"Self-signed certificates are refused again","devFlagsRestart":"The flags apply after a restart","devFlagsName":"Chromium flags","devFlagsHint":"One a line. They are read once, at start-up, so a change applies after a restart. A wrong flag can stop the browser starting.","devHostsName":"Point a name at an address","devHostsHint":"One a line: example.com 192.0.2.10. For this browser only, and only after a restart.","devLinkCheckName":"Allow checking the links on a page","devLinkCheckHint":"Off by default: it visits every address on the page, which tells each of those servers you looked.","devDebugName":"Remote debugging port","devDebugHint":"For Playwright and CDP tools. Off by default, and the engine binds it to this machine only.","devLocalCertsName":"Accept self-signed certificates on localhost and the home network","devLocalCertsHint":"Only for addresses on this machine or in the private ranges \u2014 never for a site on the internet.","devSnippetsName":"My JavaScript snippets","devSnippetsHint":"One a line: name|the code. They only ever run when you pick one.","mediaMenu2":"Video and sound, more of it","mediaPicture":"The picture","mediaSound":"The sound","filterBrighter":"Brighter","filterDarker":"Darker","filterMoreContrast":"More contrast","filterLessContrast":"Less contrast","filterMoreColour":"More colour","filterLessColour":"Less colour","filterReset":"Back to normal","turnRight":"Turn right","turnLeft":"Turn left","turnFlip":"Mirror it","turnReset":"Straighten it","zoomIn2":"Zoom in","zoomOut2":"Zoom out","zoomCrop":"Fill the box (crop)","zoomReset2":"Back to the whole picture","hideCursorName":"Hide the mouse over a playing video","hideCursorHint":"After two seconds of not moving.","statsMedia":"%d\u00d7%d \u00b7 %.2fx \u00b7 %d of %d frames dropped \u00b7 %.1f s buffered","statsShow":"What this video is","endsAt":"%d:%02d left \u2014 ends at %s","endsAtShow":"When this ends","mediaResume2":"Resume where I left a video","mediaResumeName":"Resume where I left a video","mediaResumeHint":"Per video, on this computer. Anything under two minutes is left alone.","mediaResumed2":"Carrying on at %d:%02d","mediaHistory":"What I have watched","mediaHistNone":"Nothing yet.","mediaHistClear":"Forget all of it","mediaLeftOf":" \u00b7 %d min left","capMenu":"Captions","capToggle":"Captions on or off","capNone":"This video has no captions.","capOnName":"Start videos with captions on","capOnHint":"Where the video has them.","capLangName":"Caption language","capLangHint":"A code like de or en. Empty = whichever is first.","capSizeName":"Caption size","capSizeHint":"Per cent of the usual size. 0 = as the site has it.","capColourName":"Caption colour","capBackName":"Caption background","capBottomName":"Lift the captions","capBottomHint":"Pixels from the bottom. 0 = where the site puts them.","subsOpen":"Load subtitles from a file","subsAdded":"%s loaded","subsFailed":"That subtitle file could not be read.","subsSaved":"Written to %s","subsClear":"Take the loaded subtitles off","transcript":"Transcript","transCopy":"Copy the whole transcript","transSave":"Save it as an .srt","chapters":"Chapters","chapNone":"No timestamps on this page.","audioLevel":"Even out the volume","audioEq":"Equaliser","eqFlat":"Flat","eqVoice":"Voice","eqBass":"More bass","eqTreble":"More treble","eqNight":"Night","eqPodcast":"Podcast","audioBalance":"Balance","audioLeft":"More left","audioRight":"More right","audioCentre":"Centred","audioMono":"Both channels as one","audioCrossfeed":"Crossfeed for headphones","audioTaken":"Another script already holds this video\u2019s sound.","skipSilence":"Run through the quiet parts","audioOut":"Play this tab through","sinkNone":"This engine will not let a page choose its output.","sinkRefused":"That output was refused.","micForSite":"Microphone for %s","callAudioFor":"Call sound for %s","callGain":"Automatic gain","callNoise":"Noise suppression","callEcho":"Echo cancellation","devDefault":"Whatever the system uses","devNoList":"The page has not been given the device names yet — allow the microphone once and they appear.","autoplayFor":"Autoplay on %s","autoplayAllow":"Let it play","autoplayMute":"Let it play, muted","autoplayBlock":"Do not let it play","autoplayDefault":"As everywhere else","muteAlways":"Always mute %s","duckName":"Quieten the other tabs","duckHint":"When the tab in front starts playing, the others drop to this level. 0 = off, 100 = unchanged.","pauseCallsName":"Pause the music during a call","pauseCallsHint":"When a tab starts using the microphone. Needs \u201csay when a page is using the microphone\u201d.","callPaused":"%d tabs paused for the call","callResumed":"%d tabs playing again","pauseHiddenName":"Pause a video when its tab is hidden","pauseHiddenHint":"And start it again when you come back.","holdFastName":"Hold . to run at double speed","holdFastHint":"On any video, as long as the key is down.","heldEmbedsName":"Embedded players load on a click","heldEmbedsHint":"A YouTube or Twitch embed stays a placeholder until you press it.","embedOpen":"Open this embed on its own site","embedNone":"No embedded player there.","audioOnly":"Sound only (hide the video)","shortsPlayerName":"Open Shorts in the normal player","shortsPlayerHint":"With a seek bar and the speed control.","spoilerName":"Hide video lengths and progress","spoilerHint":"No duration badges, no watched bars, no previews.","qualityFor":"Quality on %s","qualityAuto":"As the site decides","mediaLinks":"Videos and sounds on this page","mediaLinksNone":"None on this page.","playInMpv":"Play it in mpv","trackNoticeName":"Say when the track changes","trackNoticeHint":"A desktop notification with title and artist. Off by default.",
+"mprisName":"Answer the keyboard's media keys","mprisHint":"The desktop asks what is playing and may pause it (MPRIS over D-Bus). Nothing leaves the machine.","mprisNoBus":"No desktop session bus here \u2014 the media keys stay with whatever has them","mprisOn":"The media keys reach this browser","mprisOff":"The media keys no longer reach this browser","mprisMissing":"mpris.py is not next to the browser.","winFull":"Fill the window with the video","winFullOff":"Back to the page","awakeName":"Keep the screen awake while a video plays","awakeHint":"Only while something is actually playing in the tab in front, and only through systemd-inhibit.","awakeOn":"The screen stays awake while this plays","awakeOff":"The screen may sleep again","awakeNo":"systemd-inhibit is not here \u2014 the screen is not held","playerTitle":"Play a file","playerOpen":"Open the player","playerPick":"Pick video or audio files","playerNone":"Nothing picked.","mictestTitle":"Test the microphone and camera","micTestTitle":"Microphone and camera","micTestSub":"All of this stays on this computer: nothing is sent anywhere, and the recording is thrown away when you leave the page.","micWord":"Microphone","camWord":"Camera","micLevel":"now %d%%, loudest %d%%","micOn":"Listening. The level should move when you speak.","micOff":"Stopped.","micFailed":"The microphone was refused: %s","camOn":"%s, %d×%d","camOff":"Stopped.","camFailed":"The camera was refused: %s","recNone":"This build cannot record.","recNow":"Recording… say something.","recDone":"Five seconds recorded. Play it back.","on":"On","playerLoop":"Loop: %s","playerQueue":"%d in the queue","watchLater":"Watch later","watchAdd":"Watch this later","watchAdded":"Put on the watch-later list","watchEmpty":"The watch-later list is empty.","watchPlay":"Play the next one","watchClear":"Empty the list","watchGone":"Taken off the list","momentMenu":"Moments in this video","momentAdd":"Mark this moment","momentNote":"A word about this moment (optional)","momentMade":"Marked at %s","momentNone":"No moments in this video yet.","momentNoTime":"Nothing is playing here.","pauseLockName":"Pause what is playing when the browser locks","pauseLockHint":"Also when you have been away for the idle time.","pausedAway":"Paused while you were away","screenMenu":"Full screen on","screenNone":"There is no screen attached here.","sponsorName":"Skip the sponsor in a video","sponsorHint":"Asks the SponsorBlock service about this video. Only the first four characters of its hashed id are sent, and only when this is on.","sponsorSkipped":"Skipped %s","sponsorNone":"Nothing marked in this video.","sponsorOff":"Sponsor skipping is off \u2014 Settings has the switch.","lyricsName":"Fetch lyrics","lyricsHint":"Asks lrclib for the words using title, artist and length. Off = nothing is asked.","lyricsTitle":"Lyrics","lyricsNone":"No lyrics found for this one.","lyricsOff":"Lyrics are off \u2014 Settings has the switch.","playMenu":"Games and streaming","streamGroup":"While you are streaming","gameGroup":"Games","streamSafe":"Stream-safe mode","streamSafeOn":"Stream-safe: private data blurred, no notifications, no suggestions from history","streamSafeOff":"Stream-safe off","blurPrivate":"Blur addresses and private data","blurOn":"%d things blurred \u2014 hover to read one","blurOff":"Nothing is blurred any more","blurWordsName":"Also blur these words","blurWordsHint":"One a line: a name, a street, anything that should not be legible on the stream.","keysShow":"Show the keys I press","keysOn":"The keys you press are shown at the bottom","keysOff":"The key overlay is gone","fpsShow":"Show frames per second","fpsOn":"Frames per second, top right","fpsOff":"The counter is gone","obsMenu":"OBS","obsName":"Let me drive OBS","obsHint":"Over obs-websocket on this machine. Address and password below; empty address = off.","obsUrlName":"OBS address","obsUrlHint":"ws://127.0.0.1:4455 is what OBS uses by default.","obsPwName":"OBS password","obsPwHint":"From OBS: Tools \u2192 WebSocket Server Settings.","obsStart":"Start recording","obsStop":"Stop recording","obsStream":"Start streaming","obsStreamStop":"Stop streaming","obsScene":"Switch scene","obsOff":"OBS driving is off \u2014 Settings has the address.","obsNo":"OBS did not answer at %s","obsDid":"OBS: %s","modSearch":"Find a mod","modAsk":"What are you looking for?","modNone":"Nothing found for \u201c%s\u201d.","modFound":"%d found","modInstall":"Put it in an instance","mcInstancesName":"Minecraft instances","mcInstancesHint":"One folder a line. A mod is written into <folder>/mods and nowhere else.","modNoInstance":"No instance folder is set \u2014 Settings has the list.","modInstalled":"Written to %s","modFailed":"That did not download.","serverCopy":"Copy the server address","serverNone":"No server address on this page.","serverCopied":"Copied %s","serverPanel":"Server page in the panel","playerLookup":"Look this player up","playerNoName":"Select a player name first.","wikiLookup":"Look it up in the wiki","wikiAsk":"What should I look up?","gridTitle":"Several streams at once","gridAsk":"Channel names, separated by commas","gridNone":"No usable channel name there.","gridMade":"%d streams","pointsName":"Claim channel points","pointsHint":"Presses Twitch's own bonus button when it appears.","pointsOn":"Channel points are claimed as they appear","adsName":"Mute and dim through ads","adsHint":"On Twitch: the sound goes off and the picture goes dark until the ad is over.","adsOn":"Ads are muted and dimmed","chatMenu":"Chat","chatHideName":"Hide chat lines containing","chatHideHint":"One a line.","chatUsersName":"Hide these chatters","chatUsersHint":"One name a line.","chatMeName":"Highlight lines containing","chatMeHint":"Your own name, say. One a line.","chatOn":"Chat filters are on here","liveMenu":"Tell me when they go live","liveAdd":"Watch this channel","liveWatchName":"Channels being watched","liveWatchHint":"One a line. Each is asked about once every few minutes, and only while the interval below is set.","liveEveryName":"Ask every","liveEveryHint":"Minutes. 0 = never ask.","liveNow":"%s is live","liveNone":"Nobody is watched yet.","liveAdded":"Watching %s","delayName":"Stream delay","delayHint":"Seconds. The timer counts this down so you know when a chat reaction belongs to what you just did.","delayStart":"Start the delay timer","delayRunning":"Delay: %ds","delayDone":"The delay is up","clipMark":"Mark a clip here","clipMarked":"Clip marked at %s","clipList":"Clips marked","clipNone":"No clips marked yet.","clipLink":"Copy a clean clip link","clipCleaned":"Copied without the tracking bits","discordRouteName":"Open Discord links in the Discord tab","discordRouteHint":"Rather than a new tab each time.","discordWent":"Sent to the Discord tab","discordBadgeName":"Show Discord's unread count","discordBadgeHint":"In the tab's title, from Discord's own count.","ts3Open":"Open in TeamSpeak","ts3No":"TeamSpeak is not installed here.","handoffTitle":"Open another program?","handoffAsk":"%s wants to open this in %s:\n\n%s","handoffNoSite":"A page","handoffAlways":"Always allow %s to do this","ts3Went":"Handed to TeamSpeak","gameProtect":"Protect this tab while playing","gameProtectHint":"It is never discarded, never put to sleep, and asks before it closes.","gameProtectOn":"This tab is protected","gameProtectOff":"No longer protected","gameClose":"That tab is a game \u2014 close it anyway?","cloudGame":"Cloud gaming here","cloudGameHint":"Keeps the screen awake, lets the gamepad through, hides the cursor and never throttles the tab.","cloudOn":"Cloud gaming is on for %s","cloudOff":"Cloud gaming is off for %s","padName":"Let a gamepad scroll and play","padHint":"The sticks scroll, the shoulders change tab, A plays or pauses. The Gamepad API, nothing else.","padOn":"The gamepad works here","padNo":"No gamepad API in this page.","streamPreview":"Watch it in a small window","theaterName":"Big player by default","theaterHint":"On Twitch and YouTube: the player fills the page without being asked each time.","checklist":"Before going live","checkMic":"Microphone picked and at the right level","checkCam":"Camera on and pointing the right way","checkSound":"Desktop sound in the mix","checkScene":"The right scene is up","checkChat":"Chat open and filtered","checkTitle":"Title and category set","checkPrivate":"Nothing private on screen","checkNotify":"Notifications off","streamChecksName":"My own checklist","streamChecksHint":"One item a line. Empty = the standard list.","checkDone":"%d of %d done","gameModeName":"Game mode when a game is in front","gameModeHint":"Asks the window manager what is in front; on this machine there is none, so nothing happens.","gameModeNo":"No window manager to ask here.","gameModeOn":"Game mode: nothing interrupts you","formsMenu":"Forms and passwords","fillLogin":"Fill the login here","fillDone":"Filled in as %s","fillLinked":"Filled from %s \u2014 the same account, another address","fillNone":"Nothing saved for this site.","identMenu":"Fill an address","identNone":"No address saved yet.","identFilled":"%d boxes filled","cardMenu":"Fill a card","cardNone":"No card saved yet.","cardFilled":"%d boxes filled","cardFrame":"That checkout is inside the payment company\u2019s own frame \u2014 nothing outside it can fill it in, by design","cardInsecure":"This page is not encrypted (no https), so a card is not filled into it","cardCvvAsk":"The card\u2019s security number","cardCvvHint":"Asked every time: it is the number that is supposed to prove somebody is holding the card.","anyFieldMenu":"Fill this box from the vault","aliasFill":"Fill a plus-address","aliasFilled":"Filled in %s","aliasNotSet":"No address to build one from \u2014 Settings has the box.","genMenu":"Make a password","genPassword":"A strong password","genPassphrase":"A passphrase of words","genMade":"Made, filled in and saved \u2014 strength %d","genNoField":"No password box on this page.","genBits":"%d words from %d \u2014 about %d bits","otpMenu":"Two-factor codes","otpFilled":"Code %s filled in","otpCopied":"The code is in the clipboard","otpNoCode":"No code saved for this login.","otpNoLogin":"No login saved for this site.","otpRead":"Take the setup secret off this page","otpNone":"No setup secret on this page.","otpSaved":"The secret is saved with the login","otpBad":"That secret was not taken.","otpNoQr":"A drawn QR code cannot be read here \u2014 use the \u201ccan\u2019t scan it?\u201d secret beside it","secretCopied":"Copied \u2014 the clipboard is cleared again shortly","clipCleared":"The clipboard is cleared","clipClearName":"Clear copied passwords from the clipboard after","clipClearHint":"Seconds. 0 = leave them there.","draftMenu":"What I typed here","draftSave":"Keep this draft now","draftBack":"%d boxes put back","draftNone":"Nothing was kept for this page.","draftDrop":"Forget this draft","formDraftsOnName":"Keep what I type in forms","formDraftsOnHint":"Kept on this computer and put back after a crash or a misclick. Never a password, never a private tab.","historyMenu":"Values this site has seen","historyClear":"Forget them","formHistoryOnName":"Remember what I type in boxes","formHistoryOnHint":"Offered again on the next visit, per site. Off in private tabs, and never a password.","pwEyeName":"An eye in every password box","pwEyeHint":"To see what you typed. The browser\u2019s own button, not the page\u2019s.","pwEyeAction":"Show what is in the password boxes","pasteAllow":"Allow pasting here","pasteRemember":"Always allow pasting here","pasteOn":"Pasting works in %d boxes now","autocompleteFix":"Ignore \u201cdo not save this\u201d here","autocompleteRemember":"Always ignore it here","bigEdit":"Edit this box in a big window","bigEditTitle":"Edit","bigEditSave":"Put it back","testData":"Fill with test data","testFilled":"%d boxes filled with nonsense","warnFormsName":"Say something about the form in front of me","warnFormsHint":"A password box on an unencrypted page, and a sign-up form on a site you already have a login for.","formInsecure":"This page came over http \u2014 a password typed here goes out in the clear","formKnown":"You already have a login here: %s","catchName":"Offer to save logins sent by scripts","catchHint":"Sites that sign in without submitting a form \u2014 which is most of them now.","reuseWarn":"That is the password saved for %s \u2014 check the address bar before you press anything","breachName":"Check my passwords against known leaks","breachHint":"Sends the first five characters of each password\u2019s SHA-1 and compares the answer here, so the service never learns which password was asked about.","breachRun":"Check against known leaks","breachOff":"The leak check is off \u2014 Settings has the switch.","breachFound":"%d of your passwords are in known leaks, including the one for %s","breachClean":"None of your passwords are in the lists checked","breachFailed":"Could not check: the service did not answer, so nothing was compared","keyTitle":"Security key","keyAccount":"Which account on the key?","keyPin":"The key\u2019s PIN","keyTouch":"Touch your security key","configBroken":"Your settings file could not be read, so this window uses the defaults. The old file is kept as %s.","keyDone":"The key answered","keyFailed":"The key did not answer.","authTitle":"This site wants a login","authUser":"Username for %s","authPassword":"Password","authFilled":"Filled in the saved login for %s","dupMenu":"Logins saved twice","dupNone":"Nothing is saved twice.","mergeAll":"Fold them together","mergeDone":"%d folded together","unusedMenu":"Not used for a year","unusedNone":"Everything has been used this year.","unusedDaysName":"Call a login unused after","unusedDaysHint":"Days.","twofaMenu":"Could have two-factor and has not","twofaNone":"Every login that could have a code has one.","expiringMenu":"Running out","expiringNone":"Nothing is running out.","expiryWarnName":"Warn about keys and cards","expiryWarnHint":"Days before the date.","accessLog":"What was looked at","accessNone":"Nothing has been revealed yet.","accessClear":"Clear that list","pwHistory":"Earlier passwords","pwHistoryNone":"No earlier password kept.","pwHistoryRow":"%s \u2014 %d characters","customFields":"Extra fields","customAdd":"Add an extra field","customName":"What is it called?","customValue":"What is in it?","customSecret":"Keep it hidden like a password","customNone":"No extra fields.","codesMenu":"Recovery codes","codesLeft":"%d of %d left","codesUse":"Mark as used","codesNone":"No recovery codes saved.","usernameOnly":"Save just the username here","usernameSaved":"Saved %s with no password","vaultExportTitle":"Export the vault, encrypted","vaultExportAsk":"A passphrase for the file","vaultExported":"%d items written","vaultExportFailed":"Nothing was written.","vaultImportTitle":"Import a vault file","vaultImported":"%d items taken in","vaultImportBad":"That file was not read \u2014 wrong passphrase, or not a vault file.","vaultImportFile":"Import from another manager","backupNow":"Back the vault up now","backupDone":"Backed up","backupFailed":"The backup was not written.","backupNotSet":"No backup folder or passphrase \u2014 Settings has both.","backupDirName":"Keep encrypted vault backups in","backupDirHint":"A folder on this machine. Empty = no backups.","backupWordName":"Passphrase for the backups","backupWordHint":"Without it nothing is written: a backup nobody can read is not a backup.","backupKeepName":"Keep this many backups","backupKeepHint":"The older ones are deleted.","backupDaysName":"Back up every","backupDaysHint":"Days. 0 = only when you ask.","autoSubmitHere":"Send the form off after filling here","fillOnLoadHere":"Fill the login as this page loads","sessionTie":"Only offer this login in this browser","linkedName":"Sites that are the same account","linkedHint":"One group a line, hosts separated by spaces. amazon.de and amazon.com are built in.","aliasEmailName":"My address for plus-addresses","aliasEmailHint":"name@example.com becomes name+site@example.com on sign-up forms.","passLangName":"Passphrase language","passLangHint":"Which word list the word passphrases come from.","quickSearch":"Search the vault","quickSearchAsk":"Title, site, username or tag","quickNone":"Nothing matched.","vaultLockNow":"Lock the vault now","vaultLockedNow":"The vault is locked","vaultLockedShort":"The vault is locked.","vaultNoMaster":"There is no master password to lock it with.","changePw":"Open this site\u2019s change-password page","weakWalk":"Open the weak ones, one tab each","spellBothName":"Check spelling in both languages","spellBothHint":"German and English at once, where the dictionaries are installed.","cancel":"Cancel","dlFiles":"Downloads and files","dlNoSource":"The page this came from was not written down.","dlSource":"Open the page it came from","dlHash":"Work out the checksum","dlDeleteTitle":"Delete the file?","dlDeleteAsk":"Take \u201c%s\u201d off the disk as well as off the list?","dlDeleteFailed":"That file could not be deleted.","dlDelete":"Delete the file too","dlForget":"Take it off the list","dlKeepDaysName":"Drop finished downloads from the list after","dlKeepDaysHint":"Days. 0 = keep them. The files are never touched.","dlExport":"Export the list as CSV","dlExported":"%d rows written","dlLinkCopied":"The address is in the clipboard","dlCopyLink":"Copy the address","dlAgain":"Fetching %s again","dlAgainAction":"Download it again","dlNoneYet":"Nothing has finished downloading yet.","dlOpenLast":"Open the last download","dlGone":"That file is not there any more.","dlRunTitle":"Run a downloaded program?","dlRunAsk":"\u201c%s\u201d is a program from the internet. Open it?","dlNoOpener":"There is no xdg-open on this machine.","dlOpenFailed":"That did not open.","dlOpenWith":"Open this kind with\u2026","dlOpenWithName":"Open these kinds with your own program","dlOpenWithHint":"One rule a line: stl=prusa-slicer. A program that is not installed is ignored.","dlOpenWithMissing":"Not installed: %s","dlTemplateName":"Name saved files like this","dlTemplateHint":"{name} {ext} {site} {title} {date} {time} {n}. Empty = the name the site gives.","dlBlockedName":"Never download these kinds by themselves","dlBlockedHint":"Endings, separated by spaces. You are still asked rather than refused.","dlBlockedTitle":"Download this kind?","dlBlockedAsk":"\u201c%s\u201d is one of the kinds you said not to download on its own. Fetch it anyway?","dlAskForName":"Ask where to save only these kinds","dlAskForHint":"Endings, separated by spaces. The rest are saved without asking.","dlBigMbName":"Ask before a download bigger than","dlBigMbHint":"Megabytes. 0 = never ask.","dlBigTitle":"A big download","dlBigAsk":"\u201c%s\u201d is %s. Start it?","dlNoSpaceAsk":"\u201c%s\u201d is %s and there is not enough room for it. Start it anyway?","dlTwiceTitle":"Already downloaded","dlTwiceAsk":"\u201c%s\u201d is already in your downloads. Fetch it again?","dlTwiceKept":"The one you have was kept","privateDlName":"Private tabs download into","privateDlHint":"A folder of their own. Empty = the ordinary downloads folder. The file is yours either way; what a private tab never keeps is the record.","privateDlWipeName":"Empty that folder when the last private tab closes","privateDlWipeHint":"Only files, only that folder.","dlOriginName":"Write the source address into the file","dlOriginHint":"The xdg.origin.url attribute every file manager reads. It travels with the file.","dlCarryOn":"Carry on","dlHold":"Hold it","dlAtOnceName":"Downloads running at once","dlAtOnceHint":"The rest wait in a queue. 0 = no limit.","dlQueued":"Waiting","dlSpeedName":"Total download speed at most","dlSpeedHint":"Kilobytes a second. 0 = no cap. The engine has no rate limit, so this is done by holding downloads back for part of each second \u2014 a cap on average.","dlLaterStarted":"%d scheduled downloads started","dlLater":"Start it later\u2026","dlLaterAsk":"In how many minutes?","dlNotArchive":"That is not an archive this can read.","dlArchiveUnsafe":"That archive wants to write outside its folder (%s) \u2014 nothing was unpacked","dlExtractTitle":"Unpack it?","dlExtractAsk":"Unpack %d files into \u201c%s\u201d?","dlExtracted":"%d files unpacked into %s","dlExtractFailed":"Unpacking failed (%s).","dlExtract":"Unpack it","dlArchiveList":"Look inside","dlAutoExtractName":"Offer to unpack archives when they land","dlAutoExtractHint":"Into a folder of the archive\u2019s own name.","dlModTitle":"Into an instance?","dlModAsk":"Put \u201c%s\u201d into %s/mods?","dlRouteModsName":"Offer to put downloaded mods into an instance","dlRouteModsHint":"For a .jar, with the instance list from the games page.","dlModInfo":"What this mod says about itself","dlModInfoNone":"That jar says nothing about itself.","dlModInfoRow":"%s %s \u2014 %s, Minecraft %s","imgNotRead":"That picture could not be read.","imgNotWritten":"That picture could not be written.","imgConverted":"Saved as %s","imgConvert":"Save as PNG or JPEG","imgNoneBig":"No pictures big enough on this page.","imgSavingMany":"Saving %d pictures","imgSaveAll":"Save the pictures on this page","imgLeastName":"Only save pictures at least","imgLeastHint":"Pixels on the longer side. 0 = all of them.","imgBiggestName":"Fetch the full-size version where there is one","imgBiggestHint":"Only where the site\u2019s own addresses say how (Twitter, Wikimedia, Reddit).","dlNoTorrent":"No torrent client is installed here.","dlTorrentWent":"Handed to %s","dlNoYtdlp":"yt-dlp is not installed here.","dlYtdlp":"Save this video with yt-dlp","dlYtdlpAudio":"Save just the sound","dlYtdlpRow":"yt-dlp download","dlYtdlpStarted":"yt-dlp is running","dlNoClam":"clamscan is not installed here \u2014 nothing was scanned","dlScanName":"Scan finished downloads with ClamAV","dlScanHint":"Only if clamscan is installed. \u201cNo scanner\u201d and \u201cclean\u201d are never shown as the same thing.","dlScan":"Scan it","dlClean":"Clean","dlInfected":"ClamAV says \u201c%s\u201d is infected","dlNotGcode":"That is not a G-code file.","dlNoPrinter":"No printer address is set \u2014 Settings has the box.","dlPrinterSent":"%s sent to the printer","dlPrinterFailed":"The printer did not take %s.","dlPrinter":"Send it to the printer","printerUrlName":"3D printer (Moonraker) address","printerUrlHint":"http://printer.local:7125 \u2014 your own machine on your own network. Empty = off.","dlHashAllName":"Work out a checksum for every download","dlHashAllHint":"SHA-256, on this machine. Slower for very big files.","dlNotifyName":"Say when a download finishes","dlNotifyHint":"Only when you are in another window.","dlDoneTitle":"Download finished","dlDoneBody":"%s is ready","dlNoPreview":"There is nothing to preview in that file.","dlPreview":"Have a look at it","dlOpenIt":"Open it","dlBatchTitle":"Download a list","dlBatchAsk":"One address a line.","dlBatchNone":"No usable address in that list.","dlBatchStarted":"%d downloads started","dlBatch":"Download a list of addresses\u2026","dlLinkSaving":"Saving %s","altSaveName":"Alt+click on a link saves it","altSaveHint":"Instead of going there.","upNoImage":"There is no picture in the clipboard.","upNoBox":"There is no upload box on this page.","upPasted":"Put in the upload box","upPaste":"Paste the clipboard picture into the upload box","upRecent":"Upload something recent","upNoRecent":"Nothing recent to upload.","upStripped":"The camera data was taken out first","stripUploadName":"Take the camera data out of pictures before uploading","stripUploadHint":"EXIF and GPS. Done by writing the picture out again, so nothing else travels with it.","exifKeepHere":"Keep the camera data on this site","pageSaveOne":"Save the page as one file","pageSaved":"Saved as %s","pageSavedPart":"Saved as %s \u2014 %d pictures could not be read into it","pageSaveFailed":"That page could not be saved.","pageSaveMd":"Save the article as Markdown","mdSaved":"Saved as %s","mdNothing":"There is no article on this page to save.","dlSearch":"Search the downloads","dlSearchAsk":"Name, address or site","dlFilterKind":"Only this kind","dlFilterSite":"Only from this site","dlQueueMenu":"Waiting","dlQueueUp":"Up the queue","dlQueueDown":"Down the queue","sessionDlName":"This browser downloads into","sessionDlHint":"A folder for this virtual browser. Empty = the ordinary one.","barMenu":"The address bar","barPlaceholder":"Search or enter address","barNotSecure":"Not secure","barNotSecureTip":"This page came over http. Anything typed here goes out in the clear.","barSecure":"Secure connection","barLookalike":"This name is dressed up as another one","barLookalikeTip":"It reads like %s. Look at the address before you type anything.","barInUseTip":"This page is using the camera, the microphone or the screen","barNoPage":"No page here.","barCertLook":"Look at the certificate","barCertNone":"No certificate came back.","barCertTitle":"Certificate for %s","barCookieRule":"Cookies: %s","barCookieAsIs":"as the browser is set","barAllowed":"What this site may do","barLockTip":"What this page is allowed to do, and who it says it is","barCopyTip":"Copy the address","barClearTip":"Clear the bar","barQrTip":"Show the address as a QR code","barAnswerCopied":"Copied: %s","barSettingRow":"Settings: %s","barDidYouMean":"Did you mean %s?","barSearchSite":"Search %s \u2014 type what you are looking for","barBackground":"Opened in a background tab","barKeywordTitle":"A keyword for this","barKeywordAsk":"The word that opens \u201c%s\u201d","barKeywordSet":"\u201c%s\u201d opens it now","barKeywordBad":"A keyword is one word, with no spaces \u2014 nothing was set.","barNeverSuggest":"Never suggest this site again","barNeverAgain":"%s will not be suggested again","barOtherWindow":"In another window","barEngines":"Search with","barScopeHint":"@tabs, @bookmarks, @history, @settings, @downloads, @notes","barProgressName":"Show the loading progress in the address bar","barProgressHint":"A thin line along the bottom of the bar.","barDimPathName":"Show the domain bright and the rest dim","barDimPathHint":"So paypal.com.evil.ru reads as evil.ru. Only while you are not editing the address.","barDecodeName":"Show addresses as readable text","barDecodeHint":"%20 and %C3%BC and punycode shown as the letters they stand for. Copying still gives the real address.","barHideSchemeName":"Leave out https:// and www.","barHideSchemeHint":"The address comes back in full the moment you start editing.","barInlineName":"Complete a domain as I type","barInlineHint":"From the sites you actually visit, with the rest selected.","barRowsName":"Rows in the drop-down","barRowsHint":"How many suggestions to show.","barTextSizeName":"Address bar text size","barTextSizeHint":"Per cent, apart from the rest of the chrome.","barLockName":"Show the lock in the address bar","barLockHint":"Click it for what the page is allowed to do.","barCopyBtnName":"A copy button in the address bar","barCopyBtnHint":"At the right-hand end.","barClearBtnName":"A clear button while editing","barClearBtnHint":"An \u00d7 at the right-hand end.","barQrBtnName":"A QR button in the address bar","barQrBtnHint":"Shows the address as a QR code to point a phone at.","barBottomName":"Put the toolbar under the page","barBottomHint":"The whole chrome, address bar included.","barSourcesName":"What the drop-down may suggest","barSourcesHint":"history, bookmarks, tabs, answers, search, settings, windows \u2014 leave out the ones you do not want.","privateEngineName":"Private tabs search with","privateEngineHint":"The name of an engine, or empty for the usual one.","langEnginesName":"German searches go to","langEnginesHint":"An engine name for de and one for en, as de=name en=name. Empty = always the default.","moneyRatesName":"Fetch exchange rates for \u201c20 usd in eur\u201d","moneyRatesHint":"Once a day at most, from the European Central Bank's own daily file. Off = the answer says so rather than guessing.","moneyFetched":"Exchange rates for %d currencies","moneyFailed":"The rates could not be fetched.","enginesName":"My own search engines","enginesHint":"One a line: name|https://example.com/?q=%s|keyword. The address has to say where the words go.","barOpenSearch":"Add this site's search","barOpenSearchAdded":"%s can be searched from the bar now","barNoSearch":"No search came back from this site.","devRequests":"What this page fetched","devLogRow":"Write the requests down","devLogOn":"Requests are being written down","devLogOff":"The request log is off and empty","devLogEmpty":"Nothing in the request log.","devLogClear":"Clear the log","devLogHar":"Write a HAR file","devHarWritten":"%d requests written \u2014 the responses are not in it, because this browser sees requests","devRuleAdded":"%s is blocked now","devRulesName":"Addresses to block or send elsewhere","devRulesHint":"One a line: a piece of an address blocks it, and \u201cwhat -> where\u201d sends it to a file or another address.","devAgentMenu":"Tell this site the browser is","devAgentSet":"This site is told the browser is %s (%s)","devAgentOff":"%s is told the truth again","devAgentOffRow":"The truth","devHeadersName":"Headers to add","devHeadersHint":"One a line: \u201cName: value\u201d for every site, or \u201chost | Name: value\u201d for one.","devHeadersMenu":"What the server sent","devHeadersGot":"HTTP %d, %d headers, %d security headers missing","devHdrMissing":"Missing: %s","devHdrHsts":"HSTS","devHdrCsp":"a content policy","devHdrNosniff":"no-sniff","devHdrFrames":"frame rules","devHdrReferrer":"a referrer policy","devHdrPermissions":"a permissions policy","devHttp":"Send a request","devHttpAsk":"Method and address, as \u201cGET https://example.com/\u201d","devHttpHeaders":"Headers, one a line (Name: value). Empty for none.","devHttpBody":"The body","devHttpBad":"That is not an http address.","devWsMenu":"WebSockets","devWsOff":"Switch \u201cnote the live connections\u201d on in the page guards first.","devWsNone":"This page has opened none.","devWsOpen":"open","devWsClosed":"closed","devTimingMenu":"How long it took","devTiming":"First byte after %d ms, loaded after %d ms","devTtfb":"First byte: %d ms","devLoaded":"Loaded: %d ms","themeMine":"My themes","themeEditor":"Edit this theme","themeEditorSub":"Change the eight colours a theme is made of and save it under a name of your own.","themeSave":"Save as my theme","themeSaved":"Saved as \u201c%s\u201d","themeName":"A name for it","themeDrop":"Delete \u201c%s\u201d","themeExport":"Save this theme as a file","themeExported":"Written to %s","themeImport":"Read a theme from a file","themeImported":"\u201c%s\u201d is yours now","themeImportBad":"No colours could be read out of that file.","themeAccent":"Another accent colour","themeAccentSuffix":"(my accent)","themeFaint":"%s on %s is %.1f:1, and wants %.1f:1","themeFaintNone":"Everything in it can be read.","uiSizeName":"The size of the browser's own furniture","uiSizeHint":"Tabs, toolbar, menus and panes. The pages themselves are not touched \u2014 that is page zoom.","uiSize_compact":"Compact","uiSize_normal":"Normal","uiSize_big":"Big","uiSizeSet":"Chrome: %s","uiFontName":"The font the browser is lettered in","uiFontHint":"Its own menus, tabs and panes. Monospace families are listed first.","uiRadiusName":"How round the corners are","uiRadiusHint":"0 is square. Applies in every look.","uiGlassName":"How see-through Glass is","uiGlassHint":"Only the Glass look reads this.","uiLabelsName":"Words on the toolbar instead of glyphs","uiLabelsHint":"The buttons keep their icons; the words are added beside them.","uiFocusName":"How keyboard focus is drawn","uiFocusHint":"In the browser's own windows, not on websites.","uiFocus_normal":"As usual","uiFocus_thick":"A thick outline","uiFocus_underline":"An underline","uiFocus_off":"Not at all","uiAnimName":"Animate the browser's own chrome","uiAnimHint":"Off = tabs, panes and menus appear instead of sliding.","uiTabMinName":"Narrowest a tab may get","uiTabMaxName":"Widest a tab may get","uiToolbarName":"How tall the toolbar is","uiPlainMenusName":"Plain menus with bigger rows","uiPlainMenusHint":"No icons, more room between the rows.","appearanceResetName":"Put appearance back as it came","appearanceResetHint":"Theme, look, fonts, sizes and site styles. One backup is kept so this can be undone.","appearanceReset":"Appearance is back as it came","appearanceUndo":"Undo that reset","pageLookName":"How websites are shown","nightDimName":"Dim pages in the evening","nightDimHint":"Lowers the brightness of the page only \u2014 the browser's own windows keep theirs.","nightFromName":"From","nightToName":"until","warmNightName":"Warmer colours in the evening","warmNightHint":"The same hours as the dimmer.","warmStrengthName":"How warm","greyName":"Show pages in grey","greyHint":"Everywhere, or per site from the page menu.","greyHere":"Show %s in grey","greyOn":"Grey","greyOff":"Colour again","scrollbarsName":"Scrollbars on websites","scrollbarsHint":"A site that draws its own can be excused from the page menu.","scrollbars_normal":"As the site made them","scrollbars_thin":"Thin","scrollbars_themed":"Thin and in my colours","scrollbars_hidden":"Not drawn","scrollbarsHere":"Leave %s's scrollbars alone","selectionName":"Selected text in my accent colour","selectionHint":"On websites. The browser's own windows already use it.","unstyledName":"Give pages with no background of their own mine","unstyledHint":"A plain .txt or an old page is otherwise engine-white.","siteFontSizeName":"Text size for this site","siteFontSizeAsk":"Font size in pixels for %s. Empty = as it comes.","siteFontSizeSet":"%s is %dpx now","siteFontsName":"The fonts websites fall back to","siteFontsHint":"When a page names no font of its own.","siteFont_standard":"Standard","siteFont_serif":"Serif","siteFont_sans":"Sans-serif","siteFont_mono":"Monospace","siteFont_emoji":"Colour emoji","emojiFontHint":"Chromium's pictograph family \u2014 what it uses when a page asks for an emoji.","sessionTintName":"This virtual browser's own colour","sessionTintHint":"On the tab strip and the address bar, so which account is in use is never a guess.","privateTintName":"The colour of private tabs","privateTintHint":"Their name in the strip and a line over the toolbar.","monoFaviconsName":"Favicons in one colour","monoFaviconsHint":"The shapes are kept, the brand colours are not. Bookmarks keep theirs.","statusLineName":"Where a link under the mouse is said","statusLineHint":"Bottom left over the page, in the address bar, or nowhere.","statusLine_bottom":"Bottom left","statusLine_bar":"In the address bar","statusLine_off":"Nowhere","statusSizeName":"How big that line is","titleFormatName":"What the window is called","titleFormatHint":"Hyprland rules and the task switcher have nothing else to tell two windows apart by.","titleFormat_full":"Page \u2014 browser","titleFormat_page":"The page only","titleFormat_site":"The site only","titleFormat_session":"Page \u2014 virtual browser \u2014 browser","autoHideName":"Hide the tabs and the toolbar until I want them","autoHideHint":"They come back when the mouse reaches the top edge, or with Ctrl+L.","revealFsName":"Show the chrome at the top edge in fullscreen","revealFsHint":"In F11 fullscreen, not while a video has the screen.","pageColourName":"Let a site tint the toolbar","pageColourHint":"Its own theme-color meta tag. A virtual browser's colour wins over it.","themedErrorsName":"Show failed loads in the browser's own style","themedErrorsHint":"Plain, in your palette, with Enter to try again.","errTitle":"That page did not load","errUnknown":"The server did not answer.","errAgain":"Try again (Enter)","startLayoutName":"What the start page shows","startClockName":"The clock","startSecondsName":"With seconds","startDateName":"The date","startHour24Name":"Twenty-four hour clock","startSearchName":"Where the search box sits","startSearch_middle":"In the middle","startSearch_top":"At the top","startSearch_bottom":"At the bottom","startQuickName":"How big the quick links are","wallFolderName":"A folder of wallpapers","wallFolderHint":"The start page rotates through the pictures in it. Nothing is copied and nothing is fetched.","wallEveryName":"Change the picture every","wallEveryHint":"0 = a different one on every new tab.","darkSiteName":"Sites to leave alone","darkSiteHint":"One host a line. These are never darkened or re-themed \u2014 the browser's own list of already-dark sites is added to it.","darkSiteBuiltin":"The browser already leaves these alone: %s","darkSiteHere":"Leave %s alone","darkSiteOn":"%s is left alone now","darkSiteOff":"%s is themed again","lookFlat":"Flat mono","lookFlatSub":"Square corners, no shadows, no cards, lettered like a terminal.","followSchemeName":"Follow the desktop's light or dark setting","followSchemeHint":"Reads the XDG portal's colour-scheme and switches between your two picks.","schemeDarkName":"The dark theme to use","schemeLightName":"The light theme to use","colourFileName":"Follow a colour file","colourFileHint":"A kitty.conf, base16 YAML or VS Code theme. The browser re-themes when that file changes \u2014 nothing is fetched.","colourFileWatching":"Following %s","themeStarName":"Favourite themes","themeStarHint":"\u201cNext favourite theme\u201d steps through the ones you starred; Settings\u2019 keyboard list can give it a key.","themeStar":"Star this theme","themeUnstar":"Take the star off","themeCycle":"Next favourite theme","themeCycled":"%s","themeNoStars":"Star a theme or two first \u2014 Settings has the list.","rawViewName":"Plain files on my background","rawViewHint":"A .txt, a .json or an image opened on its own gets the theme's background instead of engine-white.","rawCheckerName":"A checkerboard behind images","rawCheckerHint":"So a transparent PNG is readable.","darkPdfName":"Dark PDF pages","darkPdfHint":"Inverts the page and puts the pictures back.","devtoolsDarkName":"DevTools in the browser's colours","devtoolsDarkHint":"Dark or light to match the theme, set before the window opens.","rawViewsHere":"Plain files on my background","lookMenuName":"The shape of it","appearanceMenu":"How it looks","a11yName":"Reading a page","a11yMenu":"Reading help","a11yNoAlt":"no alt text","a11yUnderlineLinks":"Always underline links","a11yBigTargets":"Bigger things to click","a11yFixContrast":"Darken text that is too faint","a11yAltText":"Alt text on hover, and mark pictures with none","a11yBoldStarts":"Bold the start of each word","a11yBigBars":"Bigger scrollbars on pages","a11yHyphenate":"Hyphenate long words","a11yReflow":"Wrap text to the window instead of scrolling sideways","a11yNoSticky":"Unstick headers and footers","a11yNoRefresh":"Stop pages reloading themselves on a timer","a11yEscapeOverlays":"Esc closes a dialog the site will not","a11yFocusInView":"Keep the focused thing in the middle","a11yFocusTooltips":"Show tooltips on keyboard focus","a11yHoverZoom":"Show a bigger copy of a picture on hover","a11yAltDragSelect":"Alt-drag selects a link's words","a11ySpatial":"Arrow keys move between links and buttons","a11yCaret":"Caret browsing (F7)","a11yCaretStyle":"A caret in my accent colour","a11yMonoAudio":"Mix page sound to mono","a11yBalance":"Left and right balance","a11yTextZoom":"Text size only","a11yFont":"A font for pages","a11yFontHint":"A dyslexia-friendly family, if one is installed. Empty = the page's own.","a11yColourFilter":"Colour-blindness filter","a11yFilter_":"Off","a11yFilter_fixrg":"Correct red-green","a11yFilter_fixby":"Correct blue-yellow","a11yFilter_protan":"Simulate protanopia","a11yFilter_deutan":"Simulate deuteranopia","a11yFilter_tritan":"Simulate tritanopia","a11ySpacing":"Line, word and letter spacing","a11ySiteOnly":"Only on %s","a11ySiteCleared":"%s reads the usual answers again","a11yAuditName":"What is wrong with this page","a11yAuditRow":"%d fields with no label, %d pictures with no alt text, %d faint, %d heading jumps","a11yAuditClean":"Nothing obvious is wrong with it.","a11yJumpHeading":"Next heading","a11yJumpHeadingBack":"Previous heading","a11yJumpLandmark":"Next landmark","a11yJumpField":"Next form field","a11yMain":"Skip to the content","a11yField":"Into the first text field","a11yCaretOn":"Caret browsing is on \u2014 the arrow keys move a cursor, Shift selects","a11yCaretOff":"Caret browsing is off","a11yFindCursor":"Ctrl on its own flashes a ring round the pointer","a11yTextOnlyZoom":"Zoom only the text, not the pictures","a11yMagnifier":"A magnifying lens that follows the pointer","a11yLensScale":"How much the lens magnifies","a11ySoundCues":"A short sound when a page or a download finishes","a11ySoundCuesHint":"Two tones made by the browser itself. Nothing is downloaded.","a11yTabStrip":"Next tab from the keyboard","a11yTabStripBack":"Previous tab from the keyboard","a11yTabMenu":"This tab's menu, from the keyboard","a11yPageMenu":"The page menu at what has the focus","a11yNames":"Name the browser's own buttons for a screen reader","a11yNamesDone":"%d things named","a11yPanel":"Reading help for this page","a11yCapOn":"Captions on \u2014 recorded and transcribed on this machine","a11yCapOff":"Captions off","a11yCapName":"Live captions for what a tab is playing","a11yCapHint":"Records the machine's own output a few seconds at a time and transcribes it with the program you name. Nothing is bundled, nothing is downloaded and no sound leaves the machine.","a11yCapNoTool":"That needs a recorder and a transcriber \u2014 name them in Settings (parec and whisper-cli, for example).","a11yCapNoTranslator":"That needs a translator on this machine \u2014 name one in Settings (trans or argos-translate).","a11yCapRecorder":"The recorder","a11yCapTranscriber":"The transcriber","a11yCapTranslator":"The translator","a11yCapModel":"The model file","a11yCapTranslate":"Translate the captions","a11yCapTranslateHint":"A video's own captions, translated by the program you name, line by line.","a11yCapFound":"Found: %s","a11yCapMissing":"not installed","descA11y":"Reading a page: contrast, spacing, the keys that move through it, captions and sound.","a11ySpacingLine":"Line spacing","a11ySpacingWord":"Word spacing","a11ySpacingLetter":"Letter spacing","a11yPanelHint":"Every one of these can be set for one site alone from the reading-help popup.","navMenu":"Getting around","navAutoScroll":"Middle-click and move to scroll","navBoxLinks":"Alt-drag a box over links","navClickableUrls":"Make plain-text addresses clickable","navNoScrollHijack":"Stop the site hijacking the scroll","navNoKeyGrab":"Stop the site grabbing keys","navStopRefresh":"Stop the site refreshing itself","navRefreshStopped":"A refresh this page wanted was stopped","navAllowRefresh":"Allow it this once","navOpenedLinks":"%d links opened in the background","navNoLinks":"No links in the selection.","navNoUrlThere":"That selection is not an address.","navOpenSelection":"Go to the selected address","navOpenAllLinks":"Open every link in the selection","navBoxOpen":"Open the links the box caught","navImages":"The pictures on this page","navNoImages":"No pictures on this page.","navImgOpen":"Open it","navImgCopy":"Copy its address","navImgSave":"Save it","navImgCopyAll":"Copy every address","navViewImage":"Show a picture full size","navStructure":"The shape of this page","navFrames":"The frames in this page","navNoFrames":"This page has no frames.","navFrameBlocked":"not drawn","navReloadFrame":"Reload a frame","navFindAll":"Find in every tab","navNoMatches":"Nothing in any tab.","navFindLink":"Find a link by its words","navFindMarks":"Mark every match","navMobileOn":"The mobile version \u2014 phone width and a phone's user agent","navMobileOff":"Back to the full version","navRewriteName":"Addresses to rewrite before loading","navRewriteHint":"One rule a line, as from -> to. For example reddit.com -> old.reddit.com","navNoteName":"A note on this page","navNoteAsk":"What should this page remind you of? It comes back whenever you visit it.","navBackOnline":"Back online \u2014 loaded","navArchiveName":"The archived copy","navArchiveAsk":"Open the newest archived copy of %s? That asks archive.org for it, which tells them you looked.","navErr_dns":"That name could not be looked up.","navErr_refused":"The server refused the connection.","navErr_timeout":"The server did not answer in time.","navErr_cert":"The certificate could not be trusted.","navErr_unknown":"The load failed and the engine said nothing about why.","navErr_other":"The load failed.","navOtherBrowser":"Open in the other browser","navPlayer":"Open with the player","navNoPlayer":"%s is not installed.","navHandedToPlayer":"Handed to %s","navPlayerName":"The external player","navPlayerHint":"mpv, or whatever plays a stream better than a web page does.","navCacheCleared":"%s's cache and workers are gone \u2014 reloading","navPrintSelection":"Print the selection","navNoSelection":"Nothing is selected.","navPrinted":"Written to %s","navRetryName":"Try a failed load again when the network is back","navRetryHint":"A check every few seconds, and the page loads itself once there is an answer.","navAppName":"Which program should open this?","navAppAsk":"A %s: address from %s. Which program should open it? The answer is remembered.","navNoApp":"Nothing on this machine can open a %s: address.","navAppFailed":"%s would not start.","navHandedTo":"Handed to %s (%s:)","navShellName":"Open this somewhere else?","navShellAsk":"A %s: address from %s. Let Windows open it with whatever program owns that kind of address? The answer is remembered.","navShellGave":"Handed to Windows (%s:)","navNoAppsYet":"Nothing has been asked yet.","navAppForgotten":"%s is asked again next time","navPreviewName":"Look at a link without going there","navPreviewKeep":"Keep it as a tab","navPreviewClose":"Close","navInfoName":"What this page is made of","navInfoLinks":"Its links","navInfoMeta":"Its meta data","navInfoMedia":"Its media","navPane":"Open in the side pane","navQrName":"What the code says","navQrRead":"Read the QR code","navQrNone":"No readable QR code in that picture.","navQrOpen":"Open it","navClearCache":"Clear this site's cache and reload","linkPreviewName":"Shift and hover shows the linked page","linkPreviewHint":"A small window, in a private jar, that can be kept as a tab.","descNav":"Getting around a page: what it is made of, what to do with a selection, and the page's own cleverness out of the way.","navHint":"These can be set for one site alone from the getting-around popup.","navErrProxy":"A proxy is switched on \u2014 it may be the proxy that failed, not the site.","perfMenu":"What this is costing","perfFreed":"%d tabs asleep","perfFreeNow":"Free memory now","perfKeepAwake":"Never sleep this site","perfKeepAwakeName":"Sites that are never slept or frozen","perfKeepAwakeHint":"Amazon Music stops when its tab is discarded, Discord drops the call. One host a line.","perfFreeze":"Freeze the idle tabs","perfFreezeName":"Freeze a background tab after","perfFreezeHint":"Frozen keeps the page and runs no timers; asleep gives the whole renderer back. 0 = never.","perfHog":"%s has been using %d%% of a processor in the background","perfHogName":"Say when a background tab keeps the processor busy","perfHogHint":"Measured over half a minute, and only for tabs you are not looking at.","perfStopped":"That tab's renderer was stopped \u2014 reloading","perfStop":"Stop this page's process","perfNice":"Give background tabs a lower claim on the processor","perfNiceHint":"Only ever downwards, so nothing can be starved \u2014 the front tab and a game just win.","perfPressure":"The machine is short of memory \u2014 %d tabs asleep","pressureNoPsi":"This machine has no memory-pressure counter, so that cannot be watched here \u2014 set a total memory budget instead, which works anywhere.","perfPressureName":"Sleep background tabs before the machine swaps","perfPressureHint":"Reads the kernel's own memory-pressure figure (PSI), not a free-memory guess.","perfBudgetName":"Total memory budget","perfBudgetHint":"Above this, the tabs you have not touched longest go to sleep. 0 = no budget.","perfLeak":"%s has grown by %s and keeps growing \u2014 a reload would give it back","perfLeakName":"Notice a tab whose memory keeps climbing","perfRecovered":"That tab crashed (%s) and was loaded again where you were","perfCrashUnknown":"no reason given","perfBadge":"%d ms \u00b7 %s \u00b7 %d requests","perfBadgeName":"How long this page took","perfData":"What each tab has pulled down","perfLazyName":"Make off-screen pictures wait","perfLazyDone":"%d pictures told to wait","perfVideoCapName":"Cap video quality at","perfVideoCapHint":"YouTube through its own player, Twitch through the setting it reads.","perfTimerFloor":"Slow this site's timers to at least","perfPauseHidden":"Pause animations in tabs nobody is looking at","perfStopHiddenVideo":"Stop silent video in a tab you cannot see","perfSoftReload":"Reload and keep my place","perfGpu":"What the graphics card is doing","gpuPickName":"Which graphics card draws the pages","gpuPickHint":"On a machine with more than one card the system picks for you, and the quiet card is the slow one. Applies when the browser is started again.","gpuAskName":"Ask at every start which card to use","gpuAskHint":"A window before the browser opens, listing every card this machine has.","gpuAuto":"Let the system decide","gpuBoot":"the one the system starts on","gpuDrives":"your screens are on this one","gpuRestart":"Saved \u2014 it takes effect the next time the browser starts.","gpuNone":"Only one graphics card here, so there is nothing to choose.","gpuWindows":"Windows decides which card a program draws with, in Settings \u2192 System \u2192 Display \u2192 Graphics. These are the cards it has to offer.","gpuOpenWindows":"Open Windows' graphics settings","gpuMac":"macOS decides which card a program draws with and gives no way to change it per program. These are the cards it has.","perfGpuNone":"chrome://gpu said nothing.","perfVaapiName":"Hardware video decoding (VA-API)","perfVaapiRestart":"Hardware video decoding applies after a restart","perfFlags":"Chromium flags worth having","perfFlagRestart":"That flag applies after a restart","flagGpuRaster":"draw pages on the graphics card","flagZeroCopy":"pass textures without copying them","flagSmooth":"smooth scrolling in the engine","flagNoDirect":"turn off the direct video decoder","flagIgnoreBlock":"use the GPU even when Chromium distrusts the driver","flagVaapi":"hardware video decode and encode","flagNoWorkarounds":"skip Chromium's driver workarounds","flagProcLimit":"at most four renderer processes","flagPerSite":"one process per site, not per tab","flagNoThrottle":"do not throttle background timers","perfCacheName":"Cache on disk, at most","perfCacheMemoryName":"Keep the cache in memory only","perfStartup":"Where the start-up time went","perfScripts":"What each userscript cost","perfPreloadName":"Fetch a link the mouse rests on","perfPreloadHint":"Off for private tabs, always: a prefetch is a visit as far as the server is concerned.","perfPreconnectName":"Open connections early to the sites I use most","perfPreconnectHint":"It tells those sites the browser is running before you have asked for anything.","perfHousekeep":"Tidy up now","perfHeavy":"%s used %s last time \u2014 open it in a lite tab?","perfLogName":"Keep a small log of start-up time and memory","perfUnusedName":"Offer to close tabs not looked at for","perfClosedUnused":"%d tabs closed, %d of them bookmarked first","perfCloseUnused":"Close the tabs I have not used","perfStageName":"Restore a big session in stages","perfStageHint":"Only the tab you were on is loaded; the rest wait until you open them.","perfTabMemory":"%s of memory","descPerf":"What the browser is costing: memory, the processor, what pages pull down, and the engine's own knobs.","perfHousekeepName":"Tidy up when I am not using it","perfCapOff":"As it comes","recMenu":"Recording and captures","recOn":"Recording this tab","recBuffer":"Keeping the last seconds of this tab","recOff":"Recording stopped","recSaved":"Written to %s","recClip":"Clip written to %s","recFailed":"Nothing could be written.","recNoBuffer":"Nothing is being kept \u2014 start the replay buffer first.","recNoFfmpeg":"ffmpeg is not installed \u2014 written as a GIF instead.","recNoAudio":"No recorder named for the sound \u2014 the picture is recorded without it.","recStart":"Record this tab","recStop":"Stop recording","recRegion":"Record part of the tab","recBufferStart":"Keep the last seconds","recSaveClip":"Save the last seconds","recAudioOnly":"Record only the sound","recVoice":"Record with the microphone","recFpsName":"Frames a second","recFormatName":"Recordings are saved as","recQualityName":"Recording quality","recQuality_best":"Best","recQuality_good":"Good","recQuality_small":"Small","recBufferName":"How many seconds the replay buffer keeps","recClicksName":"Draw clicks and keys into a recording","recClicksHint":"For a tutorial: a ring where you click and the key you pressed, in the recording only.","recTrim":"Cut the ends before saving","recTrimAsk":"Seconds to cut from the start and the end, separated by a comma.","shotNone":"No captures yet.","shotHistory":"Recent captures","shotCopyImage":"Copy the picture","shotAnnotate":"Mark it up","shotDelete":"Delete it","shotDeleteAll":"Delete them all","shotDeleted":"%d deleted","shotNoImage":"That is not a picture this can open.","shotCopiedLink":"Copied, with the page's address","shotMarkdown":"Copied as Markdown, with the source","shotStamp":"Add the address and the date","shotStampName":"Put the address and the date on a capture","shotAnnotateName":"Mark up a capture","shotSelectionImage":"The selection as a picture","shotMobile":"Capture it at phone width","shotHidpi":"Capture it at twice the size","shotInner":"Capture a scrolling area","shotPdfQuick":"Save as PDF, no questions","shotPdfLong":"Save as one long PDF page","shotAllTabs":"Capture every tab","shotAllTabsDone":"%d tabs captured into %s","shotContactSheet":"A contact sheet of every tab","shotBackground":"Capture this tab without going to it","shotTimelapse":"Capture this page every few minutes","shotTimelapseOn":"Capturing %s every %d minutes","shotTimelapseOff":"Timelapse stopped","shotDiff":"Compare with the last capture","shotDiffNone":"There is nothing to compare with yet.","shotDiffDone":"%d pixels changed","shotDiffSized":"%d pixels changed in the part both pictures share: they are not the same size (%s and %s)","shotOcr":"Copy the text out of a picture","shotOcrNone":"tesseract is not installed \u2014 name it in Settings if it is somewhere else.","shotOcrDone":"%d characters copied","shotQrArea":"Read a QR code in the selected area","shotUpload":"Upload it to my server","shotUploadName":"Where a capture is uploaded","shotUploadHint":"An https:// address it is PUT to, or user@host:/path for scp. Opt-in, and nothing is uploaded until you pick this.","shotUploaded":"Uploaded \u2014 the link is on the clipboard","shotUploadFailed":"That upload did not work.","shotUploadOff":"No upload address is set.","shotDrag":"Drag a capture out","ocrPathName":"The OCR program","ffmpegPathName":"The ffmpeg program","descRecord":"Recording a tab, the replay buffer, and what happens to a capture afterwards.","keyMenu":"Keys and the mouse","keyGuardName":"Keys to ignore","keyGuardHint":"F1, Insert and the other strays. One key a line, as Qt writes them.","keyThroughName":"Sites that keep their own keys","keyThroughHint":"Ctrl+K belongs to Discord's search and Ctrl+S to an editor in a tab.","keyThroughHere":"Let %s keep %s","keyOffHere":"Turn this shortcut off on %s","keyChordName":"Two-step keys","keyChordHint":"The leader key, then a letter. For the commands that are worth a key but not a key of their own.","keyChordWaiting":"\u2026then a letter","keyChordNone":"Nothing is bound to \u201c%s\u201d.","keyNoLast":"Nothing has been run yet.","keyRepeat":"Do that again","keyQuitAgain":"Press Ctrl+Q again to close the window","keySessionNumber":"Go to virtual browser %d","keyGroupCycle":"Next tab in this group","keyPeek":"Peek at the tab I was on","keyMru":"Ctrl+Tab goes in most-recently-used order","keyMruHint":"Off: Ctrl+Tab goes along the strip, as it always did.","keyReadline":"Terminal keys in the address bar","keyReadlineHint":"Ctrl+W, Ctrl+U, Ctrl+A, Ctrl+E, Alt+B and Alt+F, as a shell has them.","keyEditor":"Edit a text box in my editor","keyEditorName":"The editor for a text box","keyEditorHint":"kitty nvim, or whatever opens on a file and exits when it is done.","keyNoEditor":"%s is not installed.","keyNoField":"There is no text box with the caret in it.","keyEditedBack":"Written back into the page","keyRecover":"Bring back text the page lost","keyNoLostText":"Nothing was kept for this field.","keyDraftName":"Keep what I type, in case the page reloads","keyDraftHint":"In the page's own session storage, which dies with the tab. Nothing is written to disk.","keyScriptName":"The script a key runs","keyScriptHint":"A file in the plugins folder, or the title of a javascript: bookmark.","keyScriptRan":"%s ran on this page","keyNoScript":"No script called \u201c%s\u201d.","keyFirstField":"Into the page's first text box","keyVimName":"Vim keys on a page","keyVimHint":"j and k scroll, gg and G jump, H and L are history, gt and gT are tabs, / finds, gi goes to the first box.","keySwipeBack":"Back","keySwipeForward":"Forward","keyGlobalName":"Global keys, for the window manager","keyGlobalHint":"The commands to bind in Hyprland. The browser answers them on its single-instance socket.","mouseMenu":"The mouse","mouseSuperDrag":"Drag a link to open it, drag text to search it","mouseLasso":"Drag a box over links to open them","mouseSwipeNav":"Two fingers sideways go back and forward","mouseAutoScroll":"Middle-click and move to scroll","mouseAutoScrollHint":"Off by default: middle-click pastes on this desktop.","mouseHoverSwitch":"Hovering a tab while dragging switches to it","mouseTabDouble":"Double-click on a tab","mouseTabMiddle":"Middle-click on a tab","mouseBarDouble":"Double-click on the empty strip","mouseAct_close":"Close it","mouseAct_duplicate":"Duplicate it","mouseAct_newtab":"New tab","mouseAct_mute":"Mute it","mouseAct_pin":"Pin it","mouseAct_reload":"Reload it","mouseAct_nothing":"Nothing","mouseNewTabMiddle":"Middle-click on the new-tab button opens the clipboard","mouseWheelStep":"Wheel step","mouseKeyStep":"Arrow-key step","mouseStepHint":"0 = as the engine does it.","mouseGestureHelp":"Hold the right button to see this","keyLayoutName":"Shortcuts follow the key, not the letter","keyLayoutHint":"On a German keyboard Ctrl+Z, Ctrl+/ and Ctrl++ are somewhere else: both keys are bound so the right one fires.","keyGlobalRaise":"Bring the browser to the front","ctxOpenLinkTab":"Open the link under the pointer in a tab","ctxCopyLink":"Copy the link under the pointer","ctxSaveImage":"Save the picture under the pointer","ctxCopyImage":"Copy the picture's address","ctxOpenImage":"Open the picture","ctxSearchSelection":"Search for what is selected","ctxNothingThere":"There is nothing of that kind under the pointer.","keyOffHereNow":"That shortcut is switched off on this site.","descKeys":"The keys, the keys a site keeps, and what the mouse does.","splitView":"Two pages side by side","splitOn":"Split view","splitOff":"One page again","splitNeedsTwo":"That needs a second tab to put beside this one.","splitSync":"Scroll both halves together","splitLink":"Open the link beside this page","tabStripName":"Where the tabs are","tabStrip_top":"Above the page","tabStrip_bottom":"Below the page","tabStrip_left":"Down the left side","tabStrip_right":"Down the right side","tabStripWidthName":"How wide a side strip is","tabRowsName":"Rows of tabs","tabRowsHint":"More than one row instead of scrolling. Qt's tab bar does not wrap, so the tabs are squeezed to fit across \u2014 two rows is readable, ten is not.","stackSite":"Fold this site's tabs into one","stackNeedsTwo":"There is only one tab on this site.","stackDone":"%d tabs of %s folded together","wsMenu":"Sets of tabs","wsSave":"Keep these tabs as a set","wsAsk":"What should this set of tabs be called?","wsSaved":"\u201c%s\u201d keeps %d tabs","wsOpened":"\u201c%s\u201d \u2014 %d tabs","wsNone":"No sets of tabs yet.","wsDrop":"Forget \u201c%s\u201d","outsideAskName":"Links from other apps ask which virtual browser","outsideAskHint":"A link from Discord or the terminal can go into the browser you are signed in to for that site.","outsideAsk":"Which virtual browser should open %s?","outsideRuleName":"Rules for links from other apps","outsideRuleHint":"One a line, as host = virtual browser. Everything else asks, or uses the one in front.","windowStateName":"Each window comes back as it was","windowStateHint":"Its tabs, its virtual browser, its size and where it was on the screen.","trbarSaid":"This page looks like it is in %s.","trbarOnce":"Translate it","trbarAlways":"Always translate %s","trbarNever":"Never translate %s","trbarNo":"Not now","trOfferName":"Offer to translate a page in another language","trOfferHint":"A plain bar at the top, once per language per tab. Your own translator is used when you have one named.","trWorking":"Translating %d blocks on this machine\u2026","trDone":"Translated","trNothing":"There is nothing on this page to translate.","trUndone":"%d blocks back as they were","trUndo":"Put the original words back","trSide":"The page and its translation side by side","trNow":"Translate this page","trRulesName":"Languages you have decided about","trLocalHint":"With a translator named in Settings the page's text never leaves the machine; without one, translating sends the page to Google Translate.","pdfKeys":"PDF keys","pdfNext":"Next page in this PDF","pdfPrev":"Previous page in this PDF","pdfFit":"Fit the width","pdfRotate":"Rotate it","pdfBackTo":"Back to page %d, where you were","pdfPlaceName":"Remember where I was in a PDF","readerPrint":"Print the article without the furniture","readerPrinted":"Written to %s","synMenu":"Synonyms","synNoDict":"That needs the dict program and a thesaurus installed.","synNone":"No other words for \u201c%s\u201d.","spellAdd":"Add \u201c%s\u201d to my words","spellIgnore":"Ignore it here","spellAdded":"\u201c%s\u201d is a word now","lookupWord":"What this word means in the other language","lookupNoTool":"That needs a translator on this machine \u2014 name one in Settings.","cleanPasteName":"Strip tracking from an address I paste into a page","cleanPasteHint":"The same cleaning the address bar does, where it is pasted.","epubOpen":"Open a book (.epub)","epubOpened":"%s \u2014 %d chapters","epubBad":"That is not a book this can read.","epubEmpty":"There is nothing readable in that book.","permWants":"%s wants to %s.","permThisRun":"Only until you close the browser.","permMic":"use your microphone","permCam":"use your camera","permMicCam":"use your microphone and camera","permNotify":"show notifications","permMouse":"take hold of your mouse pointer","ownName":"What the browser itself sends","ownNone":"It has not fetched anything for itself yet.","ownClear":"Clear this list","ownWatch":"Keep writing it down","ownWatchHint":"Connections the browser makes for itself \u2014 suggestions, the update check, favicons. Pages are not in this list; they are the engine's.","usName":"Userscripts on this page","usNone":"You have no userscripts installed.","usRanHere":"Ran on this page","usNotHere":"Did not run here","usWhen":"Runs at: %s","torName":"Open a window through Tor","torNone":"Tor is not listening on 127.0.0.1:9050.","torOpened":"A window of its own, through Tor.","torHint":"Its own process, its own data, everything in it through the SOCKS port. Chromium reads its proxy at start-up, so it cannot be one tab of this window.","fsAskName":"Ask before a site takes the whole screen","fsAskHint":"The engine's request cannot wait for an answer, so the screen is given and a bar offers to take it back and remember that for the site.","fsBarSaid":"%s has the whole screen.","fsBarKeep":"That is fine","fsBarStop":"Give it back","fsBarNever":"Never for this site","fsDenied":"%s may not take the screen.","offlineName":"Keep a copy of the page when I bookmark it","offlineHint":"One MHTML file per bookmark, here on the disk, so the page can still be read after it goes away.","offlineKept":"A copy of the page is kept.","offlineNone":"There is no kept copy of that one.","offlineOpen":"Read the kept copy","trailName":"How I got here","trailNone":"Nothing is written down yet.","trailOpen":"Open this one","treeName":"History as a tree","thumbsName":"A day in pictures","thumbsNone":"No pictures for that day.","thumbsKeep":"Keep a small picture of every page I read","thumbsHint":"A 240-pixel PNG per address, in your own folder. Nothing is uploaded, and a private tab is never kept.","impHistName":"Import history from another browser","impHistNone":"No Chrome or Firefox history found.","impHistBad":"That history file could not be read.","impHistDone":"%d pages taken over.","movedName":"The page has moved","movedAsk":"This bookmark now ends up somewhere else.\n\nWas: %s\nNow: %s\n\nUpdate the bookmark?","movedYes":"Update it","movedNo":"Leave it","movedDone":"The bookmark points at the new address.","wbName":"Look for an archived copy","wbHint":"Asks archive.org whether it has a copy. This is the one thing here that sends an address off this machine, and only when you ask for it.","wbNone":"The archive has no copy of that page.","wbFound":"The archive's copy from %s.","remName":"Remind me about this bookmark","remAsk":"On which day? (YYYY-MM-DD)","remNone":"Nothing is due.","remDue":"%d bookmarks are due \u2014 %s","favDockName":"Keep Favourites open beside the page","favDockHint":"The same panel, in the window rather than over it.","histEncName":"Keep the history encrypted","histEncHint":"Under a key of your vault's. While the vault is locked the history is not readable and is not written over.","histEncNeedsVault":"Unlock the vault first \u2014 the key comes from it.","k1Name":"What the printer is doing","k1Asking":"Asking the printer\u2026","k1NoAnswer":"The printer did not answer.","k1State":"State: %s","k1Done":"Done: %s%%","k1Left":"Left: %s","k1Nozzle":"Nozzle: %s \u00b0C of %s","k1Bed":"Bed: %s \u00b0C of %s","spellNoDicts":"No German or English dictionary is installed for the engine.","panelName":"Send the selection to the side panel","panelNone":"Nothing is open in the side panel.","panelNoSel":"Nothing is selected.","panelTyped":"Put into the panel.","feedName":"Hide recommendations I did not ask for","feedHint":"The YouTube home grid, the Shorts shelves and Twitch's recommended channels. What it hides is listed below, not hidden in a blob.","webmailName":"Open mailto: links in","webmailHint":"A compose page of your webmail instead of a desktop mail program. None = leave it to the desktop.","floatName":"Pin a part of this page on top","floatAsk":"Which part? (a CSS selector, e.g. #chat)","floatOn":"That part is in a window on top.","floatOff":"The floating parts are closed.","modeName":"Modes","modeSave":"Keep this setup as a mode\u2026","modeAsk":"What is this mode called?","modeSaved":"\u201c%s\u201d is kept.","modeOn":"Mode: %s","modeNone":"You have no modes yet.","modeDrop":"Forget \u201c%s\u201d","phoneName":"Send this tab to my phone","phoneNoTool":"That needs kdeconnect-cli installed.","phoneNoDevice":"KDE Connect sees no paired device.","phoneSent":"Sent to %s.","ocrName":"Copy the text out of this picture","ocrNoImage":"No picture found on this page.","transNoteName":"Save the transcript as a note","transNoneHere":"This video has no captions to read.","transNoted":"%d lines kept as a note.","icsName":"Make a calendar file from the selection","icsNoDate":"No date in what you selected.","icsSaved":"Written to %s.","agendaName":"Calendar file for today's agenda","agendaHint":"A local or LAN .ics file. Repeating events (RRULE) are not worked out \u2014 they are left out rather than shown on the wrong day.","agendaNone":"Nothing today.","logName":"The day","logLine":"%d notes, %d to-dos done, %d minutes on sites with a limit.","logNoteName":"Keep the daily summary as a note","autocapName":"Make captions for this video","autocapNoTool":"That needs ffmpeg and a transcriber (whisper) on this machine.","autocapNoVideo":"No video on this page.","autocapHasTracks":"This video already has subtitles.","autocapRefused":"That video is not at a web address this page may hand over, so no captions are made for it.","autocapBlob":"This player feeds itself through the page (a blob: source), which nothing outside it can read. Use the live captions for that.","autocapWorking":"Pulling the sound out and listening to it\u2026","autocapNoSound":"No sound could be read out of that video.","autocapNoWords":"The transcriber returned nothing.","autocapDone":"%d captions, on the video.","adName":"Block ads and trackers by list","adHint":"EasyList-format .txt files in your own folder. Nothing is fetched unless you ask: the lists are files you put there, or addresses you name below.","adHere":"Block on %s","adDirName":"Folder your filter lists are in","adUrlsName":"Addresses to fetch lists from","adUrlsHint":"One per line, and only when you press \u201cFetch the lists\u201d. A blocker that quietly phones a list server is telling somebody what to serve you.","adCounts":"%d rules, %d hiding rules, from %d lists","adSkipped":"%d lines these lists ask for that this does not do","adBlockedHere":"%d blocked on this page","adReload":"Read the folder again","adFetch":"Fetch the lists","adLoaded":"%d lists, %d rules.","adFetched":"%d lists fetched.","adNoUrls":"No list addresses are named in Settings.","adNoModule":"adblock.py is not next to the browser.","thirdCookieName":"Refuse cookies from other sites","thirdCookieHint":"Only the site you are on may set one. Sign-ins that go through another site need that site on the list below, which the page menu can add in one click.","thirdCookieHere":"Let them through on %s","thirdCookieCount":"%d refused on this site","gestName":"Mouse gestures, the rocker and buttons 4-9","gestHint":"Hold the right button and draw: left is back, right is forward, up reloads, down opens a tab, down-right closes one, up-down brings one back. Right held + left click is back, left held + right click is forward, right held + the wheel walks the tabs.","gestList":"What a gesture means","gestButtons":"What buttons 4-9 do","barKeyTip":"A login is saved for this site","barKeyName":"Show the key in the address bar","barKeyNone":"No login saved for this site.","barKeyFill":"Fill it in","barKeyCopy":"Copy the password","barKeyOpen":"Open the entry","barKeyManage":"All passwords\u2026","barKeyCopied":"Copied. The clipboard is cleared in a minute.","barKeyNoSecret":"That entry has no password to copy.","mediaCatchUp":"Catch up to live at 1.1x","barCopyAddress":"Copy the address","tabsName":"Tabs","devTools":"Developer tools","devLook":"Look at the page","devPretend":"Pretend to be","devWorkbench":"Workbench","devEngine":"The engine","devOn":"%s is on","devOff":"%s is off","devRuler":"Ruler","devOutlines":"Outline every box","devHidden":"Show hidden form fields","devNoCss":"Without any CSS","devPerf":"Frames, long tasks and shifts","devKeys":"Show key codes","devFonts":"Fonts on this page","devFontsWait":"Reading the fonts\u2026","devFontFiles":"Font files it loaded","devPalette":"Colours on this page","devPaletteWait":"Reading the colours\u2026","devNothing":"Nothing to show here.","devImage":"What this picture really is","devNoImage":"No picture found on this page.","devImageInfo":"%d\u00d7%d, drawn at %d\u00d7%d, %s","devOverlay":"Lay a mockup over the page","devAuditRun":"Look the page over","devAudit":"%d elements, %d things to look at: %s","devLinkCheck":"Check the links on this page","devLinkCheckOff":"Link checking is off \u2014 Settings has the switch (it visits every address on the page).","devLinksBad":"%d links are broken, starting with %s","devLinksOk":"Every link answered","devSizes":"At another size","devSize":"%s \u2014 %d\u00d7%d","devSizeOff":"Back to the window","devMediaMenu":"As another kind of screen","devMediaDarkRow":"Dark","devMediaLightRow":"Light","devMediaPrint":"Print","devMediaMotion":"Reduced motion","devMediaOff":"Off","devMediaDark":"The page is told it is dark","devMediaLight":"The page is told it is light","devMedia":"The page is told: %s","devPlaceRow":"Somewhere else","devPlaceAsk":"Latitude, longitude, time zone, locale \u2014 whichever you want (52.5, 13.4, Europe/Berlin, de-DE)","devPlace":"The page is told: %s","devThrottleMenu":"A worse connection","devThrottleSlow":"Slow","devThrottleVerySlow":"Very slow","devThrottleOffline":"Offline","devThrottleOff":"Normal again","devThrottle":"This tab is on a %s connection","devOffline":"This tab is offline","devRegex":"Regular expression","devRegexAsk":"The pattern","devRegexText":"The text to try it on","devRegexBad":"That pattern does not compile: %s","devDiff":"Compare two texts","devDiffLeft":"The first text","devDiffRight":"The second text","devMini":"MiniMessage preview","devMiniAsk":"MiniMessage, legacy codes, or a JSON component","devOpenFile":"Open a file to read","devSnippets":"Snippets","devNoSnippets":"No snippets saved.","devSnippetNew":"A new snippet","devSnippetName":"What is it called?","devSnippetCode":"The JavaScript to run on the page","devSnippetRan":"\u2192 %s","devClipboard":"What is on the clipboard","devClipEmpty":"The clipboard is empty.","devOpenGraph":"As a link embed","devOgMissing":"Missing: %s","devErrorsMenu":"Errors on this page","devErrors":"%d errors on this page","devNoErrors":"No errors on this page.","devClearErrors":"Clear them","devStorage":"Local and session storage","devCopyValue":"Copy the value","devRemove":"Remove it","devCookies":"Cookies of this site","devNoCookies":"No cookies seen for this site.","devCookieNew":"A new cookie","devCookieName":"Its name","devCookieValue":"Its value","devCookiesTxt":"Write a cookies.txt","devCookiesTitle":"Write cookies.txt","devCookiesWritten":"%d cookies written \u2014 anything that reads that file is you, to those sites","devCert":"The certificate","devWorkers":"Service workers","devNoWorkers":"No service workers here.","devDropWorkers":"Unregister them","devSwDropped":"%d service workers unregistered","devCacheRow":"No cache for this tab","devCacheOff":"This tab is not using the cache","devCacheOn":"This tab uses the cache again","devHardReloadRow":"Clear this site's cache and reload","devHardReload":"Cache cleared, loading again","devNoJsRow":"Reload once without JavaScript","devNoJs":"Loading once without JavaScript","devWatch":"Reload when a folder changes","devWatching":"Watching %s","devInternals":"Chromium's own pages","devGpu":"Graphics","devMediaInternals":"Media","devMedia2":"Media","devWebrtc":"WebRTC","devNetExport":"Network log","devHistograms":"Histograms","devProcesses":"Processes","devQuota":"Storage quota","devUkm":"Metrics","devDebugRow":"Remote debugging port","devDebugOn":"The debugging port is on after a restart \u2014 anything on this machine that can reach it can drive this browser","devDebugOff":"The debugging port is off after a restart","devLocalCerts":"Accept self-signed certificates on this network","devLocalCertsOn":"Self-signed certificates are accepted on localhost and the home network only","devLocalCertAccepted":"%s accepted \u2014 it is on this machine or this network","devLocalCertsOff":"Self-signed certificates are refused again","devFlagsRestart":"The flags apply after a restart","devFlagsName":"Chromium flags","devFlagsHint":"One a line. They are read once, at start-up, so a change applies after a restart. A wrong flag can stop the browser starting.","devHostsName":"Point a name at an address","devHostsHint":"One a line: example.com 192.0.2.10. For this browser only, and only after a restart.","devLinkCheckName":"Allow checking the links on a page","devLinkCheckHint":"Off by default: it visits every address on the page, which tells each of those servers you looked.","devDebugName":"Remote debugging port","devDebugHint":"For Playwright and CDP tools. Off by default, and the engine binds it to this machine only.","devLocalCertsName":"Accept self-signed certificates on localhost and the home network","devLocalCertsHint":"Only for addresses on this machine or in the private ranges \u2014 never for a site on the internet.","devSnippetsName":"My JavaScript snippets","devSnippetsHint":"One a line: name|the code. They only ever run when you pick one.","mediaMenu2":"Video and sound, more of it","mediaPicture":"The picture","mediaSound":"The sound","filterBrighter":"Brighter","filterDarker":"Darker","filterMoreContrast":"More contrast","filterLessContrast":"Less contrast","filterMoreColour":"More colour","filterLessColour":"Less colour","filterReset":"Back to normal","turnRight":"Turn right","turnLeft":"Turn left","turnFlip":"Mirror it","turnReset":"Straighten it","zoomIn2":"Zoom in","zoomOut2":"Zoom out","zoomCrop":"Fill the box (crop)","zoomReset2":"Back to the whole picture","hideCursorName":"Hide the mouse over a playing video","hideCursorHint":"After two seconds of not moving.","statsMedia":"%d\u00d7%d \u00b7 %.2fx \u00b7 %d of %d frames dropped \u00b7 %.1f s buffered","statsShow":"What this video is","endsAt":"%d:%02d left \u2014 ends at %s","endsAtShow":"When this ends","mediaResume2":"Resume where I left a video","mediaResumeName":"Resume where I left a video","mediaResumeHint":"Per video, on this computer. Anything under two minutes is left alone.","mediaResumed2":"Carrying on at %d:%02d","mediaHistory":"What I have watched","mediaHistNone":"Nothing yet.","mediaHistClear":"Forget all of it","mediaLeftOf":" \u00b7 %d min left","capMenu":"Captions","capToggle":"Captions on or off","capNone":"This video has no captions.","capOnName":"Start videos with captions on","capOnHint":"Where the video has them.","capLangName":"Caption language","capLangHint":"A code like de or en. Empty = whichever is first.","capSizeName":"Caption size","capSizeHint":"Per cent of the usual size. 0 = as the site has it.","capColourName":"Caption colour","capBackName":"Caption background","capBottomName":"Lift the captions","capBottomHint":"Pixels from the bottom. 0 = where the site puts them.","subsOpen":"Load subtitles from a file","subsAdded":"%s loaded","subsFailed":"That subtitle file could not be read.","subsSaved":"Written to %s","subsClear":"Take the loaded subtitles off","transcript":"Transcript","transCopy":"Copy the whole transcript","transSave":"Save it as an .srt","chapters":"Chapters","chapNone":"No timestamps on this page.","audioLevel":"Even out the volume","audioEq":"Equaliser","eqFlat":"Flat","eqVoice":"Voice","eqBass":"More bass","eqTreble":"More treble","eqNight":"Night","eqPodcast":"Podcast","audioBalance":"Balance","audioLeft":"More left","audioRight":"More right","audioCentre":"Centred","audioMono":"Both channels as one","audioCrossfeed":"Crossfeed for headphones","audioTaken":"Another script already holds this video\u2019s sound.","skipSilence":"Run through the quiet parts","audioOut":"Play this tab through","sinkNone":"This engine will not let a page choose its output.","sinkRefused":"That output was refused.","micForSite":"Microphone for %s","callAudioFor":"Call sound for %s","callGain":"Automatic gain","callNoise":"Noise suppression","callEcho":"Echo cancellation","devDefault":"Whatever the system uses","devNoList":"The page has not been given the device names yet — allow the microphone once and they appear.","autoplayFor":"Autoplay on %s","autoplayAllow":"Let it play","autoplayMute":"Let it play, muted","autoplayBlock":"Do not let it play","autoplayDefault":"As everywhere else","muteAlways":"Always mute %s","duckName":"Quieten the other tabs","duckHint":"When the tab in front starts playing, the others drop to this level. 0 = off, 100 = unchanged.","pauseCallsName":"Pause the music during a call","pauseCallsHint":"When a tab starts using the microphone. Needs \u201csay when a page is using the microphone\u201d.","callPaused":"%d tabs paused for the call","callResumed":"%d tabs playing again","pauseHiddenName":"Pause a video when its tab is hidden","pauseHiddenHint":"And start it again when you come back.","holdFastName":"Hold . to run at double speed","holdFastHint":"On any video, as long as the key is down.","heldEmbedsName":"Embedded players load on a click","heldEmbedsHint":"A YouTube or Twitch embed stays a placeholder until you press it.","embedOpen":"Open this embed on its own site","embedNone":"No embedded player there.","audioOnly":"Sound only (hide the video)","shortsPlayerName":"Open Shorts in the normal player","shortsPlayerHint":"With a seek bar and the speed control.","spoilerName":"Hide video lengths and progress","spoilerHint":"No duration badges, no watched bars, no previews.","qualityFor":"Quality on %s","qualityAuto":"As the site decides","mediaLinks":"Videos and sounds on this page","mediaLinksNone":"None on this page.","playInMpv":"Play it in mpv","trackNoticeName":"Say when the track changes","trackNoticeHint":"A desktop notification with title and artist. Off by default.",
 "readMenu2":"Reading and text","readerSel":"Reader mode for the selection","readNextPage":"Add the next page to this one","readNoNext":"No next page found.","readNext":"Fetching the next page\u2026","readerOptions":"Reader settings","readerImagesName":"Show pictures","readerHyphensName":"Hyphenate and justify","readerSerifName":"Serif font","readerWidthCh":"%d characters wide","readSaveMd":"Save the article as Markdown","readToNote":"Put the article in a note","readSaved":"Saved to %s","readSaveFailed":"That could not be written.","readBackTo":"Back to where you were (%d px)","readResumeName":"Open long pages where I stopped","readResumeHint":"The place is kept for the last fifty pages, on this computer.","readProgressName":"Show how far down the page you are","readProgressHint":"A thin line at the top.","readFootnotesName":"Show footnotes where the mark is","readFootnotesHint":"Hovering a reference shows it instead of jumping to the bottom.","readAbbrName":"Mark the words a page explains","readAbbrHint":"Abbreviations the page defines get a dotted underline and a tooltip.","readCodeName":"Colour plain code blocks","readCodeHint":"Code the site left grey gets the theme\u2019s colours.","readNoLineNumbersName":"Copy code without the line numbers","readNoLineNumbersHint":"Logs and pastebins put them in the text; this takes them out again.","readSelBarName":"A small bar over selected text","readSelBarHint":"Copy, search, translate, define and highlight, where the words are.","readDraftsName":"Keep what I type in page text boxes","readDraftsHint":"Kept in the page\u2019s own storage so a reload or a crash does not lose a long post. Cleared when the form is sent.","readPlainPasteName":"Ctrl+Shift+V pastes without formatting","readPlainPasteHint":"And the page is not allowed to dress it up again.","renderFilesName":"Show plain files properly","renderFilesHint":"A .md file rendered, a .log with line numbers, a feed as a list.","showHidden":"Show what the page is hiding","shownHidden":"%s places opened up","readRuler":"Reading ruler","lineWidth":"Text width on %s","lineWidthOff":"As the site has it","encodingMenu":"Text encoding","encAuto":"As the page says","langForSite":"Ask %s for","langDe":"German","langEn":"English","translateSel":"Translate the selection (sends it to Google)","defineSel":"What does this word mean","defineTitle":"%s","dictionarySiteName":"Dictionary site","dictionarySiteHint":"Used when no offline dictionary (dict) is installed. {} is where the word goes.","convertSel":"Convert what is selected","convertNone":"Nothing in the selection to convert.","unicodeSel":"What these characters are","unicodeTitle":"%d characters, %d of them odd","diffSel":"Compare the selection with the clipboard","diffTitle":"The differences","diffSame":"They are the same.","fieldTools":"Text fields","fieldFont":"Big mono font in this field","fieldStats":"Words and reading time","fieldEditor":"Edit in my editor","externalEditorName":"My text editor","externalEditorHint":"Empty = whichever of kate, gedit, nvim or vim is installed.","editorNone":"No text editor is installed.","editorOpened":"Opened in %s \u2014 save and close it to put the text back","editorBack":"The text is back in the field \u2713","draftsRestore":"Put back what I had typed","draftsBack":"%s text boxes put back \u2713","draftsNone":"Nothing was kept for this page.","plainPaste":"Paste without formatting","replaceT":"Find and replace","replaceFind":"Find","replaceWith":"Replace with","replaceDone":"%s replaced","statsLine":"%d words \u00b7 %d characters \u00b7 %d sentences \u00b7 about %d min","fileView":"Show this file as","fileMd":"Rendered Markdown","fileLines":"Text with line numbers","fileRaw":"Plain text","fileFeed":"A list of feed entries","hlLibrary":"Everything I have highlighted","hlNoneYet":"Nothing highlighted yet.","hlExport":"Write them out as Markdown","hlExported":"Written to %s","spellLangsName":"Spell check in","spellLangsHint":"Two at once is fine \u2014 a German post with English mod names in it should not be underlined from end to end.",
 "deskMenu":"Notes and tools","notesTitle":"Notes","notesOpen":"Notes panel","notesTab":"Notes","notesSearch":"Search","notesNone":"No notes yet.","notesMissing":"notes.py is not next to the browser.","noteTitle":"Title","noteTags":"Tags","noteSave":"Save","noteBack":"Back","noteClipPage":"This page","noteThisPage":"Make a note of this page","noteMade":"Noted \u2713","notesFolderName":"Where the notes are kept","notesFolderHint":"A folder of plain .md files \u2014 any editor and your backup can read them. Empty = beside the settings.","todoTab":"To-do","todoNew":"Something to do","todoDone":"Done","todoClear":"Clear","todoDue":"due %s","todoFromTab":"This tab","todoThisTab":"Make a to-do of this tab","todoAdded":"On the list \u2713","todoDueNow":"Due now: %s","clipsTab":"Clips","clipsNone":"Nothing copied yet.","clipsOff":"The clipboard history is off.","clipsClear":"Clear","clipCopy":"Copy","clipHistoryName":"Remember what I copy","clipHistoryHint":"A list of the last things copied, in memory only and never from a private tab. Off by default, because it is a list of passwords as often as not.","clipSel":"Clip the selection to today\u2019s note","clipSaved":"Clipped \u2713","clipNothing":"Nothing is selected.","collTab":"Collections","collNone":"No collections yet.","collOpen":"Show","collNew":"Add this page to\u2026","snipTab":"Snippets","snipNone":"No snippets yet.","snipKey":";ip","snipText":"what it inserts","snipHint":"Type the key in any text field and it becomes the text.","snippetsName":"Text snippets","snippetsHint":"Short keys that become longer text while you type.","captureT":"Quick note","captureAsk":"A line for today\u2019s note. The page you are on is added under it.","captureSaved":"Written down \u2713","focusMenu":"Focus","focusMinutes":"Block for %d minutes","focusThisSite":"Block %s while focusing","focusOn":"Focus for %d minutes","focusOff":"Focus off","focusStop":"Stop focusing","focusTitle":"Focusing","focusBlocked":"%s is blocked while you are focusing.","focusLeft":"%d min %02d s left","focusUntilWord":"The block lifts by itself.","limitThisSite":"Daily limit for %s","limitNone":"No limit","limitTitle":"That is today\u2019s lot","limitBlocked":"%s is done for today.","limitUsed":"%d of %d minutes used","limitUp":"%s: today\u2019s %d minutes are up","limitSoon":"%s: %d minutes left today","timerMenu":"Timers","timerMinutes":"%d minutes","timerSet":"%s set for %d minutes","timerUp":"%s is up","timerLeft":"%s \u2014 %d:%02d left","timerOne":"Timer","pomStart":"Pomodoro (25 + 5)","pomWork":"Work","pomRest":"Break","breakNow":"You have been at it for %d minutes \u2014 stand up for a moment.","breakAfterName":"Remind me to take a break after","breakAfterHint":"Minutes of actually using the browser. 0 = never.","desktopNotifyName":"Use desktop notifications","desktopNotifyHint":"Through notify-send when it is installed. Off = the line in the browser is the whole of it.","dndEntry":"Do not disturb","dndOn":"Nothing will interrupt for %d minutes","dndOff":"Notifications again","dndHeld":"%d notifications came in while you were not disturbed","notifyMenu":"What the web sent","notifyNone":"Nothing yet.","snoozeMenu":"Snooze this tab","snooze30":"in 30 minutes","snooze2h":"in 2 hours","snooze8h":"in 8 hours","snoozeMorning":"tomorrow morning","snoozePrivate":"A private tab cannot be snoozed: it would have to be written down.","snoozed":"Back at %s","snoozeBack":"%d snoozed tabs are back","snoozeNow":"Bring back %d now","zenMode":"Zen mode","zenOn":"Zen mode \u2014 press the key again to come back","zenOff":"Zen mode off","everythingT":"Search everything","everythingAsk":"Tabs, bookmarks, history, notes, to-dos and clips:","everythingNone":"Nothing matches.","kindTab":"Tab","kindBookmark":"Bookmark","kindHistory":"History","kindNote":"Note","kindTodo":"To-do","kindCollection":"Collection","kindClip":"Clip","copyMenu":"Copy as","copySelMd":"The selection as Markdown","copyClean2":"The page as clean text","copyHighlight":"A link to the selection","tableCopy":"This table","tableMd":"Table as Markdown","tableCsv":"Table as CSV","tableTab":"Table as tab-separated","tableNone":"No table on this page.","tableCopied":"%d rows copied \u2713","linksMenu":"Links on this page","linksNone":"No links on this page.","linksCopyAll":"Copy them all","linksMails":"%d email addresses","sumSel":"Add up the selection","sumLine":"%d numbers \u00b7 sum %g \u00b7 average %g","sumNone":"No numbers in the selection.","textTools":"Text tools","textUpper":"UPPER CASE","textLower":"lower case","textTitle":"Title Case","textSort":"Sort the lines","textDedupe":"Drop duplicate lines","textTrim":"Trim the spaces","textJoin":"Join with commas","textNoField":"Click into a text field first.","charPicker":"Insert a character","charGerman":"German","charQuotes":"Quotes and dashes","charSigns":"Signs","charArrows":"Arrows and marks","charMinecraft":"Minecraft","charCodes":"Minecraft colour codes","bigEditor":"Edit in a big box","listToTodo":"Turn a list on this page into to-dos","listNone":"No list on this page.","listMade":"%d things to do \u2713","timeNote":"Note this moment of the video","timeNoteSaved":"The moment is in today\u2019s note \u2713","extOpenWith":"Open with","extNone":"Nothing to open it with is installed.","extMissing":"%s is not installed.","extOpened":"Opened in %s","qrTitle":"As a QR code","qrSel":"The selection as a QR code","qrMissing":"qrencode is not installed \u2014 install it and this draws the code here.","qrFailed":"That code could not be drawn.","countdownName":"Countdowns on the start page","countdownHint":"A name and a date each. They are counted here and shown here.",
 "cookieRule":"Cookies from this site","cookieAllow":"Keep them","cookieClose":"Keep them until I close the browser","cookieBlock":"Do not keep them","cookieNoSite":"No site here.","cookiePrivateNote":"Private tab \u2014 its cookies go when it closes, and no rule is saved from here","permOverview":"What sites may do","permNone":"Nothing has been allowed yet.","permRevokeAll":"Take all of it back","permLog":"When it was used","permNoLog":"Nothing has used anything yet.","permAllow":"Allow","permDeny":"Deny","permOnce":"This time","permDaysName":"Forget an unused permission after","permDaysHint":"Days. 0 = never. A permission that quietly expires is a site that quietly stops working.","mediaInUse":"In use: %s","mediaStopIn":"Stop using the %s in \u201c%s\u201d","mediaNoneInUse":"Nothing is using a microphone or camera.","guardMediaLog":"Say when a page is using the microphone, camera or screen","sessThrowaway":"Throwaway","sessCleanRoom":"Clean room","sessNewThrowaway":"New throwaway browser","cleanRoomName":"Open this site in a clean room","cleanRoomHere":"Always open %s in a clean room","certTitle":"The certificate of %s","certFor":"Issued for","certIssuer":"Issued by","certValid":"Valid","certTls":"Connection","certIp":"Address","certNames":"Also valid for","certShow":"Show the certificate of %s","certWatch":"Tell me when %s changes its certificate","certChanged":"%s is using a different certificate than before","certUnverified":"This certificate does not verify (self-signed or for another name): what follows is what it says about itself.","certChangedLine":"\u26a0 This is not the certificate this site had last time.","certFailed":"The certificate could not be fetched. %s","certNoSite":"No site here.","certExceptions":"Certificates you trusted","certForget":"Stop trusting %s","certErrorT":"%s has a certificate problem","certErrorB":"%s sent a certificate this browser will not accept:\n\n%s\n\nTrust this one certificate for this host from now on? Say no unless this is your own machine, your printer or your server \u2014 on anything else a bad certificate is the whole of the warning you get.","connTitle":"The connection to %s","connDetails":"What this connection is","connProxy":"Proxy","connDirect":"direct","mixedCheck":"Insecure parts on this page","mixedNone":"Everything on this page came over https.","mixedTitle":"Insecure parts","mixedBody":"%d things on this page were fetched over plain http:\n\n%s","dataMenu":"What sites have stored","dataNone":"Nothing has been stored yet.","bounceClean":"Clear %d sites you only passed through","bounceCleaned":"%d passed-through sites cleared","loginsHere":"%d sites keep you logged in","signOutOf":"Sign out of %s","signedOut":"%s signed out","workersMenu":"Service workers","workersNone":"None on this page.","workersDrop":"Unregister them","cacheOnly":"Clear only the cache","protoAskT":"A site wants to handle a kind of link","protoAskB":"%s wants to be what opens %s: links. Allow that?","protoMenu":"Sites that handle links","protoNone":"None.","protoForget":"Forget %s","lockTitle":"Locked","lockAsk":"Your word","lockWrong":"That was not it.","lockSetT":"Lock the window","lockSetAsk":"A word to unlock it with. Empty = no lock.","lockSet":"The window can be locked now \u2713","lockOff":"The lock is off","lockNotSet":"No lock word is set \u2014 Settings has it.","lockNow":"Lock the window","lockAfterName":"Lock the window after","lockAfterHint":"Minutes with nobody touching it. 0 = never.","privExport":"Export the privacy rules","privImport":"Import privacy rules","privExported":"%d rules written \u2713","privImported":"%d rules taken \u2713","trackerBadgeName":"Show the count of what was refused","trackerBadgeHint":"A small number in the address bar.","trackerBadgeTip":"%d requests refused, %d addresses cleaned, %d cookies refused","clearExitName":"When the browser closes, this virtual browser wipes","clearExitJarHint":"Each virtual browser has its own answer.","clearExitCookies":"Cookies","clearExitCache":"Cache","clearExitHistory":"History","clearExitDownloads":"The downloads list",
@@ -5889,7 +5944,7 @@ UI_STRINGS = {
 "nowPlaying":"L\u00e4uft gerade","mediaPlay":"Abspielen / Pause","mediaPrev":"Zur\u00fcck","mediaNext":"Weiter",
 "masterPw":"Hauptpasswort","masterPwName":"Den Tresor mit einem Hauptpasswort abschlie\u00dfen","masterPwHint":"Deine Passw\u00f6rter liegen hinter einem Kennwort, das du eintippst \u2014 kein Schl\u00fcssel als Datei. Abgeschlossen kann sie hier nichts lesen.","masterWarnT":"Wenn du es vergisst, sind deine Passw\u00f6rter weg.","masterWarnB":"Ein Hauptpasswort l\u00e4sst sich nicht zur\u00fccksetzen und nicht umgehen. Niemand kann es wiederherstellen \u2014 du nicht, dieser Browser nicht, und auch nicht, wer ihn geschrieben hat. Die Passw\u00f6rter bleiben auf diesem Computer und bleiben f\u00fcr immer unlesbar. Exportiere sie vorher, wenn du einen Weg zur\u00fcck willst, und bewahre diese Datei sicher auf.","masterSetT":"Hauptpasswort festlegen","masterSetGo":"Einschalten","masterNewPh":"Hauptpasswort","masterAgainPh":"Noch einmal eingeben","masterPassPh":"Hauptpasswort","masterCurrentPh":"Aktuelles Hauptpasswort","masterMinHint":"Mindestens 8 Zeichen. Ein paar merkbare W\u00f6rter sind besser als etwas Kurzes mit Sonderzeichen.","masterMismatch":"Die beiden stimmen nicht \u00fcberein.","masterShort":"Zu kurz \u2014 mindestens 8 Zeichen.","masterExportFirst":"Passw\u00f6rter vorher exportieren\u2026","masterUnlockT":"Passw\u00f6rter aufschlie\u00dfen","masterUnlockAsk":"Gib dein Hauptpasswort ein, um den Tresor aufzuschlie\u00dfen.","masterUnlockGo":"Aufschlie\u00dfen","masterWrong":"Das war es nicht.","masterChangeT":"Hauptpasswort \u00e4ndern","masterChangeAsk":"An deinen gespeicherten Passw\u00f6rtern \u00e4ndert sich nichts \u2014 nur am Schl\u00fcssel.","masterChangeGo":"\u00c4ndern","masterChangeDone":"Hauptpasswort ge\u00e4ndert \u2713","masterOnDone":"Der Tresor ist mit deinem Hauptpasswort abgeschlossen \u2713","masterOffT":"Hauptpasswort ausschalten?","masterOffB":"Deine Passw\u00f6rter bleiben alle genau da, wo sie sind. Aber der Schl\u00fcssel liegt dann wieder in einer Datei daneben, und jeder, der dieses Computerkonto benutzen kann, kann sie wieder lesen.","masterOffDone":"Hauptpasswort entfernt","masterFailed":"Das hat nicht geklappt \u2014 es wurde nichts ge\u00e4ndert.","masterLockNow":"Jetzt abschlie\u00dfen","masterChangeBtn":"Hauptpasswort \u00e4ndern\u2026","masterAuto":"Wieder abschlie\u00dfen nach","masterAutoHint":"Schlie\u00dft sich nach dieser Zeit ohne Nutzung von selbst wieder ab.","masterAutoNever":"Nie","masterMinutes":"{} Minuten","masterHour":"1 Stunde","masterOn":"An \u2014 aufgeschlossen","masterShut":"An \u2014 abgeschlossen","masterOffState":"Aus","masterLockedTitle":"Der Tresor ist abgeschlossen","masterLockedBody":"Deine gespeicherten Passw\u00f6rter sind unlesbar, bis du dein Hauptpasswort eingibst.","masterUnlockBtn":"Aufschlie\u00dfen\u2026","masterLockedLine":"Abgeschlossen \u2014 schlie\u00dfe die Passwortverwaltung auf, um zu sehen, was gespeichert ist.","masterEncHint":"Auf diesem Computer mit deinem Hauptpasswort verschl\u00fcsselt. Solange abgeschlossen ist, kann sie hier nichts lesen.",
 "externalTitle":"Manche Seiten in einem anderen Browser \u00f6ffnen","externalHint":"Manche Seiten funktionieren in diesem Browser nicht \u2014 darunter Gmail und die Google-Anmeldung. Statt einer Sperrseite \u00f6ffnen sie in deinem anderen Browser.","externalHandoff":"Diese Seiten an einen anderen Browser geben","externalHandoffSub":"Aus = sie laden hier wie jede andere Seite.","externalSites":"Seiten, die woanders \u00f6ffnen","externalSitesSub":"Eine Domain pro Zeile. Eine Domain gilt auch f\u00fcr ihre Subdomains.","externalOpened":"In {} ge\u00f6ffnet","externalMissing":"{} ist nicht installiert \u2014 wird hier ge\u00f6ffnet","externalSaved":"Gespeichert \u2713","tabDuplicate":"Tab duplizieren","tabPin":"Tab anheften","tabUnpin":"Tab l\u00f6sen","tabMute":"Tab stummschalten","tabUnmute":"Stummschaltung aufheben","tabSolo":"Ton nur hier","tabLock":"Tab sperren","tabUnlock":"Tab entsperren","tabLocked":"Gesperrter Tab","tabLockedAsk":"\u201e%s\u201c schlie\u00dfen? Der Tab ist gesperrt.","tabPinnedStays":"Angehefteter Tab \u2014 schlie\u00dfe ihn \u00fcber sein eigenes Men\u00fc.","tabRename":"Tab umbenennen","tabRenameAsk":"Name f\u00fcr diesen Tab (die Seite kann ihn nicht \u00e4ndern):","tabInPrivate":"Diese Seite in einem privaten Tab \u00f6ffnen","tabInSession":"In einem anderen Browser \u00f6ffnen","tabCopy":"Adresse kopieren","tabCopyThis":"Dieser Tab","tabCopyAll":"Alle Tabs","tabCopyMd":"Alle Tabs als Markdown","tabsFromClipboard":"Adressen aus der Zwischenablage \u00f6ffnen","tabsBookmarkAll":"Alle Tabs als Lesezeichen","tabsSort":"Tabs sortieren","tabsSortSite":"Nach Seite","tabsSortTitle":"Nach Titel","tabsGroupSite":"Alle Tabs dieser Seite gruppieren","tabsReload":"Alle Tabs neu laden","tabsReloadGroup":"Alle Tabs dieser Gruppe neu laden","tabsClosed":"Zuletzt geschlossen","closedNone":"Noch nichts geschlossen.","tabClose":"Tab schlie\u00dfen","tabCloseOthers":"Andere Tabs schlie\u00dfen","tabCloseRight":"Tabs rechts schlie\u00dfen","tabCloseLeft":"Tabs links schlie\u00dfen","tabCloseDupes":"Doppelte Tabs schlie\u00dfen","tabCloseSite":"Alle Tabs dieser Seite schlie\u00dfen","tabsCopied":"Kopiert \u2713","tabsOpened":"%d Tabs ge\u00f6ffnet","tabsBookmarked":"%d Tabs als Lesezeichen \u2713","tabWheelName":"Mausrad \u00fcber der Tableiste","tabWheelHint":"Aus = das Rad macht dort nichts.","tabWheelOff":"Nichts","tabWheelScroll":"Eine zu lange Leiste scrollen","tabWheelSwitch":"Tabs wechseln","tabCountName":"Anzahl der Tabs anzeigen","tabCountHint":"Eine schlichte Zahl am Ende der Leiste.","closeFocusName":"Nach dem Schlie\u00dfen eines Tabs","closeFocusHint":"Auf welchem Tab der Browser landet.","closeFocusRight":"Der Tab rechts","closeFocusLeft":"Der Tab links","closeFocusLast":"Der zuletzt benutzte Tab","pinnedSiteName":"Angeheftete Tabs bleiben auf ihrer Seite","pinnedSiteHint":"Ein Link auf eine andere Seite \u00f6ffnet einen neuen Tab, statt den angehefteten wegzunehmen.","barCopied":"Kopiert \u2713","barForgot":"Aus dem Verlauf entfernt","pasteAndGo":"Einf\u00fcgen und los","copyClean":"Saubere Adresse kopieren","copyPageAs":"Seite kopieren als","copyMarkdown":"Markdown-Link","copyHtml":"HTML-Link","copyPlain":"Titel \u2014 Adresse","searchFor":"Nach \u201e%s\u201c suchen","searchWith":"Suchen mit","searchThisSite":"Diese Seite durchsuchen","searchImage":"Nach diesem Bild suchen","searchImageAsk":"Die Adresse dieses Bildes an Google Lens schicken?\n\n%s","searchInBarName":"Suchtext in der Adressleiste zeigen","searchInBarHint":"Auf einer Ergebnisseite steht in der Leiste, wonach du gesucht hast.","pageTools":"Seitenwerkzeuge","toolUnlock":"Kopieren und Rechtsklick erlauben","toolUnstick":"Feste Leisten l\u00f6sen","toolStopMedia":"Alles Bewegte anhalten","toolExpand":"Alles aufklappen","toolEdit":"Diese Seite bearbeiten","toolVisited":"Besuchte Links markieren","toolToTop":"Nach-oben-Knopf","toolShowPw":"Passwort im Klartext zeigen","toolFreeze":"Seite einfrieren","toolThaw":"Seite wieder laufen lassen","toolTextLink":"Link auf die Auswahl kopieren","toolFeeds":"Feeds auf dieser Seite","feedsNone":"Diese Seite bietet keinen Feed an.","linkReal":"\u00d6ffnen, wohin das wirklich geht","linkPrivate":"Link in privatem Tab \u00f6ffnen","linkInSession":"Link in anderem Browser \u00f6ffnen","linkCopyAs":"Link kopieren als","linkCopyText":"Linktext","reloadHard":"Ohne Cache neu laden","reloadSiteStart":"Zur ersten Seite dieser Website","hoverLinkName":"Link unter der Maus anzeigen","hoverLinkHint":"Eine Zeile unten links mit dem echten Ziel, Weiterleitungen aufgel\u00f6st.","frameCopied":"Bild kopiert \u2713","frameFailed":"Dieses Bild ging nicht.","mediaPaused":"Alles angehalten","mediaResumed":"L\u00e4uft wieder","mediaNoSound":"Es l\u00e4uft nichts.","mediaGoTo":"Zu diesem Tab","mediaPlayPause":"Abspielen / Pause","mediaBoost":"Lautst\u00e4rke %s","sleepSet":"Alles stoppt in %d Minuten","sleepOff":"Einschlaftimer aus","sleepDone":"Einschlaftimer: alles angehalten","mediaMenu":"Video und Ton","mediaSpeed":"Tempo %s","mediaLoop":"Ab hier wiederholen (A / B / aus)","mediaFrameBack":"Ein Bild zur\u00fcck","mediaFrameFwd":"Ein Bild weiter","mediaFrameCopy":"Dieses Bild kopieren","mediaTimeLink":"Link an dieser Stelle kopieren","mediaLive":"Zum Live-Rand springen","mediaNoNext":"Kein n\u00e4chstes Video starten","sleepTimer":"Einschlaftimer","sleepMinutes":"in %d Minuten","mediaPerSiteName":"Tempo und Lautst\u00e4rke pro Seite merken","mediaPerSiteHint":"Ein Podcast bleibt auf 1,5x und eine laute Seite bleibt leise.","wheelVolumeName":"Mausrad \u00fcber einem Video regelt die Lautst\u00e4rke","wheelVolumeHint":"Aus = das Rad scrollt die Seite wie \u00fcberall sonst.","shotMenu":"Bildschirmfoto","shotVisible":"Was zu sehen ist","shotFull":"Die ganze Seite","shotElement":"Dieses Element","shotPin":"Oben behalten","shotDiscord":"Klein genug f\u00fcr Discord","shotTimed":"Gleich","shotSeconds":"in %d Sekunden","shotIn":"Aufnahme in %d Sekunden\u2026","shotWorking":"Nehme die ganze Seite auf\u2026","shotCopied":"In der Zwischenablage \u2713","shotFailed":"Diese Aufnahme ging nicht.","shotDirName":"Wohin Bildschirmfotos kommen","shotDirHint":"Leer = ein Ordner \u201eScreenshots\u201c neben den Downloads.","shotNameName":"Dateiname f\u00fcr Bildschirmfotos","shotNameHint":"strftime-Zeichen, {title} und {site}.","shotFormatName":"Format","shotRedactName":"Passwortfelder in Aufnahmen unkenntlich machen","shotRedactHint":"Was in einem Passwortfeld steht, wird vor der Aufnahme verwischt.","privTrackers":"Tracker und das Heimnetz","privConnections":"Verbindungen","privMenu":"Privatsph\u00e4re","privNoScript":"Kein JavaScript auf %s","privNoImages":"Keine Bilder auf %s","privAlways":"%s immer privat \u00f6ffnen","privNoHistory":"%s nie merken","privClearSite":"Gespeichertes von %s l\u00f6schen","privForget":"%s ganz vergessen","privCleared":"%s gel\u00f6scht","privForgotten":"%s vergessen","privReport":"%d Anfragen abgelehnt, %d Adressen ges\u00e4ubert","streamerOn":"Streamer-Modus an \u2014 die Adressleiste ist verdeckt","streamerOff":"Streamer-Modus aus","blockLocalName":"Webseiten vom Heimnetz fernhalten","blockLocalHint":"Eine Seite aus dem Internet darf nicht an 192.168.x.x, localhost oder einen .local-Namen.","stripTrackingName":"Tracking aus Adressen entfernen","stripTrackingHint":"utm_*, fbclid und der Rest fallen weg, bevor die Anfrage rausgeht.","devMenu":"Entwickler","viewSource":"Seitenquelltext","devJson":"JSON als Baum","devPretty":"Diese Datei formatieren","devCsv":"Als Tabelle zeigen","devCodeCopy":"Kopierkn\u00f6pfe an Codebl\u00f6cken","devCurl":"Als curl kopieren","devSelector":"Dieses Element kopieren als","devCss":"CSS-Selektor","devXpath":"XPath","devHtml":"HTML","devColour":"Farbe hier aufnehmen","devServers":"Server auf diesem Rechner","devNoServers":"Es l\u00e4uft nichts.","actNewTab":"Neuer Tab","actCloseTab":"Tab schlie\u00dfen","actReopen":"Geschlossenen Tab \u00f6ffnen","actTabSearch":"Offene Tabs durchsuchen","actNextTab":"N\u00e4chster Tab","actPrevTab":"Vorheriger Tab","actMoveTabRight":"Tab nach rechts","actMoveTabLeft":"Tab nach links","actNextSession":"N\u00e4chster virtueller Browser","actPrevSession":"Vorheriger virtueller Browser","actAddress":"Adressleiste","actSearch":"Aus der Adressleiste suchen","actUpALevel":"Eine Ebene h\u00f6her","actNextPage":"N\u00e4chste Seite","actPrevPage":"Vorherige Seite","actNextHeading":"N\u00e4chste \u00dcberschrift","actPrevHeading":"Vorherige \u00dcberschrift","actFind":"Auf der Seite suchen","actBookmark":"Lesezeichen setzen","actGenPassword":"Neues Passwort kopieren","actAccounts":"Konto w\u00e4hlen","actExternal":"Im externen Player abspielen","actCopyUrl":"Titel und Adresse kopieren","actSearchSelection":"Nach der Auswahl suchen","actPanic":"Panik","actStreamer":"Streamer-Modus","actMediaForward":"Zehn Sekunden vor","actMediaBack":"Zehn Sekunden zur\u00fcck","actMediaFaster":"Schneller","actMediaSlower":"Langsamer","actNoisyTab":"Zum Tab mit dem Ton","actPauseAll":"Alles anhalten","actPalette":"Befehl ausf\u00fchren\u2026","actCheatSheet":"Tastenk\u00fcrzel","actFocusCycle":"Fokus weiterschalten","actQuit":"Beenden","actZoomIn":"Vergr\u00f6\u00dfern","actZoomOut":"Verkleinern","actZoomReset":"Normale Gr\u00f6\u00dfe","actTabNumber":"Zu diesem Tab","actTabSidebar":"Tabs an der Seite","actSidebarFold":"Tab-Seitenleiste auf Symbole einklappen","tabWhereName":"Wo die Tabs sind","tabWhereHint":"An einer der Seiten sind sie eine Liste, in der du die Titel lesen kannst und die Gruppen zuklappen. F9 wechselt zwischen oben und Seite; Shift+F9 klappt die Liste auf Symbole ein.","tabWhereTop":"Oben","tabWhereBottom":"Unter der Seite","tabWhereLeft":"Links","tabWhereRight":"Rechts","mouseButtonsName":"Seitliche Maustasten gehen vor und zur\u00fcck","readMenu":"Lesen","readerMode":"Lesemodus","readerNone":"Auf dieser Seite ist kein Artikel.","readOutline":"\u00dcberschriften","outlineNone":"Keine \u00dcberschriften auf dieser Seite.","readWords":"W\u00f6rter z\u00e4hlen","wordsLine":"%d W\u00f6rter \u00b7 etwa %d min","readHints":"Linkmarken","readAloud":"Vorlesen","readStop":"Vorlesen beenden","sayMissing":"Kein Sprachprogramm installiert (spd-say).","sayNothing":"Nichts zum Vorlesen.","sayStarted":"Liest vor\u2026","sayFailed":"Das Sprachprogramm hat nicht gesprochen.","readHighlight":"Auswahl markieren","readUnhighlight":"Markierungen l\u00f6schen","hlAdded":"Markiert \u2713","hlNone":"Es ist nichts ausgew\u00e4hlt.","accContrast":"Hoher Kontrast","accReadable":"Gut lesbare Schrift","accSpacing":"Weitere Textabst\u00e4nde","accMotion":"Animationen stoppen","accStillGifs":"Animierte Bilder stoppen","accCursor":"Gro\u00dfer Mauszeiger","accFocus":"Fokusrahmen immer zeigen","accMinFont":"Kleinste Schrift auf dieser Seite","accMinFontOff":"Kein Minimum","panelSite":"Panel","panelToggle":"Seitenpanel","panelThisPage":"Diese Seite","panelPrivateNo":"Eine private Seite kommt nicht ins Seitenpanel.","panelTwitch":"Twitch-Chat","panelOther":"Andere Seite","panelAsk":"Adresse oder Kanal:","panelToTab":"Als Tab \u00f6ffnen","gameMode":"Spielmodus","gameOn":"Spielmodus an \u2014 andere Tabs schlafen, nichts l\u00e4uft","gameOff":"Spielmodus aus","sleepOthers":"Andere Tabs schlafen legen","sleptTabs":"%d Tabs schlafen","blockNotifName":"Nie nach Benachrichtigungen fragen","blockNotifHint":"Seiten, die Benachrichtigungen schicken wollen, bekommen ohne Nachfrage ein Nein.","mcServers":"Minecraft-Server","mcNone":"Noch keine Server in der Liste.","mcDown":"antwortet nicht","mcRefresh":"Jetzt neu fragen","mcUp":"%s ist wieder da","mcGone":"%s antwortet nicht mehr","dcMute":"Discord: Mikro stumm","dcDeafen":"Discord: Ton aus","discordNone":"Es ist kein Discord-Tab offen.","dlMenu":"Von dieser Seite laden","dlImages":"Alle Bilder","dlMedia":"Alle Videos und T\u00f6ne","dlLinked":"Alle verlinkten Dateien","dlNothing":"Davon gibt es auf dieser Seite nichts.","dlManyTitle":"Das sind viele Dateien","dlMany":"Alle %d Dateien laden?","dlStarted":"%d Downloads gestartet","sortDownloadsName":"Downloads in Ordner sortieren","sortDownloadsHint":"Bilder, Video, Musik, Dokumente, Archive, Programme, Mods \u2014 neben dem Download-Ordner.","openAfterName":"Ordner \u00f6ffnen, wenn ein Download fertig ist","laterAdd":"Sp\u00e4ter lesen","laterList":"Sp\u00e4ter-lesen-Liste","laterAdded":"Auf der Sp\u00e4ter-Liste \u2713","laterGone":"Von der Liste genommen","laterNone":"Nichts auf der Liste.","laterClear":"Liste leeren","indexPagesName":"Verlauf nach Seiteninhalt durchsuchen","indexPagesHint":"Merkt sich ein paar hundert W\u00f6rter jeder besuchten Seite, auf diesem Rechner. Nie aus einem privaten Tab.","taskManager":"Was die Tabs kosten","taskTotal":"%d Tabs \u00b7 %s","taskShared":"teilt sich einen Prozess","taskAsleep":"schl\u00e4ft","taskSleep":"Diesen Tab schlafen legen","taskCpu":"%.1f s Rechenzeit","liteMode":"Sparmodus","liteOn":"Sparmodus an \u2014 keine Bilder, nichts startet von selbst","liteOff":"Sparmodus aus","cacheCleared":"Cache in %d virtuellen Browsern geleert","sleepAfterName":"Tab schlafen legen nach","sleepAfterHint":"Minuten ohne Hinsehen. 0 = nie.","startupName":"Dieser Browser startete in","styleEdit":"Eigenes CSS f\u00fcr diese Seite","styleTitle":"Dein eigenes CSS f\u00fcr %s","styleHint":"Wird zuletzt auf die Seite gelegt und gewinnt damit gegen Seite und Theme.","styleSaved":"F\u00fcr %s gespeichert \u2713","zoomPerSiteName":"Zoom pro Seite merken","zoomPerSiteHint":"Eine Seite \u00f6ffnet mit der zuletzt benutzten Gr\u00f6\u00dfe.","ytAdSkipName":"YouTube-Werbung \u00fcberspringen","ytAdSkipHint":"Aus, denn YouTube merkt es: es z\u00e4hlt die Videos und setzt dann seine \u201eWerbung erlauben\u201c-Sperre an die Stelle des Players \u2014 danach l\u00e4uft gar nichts mehr. Wirkt beim n\u00e4chsten Start.","privatePermHint":"Nur in diesem privaten Tab.",
-"mprisName":"Auf die Medientasten der Tastatur h\u00f6ren","mprisHint":"Der Desktop fragt, was l\u00e4uft, und darf pausieren (MPRIS \u00fcber D-Bus). Es verl\u00e4sst nichts den Rechner.","mprisNoBus":"Hier gibt es keinen Sitzungsbus \u2014 die Medientasten bleiben, wo sie sind","mprisOn":"Die Medientasten erreichen diesen Browser","mprisOff":"Die Medientasten erreichen diesen Browser nicht mehr","mprisMissing":"mpris.py liegt nicht neben dem Browser.","winFull":"Das Fenster mit dem Video f\u00fcllen","winFullOff":"Zur\u00fcck zur Seite","awakeName":"Bildschirm wach halten, solange ein Video l\u00e4uft","awakeHint":"Nur solange im vorderen Tab wirklich etwas l\u00e4uft, und nur \u00fcber systemd-inhibit.","awakeOn":"Der Bildschirm bleibt wach, solange das l\u00e4uft","awakeOff":"Der Bildschirm darf wieder schlafen","awakeNo":"systemd-inhibit ist nicht da \u2014 der Bildschirm wird nicht gehalten","playerTitle":"Eine Datei abspielen","playerOpen":"Den Player \u00f6ffnen","playerPick":"Video- oder Audiodateien ausw\u00e4hlen","playerNone":"Nichts ausgew\u00e4hlt.","mictestTitle":"Mikrofon und Kamera testen","micTestTitle":"Mikrofon und Kamera","micTestSub":"Das alles bleibt auf diesem Rechner: nichts wird irgendwohin geschickt, und die Aufnahme wird verworfen, sobald du die Seite verlässt.","micWord":"Mikrofon","camWord":"Kamera","micLevel":"jetzt %d%%, am lautesten %d%%","micOn":"Hört zu. Der Pegel sollte sich bewegen, wenn du sprichst.","micOff":"Gestoppt.","micFailed":"Das Mikrofon wurde abgelehnt: %s","camOn":"%s, %d×%d","camOff":"Gestoppt.","camFailed":"Die Kamera wurde abgelehnt: %s","recNone":"Dieser Build kann nicht aufnehmen.","recNow":"Nimmt auf… sag etwas.","recDone":"Fünf Sekunden aufgenommen. Hör sie dir an.","on":"An","playerLoop":"Wiederholen: %s","playerQueue":"%d in der Liste","watchLater":"Sp\u00e4ter ansehen","watchAdd":"Das sp\u00e4ter ansehen","watchAdded":"Auf die Sp\u00e4ter-Liste gesetzt","watchEmpty":"Die Sp\u00e4ter-Liste ist leer.","watchPlay":"Das N\u00e4chste abspielen","watchClear":"Liste leeren","watchGone":"Von der Liste genommen","momentMenu":"Stellen in diesem Video","momentAdd":"Diese Stelle merken","momentNote":"Ein Wort zu dieser Stelle (optional)","momentMade":"Bei %s gemerkt","momentNone":"In diesem Video ist noch nichts gemerkt.","momentNoTime":"Hier l\u00e4uft nichts.","pauseLockName":"Pausieren, wenn der Browser sich sperrt","pauseLockHint":"Auch wenn du die Leerlaufzeit weg warst.","pausedAway":"Pausiert, w\u00e4hrend du weg warst","screenMenu":"Vollbild auf","screenNone":"Hier h\u00e4ngt kein Bildschirm.","sponsorName":"Den Sponsor im Video \u00fcberspringen","sponsorHint":"Fragt den SponsorBlock-Dienst nach diesem Video. Es gehen nur die ersten vier Zeichen der gehashten Video-ID hin, und nur wenn das hier an ist.","sponsorSkipped":"%s \u00fcbersprungen","sponsorNone":"In diesem Video ist nichts markiert.","sponsorOff":"Sponsor-\u00dcberspringen ist aus \u2014 der Schalter steht in den Einstellungen.","lyricsName":"Liedtexte holen","lyricsHint":"Fragt lrclib mit Titel, Interpret und L\u00e4nge nach dem Text. Aus = es wird nichts gefragt.","lyricsTitle":"Liedtext","lyricsNone":"Daf\u00fcr ist kein Text zu finden.","lyricsOff":"Liedtexte sind aus \u2014 der Schalter steht in den Einstellungen.","playMenu":"Spiele und Streaming","streamGroup":"W\u00e4hrend du streamst","gameGroup":"Spiele","streamSafe":"Stream-sicherer Modus","streamSafeOn":"Stream-sicher: Privates verwischt, keine Benachrichtigungen, keine Vorschl\u00e4ge aus der Chronik","streamSafeOff":"Stream-sicher aus","blurPrivate":"Adressen und Privates verwischen","blurOn":"%d Stellen verwischt \u2014 zum Lesen dr\u00fcberfahren","blurOff":"Es ist nichts mehr verwischt","blurWordsName":"Diese W\u00f6rter auch verwischen","blurWordsHint":"Eins pro Zeile: ein Name, eine Stra\u00dfe, alles, was im Stream nicht lesbar sein soll.","keysShow":"Zeigen, welche Tasten ich dr\u00fccke","keysOn":"Die Tasten erscheinen unten","keysOff":"Die Tastenanzeige ist weg","fpsShow":"Bilder pro Sekunde zeigen","fpsOn":"Bilder pro Sekunde, oben rechts","fpsOff":"Der Z\u00e4hler ist weg","obsMenu":"OBS","obsName":"Ich darf OBS steuern","obsHint":"\u00dcber obs-websocket auf diesem Rechner. Adresse und Passwort unten; leere Adresse = aus.","obsUrlName":"OBS-Adresse","obsUrlHint":"ws://127.0.0.1:4455 ist OBS' Voreinstellung.","obsPwName":"OBS-Passwort","obsPwHint":"Aus OBS: Werkzeuge \u2192 WebSocket-Servereinstellungen.","obsStart":"Aufnahme starten","obsStop":"Aufnahme beenden","obsStream":"Stream starten","obsStreamStop":"Stream beenden","obsScene":"Szene wechseln","obsOff":"OBS-Steuerung ist aus \u2014 die Adresse steht in den Einstellungen.","obsNo":"OBS hat auf %s nicht geantwortet","obsDid":"OBS: %s","modSearch":"Eine Mod finden","modAsk":"Wonach suchst du?","modNone":"Zu \u201e%s\u201c ist nichts zu finden.","modFound":"%d gefunden","modInstall":"In eine Instanz legen","mcInstancesName":"Minecraft-Instanzen","mcInstancesHint":"Ein Ordner pro Zeile. Eine Mod wird nach <Ordner>/mods geschrieben und sonst nirgends.","modNoInstance":"Es ist kein Instanzordner gesetzt \u2014 die Liste steht in den Einstellungen.","modInstalled":"Nach %s geschrieben","modFailed":"Das wurde nicht geladen.","serverCopy":"Die Serveradresse kopieren","serverNone":"Auf dieser Seite steht keine Serveradresse.","serverCopied":"%s kopiert","serverPanel":"Serverseite im Panel","playerLookup":"Diesen Spieler nachschlagen","playerNoName":"Markiere zuerst einen Spielernamen.","wikiLookup":"Im Wiki nachschlagen","wikiAsk":"Was soll ich nachschlagen?","gridTitle":"Mehrere Streams gleichzeitig","gridAsk":"Kanalnamen, mit Komma getrennt","gridNone":"Da ist kein brauchbarer Kanalname.","gridMade":"%d Streams","pointsName":"Kanalpunkte einsammeln","pointsHint":"Dr\u00fcckt Twitchs eigenen Bonus-Knopf, wenn er auftaucht.","pointsOn":"Kanalpunkte werden eingesammelt","adsName":"Bei Werbung stummschalten und abdunkeln","adsHint":"Auf Twitch: der Ton geht aus und das Bild wird dunkel, bis die Werbung vorbei ist.","adsOn":"Werbung wird stumm und dunkel","chatMenu":"Chat","chatHideName":"Chatzeilen ausblenden, die enthalten","chatHideHint":"Eins pro Zeile.","chatUsersName":"Diese Schreiber ausblenden","chatUsersHint":"Ein Name pro Zeile.","chatMeName":"Zeilen hervorheben, die enthalten","chatMeHint":"Zum Beispiel deinen Namen. Eins pro Zeile.","chatOn":"Die Chatfilter sind hier an","liveMenu":"Sagen, wenn sie live gehen","liveAdd":"Diesen Kanal beobachten","liveWatchName":"Beobachtete Kan\u00e4le","liveWatchHint":"Einer pro Zeile. Jeder wird alle paar Minuten gefragt, und nur solange das an ist.","liveEveryName":"Fragen alle","liveEveryHint":"Minuten. 0 = nie fragen.","liveNow":"%s ist live","liveNone":"Es wird noch niemand beobachtet.","liveAdded":"%s wird beobachtet","delayName":"Stream-Verz\u00f6gerung","delayHint":"Sekunden. Der Timer z\u00e4hlt sie herunter, damit du wei\u00dft, wann eine Chatreaktion zu was geh\u00f6rt.","delayStart":"Verz\u00f6gerungs-Timer starten","delayRunning":"Verz\u00f6gerung: %ds","delayDone":"Die Verz\u00f6gerung ist um","clipMark":"Hier einen Clip markieren","clipMarked":"Clip bei %s markiert","clipList":"Markierte Clips","clipNone":"Es ist noch kein Clip markiert.","clipLink":"Sauberen Clip-Link kopieren","clipCleaned":"Ohne die Tracking-Teile kopiert","discordRouteName":"Discord-Links im Discord-Tab \u00f6ffnen","discordRouteHint":"Statt jedes Mal in einem neuen Tab.","discordWent":"An den Discord-Tab gegeben","discordBadgeName":"Discords Ungelesen-Z\u00e4hler zeigen","discordBadgeHint":"Im Tabtitel, aus Discords eigener Zahl.","ts3Open":"In TeamSpeak \u00f6ffnen","ts3No":"TeamSpeak ist hier nicht installiert.","handoffTitle":"Anderes Programm öffnen?","handoffAsk":"%s möchte das in %s öffnen:\n\n%s","handoffNoSite":"Eine Seite","handoffAlways":"%s das immer erlauben","ts3Went":"An TeamSpeak gegeben","gameProtect":"Diesen Tab beim Spielen sch\u00fctzen","gameProtectHint":"Er wird nie verworfen, nie schlafen gelegt und fragt vor dem Schlie\u00dfen.","gameProtectOn":"Dieser Tab ist gesch\u00fctzt","gameProtectOff":"Nicht mehr gesch\u00fctzt","gameClose":"Das ist ein Spiel-Tab \u2014 trotzdem schlie\u00dfen?","cloudGame":"Cloud-Gaming hier","cloudGameHint":"H\u00e4lt den Bildschirm wach, l\u00e4sst das Gamepad durch, versteckt den Zeiger und bremst den Tab nie.","cloudOn":"Cloud-Gaming ist an f\u00fcr %s","cloudOff":"Cloud-Gaming ist aus f\u00fcr %s","padName":"Ein Gamepad darf scrollen und abspielen","padHint":"Die Sticks scrollen, die Schultertasten wechseln den Tab, A spielt oder pausiert. Die Gamepad-API, nichts weiter.","padOn":"Das Gamepad funktioniert hier","padNo":"In dieser Seite gibt es keine Gamepad-API.","streamPreview":"In einem kleinen Fenster ansehen","theaterName":"Gro\u00dfer Player von Anfang an","theaterHint":"Auf Twitch und YouTube: der Player f\u00fcllt die Seite, ohne dass du es jedes Mal sagst.","checklist":"Bevor du live gehst","checkMic":"Mikrofon ausgew\u00e4hlt und richtig laut","checkCam":"Kamera an und richtig ausgerichtet","checkSound":"Desktopton ist in der Mischung","checkScene":"Die richtige Szene steht","checkChat":"Chat offen und gefiltert","checkTitle":"Titel und Kategorie gesetzt","checkPrivate":"Nichts Privates auf dem Schirm","checkNotify":"Benachrichtigungen aus","streamChecksName":"Meine eigene Liste","streamChecksHint":"Ein Punkt pro Zeile. Leer = die Standardliste.","checkDone":"%d von %d erledigt","gameModeName":"Spielmodus, wenn ein Spiel im Vordergrund ist","gameModeHint":"Fragt den Fenstermanager, was vorne ist; auf diesem Rechner gibt es keinen, also passiert nichts.","gameModeNo":"Hier ist kein Fenstermanager zu fragen.","gameModeOn":"Spielmodus: nichts unterbricht dich","formsMenu":"Formulare und Passw\u00f6rter","fillLogin":"Login hier einsetzen","fillDone":"Als %s eingesetzt","fillLinked":"Von %s eingesetzt \u2014 dasselbe Konto, andere Adresse","fillNone":"F\u00fcr diese Seite ist nichts gespeichert.","identMenu":"Eine Adresse einsetzen","identNone":"Es ist noch keine Adresse gespeichert.","identFilled":"%d Felder gef\u00fcllt","cardMenu":"Eine Karte einsetzen","cardNone":"Es ist noch keine Karte gespeichert.","cardFilled":"%d Felder gef\u00fcllt","cardFrame":"Diese Kasse steckt im eigenen Rahmen des Zahlungsdienstes \u2014 von au\u00dfen kann da nichts hineinschreiben, so ist es gebaut","cardInsecure":"Diese Seite ist nicht verschl\u00fcsselt (kein https), deshalb wird hier keine Karte eingetragen","cardCvvAsk":"Die Pr\u00fcfnummer der Karte","cardCvvHint":"Wird jedes Mal gefragt: sie soll ja beweisen, dass jemand die Karte in der Hand h\u00e4lt.","anyFieldMenu":"Dieses Feld aus dem Tresor f\u00fcllen","aliasFill":"Plus-Adresse einsetzen","aliasFilled":"%s eingesetzt","aliasNotSet":"Keine Adresse zum Bauen \u2014 das Feld steht in den Einstellungen.","genMenu":"Ein Passwort erzeugen","genPassword":"Ein starkes Passwort","genPassphrase":"Eine Wortfolge","genMade":"Erzeugt, eingesetzt und gespeichert \u2014 St\u00e4rke %d","genNoField":"Auf dieser Seite ist kein Passwortfeld.","genBits":"%d W\u00f6rter aus %d \u2014 etwa %d Bit","otpMenu":"Zwei-Faktor-Codes","otpFilled":"Code %s eingesetzt","otpCopied":"Der Code liegt in der Zwischenablage","otpNoCode":"F\u00fcr dieses Login ist kein Code gespeichert.","otpNoLogin":"F\u00fcr diese Seite ist kein Login gespeichert.","otpRead":"Das Einrichtungsgeheimnis von dieser Seite nehmen","otpNone":"Auf dieser Seite steht kein Einrichtungsgeheimnis.","otpSaved":"Das Geheimnis liegt beim Login","otpBad":"Dieses Geheimnis wurde nicht \u00fcbernommen.","otpNoQr":"Einen gezeichneten QR-Code kann das hier nicht lesen \u2014 nimm das Geheimnis aus dem \u201eGeht nicht?\u201c-Kasten daneben","secretCopied":"Kopiert \u2014 die Zwischenablage wird gleich wieder geleert","clipCleared":"Die Zwischenablage ist geleert","clipClearName":"Kopierte Passw\u00f6rter aus der Zwischenablage l\u00f6schen nach","clipClearHint":"Sekunden. 0 = drin lassen.","draftMenu":"Was ich hier getippt habe","draftSave":"Diesen Entwurf jetzt sichern","draftBack":"%d Felder wiederhergestellt","draftNone":"F\u00fcr diese Seite wurde nichts gesichert.","draftDrop":"Diesen Entwurf vergessen","formDraftsOnName":"Was ich in Formulare tippe, sichern","formDraftsOnHint":"Bleibt auf diesem Rechner und kommt nach einem Absturz oder Fehlklick zur\u00fcck. Nie ein Passwort, nie ein privater Tab.","historyMenu":"Werte, die diese Seite schon gesehen hat","historyClear":"Vergessen","formHistoryOnName":"Was ich in Felder tippe, merken","formHistoryOnHint":"Wird beim n\u00e4chsten Besuch wieder angeboten, pro Seite. Aus in privaten Tabs, und nie ein Passwort.","pwEyeName":"Ein Auge in jedem Passwortfeld","pwEyeHint":"Um zu sehen, was du getippt hast. Der Knopf des Browsers, nicht der der Seite.","pwEyeAction":"Zeigen, was in den Passwortfeldern steht","pasteAllow":"Hier Einf\u00fcgen erlauben","pasteRemember":"Hier immer Einf\u00fcgen erlauben","pasteOn":"Einf\u00fcgen geht jetzt in %d Feldern","autocompleteFix":"\u201eNicht speichern\u201c hier ignorieren","autocompleteRemember":"Hier immer ignorieren","bigEdit":"Dieses Feld in einem gro\u00dfen Fenster bearbeiten","bigEditTitle":"Bearbeiten","bigEditSave":"Zur\u00fcckschreiben","testData":"Mit Testdaten f\u00fcllen","testFilled":"%d Felder mit Unsinn gef\u00fcllt","warnFormsName":"Etwas zum Formular vor mir sagen","warnFormsHint":"Ein Passwortfeld auf einer unverschl\u00fcsselten Seite, und ein Anmeldeformular auf einer Seite, f\u00fcr die du schon ein Login hast.","formInsecure":"Diese Seite kam \u00fcber http \u2014 ein Passwort von hier geht im Klartext hinaus","formKnown":"Du hast hier schon ein Login: %s","catchName":"Logins anbieten, die Skripte abschicken","catchHint":"Seiten, die ohne Formular anmelden \u2014 also die meisten.","reuseWarn":"Das ist das Passwort von %s \u2014 schau in die Adresszeile, bevor du etwas dr\u00fcckst","breachName":"Meine Passw\u00f6rter gegen bekannte Leaks pr\u00fcfen","breachHint":"Schickt die ersten f\u00fcnf Zeichen des SHA-1 jedes Passworts und vergleicht hier \u2014 der Dienst erf\u00e4hrt nie, nach welchem gefragt wurde.","breachRun":"Gegen bekannte Leaks pr\u00fcfen","breachOff":"Die Leak-Pr\u00fcfung ist aus \u2014 der Schalter steht in den Einstellungen.","breachFound":"%d deiner Passw\u00f6rter stehen in bekannten Leaks, auch das f\u00fcr %s","breachClean":"Keines deiner Passw\u00f6rter steht in den gepr\u00fcften Listen","keyTitle":"Sicherheitsschl\u00fcssel","keyAccount":"Welches Konto auf dem Schl\u00fcssel?","keyPin":"Die PIN des Schl\u00fcssels","keyTouch":"Ber\u00fchre deinen Sicherheitsschl\u00fcssel","configBroken":"Deine Einstellungsdatei konnte nicht gelesen werden, daher nutzt dieses Fenster die Standardwerte. Die alte Datei liegt als %s daneben.","keyDone":"Der Schl\u00fcssel hat geantwortet","keyFailed":"Der Schl\u00fcssel hat nicht geantwortet.","authTitle":"Diese Seite will ein Login","authUser":"Benutzername f\u00fcr %s","authPassword":"Passwort","authFilled":"Gespeichertes Login f\u00fcr %s eingesetzt","dupMenu":"Doppelt gespeicherte Logins","dupNone":"Es ist nichts doppelt gespeichert.","mergeAll":"Zusammenlegen","mergeDone":"%d zusammengelegt","unusedMenu":"Seit einem Jahr nicht benutzt","unusedNone":"Alles wurde dieses Jahr benutzt.","unusedDaysName":"Ein Login gilt als unbenutzt nach","unusedDaysHint":"Tagen.","twofaMenu":"K\u00f6nnte zwei Faktoren haben, hat aber keine","twofaNone":"Jedes Login, das einen Code haben k\u00f6nnte, hat einen.","expiringMenu":"L\u00e4uft ab","expiringNone":"Es l\u00e4uft nichts ab.","expiryWarnName":"Vor Schl\u00fcsseln und Karten warnen","expiryWarnHint":"Tage vor dem Datum.","accessLog":"Was angesehen wurde","accessNone":"Es wurde noch nichts aufgedeckt.","accessClear":"Diese Liste leeren","pwHistory":"Fr\u00fchere Passw\u00f6rter","pwHistoryNone":"Es ist kein fr\u00fcheres Passwort aufbewahrt.","pwHistoryRow":"%s \u2014 %d Zeichen","customFields":"Zusatzfelder","customAdd":"Ein Zusatzfeld anlegen","customName":"Wie hei\u00dft es?","customValue":"Was steht drin?","customSecret":"Wie ein Passwort verborgen halten","customNone":"Keine Zusatzfelder.","codesMenu":"Wiederherstellungscodes","codesLeft":"%d von %d \u00fcbrig","codesUse":"Als benutzt markieren","codesNone":"Es sind keine Wiederherstellungscodes gespeichert.","usernameOnly":"Hier nur den Benutzernamen speichern","usernameSaved":"%s ohne Passwort gespeichert","vaultExportTitle":"Tresor verschl\u00fcsselt exportieren","vaultExportAsk":"Ein Kennwort f\u00fcr die Datei","vaultExported":"%d Eintr\u00e4ge geschrieben","vaultExportFailed":"Es wurde nichts geschrieben.","vaultImportTitle":"Eine Tresordatei einlesen","vaultImported":"%d Eintr\u00e4ge \u00fcbernommen","vaultImportBad":"Diese Datei wurde nicht gelesen \u2014 falsches Kennwort, oder keine Tresordatei.","vaultImportFile":"Aus einem anderen Manager einlesen","backupNow":"Den Tresor jetzt sichern","backupDone":"Gesichert","backupFailed":"Die Sicherung wurde nicht geschrieben.","backupNotSet":"Kein Ordner und kein Kennwort \u2014 beides steht in den Einstellungen.","backupDirName":"Verschl\u00fcsselte Tresorsicherungen ablegen in","backupDirHint":"Ein Ordner auf diesem Rechner. Leer = keine Sicherungen.","backupWordName":"Kennwort f\u00fcr die Sicherungen","backupWordHint":"Ohne es wird nichts geschrieben: eine Sicherung, die niemand lesen kann, ist keine.","backupKeepName":"So viele Sicherungen behalten","backupKeepHint":"Die \u00e4lteren werden gel\u00f6scht.","backupDaysName":"Sichern alle","backupDaysHint":"Tage. 0 = nur auf Zuruf.","autoSubmitHere":"Formular hier nach dem F\u00fcllen abschicken","fillOnLoadHere":"Login beim Laden dieser Seite einsetzen","sessionTie":"Dieses Login nur in diesem Browser anbieten","linkedName":"Seiten, die dasselbe Konto sind","linkedHint":"Eine Gruppe pro Zeile, Hosts mit Leerzeichen getrennt. amazon.de und amazon.com sind eingebaut.","aliasEmailName":"Meine Adresse f\u00fcr Plus-Adressen","aliasEmailHint":"name@example.com wird auf Anmeldeformularen zu name+seite@example.com.","passLangName":"Sprache der Wortfolgen","passLangHint":"Aus welcher Wortliste die Wortfolgen kommen.","quickSearch":"Tresor durchsuchen","quickSearchAsk":"Titel, Seite, Benutzername oder Schlagwort","quickNone":"Nichts gefunden.","vaultLockNow":"Tresor jetzt sperren","vaultLockedNow":"Der Tresor ist gesperrt","vaultLockedShort":"Der Tresor ist gesperrt.","vaultNoMaster":"Es gibt kein Hauptpasswort, mit dem man sperren k\u00f6nnte.","changePw":"Die Passwort-\u00c4ndern-Seite dieser Seite \u00f6ffnen","weakWalk":"Die schwachen \u00f6ffnen, je einen Tab","spellBothName":"Rechtschreibung in beiden Sprachen pr\u00fcfen","spellBothHint":"Deutsch und Englisch gleichzeitig, soweit die W\u00f6rterb\u00fccher installiert sind.","cancel":"Abbrechen","dlFiles":"Downloads und Dateien","dlNoSource":"Die Seite, von der das kam, wurde nicht notiert.","dlSource":"Die Seite \u00f6ffnen, von der es kam","dlHash":"Pr\u00fcfsumme berechnen","dlDeleteTitle":"Datei l\u00f6schen?","dlDeleteAsk":"\u201e%s\u201c auch von der Platte nehmen, nicht nur von der Liste?","dlDeleteFailed":"Diese Datei konnte nicht gel\u00f6scht werden.","dlDelete":"Datei mitl\u00f6schen","dlForget":"Von der Liste nehmen","dlKeepDaysName":"Fertige Downloads von der Liste nehmen nach","dlKeepDaysHint":"Tagen. 0 = behalten. Die Dateien bleiben unber\u00fchrt.","dlExport":"Liste als CSV exportieren","dlExported":"%d Zeilen geschrieben","dlLinkCopied":"Die Adresse liegt in der Zwischenablage","dlCopyLink":"Adresse kopieren","dlAgain":"%s wird erneut geholt","dlAgainAction":"Noch einmal herunterladen","dlNoneYet":"Es ist noch kein Download fertig geworden.","dlOpenLast":"Den letzten Download \u00f6ffnen","dlGone":"Diese Datei ist nicht mehr da.","dlRunTitle":"Heruntergeladenes Programm starten?","dlRunAsk":"\u201e%s\u201c ist ein Programm aus dem Internet. \u00d6ffnen?","dlNoOpener":"Auf diesem Rechner gibt es kein xdg-open.","dlOpenFailed":"Das lie\u00df sich nicht \u00f6ffnen.","dlOpenWith":"Diese Art \u00f6ffnen mit\u2026","dlOpenWithName":"Diese Arten mit eigenem Programm \u00f6ffnen","dlOpenWithHint":"Eine Regel pro Zeile: stl=prusa-slicer. Ein nicht installiertes Programm wird ignoriert.","dlOpenWithMissing":"Nicht installiert: %s","dlTemplateName":"Gespeicherte Dateien so benennen","dlTemplateHint":"{name} {ext} {site} {title} {date} {time} {n}. Leer = der Name der Seite.","dlBlockedName":"Diese Arten nie von allein herunterladen","dlBlockedHint":"Endungen, mit Leerzeichen getrennt. Du wirst gefragt, nicht abgewiesen.","dlBlockedTitle":"Diese Art herunterladen?","dlBlockedAsk":"\u201e%s\u201c ist eine der Arten, die nicht von allein kommen sollen. Trotzdem holen?","dlAskForName":"Nur bei diesen Arten nach dem Ort fragen","dlAskForHint":"Endungen, mit Leerzeichen getrennt. Der Rest wird ohne Frage gespeichert.","dlBigMbName":"Fragen, wenn ein Download gr\u00f6\u00dfer ist als","dlBigMbHint":"Megabyte. 0 = nie fragen.","dlBigTitle":"Ein gro\u00dfer Download","dlBigAsk":"\u201e%s\u201c ist %s. Starten?","dlNoSpaceAsk":"\u201e%s\u201c ist %s und es ist nicht genug Platz daf\u00fcr. Trotzdem starten?","dlTwiceTitle":"Schon heruntergeladen","dlTwiceAsk":"\u201e%s\u201c liegt schon in den Downloads. Noch einmal holen?","dlTwiceKept":"Die vorhandene Datei wurde behalten","privateDlName":"Private Tabs laden herunter nach","privateDlHint":"Ein eigener Ordner. Leer = der normale Download-Ordner. Die Datei ist so oder so deine; was ein privater Tab nie beh\u00e4lt, ist der Eintrag.","privateDlWipeName":"Diesen Ordner leeren, wenn der letzte private Tab zugeht","privateDlWipeHint":"Nur Dateien, nur dieser Ordner.","dlOriginName":"Die Herkunftsadresse in die Datei schreiben","dlOriginHint":"Das Attribut xdg.origin.url, das jeder Dateimanager liest. Es reist mit der Datei mit.","dlCarryOn":"Weitermachen","dlHold":"Anhalten","dlAtOnceName":"Gleichzeitig laufende Downloads","dlAtOnceHint":"Der Rest wartet in einer Warteschlange. 0 = ohne Grenze.","dlQueued":"Wartet","dlSpeedName":"Gesamte Downloadgeschwindigkeit h\u00f6chstens","dlSpeedHint":"Kilobyte pro Sekunde. 0 = ohne Grenze. Die Engine kennt keine Ratengrenze, also wird f\u00fcr einen Teil jeder Sekunde angehalten \u2014 eine Grenze im Mittel.","dlLaterStarted":"%d geplante Downloads gestartet","dlLater":"Sp\u00e4ter starten\u2026","dlLaterAsk":"In wie vielen Minuten?","dlNotArchive":"Das ist kein Archiv, das hier gelesen werden kann.","dlArchiveUnsafe":"Dieses Archiv will au\u00dferhalb seines Ordners schreiben (%s) \u2014 es wurde nichts entpackt","dlExtractTitle":"Entpacken?","dlExtractAsk":"%d Dateien nach \u201e%s\u201c entpacken?","dlExtracted":"%d Dateien nach %s entpackt","dlExtractFailed":"Entpacken fehlgeschlagen (%s).","dlExtract":"Entpacken","dlArchiveList":"Hineinschauen","dlAutoExtractName":"Anbieten, Archive beim Ankommen zu entpacken","dlAutoExtractHint":"In einen Ordner mit dem Namen des Archivs.","dlModTitle":"In eine Instanz?","dlModAsk":"\u201e%s\u201c nach %s/mods legen?","dlRouteModsName":"Anbieten, geladene Mods in eine Instanz zu legen","dlRouteModsHint":"F\u00fcr eine .jar, mit der Instanzliste von der Spieleseite.","dlModInfo":"Was diese Mod \u00fcber sich sagt","dlModInfoNone":"Diese jar sagt nichts \u00fcber sich.","dlModInfoRow":"%s %s \u2014 %s, Minecraft %s","imgNotRead":"Dieses Bild lie\u00df sich nicht lesen.","imgNotWritten":"Dieses Bild lie\u00df sich nicht schreiben.","imgConverted":"Als %s gespeichert","imgConvert":"Als PNG oder JPEG speichern","imgNoneBig":"Auf dieser Seite ist kein Bild gro\u00df genug.","imgSavingMany":"%d Bilder werden gespeichert","imgSaveAll":"Die Bilder dieser Seite speichern","imgLeastName":"Nur Bilder speichern von mindestens","imgLeastHint":"Pixel auf der l\u00e4ngeren Seite. 0 = alle.","imgBiggestName":"Die volle Gr\u00f6\u00dfe holen, wo es eine gibt","imgBiggestHint":"Nur wo die Adressen der Seite selbst sagen, wie (Twitter, Wikimedia, Reddit).","dlNoTorrent":"Hier ist kein Torrent-Programm installiert.","dlTorrentWent":"An %s gegeben","dlNoYtdlp":"yt-dlp ist hier nicht installiert.","dlYtdlp":"Dieses Video mit yt-dlp speichern","dlYtdlpAudio":"Nur den Ton speichern","dlYtdlpRow":"yt-dlp-Download","dlYtdlpStarted":"yt-dlp l\u00e4uft","dlNoClam":"clamscan ist hier nicht installiert \u2014 es wurde nichts gepr\u00fcft","dlScanName":"Fertige Downloads mit ClamAV pr\u00fcfen","dlScanHint":"Nur wenn clamscan installiert ist. \u201eKein Scanner\u201c und \u201esauber\u201c werden nie als dasselbe gezeigt.","dlScan":"Pr\u00fcfen","dlClean":"Sauber","dlInfected":"ClamAV sagt, \u201e%s\u201c ist infiziert","dlNotGcode":"Das ist keine G-Code-Datei.","dlNoPrinter":"Es ist keine Druckeradresse gesetzt \u2014 das Feld steht in den Einstellungen.","dlPrinterSent":"%s an den Drucker geschickt","dlPrinterFailed":"Der Drucker hat %s nicht angenommen.","dlPrinter":"An den Drucker schicken","printerUrlName":"Adresse des 3D-Druckers (Moonraker)","printerUrlHint":"http://printer.local:7125 \u2014 dein eigenes Ger\u00e4t in deinem Netz. Leer = aus.","dlHashAllName":"F\u00fcr jeden Download eine Pr\u00fcfsumme berechnen","dlHashAllHint":"SHA-256, auf diesem Rechner. Bei sehr gro\u00dfen Dateien langsamer.","dlNotifyName":"Sagen, wenn ein Download fertig ist","dlNotifyHint":"Nur wenn du in einem anderen Fenster bist.","dlDoneTitle":"Download fertig","dlDoneBody":"%s ist fertig","dlNoPreview":"In dieser Datei gibt es nichts zum Ansehen.","dlPreview":"Ansehen","dlOpenIt":"\u00d6ffnen","dlBatchTitle":"Eine Liste herunterladen","dlBatchAsk":"Eine Adresse pro Zeile.","dlBatchNone":"In dieser Liste ist keine brauchbare Adresse.","dlBatchStarted":"%d Downloads gestartet","dlBatch":"Eine Liste von Adressen herunterladen\u2026","dlLinkSaving":"%s wird gespeichert","altSaveName":"Alt+Klick auf einen Link speichert ihn","altSaveHint":"Statt hinzugehen.","upNoImage":"In der Zwischenablage ist kein Bild.","upNoBox":"Auf dieser Seite ist kein Upload-Feld.","upPasted":"Ins Upload-Feld gelegt","upPaste":"Das Bild aus der Zwischenablage ins Upload-Feld legen","upRecent":"Etwas Neueres hochladen","upNoRecent":"Es gibt nichts Neueres zum Hochladen.","upStripped":"Die Kameradaten wurden vorher entfernt","stripUploadName":"Kameradaten vor dem Hochladen aus Bildern entfernen","stripUploadHint":"EXIF und GPS. Das Bild wird neu geschrieben, es reist also nichts anderes mit.","exifKeepHere":"Auf dieser Seite die Kameradaten behalten","pageSaveOne":"Die Seite als eine Datei speichern","pageSaved":"Als %s gespeichert","pageSavedPart":"Als %s gespeichert \u2014 %d Bilder konnten nicht hineingelesen werden","pageSaveFailed":"Diese Seite lie\u00df sich nicht speichern.","pageSaveMd":"Den Artikel als Markdown speichern","mdSaved":"Als %s gespeichert","mdNothing":"Auf dieser Seite ist kein Artikel zum Speichern.","dlSearch":"Downloads durchsuchen","dlSearchAsk":"Name, Adresse oder Seite","dlFilterKind":"Nur diese Art","dlFilterSite":"Nur von dieser Seite","dlQueueMenu":"Wartet","dlQueueUp":"In der Schlange nach vorn","dlQueueDown":"In der Schlange nach hinten","sessionDlName":"Dieser Browser l\u00e4dt herunter nach","sessionDlHint":"Ein Ordner f\u00fcr diesen virtuellen Browser. Leer = der normale.","barMenu":"Die Adresszeile","barPlaceholder":"Suchen oder Adresse eingeben","barNotSecure":"Nicht sicher","barNotSecureTip":"Diese Seite kam \u00fcber http. Was du hier eintippst, geht im Klartext hinaus.","barSecure":"Sichere Verbindung","barLookalike":"Dieser Name ist als ein anderer verkleidet","barLookalikeTip":"Er liest sich wie %s. Schau auf die Adresse, bevor du etwas eintippst.","barInUseTip":"Diese Seite benutzt Kamera, Mikrofon oder Bildschirm","barNoPage":"Hier ist keine Seite.","barCertLook":"Zertifikat ansehen","barCertNone":"Es kam kein Zertifikat zur\u00fcck.","barCertTitle":"Zertifikat f\u00fcr %s","barCookieRule":"Cookies: %s","barCookieAsIs":"wie der Browser eingestellt ist","barAllowed":"Was diese Seite darf","barLockTip":"Was diese Seite darf, und wer sie zu sein behauptet","barCopyTip":"Adresse kopieren","barClearTip":"Zeile leeren","barQrTip":"Adresse als QR-Code zeigen","barAnswerCopied":"Kopiert: %s","barSettingRow":"Einstellungen: %s","barDidYouMean":"Meintest du %s?","barSearchSite":"%s durchsuchen \u2014 tippe, was du suchst","barBackground":"In einem Hintergrundtab ge\u00f6ffnet","barKeywordTitle":"Ein Schlagwort daf\u00fcr","barKeywordAsk":"Das Wort, das \u201e%s\u201c \u00f6ffnet","barKeywordSet":"\u201e%s\u201c \u00f6ffnet es jetzt","barKeywordBad":"Ein Stichwort ist ein Wort ohne Leerzeichen \u2014 es wurde nichts gesetzt.","barNeverSuggest":"Diese Seite nie mehr vorschlagen","barNeverAgain":"%s wird nicht mehr vorgeschlagen","barOtherWindow":"In einem anderen Fenster","barEngines":"Suchen mit","barScopeHint":"@tabs, @lesezeichen, @chronik, @einstellungen, @downloads, @notizen","barProgressName":"Ladefortschritt in der Adresszeile zeigen","barProgressHint":"Eine d\u00fcnne Linie am unteren Rand der Zeile.","barDimPathName":"Die Domain hell, den Rest blass zeigen","barDimPathHint":"Damit paypal.com.evil.ru sich wie evil.ru liest. Nur solange du die Adresse nicht bearbeitest.","barDecodeName":"Adressen lesbar anzeigen","barDecodeHint":"%20, %C3%BC und Punycode als die Zeichen, f\u00fcr die sie stehen. Kopiert wird weiterhin die echte Adresse.","barHideSchemeName":"https:// und www. weglassen","barHideSchemeHint":"Die Adresse kommt vollst\u00e4ndig zur\u00fcck, sobald du sie bearbeitest.","barInlineName":"Domain beim Tippen vervollst\u00e4ndigen","barInlineHint":"Aus den Seiten, die du wirklich besuchst, mit dem Rest markiert.","barRowsName":"Zeilen im Vorschlagsfeld","barRowsHint":"Wie viele Vorschl\u00e4ge gezeigt werden.","barTextSizeName":"Schriftgr\u00f6\u00dfe der Adresszeile","barTextSizeHint":"Prozent, unabh\u00e4ngig vom Rest der Oberfl\u00e4che.","barLockName":"Das Schloss in der Adresszeile zeigen","barLockHint":"Klick darauf zeigt, was die Seite darf.","barCopyBtnName":"Ein Kopierknopf in der Adresszeile","barCopyBtnHint":"Am rechten Ende.","barClearBtnName":"Ein Leeren-Knopf beim Bearbeiten","barClearBtnHint":"Ein \u00d7 am rechten Ende.","barQrBtnName":"Ein QR-Knopf in der Adresszeile","barQrBtnHint":"Zeigt die Adresse als QR-Code f\u00fcrs Handy.","barBottomName":"Die Werkzeugleiste unter die Seite legen","barBottomHint":"Die ganze Leiste, Adresszeile inklusive.","barSourcesName":"Was das Vorschlagsfeld vorschlagen darf","barSourcesHint":"history, bookmarks, tabs, answers, search, settings, windows \u2014 lass weg, was du nicht willst.","privateEngineName":"Private Tabs suchen mit","privateEngineHint":"Der Name einer Suchmaschine, oder leer f\u00fcr die normale.","langEnginesName":"Deutsche Suchen gehen an","langEnginesHint":"Ein Maschinenname f\u00fcr de und einer f\u00fcr en, als de=name en=name. Leer = immer die Voreinstellung.","moneyRatesName":"Wechselkurse f\u00fcr \u201e20 usd in eur\u201c holen","moneyRatesHint":"H\u00f6chstens einmal am Tag, aus der Tagesdatei der Europ\u00e4ischen Zentralbank. Aus = die Antwort sagt das, statt zu raten.","moneyFetched":"Wechselkurse f\u00fcr %d W\u00e4hrungen","moneyFailed":"Die Kurse konnten nicht geholt werden.","enginesName":"Meine eigenen Suchmaschinen","enginesHint":"Eine pro Zeile: Name|https://example.com/?q=%s|Wort. Die Adresse muss sagen, wo die W\u00f6rter hingeh\u00f6ren.","barOpenSearch":"Die Suche dieser Seite hinzuf\u00fcgen","barOpenSearchAdded":"%s kann jetzt aus der Zeile durchsucht werden","devRequests":"Was diese Seite geholt hat","devLogRow":"Anfragen mitschreiben","devLogOn":"Anfragen werden mitgeschrieben","devLogOff":"Das Anfrageprotokoll ist aus und leer","devLogEmpty":"Im Anfrageprotokoll steht nichts.","devLogClear":"Protokoll leeren","devLogHar":"Eine HAR-Datei schreiben","devHarWritten":"%d Anfragen geschrieben \u2014 die Antworten stehen nicht drin, weil dieser Browser Anfragen sieht","devRuleAdded":"%s wird jetzt blockiert","devRulesName":"Adressen blockieren oder umleiten","devRulesHint":"Eine pro Zeile: ein St\u00fcck Adresse blockiert sie, und \u201ewas -> wohin\u201c schickt sie an eine Datei oder eine andere Adresse.","devAgentMenu":"Dieser Seite sagen, der Browser sei","devAgentSet":"Dieser Seite wird gesagt, der Browser sei %s (%s)","devAgentOff":"%s bekommt wieder die Wahrheit","devAgentOffRow":"Die Wahrheit","devHeadersName":"Header hinzuf\u00fcgen","devHeadersHint":"Einer pro Zeile: \u201eName: Wert\u201c f\u00fcr jede Seite, oder \u201eHost | Name: Wert\u201c f\u00fcr eine.","devHeadersMenu":"Was der Server geschickt hat","devHeadersGot":"HTTP %d, %d Header, %d Sicherheitsheader fehlen","devHdrMissing":"Fehlt: %s","devHdrHsts":"HSTS","devHdrCsp":"eine Content-Policy","devHdrNosniff":"no-sniff","devHdrFrames":"Rahmenregeln","devHdrReferrer":"eine Referrer-Policy","devHdrPermissions":"eine Permissions-Policy","devHttp":"Eine Anfrage schicken","devHttpAsk":"Methode und Adresse, als \u201eGET https://example.com/\u201c","devHttpHeaders":"Header, einer pro Zeile (Name: Wert). Leer f\u00fcr keine.","devHttpBody":"Der Inhalt","devHttpBad":"Das ist keine http-Adresse.","devWsMenu":"WebSockets","devWsOff":"Schalte zuerst \u201eOffene Verbindungen notieren\u201c bei den Seitenw\u00e4chtern ein.","devWsNone":"Diese Seite hat keine ge\u00f6ffnet.","devWsOpen":"offen","devWsClosed":"geschlossen","devTimingMenu":"Wie lange es gedauert hat","devTiming":"Erstes Byte nach %d ms, geladen nach %d ms","devTtfb":"Erstes Byte: %d ms","devLoaded":"Geladen: %d ms","themeMine":"Meine Themes","themeEditor":"Dieses Theme bearbeiten","themeEditorSub":"Die acht Farben eines Themes \u00e4ndern und es unter einem eigenen Namen speichern.","themeSave":"Als mein Theme speichern","themeSaved":"Als \u201e%s\u201c gespeichert","themeName":"Ein Name daf\u00fcr","themeDrop":"\u201e%s\u201c l\u00f6schen","themeExport":"Dieses Theme als Datei speichern","themeExported":"Nach %s geschrieben","themeImport":"Ein Theme aus einer Datei lesen","themeImported":"\u201e%s\u201c geh\u00f6rt jetzt dir","themeImportBad":"Aus dieser Datei lie\u00dfen sich keine Farben lesen.","themeAccent":"Eine andere Akzentfarbe","themeAccentSuffix":"(mein Akzent)","themeFaint":"%s auf %s ist %.1f:1 und braucht %.1f:1","themeFaintNone":"Alles darin ist lesbar.","uiSizeName":"Die Gr\u00f6\u00dfe der Browser-Oberfl\u00e4che","uiSizeHint":"Tabs, Werkzeugleiste, Men\u00fcs und Leisten. Die Seiten selbst bleiben unber\u00fchrt \u2014 das ist der Seitenzoom.","uiSize_compact":"Kompakt","uiSize_normal":"Normal","uiSize_big":"Gro\u00df","uiSizeSet":"Oberfl\u00e4che: %s","uiFontName":"Die Schrift der Browser-Oberfl\u00e4che","uiFontHint":"Eigene Men\u00fcs, Tabs und Leisten. Nichtproportionale Schriften stehen zuerst.","uiRadiusName":"Wie rund die Ecken sind","uiRadiusHint":"0 ist eckig. Gilt in jedem Look.","uiGlassName":"Wie durchsichtig Glass ist","uiGlassHint":"Nur der Glass-Look liest das.","uiLabelsName":"W\u00f6rter in der Werkzeugleiste statt Zeichen","uiLabelsHint":"Die Kn\u00f6pfe behalten ihre Symbole; die W\u00f6rter kommen daneben.","uiFocusName":"Wie der Tastaturfokus gezeichnet wird","uiFocusHint":"In den eigenen Fenstern des Browsers, nicht auf Webseiten.","uiFocus_normal":"Wie \u00fcblich","uiFocus_thick":"Ein dicker Rahmen","uiFocus_underline":"Eine Unterstreichung","uiFocus_off":"Gar nicht","uiAnimName":"Die eigene Oberfl\u00e4che animieren","uiAnimHint":"Aus = Tabs, Leisten und Men\u00fcs erscheinen, statt zu gleiten.","uiTabMinName":"Schmalste Breite eines Tabs","uiTabMaxName":"Breiteste Breite eines Tabs","uiToolbarName":"Wie hoch die Werkzeugleiste ist","uiPlainMenusName":"Einfache Men\u00fcs mit gr\u00f6\u00dferen Zeilen","uiPlainMenusHint":"Keine Symbole, mehr Platz zwischen den Zeilen.","appearanceResetName":"Aussehen zur\u00fccksetzen","appearanceResetHint":"Theme, Look, Schriften, Gr\u00f6\u00dfen und Seitenstile. Eine Sicherung bleibt, damit es r\u00fcckg\u00e4ngig gemacht werden kann.","appearanceReset":"Das Aussehen ist wieder wie geliefert","appearanceUndo":"Dieses Zur\u00fccksetzen widerrufen","pageLookName":"Wie Webseiten angezeigt werden","nightDimName":"Seiten abends abdunkeln","nightDimHint":"Dunkelt nur die Seite ab \u2014 die eigenen Fenster des Browsers behalten ihre Helligkeit.","nightFromName":"Von","nightToName":"bis","warmNightName":"Abends w\u00e4rmere Farben","warmNightHint":"Dieselben Stunden wie beim Abdunkeln.","warmStrengthName":"Wie warm","greyName":"Seiten in Grau zeigen","greyHint":"\u00dcberall, oder pro Seite im Seitenmen\u00fc.","greyHere":"%s in Grau zeigen","greyOn":"Grau","greyOff":"Wieder in Farbe","scrollbarsName":"Scrollbalken auf Webseiten","scrollbarsHint":"Eine Seite, die eigene zeichnet, kann im Seitenmen\u00fc ausgenommen werden.","scrollbars_normal":"Wie die Seite sie gemacht hat","scrollbars_thin":"D\u00fcnn","scrollbars_themed":"D\u00fcnn und in meinen Farben","scrollbars_hidden":"Nicht gezeichnet","scrollbarsHere":"Die Scrollbalken von %s in Ruhe lassen","selectionName":"Markierter Text in meiner Akzentfarbe","selectionHint":"Auf Webseiten. Die eigenen Fenster benutzen sie schon.","unstyledName":"Seiten ohne eigenen Hintergrund meinen geben","unstyledHint":"Ein einfaches .txt oder eine alte Seite ist sonst motorwei\u00df.","siteFontSizeName":"Textgr\u00f6\u00dfe f\u00fcr diese Seite","siteFontSizeAsk":"Schriftgr\u00f6\u00dfe in Pixeln f\u00fcr %s. Leer = wie geliefert.","siteFontSizeSet":"%s ist jetzt %dpx","siteFontsName":"Die Schriften, auf die Webseiten zur\u00fcckfallen","siteFontsHint":"Wenn eine Seite keine eigene nennt.","siteFont_standard":"Standard","siteFont_serif":"Serif","siteFont_sans":"Sans-serif","siteFont_mono":"Nichtproportional","siteFont_emoji":"Farbige Emoji","emojiFontHint":"Chromiums Piktogramm-Familie \u2014 was es nimmt, wenn eine Seite ein Emoji verlangt.","sessionTintName":"Die eigene Farbe dieses virtuellen Browsers","sessionTintHint":"Auf der Tableiste und der Adresszeile, damit nie geraten werden muss, welches Konto aktiv ist.","privateTintName":"Die Farbe privater Tabs","privateTintHint":"Ihr Name in der Leiste und eine Linie \u00fcber der Werkzeugleiste.","monoFaviconsName":"Favicons in einer Farbe","monoFaviconsHint":"Die Formen bleiben, die Markenfarben nicht. Lesezeichen behalten ihre.","statusLineName":"Wo ein Link unter der Maus genannt wird","statusLineHint":"Unten links \u00fcber der Seite, in der Adresszeile oder nirgends.","statusLine_bottom":"Unten links","statusLine_bar":"In der Adresszeile","statusLine_off":"Nirgends","statusSizeName":"Wie gro\u00df diese Zeile ist","titleFormatName":"Wie das Fenster hei\u00dft","titleFormatHint":"Hyprland-Regeln und der Fensterwechsler haben nichts anderes, um zwei Fenster zu unterscheiden.","titleFormat_full":"Seite \u2014 Browser","titleFormat_page":"Nur die Seite","titleFormat_site":"Nur die Website","titleFormat_session":"Seite \u2014 virtueller Browser \u2014 Browser","autoHideName":"Tabs und Werkzeugleiste verstecken, bis ich sie brauche","autoHideHint":"Sie kommen zur\u00fcck, wenn die Maus den oberen Rand erreicht, oder mit Strg+L.","revealFsName":"Oberfl\u00e4che im Vollbild am oberen Rand zeigen","revealFsHint":"Im F11-Vollbild, nicht w\u00e4hrend ein Video den Bildschirm hat.","pageColourName":"Einer Seite erlauben, die Werkzeugleiste zu f\u00e4rben","pageColourHint":"Ihr eigenes theme-color-Meta-Tag. Die Farbe eines virtuellen Browsers gewinnt dagegen.","themedErrorsName":"Fehlgeschlagene Ladevorg\u00e4nge im eigenen Stil zeigen","themedErrorsHint":"Einfach, in deiner Palette, mit Enter zum erneuten Versuch.","errTitle":"Diese Seite wurde nicht geladen","errUnknown":"Der Server hat nicht geantwortet.","errAgain":"Erneut versuchen (Enter)","startLayoutName":"Was die Startseite zeigt","startClockName":"Die Uhr","startSecondsName":"Mit Sekunden","startDateName":"Das Datum","startHour24Name":"24-Stunden-Uhr","startSearchName":"Wo das Suchfeld sitzt","startSearch_middle":"In der Mitte","startSearch_top":"Oben","startSearch_bottom":"Unten","startQuickName":"Wie gro\u00df die Schnelllinks sind","wallFolderName":"Ein Ordner mit Hintergrundbildern","wallFolderHint":"Die Startseite wechselt durch die Bilder darin. Es wird nichts kopiert und nichts geladen.","wallEveryName":"Bild wechseln alle","wallEveryHint":"0 = bei jedem neuen Tab ein anderes.","darkSiteName":"Seiten, die in Ruhe gelassen werden","darkSiteHint":"Ein Host pro Zeile. Diese werden nie abgedunkelt oder umgef\u00e4rbt \u2014 die eigene Liste des Browsers mit bereits dunklen Seiten kommt dazu.","darkSiteBuiltin":"Diese l\u00e4sst der Browser schon in Ruhe: %s","darkSiteHere":"%s in Ruhe lassen","darkSiteOn":"%s wird jetzt in Ruhe gelassen","darkSiteOff":"%s wird wieder umgef\u00e4rbt","lookFlat":"Flat Mono","lookFlatSub":"Eckige Ecken, keine Schatten, keine Karten, beschriftet wie ein Terminal.","followSchemeName":"Der Hell/Dunkel-Einstellung des Desktops folgen","followSchemeHint":"Liest die colour-scheme-Einstellung des XDG-Portals und wechselt zwischen deinen zwei Themes.","schemeDarkName":"Das dunkle Theme","schemeLightName":"Das helle Theme","colourFileName":"Einer Farbdatei folgen","colourFileHint":"Eine kitty.conf, base16-YAML oder ein VS-Code-Theme. Der Browser f\u00e4rbt um, wenn die Datei sich \u00e4ndert \u2014 es wird nichts geladen.","colourFileWatching":"Folgt %s","themeStarName":"Lieblings-Themes","themeStarHint":"\u201eN\u00e4chstes Lieblings-Theme\u201c geht durch die markierten; in der Tastenliste der Einstellungen kann es eine Taste bekommen.","themeStar":"Dieses Theme markieren","themeUnstar":"Markierung entfernen","themeCycle":"N\u00e4chstes Lieblings-Theme","themeCycled":"%s","themeNoStars":"Markiere erst ein oder zwei Themes \u2014 die Liste steht in den Einstellungen.","rawViewName":"Einfache Dateien auf meinem Hintergrund","rawViewHint":"Eine .txt, eine .json oder ein einzeln ge\u00f6ffnetes Bild bekommt den Theme-Hintergrund statt Motorwei\u00df.","rawCheckerName":"Ein Schachbrett hinter Bildern","rawCheckerHint":"Damit ein transparentes PNG lesbar ist.","darkPdfName":"Dunkle PDF-Seiten","darkPdfHint":"Invertiert die Seite und setzt die Bilder zur\u00fcck.","devtoolsDarkName":"DevTools in den Farben des Browsers","devtoolsDarkHint":"Dunkel oder hell passend zum Theme, gesetzt bevor das Fenster aufgeht.","rawViewsHere":"Einfache Dateien auf meinem Hintergrund","lookMenuName":"Die Form","appearanceMenu":"Wie es aussieht","a11yName":"Eine Seite lesen","a11yMenu":"Lesehilfe","a11yNoAlt":"kein Alt-Text","a11yUnderlineLinks":"Links immer unterstreichen","a11yBigTargets":"Gr\u00f6\u00dfere Klickfl\u00e4chen","a11yFixContrast":"Zu blassen Text abdunkeln","a11yAltText":"Alt-Text beim \u00dcberfahren, Bilder ohne markieren","a11yBoldStarts":"Den Anfang jedes Wortes fett","a11yBigBars":"Gr\u00f6\u00dfere Scrollbalken auf Seiten","a11yHyphenate":"Lange W\u00f6rter trennen","a11yReflow":"Text aufs Fenster umbrechen statt seitw\u00e4rts scrollen","a11yNoSticky":"Kopf- und Fu\u00dfzeilen losmachen","a11yNoRefresh":"Seiten daran hindern, sich selbst neu zu laden","a11yEscapeOverlays":"Esc schlie\u00dft ein Fenster, das die Seite nicht schlie\u00dft","a11yFocusInView":"Das fokussierte Element in der Mitte halten","a11yFocusTooltips":"Tooltips beim Tastaturfokus zeigen","a11yHoverZoom":"Beim \u00dcberfahren eine gr\u00f6\u00dfere Kopie des Bildes zeigen","a11yAltDragSelect":"Alt-Ziehen markiert die W\u00f6rter eines Links","a11ySpatial":"Pfeiltasten wechseln zwischen Links und Kn\u00f6pfen","a11yCaret":"Cursor-Navigation (F7)","a11yCaretStyle":"Ein Cursor in meiner Akzentfarbe","a11yMonoAudio":"Seitenton auf Mono mischen","a11yBalance":"Balance links/rechts","a11yTextZoom":"Nur die Textgr\u00f6\u00dfe","a11yFont":"Eine Schrift f\u00fcr Seiten","a11yFontHint":"Eine legasthenie-freundliche Familie, falls installiert. Leer = die der Seite.","a11yColourFilter":"Filter f\u00fcr Farbenblindheit","a11yFilter_":"Aus","a11yFilter_fixrg":"Rot-Gr\u00fcn korrigieren","a11yFilter_fixby":"Blau-Gelb korrigieren","a11yFilter_protan":"Protanopie simulieren","a11yFilter_deutan":"Deuteranopie simulieren","a11yFilter_tritan":"Tritanopie simulieren","a11ySpacing":"Zeilen-, Wort- und Buchstabenabstand","a11ySiteOnly":"Nur auf %s","a11ySiteCleared":"%s liest wieder die \u00fcblichen Antworten","a11yAuditName":"Was an dieser Seite nicht stimmt","a11yAuditRow":"%d Felder ohne Bezeichnung, %d Bilder ohne Alt-Text, %d zu blass, %d Spr\u00fcnge in der Gliederung","a11yAuditClean":"Offensichtlich ist nichts verkehrt.","a11yJumpHeading":"N\u00e4chste \u00dcberschrift","a11yJumpHeadingBack":"Vorige \u00dcberschrift","a11yJumpLandmark":"N\u00e4chster Bereich","a11yJumpField":"N\u00e4chstes Formularfeld","a11yMain":"Zum Inhalt springen","a11yField":"In das erste Textfeld","a11yCaretOn":"Cursor-Navigation ist an \u2014 die Pfeiltasten bewegen einen Cursor, Umschalt markiert","a11yCaretOff":"Cursor-Navigation ist aus","a11yFindCursor":"Strg allein l\u00e4sst einen Ring um den Zeiger blinken","a11yTextOnlyZoom":"Nur den Text vergr\u00f6\u00dfern, nicht die Bilder","a11yMagnifier":"Eine Lupe, die dem Zeiger folgt","a11yLensScale":"Wie stark die Lupe vergr\u00f6\u00dfert","a11ySoundCues":"Ein kurzer Ton, wenn eine Seite oder ein Download fertig ist","a11ySoundCuesHint":"Zwei T\u00f6ne, die der Browser selbst erzeugt. Es wird nichts heruntergeladen.","a11yTabStrip":"N\u00e4chster Tab \u00fcber die Tastatur","a11yTabStripBack":"Voriger Tab \u00fcber die Tastatur","a11yTabMenu":"Das Men\u00fc dieses Tabs \u00fcber die Tastatur","a11yPageMenu":"Das Seitenmen\u00fc beim fokussierten Element","a11yNames":"Die eigenen Kn\u00f6pfe f\u00fcr einen Screenreader benennen","a11yNamesDone":"%d Dinge benannt","a11yPanel":"Lesehilfe f\u00fcr diese Seite","a11yCapOn":"Untertitel an \u2014 auf diesem Rechner aufgenommen und erkannt","a11yCapOff":"Untertitel aus","a11yCapName":"Live-Untertitel f\u00fcr das, was ein Tab abspielt","a11yCapHint":"Nimmt die Ausgabe des Rechners in Abschnitten von einigen Sekunden auf und erkennt sie mit dem Programm, das du nennst. Nichts ist mitgeliefert, nichts wird heruntergeladen, und kein Ton verl\u00e4sst den Rechner.","a11yCapNoTool":"Daf\u00fcr braucht es einen Rekorder und eine Spracherkennung \u2014 nenne sie in den Einstellungen (zum Beispiel parec und whisper-cli).","a11yCapNoTranslator":"Daf\u00fcr braucht es einen \u00dcbersetzer auf diesem Rechner \u2014 nenne einen in den Einstellungen (trans oder argos-translate).","a11yCapRecorder":"Der Rekorder","a11yCapTranscriber":"Die Spracherkennung","a11yCapTranslator":"Der \u00dcbersetzer","a11yCapModel":"Die Modelldatei","a11yCapTranslate":"Die Untertitel \u00fcbersetzen","a11yCapTranslateHint":"Die eigenen Untertitel eines Videos, Zeile f\u00fcr Zeile von dem Programm \u00fcbersetzt, das du nennst.","a11yCapFound":"Gefunden: %s","a11yCapMissing":"nicht installiert","descA11y":"Eine Seite lesen: Kontrast, Abst\u00e4nde, die Tasten, die durch sie f\u00fchren, Untertitel und Ton.","a11ySpacingLine":"Zeilenabstand","a11ySpacingWord":"Wortabstand","a11ySpacingLetter":"Buchstabenabstand","a11yPanelHint":"Jede dieser Einstellungen l\u00e4sst sich im Lesehilfe-Fenster f\u00fcr eine einzelne Seite setzen.","navMenu":"Zurechtkommen","navAutoScroll":"Mittelklick und bewegen zum Scrollen","navBoxLinks":"Mit Alt einen Rahmen \u00fcber Links ziehen","navClickableUrls":"Adressen im Text klickbar machen","navNoScrollHijack":"Der Seite das Scrollen nicht \u00fcberlassen","navNoKeyGrab":"Der Seite die Tasten nicht \u00fcberlassen","navStopRefresh":"Die Seite nicht selbst neu laden lassen","navRefreshStopped":"Ein Neuladen, das diese Seite wollte, wurde gestoppt","navAllowRefresh":"Dieses eine Mal erlauben","navOpenedLinks":"%d Links im Hintergrund ge\u00f6ffnet","navNoLinks":"Keine Links in der Auswahl.","navNoUrlThere":"Diese Auswahl ist keine Adresse.","navOpenSelection":"Zur ausgew\u00e4hlten Adresse gehen","navOpenAllLinks":"Jeden Link in der Auswahl \u00f6ffnen","navBoxOpen":"Die Links aus dem Rahmen \u00f6ffnen","navImages":"Die Bilder auf dieser Seite","navNoImages":"Keine Bilder auf dieser Seite.","navImgOpen":"\u00d6ffnen","navImgCopy":"Adresse kopieren","navImgSave":"Speichern","navImgCopyAll":"Alle Adressen kopieren","navViewImage":"Ein Bild in voller Gr\u00f6\u00dfe zeigen","navStructure":"Die Gliederung dieser Seite","navFrames":"Die Rahmen in dieser Seite","navNoFrames":"Diese Seite hat keine Rahmen.","navFrameBlocked":"nicht gezeichnet","navReloadFrame":"Einen Rahmen neu laden","navFindAll":"In allen Tabs suchen","navNoMatches":"In keinem Tab etwas gefunden.","navFindLink":"Einen Link \u00fcber seine W\u00f6rter finden","navFindMarks":"Jeden Treffer markieren","navMobileOn":"Die mobile Version \u2014 Telefonbreite und ein Telefon-User-Agent","navMobileOff":"Zur\u00fcck zur vollen Version","navRewriteName":"Adressen, die vor dem Laden umgeschrieben werden","navRewriteHint":"Eine Regel pro Zeile, als von -> nach. Zum Beispiel reddit.com -> old.reddit.com","navNoteName":"Eine Notiz zu dieser Seite","navNoteAsk":"Woran soll diese Seite dich erinnern? Sie kommt bei jedem Besuch wieder.","navBackOnline":"Wieder online \u2014 geladen","navArchiveName":"Die archivierte Fassung","navArchiveAsk":"Die neueste archivierte Fassung von %s \u00f6ffnen? Das fragt archive.org danach und sagt denen damit, dass du nachgesehen hast.","navErr_dns":"Dieser Name lie\u00df sich nicht aufl\u00f6sen.","navErr_refused":"Der Server hat die Verbindung abgelehnt.","navErr_timeout":"Der Server hat nicht rechtzeitig geantwortet.","navErr_cert":"Dem Zertifikat war nicht zu trauen.","navErr_unknown":"Das Laden schlug fehl, und die Engine sagte nicht, warum.","navErr_other":"Das Laden schlug fehl.","navOtherBrowser":"Im anderen Browser \u00f6ffnen","navPlayer":"Mit dem Player \u00f6ffnen","navNoPlayer":"%s ist nicht installiert.","navHandedToPlayer":"An %s \u00fcbergeben","navPlayerName":"Der externe Player","navPlayerHint":"mpv, oder was einen Stream besser abspielt als eine Webseite.","navCacheCleared":"Cache und Worker von %s sind weg \u2014 wird neu geladen","navPrintSelection":"Die Auswahl drucken","navNoSelection":"Es ist nichts ausgew\u00e4hlt.","navPrinted":"Nach %s geschrieben","navRetryName":"Einen fehlgeschlagenen Ladevorgang wiederholen, wenn das Netz zur\u00fcck ist","navRetryHint":"Alle paar Sekunden eine Pr\u00fcfung, und die Seite l\u00e4dt sich selbst, sobald es eine Antwort gibt.","navAppName":"Welches Programm soll das \u00f6ffnen?","navAppAsk":"Eine %s:-Adresse von %s. Welches Programm soll sie \u00f6ffnen? Die Antwort wird behalten.","navNoApp":"Auf diesem Rechner kann nichts eine %s:-Adresse \u00f6ffnen.","navAppFailed":"%s lie\u00df sich nicht starten.","navHandedTo":"An %s \u00fcbergeben (%s:)","navShellName":"Woanders \u00f6ffnen?","navShellAsk":"Eine %s:-Adresse von %s. Soll Windows sie mit dem Programm \u00f6ffnen, dem diese Art Adresse geh\u00f6rt? Die Antwort wird behalten.","navShellGave":"An Windows \u00fcbergeben (%s:)","navNoAppsYet":"Es wurde noch nichts gefragt.","navAppForgotten":"%s wird n\u00e4chstes Mal wieder gefragt","navPreviewName":"Einen Link ansehen, ohne hinzugehen","navPreviewKeep":"Als Tab behalten","navPreviewClose":"Schlie\u00dfen","navInfoName":"Woraus diese Seite besteht","navInfoLinks":"Ihre Links","navInfoMeta":"Ihre Metadaten","navInfoMedia":"Ihre Medien","navPane":"In der Seitenleiste \u00f6ffnen","navQrName":"Was der Code sagt","navQrRead":"Den QR-Code lesen","navQrNone":"In diesem Bild ist kein lesbarer QR-Code.","navQrOpen":"\u00d6ffnen","navClearCache":"Cache dieser Seite leeren und neu laden","linkPreviewName":"Umschalt und \u00dcberfahren zeigt die verlinkte Seite","linkPreviewHint":"Ein kleines Fenster in einem privaten Beh\u00e4lter, das als Tab behalten werden kann.","descNav":"Auf einer Seite zurechtkommen: woraus sie besteht, was mit einer Auswahl geht, und die Klugheit der Seite aus dem Weg.","navHint":"Diese Schalter lassen sich im Zurechtkommen-Fenster f\u00fcr eine einzelne Seite setzen.","navErrProxy":"Ein Proxy ist eingeschaltet \u2014 vielleicht hat der Proxy versagt, nicht die Seite.","perfMenu":"Was das kostet","perfFreed":"%d Tabs schlafen","perfFreeNow":"Jetzt Speicher freigeben","perfKeepAwake":"Diese Seite nie schlafen legen","perfKeepAwakeName":"Seiten, die nie schlafen oder eingefroren werden","perfKeepAwakeHint":"Amazon Music h\u00f6rt auf, wenn der Tab verworfen wird, Discord verliert den Anruf. Ein Host pro Zeile.","perfFreeze":"Die unt\u00e4tigen Tabs einfrieren","perfFreezeName":"Einen Hintergrundtab einfrieren nach","perfFreezeHint":"Eingefroren beh\u00e4lt die Seite und f\u00fchrt keine Timer aus; schlafend gibt den ganzen Renderer zur\u00fcck. 0 = nie.","perfHog":"%s benutzt im Hintergrund %d%% eines Prozessors","perfHogName":"Sagen, wenn ein Hintergrundtab den Prozessor besch\u00e4ftigt h\u00e4lt","perfHogHint":"\u00dcber eine halbe Minute gemessen, und nur f\u00fcr Tabs, die du nicht ansiehst.","perfStopped":"Der Renderer dieses Tabs wurde gestoppt \u2014 wird neu geladen","perfStop":"Den Prozess dieser Seite stoppen","perfNice":"Hintergrundtabs weniger Anspruch auf den Prozessor geben","perfNiceHint":"Immer nur nach unten, damit nichts verhungern kann \u2014 der vordere Tab und ein Spiel gewinnen einfach.","perfPressure":"Dem Rechner fehlt Speicher \u2014 %d Tabs schlafen","pressureNoPsi":"Dieser Rechner hat keinen Speicherdruck-Z\u00e4hler, das l\u00e4sst sich hier also nicht beobachten \u2014 setz stattdessen ein Gesamt-Speicherlimit, das \u00fcberall funktioniert.","perfPressureName":"Hintergrundtabs schlafen legen, bevor der Rechner auslagert","perfPressureHint":"Liest die Speicherdruck-Zahl des Kernels (PSI), nicht eine Sch\u00e4tzung \u00fcber freien Speicher.","perfBudgetName":"Gesamtes Speicherbudget","perfBudgetHint":"Dar\u00fcber schlafen die Tabs, die du am l\u00e4ngsten nicht angefasst hast. 0 = kein Budget.","perfLeak":"%s ist um %s gewachsen und w\u00e4chst weiter \u2014 ein Neuladen g\u00e4be das zur\u00fcck","perfLeakName":"Einen Tab bemerken, dessen Speicher immer weiter steigt","perfRecovered":"Dieser Tab ist abgest\u00fcrzt (%s) und wurde dort wieder geladen, wo du warst","perfCrashUnknown":"kein Grund genannt","perfBadge":"%d ms \u00b7 %s \u00b7 %d Anfragen","perfBadgeName":"Wie lange diese Seite gebraucht hat","perfData":"Was jeder Tab heruntergeladen hat","perfLazyName":"Bilder au\u00dferhalb des Bildschirms warten lassen","perfLazyDone":"%d Bilder warten jetzt","perfVideoCapName":"Videoqualit\u00e4t begrenzen auf","perfVideoCapHint":"YouTube \u00fcber den eigenen Player, Twitch \u00fcber die Einstellung, die es liest.","perfTimerFloor":"Die Timer dieser Seite ausbremsen auf mindestens","perfPauseHidden":"Animationen in Tabs anhalten, die niemand ansieht","perfStopHiddenVideo":"Stummes Video in einem unsichtbaren Tab anhalten","perfSoftReload":"Neu laden und meine Stelle behalten","perfGpu":"Was die Grafikkarte tut","gpuPickName":"Welche Grafikkarte die Seiten zeichnet","gpuPickHint":"Bei mehreren Karten w\u00e4hlt das System selbst, und die leise Karte ist die langsame. Gilt ab dem n\u00e4chsten Start.","gpuAskName":"Bei jedem Start nach der Karte fragen","gpuAskHint":"Ein Fenster vor dem Browser, das jede Karte dieses Rechners zeigt.","gpuAuto":"Das System entscheiden lassen","gpuBoot":"die, mit der das System startet","gpuDrives":"an dieser h\u00e4ngen deine Bildschirme","gpuRestart":"Gespeichert \u2014 gilt ab dem n\u00e4chsten Start des Browsers.","gpuNone":"Hier gibt es nur eine Grafikkarte, also nichts zu w\u00e4hlen.","gpuWindows":"Welche Karte ein Programm benutzt, entscheidet Windows \u2014 in Einstellungen \u2192 System \u2192 Bildschirm \u2192 Grafik. Das hier sind die Karten, die es dazu hat.","gpuOpenWindows":"Windows-Grafikeinstellungen \u00f6ffnen","gpuMac":"Welche Karte ein Programm benutzt, entscheidet macOS \u2014 und bietet keine M\u00f6glichkeit, das pro Programm zu \u00e4ndern. Das hier sind die Karten, die es hat.","perfGpuNone":"chrome://gpu hat nichts gesagt.","perfVaapiName":"Hardware-Videodekodierung (VA-API)","perfVaapiRestart":"Hardware-Videodekodierung gilt nach einem Neustart","perfFlags":"Chromium-Flags, die sich lohnen","perfFlagRestart":"Dieses Flag gilt nach einem Neustart","flagGpuRaster":"Seiten auf der Grafikkarte zeichnen","flagZeroCopy":"Texturen ohne Kopie \u00fcbergeben","flagSmooth":"sanftes Scrollen in der Engine","flagNoDirect":"den direkten Videodekoder abschalten","flagIgnoreBlock":"die GPU auch nutzen, wenn Chromium dem Treiber misstraut","flagVaapi":"Videodekodierung und -kodierung in Hardware","flagNoWorkarounds":"Chromiums Treiber-Umgehungen \u00fcberspringen","flagProcLimit":"h\u00f6chstens vier Renderer-Prozesse","flagPerSite":"ein Prozess pro Seite, nicht pro Tab","flagNoThrottle":"Hintergrund-Timer nicht ausbremsen","perfCacheName":"Cache auf der Platte, h\u00f6chstens","perfCacheMemoryName":"Den Cache nur im Speicher halten","perfStartup":"Wohin die Startzeit ging","perfScripts":"Was jedes Userscript gekostet hat","perfPreloadName":"Einen Link holen, auf dem die Maus ruht","perfPreloadHint":"F\u00fcr private Tabs immer aus: ein Vorabruf ist f\u00fcr den Server ein Besuch.","perfPreconnectName":"Fr\u00fch Verbindungen zu den meistbesuchten Seiten \u00f6ffnen","perfPreconnectHint":"Es sagt diesen Seiten, dass der Browser l\u00e4uft, bevor du etwas verlangt hast.","perfHousekeep":"Jetzt aufr\u00e4umen","perfHeavy":"%s hat letztes Mal %s gebraucht \u2014 in einem leichten Tab \u00f6ffnen?","perfLogName":"Ein kleines Protokoll \u00fcber Startzeit und Speicher f\u00fchren","perfUnusedName":"Anbieten, Tabs zu schlie\u00dfen, die ungenutzt sind seit","perfClosedUnused":"%d Tabs geschlossen, %d davon vorher als Lesezeichen gespeichert","perfCloseUnused":"Die Tabs schlie\u00dfen, die ich nicht benutze","perfStageName":"Eine gro\u00dfe Sitzung stufenweise wiederherstellen","perfStageHint":"Nur der Tab, auf dem du warst, wird geladen; der Rest wartet, bis du ihn \u00f6ffnest.","perfTabMemory":"%s Speicher","descPerf":"Was der Browser kostet: Speicher, Prozessor, was Seiten herunterladen, und die Kn\u00f6pfe der Engine.","perfHousekeepName":"Aufr\u00e4umen, wenn ich es nicht benutze","perfCapOff":"Wie es kommt","recMenu":"Aufnahmen und Bilder","recOn":"Dieser Tab wird aufgenommen","recBuffer":"Die letzten Sekunden dieses Tabs werden behalten","recOff":"Aufnahme beendet","recSaved":"Nach %s geschrieben","recClip":"Clip nach %s geschrieben","recFailed":"Es lie\u00df sich nichts schreiben.","recNoBuffer":"Es wird nichts behalten \u2014 starte zuerst den R\u00fcckspielpuffer.","recNoFfmpeg":"ffmpeg ist nicht installiert \u2014 stattdessen als GIF geschrieben.","recNoAudio":"Kein Rekorder f\u00fcr den Ton genannt \u2014 das Bild wird ohne ihn aufgenommen.","recStart":"Diesen Tab aufnehmen","recStop":"Aufnahme beenden","recRegion":"Einen Teil des Tabs aufnehmen","recBufferStart":"Die letzten Sekunden behalten","recSaveClip":"Die letzten Sekunden speichern","recAudioOnly":"Nur den Ton aufnehmen","recVoice":"Mit dem Mikrofon aufnehmen","recFpsName":"Bilder pro Sekunde","recFormatName":"Aufnahmen werden gespeichert als","recQualityName":"Aufnahmequalit\u00e4t","recQuality_best":"Beste","recQuality_good":"Gute","recQuality_small":"Kleine","recBufferName":"Wie viele Sekunden der R\u00fcckspielpuffer beh\u00e4lt","recClicksName":"Klicks und Tasten in eine Aufnahme zeichnen","recClicksHint":"F\u00fcr ein Tutorial: ein Ring, wo du klickst, und die gedr\u00fcckte Taste \u2014 nur in der Aufnahme.","recTrim":"Die Enden vor dem Speichern abschneiden","recTrimAsk":"Sekunden, die am Anfang und am Ende weggeschnitten werden, mit Komma getrennt.","shotNone":"Noch keine Aufnahmen.","shotHistory":"Letzte Aufnahmen","shotCopyImage":"Das Bild kopieren","shotAnnotate":"Beschriften","shotDelete":"L\u00f6schen","shotDeleteAll":"Alle l\u00f6schen","shotDeleted":"%d gel\u00f6scht","shotNoImage":"Das ist kein Bild, das sich \u00f6ffnen l\u00e4sst.","shotCopiedLink":"Kopiert, mit der Adresse der Seite","shotMarkdown":"Als Markdown kopiert, mit der Quelle","shotStamp":"Adresse und Datum hinzuf\u00fcgen","shotStampName":"Adresse und Datum auf eine Aufnahme setzen","shotAnnotateName":"Eine Aufnahme beschriften","shotSelectionImage":"Die Auswahl als Bild","shotMobile":"In Telefonbreite aufnehmen","shotHidpi":"In doppelter Gr\u00f6\u00dfe aufnehmen","shotInner":"Einen scrollenden Bereich aufnehmen","shotPdfQuick":"Als PDF speichern, ohne Fragen","shotPdfLong":"Als eine lange PDF-Seite speichern","shotAllTabs":"Jeden Tab aufnehmen","shotAllTabsDone":"%d Tabs nach %s aufgenommen","shotContactSheet":"Eine \u00dcbersicht aller Tabs","shotBackground":"Diesen Tab aufnehmen, ohne hinzugehen","shotTimelapse":"Diese Seite alle paar Minuten aufnehmen","shotTimelapseOn":"%s wird alle %d Minuten aufgenommen","shotTimelapseOff":"Zeitraffer beendet","shotDiff":"Mit der letzten Aufnahme vergleichen","shotDiffNone":"Es gibt noch nichts zum Vergleichen.","shotDiffDone":"%d Pixel haben sich ge\u00e4ndert","shotDiffSized":"%d Pixel haben sich im gemeinsamen Teil ge\u00e4ndert: die Bilder sind nicht gleich gro\u00df (%s und %s)","shotOcr":"Den Text aus einem Bild kopieren","shotOcrNone":"tesseract ist nicht installiert \u2014 nenne es in den Einstellungen, wenn es woanders liegt.","shotOcrDone":"%d Zeichen kopiert","shotQrArea":"Den QR-Code im ausgew\u00e4hlten Bereich lesen","shotUpload":"Auf meinen Server hochladen","shotUploadName":"Wohin eine Aufnahme hochgeladen wird","shotUploadHint":"Eine https://-Adresse, an die sie per PUT geht, oder user@host:/pfad f\u00fcr scp. Freiwillig, und es wird nichts hochgeladen, bis du das w\u00e4hlst.","shotUploaded":"Hochgeladen \u2014 der Link liegt in der Zwischenablage","shotUploadFailed":"Dieser Upload hat nicht funktioniert.","shotUploadOff":"Es ist keine Upload-Adresse gesetzt.","shotDrag":"Eine Aufnahme herausziehen","ocrPathName":"Das OCR-Programm","ffmpegPathName":"Das ffmpeg-Programm","descRecord":"Einen Tab aufnehmen, der R\u00fcckspielpuffer, und was mit einer Aufnahme danach passiert.","keyMenu":"Tasten und Maus","keyGuardName":"Tasten, die ignoriert werden","keyGuardHint":"F1, Einfg und die anderen Ausrutscher. Eine Taste pro Zeile, wie Qt sie schreibt.","keyThroughName":"Seiten, die ihre eigenen Tasten behalten","keyThroughHint":"Strg+K geh\u00f6rt der Suche von Discord und Strg+S einem Editor im Tab.","keyThroughHere":"%s die Taste %s behalten lassen","keyOffHere":"Dieses Tastenk\u00fcrzel auf %s abschalten","keyChordName":"Zweistufige Tasten","keyChordHint":"Die Leittaste, dann ein Buchstabe. F\u00fcr die Befehle, die eine Taste wert sind, aber keine eigene.","keyChordWaiting":"\u2026jetzt ein Buchstabe","keyChordNone":"Auf \u201e%s\u201c liegt nichts.","keyNoLast":"Es wurde noch nichts ausgef\u00fchrt.","keyRepeat":"Das noch einmal","keyQuitAgain":"Strg+Q noch einmal dr\u00fccken, um das Fenster zu schlie\u00dfen","keySessionNumber":"Zum virtuellen Browser %d","keyGroupCycle":"N\u00e4chster Tab in dieser Gruppe","keyPeek":"Zum vorigen Tab schauen","keyMru":"Strg+Tab geht in der Reihenfolge der letzten Benutzung","keyMruHint":"Aus: Strg+Tab geht die Leiste entlang, wie immer.","keyReadline":"Terminal-Tasten in der Adresszeile","keyReadlineHint":"Strg+W, Strg+U, Strg+A, Strg+E, Alt+B und Alt+F, wie in einer Shell.","keyEditor":"Ein Textfeld im Editor bearbeiten","keyEditorName":"Der Editor f\u00fcr ein Textfeld","keyEditorHint":"kitty nvim, oder was sich auf einer Datei \u00f6ffnet und beendet, wenn es fertig ist.","keyNoEditor":"%s ist nicht installiert.","keyNoField":"Es gibt kein Textfeld mit dem Cursor darin.","keyEditedBack":"Zur\u00fcck in die Seite geschrieben","keyRecover":"Text zur\u00fcckholen, den die Seite verloren hat","keyNoLostText":"F\u00fcr dieses Feld wurde nichts behalten.","keyDraftName":"Behalten, was ich tippe, falls die Seite neu l\u00e4dt","keyDraftHint":"Im Session-Storage der Seite, der mit dem Tab stirbt. Es wird nichts auf die Platte geschrieben.","keyScriptName":"Das Skript, das eine Taste ausf\u00fchrt","keyScriptHint":"Eine Datei im Plugin-Ordner oder der Titel eines javascript:-Lesezeichens.","keyScriptRan":"%s lief auf dieser Seite","keyNoScript":"Kein Skript namens \u201e%s\u201c.","keyFirstField":"In das erste Textfeld der Seite","keyVimName":"Vim-Tasten auf einer Seite","keyVimHint":"j und k scrollen, gg und G springen, H und L sind die Chronik, gt und gT die Tabs, / sucht, gi geht ins erste Feld.","keySwipeBack":"Zur\u00fcck","keySwipeForward":"Vorw\u00e4rts","keyGlobalName":"Globale Tasten f\u00fcr den Fenstermanager","keyGlobalHint":"Die Befehle, die in Hyprland gebunden werden. Der Browser beantwortet sie \u00fcber seinen Single-Instance-Socket.","mouseMenu":"Die Maus","mouseSuperDrag":"Einen Link ziehen \u00f6ffnet ihn, Text ziehen sucht ihn","mouseLasso":"Einen Rahmen \u00fcber Links ziehen \u00f6ffnet sie","mouseSwipeNav":"Zwei Finger seitw\u00e4rts gehen vor und zur\u00fcck","mouseAutoScroll":"Mittelklick und bewegen zum Scrollen","mouseAutoScrollHint":"Standardm\u00e4\u00dfig aus: Mittelklick f\u00fcgt auf diesem Desktop ein.","mouseHoverSwitch":"Beim Ziehen \u00fcber einen Tab fahren wechselt zu ihm","mouseTabDouble":"Doppelklick auf einen Tab","mouseTabMiddle":"Mittelklick auf einen Tab","mouseBarDouble":"Doppelklick auf die leere Leiste","mouseAct_close":"Schlie\u00dfen","mouseAct_duplicate":"Duplizieren","mouseAct_newtab":"Neuer Tab","mouseAct_mute":"Stummschalten","mouseAct_pin":"Anpinnen","mouseAct_reload":"Neu laden","mouseAct_nothing":"Nichts","mouseNewTabMiddle":"Mittelklick auf den Neuer-Tab-Knopf \u00f6ffnet die Zwischenablage","mouseWheelStep":"Radschritt","mouseKeyStep":"Pfeiltastenschritt","mouseStepHint":"0 = wie die Engine es macht.","mouseGestureHelp":"Die rechte Taste halten, um das zu sehen","keyLayoutName":"Tastenk\u00fcrzel folgen der Taste, nicht dem Buchstaben","keyLayoutHint":"Auf einer deutschen Tastatur liegen Strg+Z, Strg+/ und Strg++ anders: beide Tasten sind belegt, damit die richtige greift.","keyGlobalRaise":"Den Browser nach vorn holen","ctxOpenLinkTab":"Den Link unter dem Zeiger in einem Tab \u00f6ffnen","ctxCopyLink":"Den Link unter dem Zeiger kopieren","ctxSaveImage":"Das Bild unter dem Zeiger speichern","ctxCopyImage":"Die Adresse des Bildes kopieren","ctxOpenImage":"Das Bild \u00f6ffnen","ctxSearchSelection":"Nach der Auswahl suchen","ctxNothingThere":"Unter dem Zeiger ist nichts dieser Art.","keyOffHereNow":"Dieses Tastenk\u00fcrzel ist auf dieser Seite abgeschaltet.","descKeys":"Die Tasten, die Tasten, die eine Seite beh\u00e4lt, und was die Maus tut.","splitView":"Zwei Seiten nebeneinander","splitOn":"Geteilte Ansicht","splitOff":"Wieder eine Seite","splitNeedsTwo":"Daf\u00fcr braucht es einen zweiten Tab daneben.","splitSync":"Beide H\u00e4lften zusammen scrollen","splitLink":"Den Link neben dieser Seite \u00f6ffnen","tabStripName":"Wo die Tabs sind","tabStrip_top":"\u00dcber der Seite","tabStrip_bottom":"Unter der Seite","tabStrip_left":"Links an der Seite","tabStrip_right":"Rechts an der Seite","tabStripWidthName":"Wie breit eine seitliche Leiste ist","tabRowsName":"Tab-Reihen","tabRowsHint":"Mehr als eine Reihe statt Scrollen. Qts Tableiste bricht nicht um, also werden die Tabs quer zusammengedr\u00fcckt \u2014 zwei Reihen sind lesbar, zehn nicht.","stackSite":"Die Tabs dieser Seite zu einem falten","stackNeedsTwo":"Es gibt nur einen Tab auf dieser Seite.","stackDone":"%d Tabs von %s zusammengefaltet","wsMenu":"Tab-S\u00e4tze","wsSave":"Diese Tabs als Satz behalten","wsAsk":"Wie soll dieser Tab-Satz hei\u00dfen?","wsSaved":"\u201e%s\u201c beh\u00e4lt %d Tabs","wsOpened":"\u201e%s\u201c \u2014 %d Tabs","wsNone":"Noch keine Tab-S\u00e4tze.","wsDrop":"\u201e%s\u201c vergessen","outsideAskName":"Links aus anderen Programmen fragen nach dem virtuellen Browser","outsideAskHint":"Ein Link aus Discord oder dem Terminal kann in den Browser gehen, in dem du f\u00fcr diese Seite angemeldet bist.","outsideAsk":"Welcher virtuelle Browser soll %s \u00f6ffnen?","outsideRuleName":"Regeln f\u00fcr Links aus anderen Programmen","outsideRuleHint":"Eine pro Zeile, als Host = virtueller Browser. Alles andere fragt oder nimmt den vordersten.","windowStateName":"Jedes Fenster kommt zur\u00fcck, wie es war","windowStateHint":"Seine Tabs, sein virtueller Browser, seine Gr\u00f6\u00dfe und wo es auf dem Bildschirm war.","trbarSaid":"Diese Seite sieht aus wie %s.","trbarOnce":"\u00dcbersetzen","trbarAlways":"%s immer \u00fcbersetzen","trbarNever":"%s nie \u00fcbersetzen","trbarNo":"Jetzt nicht","trOfferName":"Anbieten, eine Seite in einer anderen Sprache zu \u00fcbersetzen","trOfferHint":"Eine einfache Leiste oben, einmal pro Sprache und Tab. Dein eigener \u00dcbersetzer wird benutzt, wenn du einen genannt hast.","trWorking":"%d Bl\u00f6cke werden auf diesem Rechner \u00fcbersetzt\u2026","trDone":"\u00dcbersetzt","trNothing":"Auf dieser Seite ist nichts zu \u00fcbersetzen.","trUndone":"%d Bl\u00f6cke wieder wie vorher","trUndo":"Die urspr\u00fcnglichen W\u00f6rter zur\u00fcckholen","trSide":"Die Seite und ihre \u00dcbersetzung nebeneinander","trNow":"Diese Seite \u00fcbersetzen","trRulesName":"Sprachen, \u00fcber die du entschieden hast","trLocalHint":"Mit einem in den Einstellungen genannten \u00dcbersetzer verl\u00e4sst der Text der Seite den Rechner nie; ohne einen wird die Seite zum \u00dcbersetzen an Google Translate geschickt.","pdfKeys":"PDF-Tasten","pdfNext":"N\u00e4chste Seite in diesem PDF","pdfPrev":"Vorige Seite in diesem PDF","pdfFit":"Breite einpassen","pdfRotate":"Drehen","pdfBackTo":"Zur\u00fcck auf Seite %d, wo du warst","pdfPlaceName":"Merken, wo ich in einem PDF war","readerPrint":"Den Artikel ohne Beiwerk drucken","readerPrinted":"Nach %s geschrieben","synMenu":"Synonyme","synNoDict":"Daf\u00fcr braucht es das Programm dict und einen Thesaurus.","synNone":"Keine anderen W\u00f6rter f\u00fcr \u201e%s\u201c.","spellAdd":"\u201e%s\u201c zu meinen W\u00f6rtern hinzuf\u00fcgen","spellIgnore":"Hier ignorieren","spellAdded":"\u201e%s\u201c ist jetzt ein Wort","lookupWord":"Was dieses Wort in der anderen Sprache hei\u00dft","lookupNoTool":"Daf\u00fcr braucht es einen \u00dcbersetzer auf diesem Rechner \u2014 nenne einen in den Einstellungen.","cleanPasteName":"Tracking aus einer Adresse entfernen, die ich in eine Seite einf\u00fcge","cleanPasteHint":"Dieselbe Reinigung, die die Adresszeile macht, dort wo eingef\u00fcgt wird.","epubOpen":"Ein Buch \u00f6ffnen (.epub)","epubOpened":"%s \u2014 %d Kapitel","epubBad":"Das ist kein Buch, das sich hier lesen l\u00e4sst.","epubEmpty":"In diesem Buch ist nichts Lesbares.","permWants":"%s m\u00f6chte %s.","permThisRun":"Nur bis du den Browser schlie\u00dft.","permMic":"dein Mikrofon benutzen","permCam":"deine Kamera benutzen","permMicCam":"Mikrofon und Kamera benutzen","permNotify":"Benachrichtigungen zeigen","permMouse":"deinen Mauszeiger \u00fcbernehmen","ownName":"Was der Browser selbst sendet","ownNone":"Er hat noch nichts f\u00fcr sich selbst geholt.","ownClear":"Diese Liste leeren","ownWatch":"Weiter mitschreiben","ownWatchHint":"Verbindungen, die der Browser f\u00fcr sich selbst macht \u2014 Vorschl\u00e4ge, Update-Pr\u00fcfung, Favicons. Seiten stehen nicht darin, die geh\u00f6ren der Engine.","usName":"Userscripts auf dieser Seite","usNone":"Du hast keine Userscripts installiert.","usRanHere":"Lief auf dieser Seite","usNotHere":"Lief hier nicht","usWhen":"L\u00e4uft: %s","torName":"Ein Fenster \u00fcber Tor \u00f6ffnen","torNone":"Tor h\u00f6rt nicht auf 127.0.0.1:9050.","torOpened":"Ein eigenes Fenster, \u00fcber Tor.","torHint":"Eigener Prozess, eigene Daten, alles darin \u00fcber den SOCKS-Port. Chromium liest seinen Proxy beim Start, deshalb kann es kein einzelner Tab dieses Fensters sein.","fsAskName":"Fragen, bevor eine Seite den ganzen Schirm nimmt","fsAskHint":"Die Anfrage der Engine kann nicht auf eine Antwort warten, deshalb wird der Schirm gegeben und eine Leiste bietet an, ihn zur\u00fcckzunehmen und das f\u00fcr die Seite zu merken.","fsBarSaid":"%s hat den ganzen Schirm.","fsBarKeep":"Das ist in Ordnung","fsBarStop":"Zur\u00fcckgeben","fsBarNever":"Nie f\u00fcr diese Seite","fsDenied":"%s darf den Schirm nicht nehmen.","offlineName":"Eine Kopie der Seite behalten, wenn ich sie als Lesezeichen speichere","offlineHint":"Eine MHTML-Datei pro Lesezeichen, hier auf der Platte, damit die Seite noch lesbar ist, wenn sie verschwindet.","offlineKept":"Eine Kopie der Seite ist gesichert.","offlineNone":"Von der gibt es keine gesicherte Kopie.","offlineOpen":"Die gesicherte Kopie lesen","trailName":"Wie ich hierhergekommen bin","trailNone":"Es ist noch nichts aufgeschrieben.","trailOpen":"Diese \u00f6ffnen","treeName":"Verlauf als Baum","thumbsName":"Ein Tag in Bildern","thumbsNone":"Keine Bilder f\u00fcr diesen Tag.","thumbsKeep":"Von jeder gelesenen Seite ein kleines Bild behalten","thumbsHint":"Ein 240-Pixel-PNG pro Adresse, in deinem eigenen Ordner. Es wird nichts hochgeladen, und ein privater Tab wird nie gesichert.","impHistName":"Verlauf aus einem anderen Browser \u00fcbernehmen","impHistNone":"Kein Chrome- oder Firefox-Verlauf gefunden.","impHistBad":"Diese Verlaufsdatei lie\u00df sich nicht lesen.","impHistDone":"%d Seiten \u00fcbernommen.","movedName":"Die Seite ist umgezogen","movedAsk":"Dieses Lesezeichen landet jetzt woanders.\n\nWar: %s\nJetzt: %s\n\nLesezeichen aktualisieren?","movedYes":"Aktualisieren","movedNo":"So lassen","movedDone":"Das Lesezeichen zeigt auf die neue Adresse.","wbName":"Nach einer Archivkopie suchen","wbHint":"Fragt archive.org, ob es eine Kopie hat. Das ist das Einzige hier, das eine Adresse von diesem Rechner schickt, und nur wenn du danach fragst.","wbNone":"Das Archiv hat keine Kopie dieser Seite.","wbFound":"Die Archivkopie vom %s.","remName":"An dieses Lesezeichen erinnern","remAsk":"An welchem Tag? (JJJJ-MM-TT)","remNone":"Es ist nichts f\u00e4llig.","remDue":"%d Lesezeichen sind f\u00e4llig \u2014 %s","favDockName":"Favoriten neben der Seite offen halten","favDockHint":"Dieselbe Leiste, im Fenster statt dar\u00fcber.","histEncName":"Den Verlauf verschl\u00fcsselt halten","histEncHint":"Unter einem Schl\u00fcssel deines Tresors. Solange der Tresor zu ist, ist der Verlauf nicht lesbar und wird nicht \u00fcberschrieben.","histEncNeedsVault":"\u00d6ffne zuerst den Tresor \u2014 der Schl\u00fcssel kommt daher.","k1Name":"Was der Drucker macht","k1Asking":"Frage den Drucker\u2026","k1NoAnswer":"Der Drucker hat nicht geantwortet.","k1State":"Zustand: %s","k1Done":"Fertig: %s%%","k1Left":"Rest: %s","k1Nozzle":"D\u00fcse: %s \u00b0C von %s","k1Bed":"Bett: %s \u00b0C von %s","spellNoDicts":"F\u00fcr die Engine ist kein deutsches oder englisches W\u00f6rterbuch installiert.","panelName":"Auswahl in die Seitenleiste schicken","panelNone":"In der Seitenleiste ist nichts offen.","panelNoSel":"Es ist nichts ausgew\u00e4hlt.","panelTyped":"In die Leiste eingesetzt.","feedName":"Empfehlungen verstecken, die ich nicht wollte","feedHint":"Das YouTube-Startraster, die Shorts-Regale und Twitchs empfohlene Kan\u00e4le. Was versteckt wird, steht unten, nicht versteckt in einem Klumpen.","webmailName":"mailto:-Links \u00f6ffnen in","webmailHint":"Eine Schreibseite deines Webmails statt eines Mailprogramms. Keins = dem Desktop \u00fcberlassen.","floatName":"Einen Teil dieser Seite oben anpinnen","floatAsk":"Welchen Teil? (ein CSS-Selektor, z.\u00a0B. #chat)","floatOn":"Dieser Teil ist in einem Fenster oben.","floatOff":"Die angepinnten Teile sind geschlossen.","modeName":"Modi","modeSave":"Diese Einrichtung als Modus behalten\u2026","modeAsk":"Wie hei\u00dft dieser Modus?","modeSaved":"\u201e%s\u201c ist gespeichert.","modeOn":"Modus: %s","modeNone":"Du hast noch keine Modi.","modeDrop":"\u201e%s\u201c vergessen","phoneName":"Diesen Tab aufs Handy schicken","phoneNoTool":"Daf\u00fcr braucht es kdeconnect-cli.","phoneNoDevice":"KDE Connect sieht kein gekoppeltes Ger\u00e4t.","phoneSent":"An %s geschickt.","ocrName":"Den Text aus diesem Bild kopieren","ocrNoImage":"Auf dieser Seite ist kein Bild gefunden.","transNoteName":"Das Transkript als Notiz speichern","transNoneHere":"Dieses Video hat keine Untertitel zum Lesen.","transNoted":"%d Zeilen als Notiz gespeichert.","icsName":"Aus der Auswahl eine Kalenderdatei machen","icsNoDate":"In der Auswahl ist kein Datum.","icsSaved":"Nach %s geschrieben.","agendaName":"Kalenderdatei f\u00fcr den heutigen Tag","agendaHint":"Eine .ics-Datei lokal oder im eigenen Netz. Wiederholungen (RRULE) werden nicht ausgerechnet \u2014 sie fehlen lieber, als am falschen Tag zu stehen.","agendaNone":"Heute nichts.","logName":"Der Tag","logLine":"%d Notizen, %d To-dos erledigt, %d Minuten auf Seiten mit Limit.","logNoteName":"Die Tageszusammenfassung als Notiz behalten","autocapName":"Untertitel f\u00fcr dieses Video machen","autocapNoTool":"Daf\u00fcr braucht es ffmpeg und einen Transcriber (whisper) auf diesem Rechner.","autocapNoVideo":"Auf dieser Seite ist kein Video.","autocapHasTracks":"Dieses Video hat schon Untertitel.","autocapRefused":"Dieses Video liegt nicht unter einer Webadresse, die diese Seite weitergeben darf \u2014 daf\u00fcr werden keine Untertitel gemacht.","autocapBlob":"Dieser Player f\u00fcttert sich durch die Seite selbst (eine blob:-Quelle), die von au\u00dfen niemand lesen kann. Nimm daf\u00fcr die Live-Untertitel.","autocapWorking":"Hole den Ton heraus und h\u00f6re zu\u2026","autocapNoSound":"Aus diesem Video lie\u00df sich kein Ton lesen.","autocapNoWords":"Der Transcriber hat nichts zur\u00fcckgegeben.","autocapDone":"%d Untertitel, am Video.","adName":"Werbung und Tracker per Liste blocken","adHint":"Dateien im EasyList-Format (.txt) in deinem eigenen Ordner. Es wird nichts geholt, solange du nicht fragst: die Listen sind Dateien, die du dort ablegst, oder Adressen, die du unten nennst.","adHere":"Auf %s blocken","adDirName":"Ordner, in dem deine Filterlisten liegen","adUrlsName":"Adressen, von denen Listen geholt werden","adUrlsHint":"Eine pro Zeile, und nur wenn du \u201eListen holen\u201c dr\u00fcckst. Ein Blocker, der heimlich einen Listenserver anruft, verr\u00e4t jemandem, was er dir vorsetzen soll.","adCounts":"%d Regeln, %d Versteckregeln, aus %d Listen","adSkipped":"%d Zeilen, die diese Listen wollen und die das hier nicht macht","adBlockedHere":"%d auf dieser Seite geblockt","adReload":"Ordner neu einlesen","adFetch":"Listen holen","adLoaded":"%d Listen, %d Regeln.","adFetched":"%d Listen geholt.","adNoUrls":"In den Einstellungen sind keine Listenadressen genannt.","adNoModule":"adblock.py liegt nicht neben dem Browser.","thirdCookieName":"Cookies von anderen Seiten ablehnen","thirdCookieHint":"Nur die Seite, auf der du bist, darf eine setzen. Anmeldungen, die \u00fcber eine andere Seite laufen, brauchen diese Seite in der Liste darunter \u2014 das Seitenmen\u00fc tr\u00e4gt sie mit einem Klick ein.","thirdCookieHere":"Auf %s durchlassen","thirdCookieCount":"%d auf dieser Seite abgelehnt","gestName":"Mausgesten, Rocker und Tasten 4-9","gestHint":"Rechte Taste halten und ziehen: links ist zur\u00fcck, rechts vorw\u00e4rts, hoch l\u00e4dt neu, runter \u00f6ffnet einen Tab, runter-rechts schlie\u00dft einen, hoch-runter holt einen zur\u00fcck. Rechts halten + links klicken ist zur\u00fcck, links halten + rechts klicken ist vorw\u00e4rts, rechts halten + Rad geht durch die Tabs.","gestList":"Was eine Geste bedeutet","gestButtons":"Was die Tasten 4-9 machen","barKeyTip":"F\u00fcr diese Seite ist eine Anmeldung gespeichert","barKeyName":"Den Schl\u00fcssel in der Adresszeile zeigen","barKeyNone":"F\u00fcr diese Seite ist keine Anmeldung gespeichert.","barKeyFill":"Eintragen","barKeyCopy":"Passwort kopieren","barKeyOpen":"Eintrag \u00f6ffnen","barKeyManage":"Alle Passw\u00f6rter\u2026","barKeyCopied":"Kopiert. Die Zwischenablage wird in einer Minute geleert.","barKeyNoSecret":"Dieser Eintrag hat kein Passwort zum Kopieren.","mediaCatchUp":"Mit 1,1x zum Live-Rand aufholen","barCopyAddress":"Adresse kopieren","tabsName":"Tabs","devTools":"Entwicklerwerkzeuge","devLook":"Die Seite ansehen","devPretend":"So tun als ob","devWorkbench":"Werkbank","devEngine":"Die Engine","devOn":"%s ist an","devOff":"%s ist aus","devRuler":"Lineal","devOutlines":"Jede Box umranden","devHidden":"Versteckte Formularfelder zeigen","devNoCss":"Ohne jedes CSS","devPerf":"Bilder, lange Aufgaben und Spr\u00fcnge","devKeys":"Tastencodes zeigen","devFonts":"Schriften dieser Seite","devFontsWait":"Schriften werden gelesen\u2026","devFontFiles":"Geladene Schriftdateien","devPalette":"Farben dieser Seite","devPaletteWait":"Farben werden gelesen\u2026","devNothing":"Hier gibt es nichts zu zeigen.","devImage":"Was dieses Bild wirklich ist","devNoImage":"Auf dieser Seite ist kein Bild.","devImageInfo":"%d\u00d7%d, gezeichnet mit %d\u00d7%d, %s","devOverlay":"Ein Mockup \u00fcber die Seite legen","devAuditRun":"Die Seite durchsehen","devAudit":"%d Elemente, %d Punkte zum Ansehen: %s","devLinkCheck":"Die Links dieser Seite pr\u00fcfen","devLinkCheckOff":"Die Linkpr\u00fcfung ist aus \u2014 der Schalter steht in den Einstellungen (sie besucht jede Adresse der Seite).","devLinksBad":"%d Links sind kaputt, angefangen mit %s","devLinksOk":"Jeder Link hat geantwortet","devSizes":"In einer anderen Gr\u00f6\u00dfe","devSize":"%s \u2014 %d\u00d7%d","devSizeOff":"Zur\u00fcck zum Fenster","devMediaMenu":"Als andere Art Bildschirm","devMediaDarkRow":"Dunkel","devMediaLightRow":"Hell","devMediaPrint":"Druck","devMediaMotion":"Weniger Bewegung","devMediaOff":"Aus","devMediaDark":"Der Seite wird gesagt, es sei dunkel","devMediaLight":"Der Seite wird gesagt, es sei hell","devMedia":"Der Seite wird gesagt: %s","devPlaceRow":"Woanders sein","devPlaceAsk":"Breite, L\u00e4nge, Zeitzone, Sprache \u2014 was du brauchst (52.5, 13.4, Europe/Berlin, de-DE)","devPlace":"Der Seite wird gesagt: %s","devThrottleMenu":"Eine schlechtere Verbindung","devThrottleSlow":"Langsam","devThrottleVerySlow":"Sehr langsam","devThrottleOffline":"Offline","devThrottleOff":"Wieder normal","devThrottle":"Dieser Tab h\u00e4ngt an einer %s-Verbindung","devOffline":"Dieser Tab ist offline","devRegex":"Regul\u00e4rer Ausdruck","devRegexAsk":"Das Muster","devRegexText":"Der Text zum Ausprobieren","devRegexBad":"Dieses Muster l\u00e4sst sich nicht \u00fcbersetzen: %s","devDiff":"Zwei Texte vergleichen","devDiffLeft":"Der erste Text","devDiffRight":"Der zweite Text","devMini":"MiniMessage-Vorschau","devMiniAsk":"MiniMessage, alte Codes oder eine JSON-Komponente","devOpenFile":"Eine Datei zum Lesen \u00f6ffnen","devSnippets":"Schnipsel","devNoSnippets":"Es sind keine Schnipsel gespeichert.","devSnippetNew":"Ein neuer Schnipsel","devSnippetName":"Wie hei\u00dft er?","devSnippetCode":"Das JavaScript, das auf der Seite laufen soll","devSnippetRan":"\u2192 %s","devClipboard":"Was in der Zwischenablage liegt","devClipEmpty":"Die Zwischenablage ist leer.","devOpenGraph":"Als Link-Vorschau","devOgMissing":"Fehlt: %s","devErrorsMenu":"Fehler auf dieser Seite","devErrors":"%d Fehler auf dieser Seite","devNoErrors":"Auf dieser Seite gibt es keine Fehler.","devClearErrors":"Liste leeren","devStorage":"Local- und Session-Storage","devCopyValue":"Wert kopieren","devRemove":"Entfernen","devCookies":"Cookies dieser Seite","devNoCookies":"F\u00fcr diese Seite wurden keine Cookies gesehen.","devCookieNew":"Ein neues Cookie","devCookieName":"Sein Name","devCookieValue":"Sein Wert","devCookiesTxt":"Eine cookies.txt schreiben","devCookiesTitle":"cookies.txt schreiben","devCookiesWritten":"%d Cookies geschrieben \u2014 wer diese Datei liest, ist f\u00fcr diese Seiten du","devCert":"Das Zertifikat","devWorkers":"Service Worker","devNoWorkers":"Hier gibt es keine Service Worker.","devDropWorkers":"Abmelden","devSwDropped":"%d Service Worker abgemeldet","devCacheRow":"Kein Cache f\u00fcr diesen Tab","devCacheOff":"Dieser Tab benutzt den Cache nicht","devCacheOn":"Dieser Tab benutzt den Cache wieder","devHardReloadRow":"Cache dieser Seite leeren und neu laden","devHardReload":"Cache geleert, wird neu geladen","devNoJsRow":"Einmal ohne JavaScript laden","devNoJs":"Wird einmal ohne JavaScript geladen","devWatch":"Neu laden, wenn sich ein Ordner \u00e4ndert","devWatching":"%s wird beobachtet","devInternals":"Chromiums eigene Seiten","devGpu":"Grafik","devMediaInternals":"Medien","devMedia2":"Medien","devWebrtc":"WebRTC","devNetExport":"Netzwerkprotokoll","devHistograms":"Histogramme","devProcesses":"Prozesse","devQuota":"Speicherkontingent","devUkm":"Messwerte","devDebugRow":"Port f\u00fcr Fernsteuerung","devDebugOn":"Der Debug-Port ist nach einem Neustart an \u2014 wer ihn auf diesem Rechner erreicht, kann diesen Browser steuern","devDebugOff":"Der Debug-Port ist nach einem Neustart aus","devLocalCerts":"Selbstsignierte Zertifikate in diesem Netz annehmen","devLocalCertsOn":"Selbstsignierte Zertifikate gelten nur f\u00fcr localhost und das Heimnetz","devLocalCertAccepted":"%s angenommen \u2014 es liegt auf diesem Rechner oder in diesem Netz","devLocalCertsOff":"Selbstsignierte Zertifikate werden wieder abgelehnt","devFlagsRestart":"Die Flags gelten nach einem Neustart","devFlagsName":"Chromium-Flags","devFlagsHint":"Eines pro Zeile. Sie werden einmal beim Start gelesen, eine \u00c4nderung gilt also nach einem Neustart. Ein falsches Flag kann den Start verhindern.","devHostsName":"Einen Namen auf eine Adresse zeigen lassen","devHostsHint":"Eines pro Zeile: example.com 192.0.2.10. Nur f\u00fcr diesen Browser, und erst nach einem Neustart.","devLinkCheckName":"Links einer Seite pr\u00fcfen d\u00fcrfen","devLinkCheckHint":"Aus als Voreinstellung: es besucht jede Adresse der Seite und sagt damit jedem dieser Server, dass du nachgesehen hast.","devDebugName":"Port f\u00fcr Fernsteuerung","devDebugHint":"F\u00fcr Playwright und CDP-Werkzeuge. Aus als Voreinstellung, und die Engine bindet ihn nur an diesen Rechner.","devLocalCertsName":"Selbstsignierte Zertifikate auf localhost und im Heimnetz annehmen","devLocalCertsHint":"Nur f\u00fcr Adressen auf diesem Rechner oder in den privaten Bereichen \u2014 nie f\u00fcr eine Seite im Internet.","devSnippetsName":"Meine JavaScript-Schnipsel","devSnippetsHint":"Einer pro Zeile: Name|der Code. Sie laufen nur, wenn du einen ausw\u00e4hlst.","mediaMenu2":"Video und Ton, mehr davon","mediaPicture":"Das Bild","mediaSound":"Der Ton","filterBrighter":"Heller","filterDarker":"Dunkler","filterMoreContrast":"Mehr Kontrast","filterLessContrast":"Weniger Kontrast","filterMoreColour":"Mehr Farbe","filterLessColour":"Weniger Farbe","filterReset":"Zur\u00fcck auf normal","turnRight":"Nach rechts drehen","turnLeft":"Nach links drehen","turnFlip":"Spiegeln","turnReset":"Geradestellen","zoomIn2":"Hineinzoomen","zoomOut2":"Herauszoomen","zoomCrop":"Rahmen f\u00fcllen (beschneiden)","zoomReset2":"Ganzes Bild","hideCursorName":"Maus \u00fcber einem laufenden Video verbergen","hideCursorHint":"Nach zwei Sekunden ohne Bewegung.","statsMedia":"%d\u00d7%d \u00b7 %.2fx \u00b7 %d von %d Bildern verloren \u00b7 %.1f s gepuffert","statsShow":"Was dieses Video ist","endsAt":"%d:%02d \u00fcbrig \u2014 endet um %s","endsAtShow":"Wann das hier endet","mediaResume2":"Videos dort fortsetzen, wo ich war","mediaResumeName":"Videos dort fortsetzen, wo ich war","mediaResumeHint":"Pro Video, auf diesem Rechner. Alles unter zwei Minuten wird in Ruhe gelassen.","mediaResumed2":"Weiter bei %d:%02d","mediaHistory":"Was ich gesehen habe","mediaHistNone":"Noch nichts.","mediaHistClear":"Alles vergessen","mediaLeftOf":" \u00b7 %d min \u00fcbrig","capMenu":"Untertitel","capToggle":"Untertitel an oder aus","capNone":"Dieses Video hat keine Untertitel.","capOnName":"Videos mit Untertiteln starten","capOnHint":"Wo das Video sie hat.","capLangName":"Untertitelsprache","capLangHint":"Ein Code wie de oder en. Leer = der erste.","capSizeName":"Untertitelgr\u00f6\u00dfe","capSizeHint":"Prozent der \u00fcblichen Gr\u00f6\u00dfe. 0 = wie die Seite es macht.","capColourName":"Untertitelfarbe","capBackName":"Untertitelhintergrund","capBottomName":"Untertitel anheben","capBottomHint":"Pixel vom unteren Rand. 0 = wohin die Seite sie setzt.","subsOpen":"Untertitel aus einer Datei laden","subsAdded":"%s geladen","subsFailed":"Diese Untertiteldatei war nicht lesbar.","subsSaved":"Geschrieben nach %s","subsClear":"Geladene Untertitel entfernen","transcript":"Transkript","transCopy":"Ganzes Transkript kopieren","transSave":"Als .srt speichern","chapters":"Kapitel","chapNone":"Keine Zeitmarken auf dieser Seite.","audioLevel":"Lautst\u00e4rke ausgleichen","audioEq":"Equalizer","eqFlat":"Neutral","eqVoice":"Stimme","eqBass":"Mehr Bass","eqTreble":"Mehr H\u00f6hen","eqNight":"Nacht","eqPodcast":"Podcast","audioBalance":"Balance","audioLeft":"Mehr links","audioRight":"Mehr rechts","audioCentre":"Mittig","audioMono":"Beide Kan\u00e4le als einen","audioCrossfeed":"Crossfeed f\u00fcr Kopfh\u00f6rer","audioTaken":"Ein anderes Skript h\u00e4lt den Ton dieses Videos schon.","skipSilence":"Durch die leisen Stellen laufen","audioOut":"Diesen Tab abspielen \u00fcber","sinkNone":"Diese Engine l\u00e4sst eine Seite ihre Ausgabe nicht w\u00e4hlen.","sinkRefused":"Diese Ausgabe wurde abgelehnt.","micForSite":"Mikrofon f\u00fcr %s","callAudioFor":"Anrufton f\u00fcr %s","callGain":"Automatische Verst\u00e4rkung","callNoise":"Rauschunterdr\u00fcckung","callEcho":"Echounterdr\u00fcckung","devDefault":"Was das System benutzt","devNoList":"Die Seite hat die Gerätenamen noch nicht bekommen — erlaube einmal das Mikrofon, dann erscheinen sie.","autoplayFor":"Autoplay auf %s","autoplayAllow":"Laufen lassen","autoplayMute":"Laufen lassen, stumm","autoplayBlock":"Nicht laufen lassen","autoplayDefault":"Wie \u00fcberall sonst","muteAlways":"%s immer stumm","duckName":"Die anderen Tabs leiser machen","duckHint":"Wenn der vordere Tab etwas abspielt, gehen die anderen auf diesen Wert. 0 = aus, 100 = unver\u00e4ndert.","pauseCallsName":"Musik w\u00e4hrend eines Anrufs anhalten","pauseCallsHint":"Wenn ein Tab das Mikrofon benutzt. Braucht \u201esagen, wenn eine Seite das Mikrofon benutzt\u201c.","callPaused":"%d Tabs f\u00fcr den Anruf angehalten","callResumed":"%d Tabs spielen wieder","pauseHiddenName":"Video anhalten, wenn sein Tab verdeckt ist","pauseHiddenHint":"Und wieder starten, wenn du zur\u00fcckkommst.","holdFastName":"Punkt halten f\u00fcr doppelte Geschwindigkeit","holdFastHint":"Auf jedem Video, solange die Taste gedr\u00fcckt ist.","heldEmbedsName":"Eingebettete Player erst auf Klick laden","heldEmbedsHint":"Ein YouTube- oder Twitch-Embed bleibt ein Platzhalter, bis du ihn dr\u00fcckst.","embedOpen":"Dieses Embed auf seiner eigenen Seite \u00f6ffnen","embedNone":"Da ist kein eingebetteter Player.","audioOnly":"Nur Ton (Video ausblenden)","shortsPlayerName":"Shorts im normalen Player \u00f6ffnen","shortsPlayerHint":"Mit Suchleiste und Geschwindigkeitsregler.","spoilerName":"Videol\u00e4ngen und Fortschritt verbergen","spoilerHint":"Keine Dauer-Abzeichen, keine Fortschrittsbalken, keine Vorschauen.","qualityFor":"Qualit\u00e4t auf %s","qualityAuto":"Wie die Seite entscheidet","mediaLinks":"Videos und T\u00f6ne auf dieser Seite","mediaLinksNone":"Keine auf dieser Seite.","playInMpv":"In mpv abspielen","trackNoticeName":"Sagen, wenn der Titel wechselt","trackNoticeHint":"Eine Desktop-Benachrichtigung mit Titel und Interpret. Standardm\u00e4\u00dfig aus.",
+"mprisName":"Auf die Medientasten der Tastatur h\u00f6ren","mprisHint":"Der Desktop fragt, was l\u00e4uft, und darf pausieren (MPRIS \u00fcber D-Bus). Es verl\u00e4sst nichts den Rechner.","mprisNoBus":"Hier gibt es keinen Sitzungsbus \u2014 die Medientasten bleiben, wo sie sind","mprisOn":"Die Medientasten erreichen diesen Browser","mprisOff":"Die Medientasten erreichen diesen Browser nicht mehr","mprisMissing":"mpris.py liegt nicht neben dem Browser.","winFull":"Das Fenster mit dem Video f\u00fcllen","winFullOff":"Zur\u00fcck zur Seite","awakeName":"Bildschirm wach halten, solange ein Video l\u00e4uft","awakeHint":"Nur solange im vorderen Tab wirklich etwas l\u00e4uft, und nur \u00fcber systemd-inhibit.","awakeOn":"Der Bildschirm bleibt wach, solange das l\u00e4uft","awakeOff":"Der Bildschirm darf wieder schlafen","awakeNo":"systemd-inhibit ist nicht da \u2014 der Bildschirm wird nicht gehalten","playerTitle":"Eine Datei abspielen","playerOpen":"Den Player \u00f6ffnen","playerPick":"Video- oder Audiodateien ausw\u00e4hlen","playerNone":"Nichts ausgew\u00e4hlt.","mictestTitle":"Mikrofon und Kamera testen","micTestTitle":"Mikrofon und Kamera","micTestSub":"Das alles bleibt auf diesem Rechner: nichts wird irgendwohin geschickt, und die Aufnahme wird verworfen, sobald du die Seite verlässt.","micWord":"Mikrofon","camWord":"Kamera","micLevel":"jetzt %d%%, am lautesten %d%%","micOn":"Hört zu. Der Pegel sollte sich bewegen, wenn du sprichst.","micOff":"Gestoppt.","micFailed":"Das Mikrofon wurde abgelehnt: %s","camOn":"%s, %d×%d","camOff":"Gestoppt.","camFailed":"Die Kamera wurde abgelehnt: %s","recNone":"Dieser Build kann nicht aufnehmen.","recNow":"Nimmt auf… sag etwas.","recDone":"Fünf Sekunden aufgenommen. Hör sie dir an.","on":"An","playerLoop":"Wiederholen: %s","playerQueue":"%d in der Liste","watchLater":"Sp\u00e4ter ansehen","watchAdd":"Das sp\u00e4ter ansehen","watchAdded":"Auf die Sp\u00e4ter-Liste gesetzt","watchEmpty":"Die Sp\u00e4ter-Liste ist leer.","watchPlay":"Das N\u00e4chste abspielen","watchClear":"Liste leeren","watchGone":"Von der Liste genommen","momentMenu":"Stellen in diesem Video","momentAdd":"Diese Stelle merken","momentNote":"Ein Wort zu dieser Stelle (optional)","momentMade":"Bei %s gemerkt","momentNone":"In diesem Video ist noch nichts gemerkt.","momentNoTime":"Hier l\u00e4uft nichts.","pauseLockName":"Pausieren, wenn der Browser sich sperrt","pauseLockHint":"Auch wenn du die Leerlaufzeit weg warst.","pausedAway":"Pausiert, w\u00e4hrend du weg warst","screenMenu":"Vollbild auf","screenNone":"Hier h\u00e4ngt kein Bildschirm.","sponsorName":"Den Sponsor im Video \u00fcberspringen","sponsorHint":"Fragt den SponsorBlock-Dienst nach diesem Video. Es gehen nur die ersten vier Zeichen der gehashten Video-ID hin, und nur wenn das hier an ist.","sponsorSkipped":"%s \u00fcbersprungen","sponsorNone":"In diesem Video ist nichts markiert.","sponsorOff":"Sponsor-\u00dcberspringen ist aus \u2014 der Schalter steht in den Einstellungen.","lyricsName":"Liedtexte holen","lyricsHint":"Fragt lrclib mit Titel, Interpret und L\u00e4nge nach dem Text. Aus = es wird nichts gefragt.","lyricsTitle":"Liedtext","lyricsNone":"Daf\u00fcr ist kein Text zu finden.","lyricsOff":"Liedtexte sind aus \u2014 der Schalter steht in den Einstellungen.","playMenu":"Spiele und Streaming","streamGroup":"W\u00e4hrend du streamst","gameGroup":"Spiele","streamSafe":"Stream-sicherer Modus","streamSafeOn":"Stream-sicher: Privates verwischt, keine Benachrichtigungen, keine Vorschl\u00e4ge aus der Chronik","streamSafeOff":"Stream-sicher aus","blurPrivate":"Adressen und Privates verwischen","blurOn":"%d Stellen verwischt \u2014 zum Lesen dr\u00fcberfahren","blurOff":"Es ist nichts mehr verwischt","blurWordsName":"Diese W\u00f6rter auch verwischen","blurWordsHint":"Eins pro Zeile: ein Name, eine Stra\u00dfe, alles, was im Stream nicht lesbar sein soll.","keysShow":"Zeigen, welche Tasten ich dr\u00fccke","keysOn":"Die Tasten erscheinen unten","keysOff":"Die Tastenanzeige ist weg","fpsShow":"Bilder pro Sekunde zeigen","fpsOn":"Bilder pro Sekunde, oben rechts","fpsOff":"Der Z\u00e4hler ist weg","obsMenu":"OBS","obsName":"Ich darf OBS steuern","obsHint":"\u00dcber obs-websocket auf diesem Rechner. Adresse und Passwort unten; leere Adresse = aus.","obsUrlName":"OBS-Adresse","obsUrlHint":"ws://127.0.0.1:4455 ist OBS' Voreinstellung.","obsPwName":"OBS-Passwort","obsPwHint":"Aus OBS: Werkzeuge \u2192 WebSocket-Servereinstellungen.","obsStart":"Aufnahme starten","obsStop":"Aufnahme beenden","obsStream":"Stream starten","obsStreamStop":"Stream beenden","obsScene":"Szene wechseln","obsOff":"OBS-Steuerung ist aus \u2014 die Adresse steht in den Einstellungen.","obsNo":"OBS hat auf %s nicht geantwortet","obsDid":"OBS: %s","modSearch":"Eine Mod finden","modAsk":"Wonach suchst du?","modNone":"Zu \u201e%s\u201c ist nichts zu finden.","modFound":"%d gefunden","modInstall":"In eine Instanz legen","mcInstancesName":"Minecraft-Instanzen","mcInstancesHint":"Ein Ordner pro Zeile. Eine Mod wird nach <Ordner>/mods geschrieben und sonst nirgends.","modNoInstance":"Es ist kein Instanzordner gesetzt \u2014 die Liste steht in den Einstellungen.","modInstalled":"Nach %s geschrieben","modFailed":"Das wurde nicht geladen.","serverCopy":"Die Serveradresse kopieren","serverNone":"Auf dieser Seite steht keine Serveradresse.","serverCopied":"%s kopiert","serverPanel":"Serverseite im Panel","playerLookup":"Diesen Spieler nachschlagen","playerNoName":"Markiere zuerst einen Spielernamen.","wikiLookup":"Im Wiki nachschlagen","wikiAsk":"Was soll ich nachschlagen?","gridTitle":"Mehrere Streams gleichzeitig","gridAsk":"Kanalnamen, mit Komma getrennt","gridNone":"Da ist kein brauchbarer Kanalname.","gridMade":"%d Streams","pointsName":"Kanalpunkte einsammeln","pointsHint":"Dr\u00fcckt Twitchs eigenen Bonus-Knopf, wenn er auftaucht.","pointsOn":"Kanalpunkte werden eingesammelt","adsName":"Bei Werbung stummschalten und abdunkeln","adsHint":"Auf Twitch: der Ton geht aus und das Bild wird dunkel, bis die Werbung vorbei ist.","adsOn":"Werbung wird stumm und dunkel","chatMenu":"Chat","chatHideName":"Chatzeilen ausblenden, die enthalten","chatHideHint":"Eins pro Zeile.","chatUsersName":"Diese Schreiber ausblenden","chatUsersHint":"Ein Name pro Zeile.","chatMeName":"Zeilen hervorheben, die enthalten","chatMeHint":"Zum Beispiel deinen Namen. Eins pro Zeile.","chatOn":"Die Chatfilter sind hier an","liveMenu":"Sagen, wenn sie live gehen","liveAdd":"Diesen Kanal beobachten","liveWatchName":"Beobachtete Kan\u00e4le","liveWatchHint":"Einer pro Zeile. Jeder wird alle paar Minuten gefragt, und nur solange das an ist.","liveEveryName":"Fragen alle","liveEveryHint":"Minuten. 0 = nie fragen.","liveNow":"%s ist live","liveNone":"Es wird noch niemand beobachtet.","liveAdded":"%s wird beobachtet","delayName":"Stream-Verz\u00f6gerung","delayHint":"Sekunden. Der Timer z\u00e4hlt sie herunter, damit du wei\u00dft, wann eine Chatreaktion zu was geh\u00f6rt.","delayStart":"Verz\u00f6gerungs-Timer starten","delayRunning":"Verz\u00f6gerung: %ds","delayDone":"Die Verz\u00f6gerung ist um","clipMark":"Hier einen Clip markieren","clipMarked":"Clip bei %s markiert","clipList":"Markierte Clips","clipNone":"Es ist noch kein Clip markiert.","clipLink":"Sauberen Clip-Link kopieren","clipCleaned":"Ohne die Tracking-Teile kopiert","discordRouteName":"Discord-Links im Discord-Tab \u00f6ffnen","discordRouteHint":"Statt jedes Mal in einem neuen Tab.","discordWent":"An den Discord-Tab gegeben","discordBadgeName":"Discords Ungelesen-Z\u00e4hler zeigen","discordBadgeHint":"Im Tabtitel, aus Discords eigener Zahl.","ts3Open":"In TeamSpeak \u00f6ffnen","ts3No":"TeamSpeak ist hier nicht installiert.","handoffTitle":"Anderes Programm öffnen?","handoffAsk":"%s möchte das in %s öffnen:\n\n%s","handoffNoSite":"Eine Seite","handoffAlways":"%s das immer erlauben","ts3Went":"An TeamSpeak gegeben","gameProtect":"Diesen Tab beim Spielen sch\u00fctzen","gameProtectHint":"Er wird nie verworfen, nie schlafen gelegt und fragt vor dem Schlie\u00dfen.","gameProtectOn":"Dieser Tab ist gesch\u00fctzt","gameProtectOff":"Nicht mehr gesch\u00fctzt","gameClose":"Das ist ein Spiel-Tab \u2014 trotzdem schlie\u00dfen?","cloudGame":"Cloud-Gaming hier","cloudGameHint":"H\u00e4lt den Bildschirm wach, l\u00e4sst das Gamepad durch, versteckt den Zeiger und bremst den Tab nie.","cloudOn":"Cloud-Gaming ist an f\u00fcr %s","cloudOff":"Cloud-Gaming ist aus f\u00fcr %s","padName":"Ein Gamepad darf scrollen und abspielen","padHint":"Die Sticks scrollen, die Schultertasten wechseln den Tab, A spielt oder pausiert. Die Gamepad-API, nichts weiter.","padOn":"Das Gamepad funktioniert hier","padNo":"In dieser Seite gibt es keine Gamepad-API.","streamPreview":"In einem kleinen Fenster ansehen","theaterName":"Gro\u00dfer Player von Anfang an","theaterHint":"Auf Twitch und YouTube: der Player f\u00fcllt die Seite, ohne dass du es jedes Mal sagst.","checklist":"Bevor du live gehst","checkMic":"Mikrofon ausgew\u00e4hlt und richtig laut","checkCam":"Kamera an und richtig ausgerichtet","checkSound":"Desktopton ist in der Mischung","checkScene":"Die richtige Szene steht","checkChat":"Chat offen und gefiltert","checkTitle":"Titel und Kategorie gesetzt","checkPrivate":"Nichts Privates auf dem Schirm","checkNotify":"Benachrichtigungen aus","streamChecksName":"Meine eigene Liste","streamChecksHint":"Ein Punkt pro Zeile. Leer = die Standardliste.","checkDone":"%d von %d erledigt","gameModeName":"Spielmodus, wenn ein Spiel im Vordergrund ist","gameModeHint":"Fragt den Fenstermanager, was vorne ist; auf diesem Rechner gibt es keinen, also passiert nichts.","gameModeNo":"Hier ist kein Fenstermanager zu fragen.","gameModeOn":"Spielmodus: nichts unterbricht dich","formsMenu":"Formulare und Passw\u00f6rter","fillLogin":"Login hier einsetzen","fillDone":"Als %s eingesetzt","fillLinked":"Von %s eingesetzt \u2014 dasselbe Konto, andere Adresse","fillNone":"F\u00fcr diese Seite ist nichts gespeichert.","identMenu":"Eine Adresse einsetzen","identNone":"Es ist noch keine Adresse gespeichert.","identFilled":"%d Felder gef\u00fcllt","cardMenu":"Eine Karte einsetzen","cardNone":"Es ist noch keine Karte gespeichert.","cardFilled":"%d Felder gef\u00fcllt","cardFrame":"Diese Kasse steckt im eigenen Rahmen des Zahlungsdienstes \u2014 von au\u00dfen kann da nichts hineinschreiben, so ist es gebaut","cardInsecure":"Diese Seite ist nicht verschl\u00fcsselt (kein https), deshalb wird hier keine Karte eingetragen","cardCvvAsk":"Die Pr\u00fcfnummer der Karte","cardCvvHint":"Wird jedes Mal gefragt: sie soll ja beweisen, dass jemand die Karte in der Hand h\u00e4lt.","anyFieldMenu":"Dieses Feld aus dem Tresor f\u00fcllen","aliasFill":"Plus-Adresse einsetzen","aliasFilled":"%s eingesetzt","aliasNotSet":"Keine Adresse zum Bauen \u2014 das Feld steht in den Einstellungen.","genMenu":"Ein Passwort erzeugen","genPassword":"Ein starkes Passwort","genPassphrase":"Eine Wortfolge","genMade":"Erzeugt, eingesetzt und gespeichert \u2014 St\u00e4rke %d","genNoField":"Auf dieser Seite ist kein Passwortfeld.","genBits":"%d W\u00f6rter aus %d \u2014 etwa %d Bit","otpMenu":"Zwei-Faktor-Codes","otpFilled":"Code %s eingesetzt","otpCopied":"Der Code liegt in der Zwischenablage","otpNoCode":"F\u00fcr dieses Login ist kein Code gespeichert.","otpNoLogin":"F\u00fcr diese Seite ist kein Login gespeichert.","otpRead":"Das Einrichtungsgeheimnis von dieser Seite nehmen","otpNone":"Auf dieser Seite steht kein Einrichtungsgeheimnis.","otpSaved":"Das Geheimnis liegt beim Login","otpBad":"Dieses Geheimnis wurde nicht \u00fcbernommen.","otpNoQr":"Einen gezeichneten QR-Code kann das hier nicht lesen \u2014 nimm das Geheimnis aus dem \u201eGeht nicht?\u201c-Kasten daneben","secretCopied":"Kopiert \u2014 die Zwischenablage wird gleich wieder geleert","clipCleared":"Die Zwischenablage ist geleert","clipClearName":"Kopierte Passw\u00f6rter aus der Zwischenablage l\u00f6schen nach","clipClearHint":"Sekunden. 0 = drin lassen.","draftMenu":"Was ich hier getippt habe","draftSave":"Diesen Entwurf jetzt sichern","draftBack":"%d Felder wiederhergestellt","draftNone":"F\u00fcr diese Seite wurde nichts gesichert.","draftDrop":"Diesen Entwurf vergessen","formDraftsOnName":"Was ich in Formulare tippe, sichern","formDraftsOnHint":"Bleibt auf diesem Rechner und kommt nach einem Absturz oder Fehlklick zur\u00fcck. Nie ein Passwort, nie ein privater Tab.","historyMenu":"Werte, die diese Seite schon gesehen hat","historyClear":"Vergessen","formHistoryOnName":"Was ich in Felder tippe, merken","formHistoryOnHint":"Wird beim n\u00e4chsten Besuch wieder angeboten, pro Seite. Aus in privaten Tabs, und nie ein Passwort.","pwEyeName":"Ein Auge in jedem Passwortfeld","pwEyeHint":"Um zu sehen, was du getippt hast. Der Knopf des Browsers, nicht der der Seite.","pwEyeAction":"Zeigen, was in den Passwortfeldern steht","pasteAllow":"Hier Einf\u00fcgen erlauben","pasteRemember":"Hier immer Einf\u00fcgen erlauben","pasteOn":"Einf\u00fcgen geht jetzt in %d Feldern","autocompleteFix":"\u201eNicht speichern\u201c hier ignorieren","autocompleteRemember":"Hier immer ignorieren","bigEdit":"Dieses Feld in einem gro\u00dfen Fenster bearbeiten","bigEditTitle":"Bearbeiten","bigEditSave":"Zur\u00fcckschreiben","testData":"Mit Testdaten f\u00fcllen","testFilled":"%d Felder mit Unsinn gef\u00fcllt","warnFormsName":"Etwas zum Formular vor mir sagen","warnFormsHint":"Ein Passwortfeld auf einer unverschl\u00fcsselten Seite, und ein Anmeldeformular auf einer Seite, f\u00fcr die du schon ein Login hast.","formInsecure":"Diese Seite kam \u00fcber http \u2014 ein Passwort von hier geht im Klartext hinaus","formKnown":"Du hast hier schon ein Login: %s","catchName":"Logins anbieten, die Skripte abschicken","catchHint":"Seiten, die ohne Formular anmelden \u2014 also die meisten.","reuseWarn":"Das ist das Passwort von %s \u2014 schau in die Adresszeile, bevor du etwas dr\u00fcckst","breachName":"Meine Passw\u00f6rter gegen bekannte Leaks pr\u00fcfen","breachHint":"Schickt die ersten f\u00fcnf Zeichen des SHA-1 jedes Passworts und vergleicht hier \u2014 der Dienst erf\u00e4hrt nie, nach welchem gefragt wurde.","breachRun":"Gegen bekannte Leaks pr\u00fcfen","breachOff":"Die Leak-Pr\u00fcfung ist aus \u2014 der Schalter steht in den Einstellungen.","breachFound":"%d deiner Passw\u00f6rter stehen in bekannten Leaks, auch das f\u00fcr %s","breachClean":"Keines deiner Passw\u00f6rter steht in den gepr\u00fcften Listen","breachFailed":"Pr\u00fcfung nicht m\u00f6glich: der Dienst hat nicht geantwortet, es wurde nichts verglichen","keyTitle":"Sicherheitsschl\u00fcssel","keyAccount":"Welches Konto auf dem Schl\u00fcssel?","keyPin":"Die PIN des Schl\u00fcssels","keyTouch":"Ber\u00fchre deinen Sicherheitsschl\u00fcssel","configBroken":"Deine Einstellungsdatei konnte nicht gelesen werden, daher nutzt dieses Fenster die Standardwerte. Die alte Datei liegt als %s daneben.","keyDone":"Der Schl\u00fcssel hat geantwortet","keyFailed":"Der Schl\u00fcssel hat nicht geantwortet.","authTitle":"Diese Seite will ein Login","authUser":"Benutzername f\u00fcr %s","authPassword":"Passwort","authFilled":"Gespeichertes Login f\u00fcr %s eingesetzt","dupMenu":"Doppelt gespeicherte Logins","dupNone":"Es ist nichts doppelt gespeichert.","mergeAll":"Zusammenlegen","mergeDone":"%d zusammengelegt","unusedMenu":"Seit einem Jahr nicht benutzt","unusedNone":"Alles wurde dieses Jahr benutzt.","unusedDaysName":"Ein Login gilt als unbenutzt nach","unusedDaysHint":"Tagen.","twofaMenu":"K\u00f6nnte zwei Faktoren haben, hat aber keine","twofaNone":"Jedes Login, das einen Code haben k\u00f6nnte, hat einen.","expiringMenu":"L\u00e4uft ab","expiringNone":"Es l\u00e4uft nichts ab.","expiryWarnName":"Vor Schl\u00fcsseln und Karten warnen","expiryWarnHint":"Tage vor dem Datum.","accessLog":"Was angesehen wurde","accessNone":"Es wurde noch nichts aufgedeckt.","accessClear":"Diese Liste leeren","pwHistory":"Fr\u00fchere Passw\u00f6rter","pwHistoryNone":"Es ist kein fr\u00fcheres Passwort aufbewahrt.","pwHistoryRow":"%s \u2014 %d Zeichen","customFields":"Zusatzfelder","customAdd":"Ein Zusatzfeld anlegen","customName":"Wie hei\u00dft es?","customValue":"Was steht drin?","customSecret":"Wie ein Passwort verborgen halten","customNone":"Keine Zusatzfelder.","codesMenu":"Wiederherstellungscodes","codesLeft":"%d von %d \u00fcbrig","codesUse":"Als benutzt markieren","codesNone":"Es sind keine Wiederherstellungscodes gespeichert.","usernameOnly":"Hier nur den Benutzernamen speichern","usernameSaved":"%s ohne Passwort gespeichert","vaultExportTitle":"Tresor verschl\u00fcsselt exportieren","vaultExportAsk":"Ein Kennwort f\u00fcr die Datei","vaultExported":"%d Eintr\u00e4ge geschrieben","vaultExportFailed":"Es wurde nichts geschrieben.","vaultImportTitle":"Eine Tresordatei einlesen","vaultImported":"%d Eintr\u00e4ge \u00fcbernommen","vaultImportBad":"Diese Datei wurde nicht gelesen \u2014 falsches Kennwort, oder keine Tresordatei.","vaultImportFile":"Aus einem anderen Manager einlesen","backupNow":"Den Tresor jetzt sichern","backupDone":"Gesichert","backupFailed":"Die Sicherung wurde nicht geschrieben.","backupNotSet":"Kein Ordner und kein Kennwort \u2014 beides steht in den Einstellungen.","backupDirName":"Verschl\u00fcsselte Tresorsicherungen ablegen in","backupDirHint":"Ein Ordner auf diesem Rechner. Leer = keine Sicherungen.","backupWordName":"Kennwort f\u00fcr die Sicherungen","backupWordHint":"Ohne es wird nichts geschrieben: eine Sicherung, die niemand lesen kann, ist keine.","backupKeepName":"So viele Sicherungen behalten","backupKeepHint":"Die \u00e4lteren werden gel\u00f6scht.","backupDaysName":"Sichern alle","backupDaysHint":"Tage. 0 = nur auf Zuruf.","autoSubmitHere":"Formular hier nach dem F\u00fcllen abschicken","fillOnLoadHere":"Login beim Laden dieser Seite einsetzen","sessionTie":"Dieses Login nur in diesem Browser anbieten","linkedName":"Seiten, die dasselbe Konto sind","linkedHint":"Eine Gruppe pro Zeile, Hosts mit Leerzeichen getrennt. amazon.de und amazon.com sind eingebaut.","aliasEmailName":"Meine Adresse f\u00fcr Plus-Adressen","aliasEmailHint":"name@example.com wird auf Anmeldeformularen zu name+seite@example.com.","passLangName":"Sprache der Wortfolgen","passLangHint":"Aus welcher Wortliste die Wortfolgen kommen.","quickSearch":"Tresor durchsuchen","quickSearchAsk":"Titel, Seite, Benutzername oder Schlagwort","quickNone":"Nichts gefunden.","vaultLockNow":"Tresor jetzt sperren","vaultLockedNow":"Der Tresor ist gesperrt","vaultLockedShort":"Der Tresor ist gesperrt.","vaultNoMaster":"Es gibt kein Hauptpasswort, mit dem man sperren k\u00f6nnte.","changePw":"Die Passwort-\u00c4ndern-Seite dieser Seite \u00f6ffnen","weakWalk":"Die schwachen \u00f6ffnen, je einen Tab","spellBothName":"Rechtschreibung in beiden Sprachen pr\u00fcfen","spellBothHint":"Deutsch und Englisch gleichzeitig, soweit die W\u00f6rterb\u00fccher installiert sind.","cancel":"Abbrechen","dlFiles":"Downloads und Dateien","dlNoSource":"Die Seite, von der das kam, wurde nicht notiert.","dlSource":"Die Seite \u00f6ffnen, von der es kam","dlHash":"Pr\u00fcfsumme berechnen","dlDeleteTitle":"Datei l\u00f6schen?","dlDeleteAsk":"\u201e%s\u201c auch von der Platte nehmen, nicht nur von der Liste?","dlDeleteFailed":"Diese Datei konnte nicht gel\u00f6scht werden.","dlDelete":"Datei mitl\u00f6schen","dlForget":"Von der Liste nehmen","dlKeepDaysName":"Fertige Downloads von der Liste nehmen nach","dlKeepDaysHint":"Tagen. 0 = behalten. Die Dateien bleiben unber\u00fchrt.","dlExport":"Liste als CSV exportieren","dlExported":"%d Zeilen geschrieben","dlLinkCopied":"Die Adresse liegt in der Zwischenablage","dlCopyLink":"Adresse kopieren","dlAgain":"%s wird erneut geholt","dlAgainAction":"Noch einmal herunterladen","dlNoneYet":"Es ist noch kein Download fertig geworden.","dlOpenLast":"Den letzten Download \u00f6ffnen","dlGone":"Diese Datei ist nicht mehr da.","dlRunTitle":"Heruntergeladenes Programm starten?","dlRunAsk":"\u201e%s\u201c ist ein Programm aus dem Internet. \u00d6ffnen?","dlNoOpener":"Auf diesem Rechner gibt es kein xdg-open.","dlOpenFailed":"Das lie\u00df sich nicht \u00f6ffnen.","dlOpenWith":"Diese Art \u00f6ffnen mit\u2026","dlOpenWithName":"Diese Arten mit eigenem Programm \u00f6ffnen","dlOpenWithHint":"Eine Regel pro Zeile: stl=prusa-slicer. Ein nicht installiertes Programm wird ignoriert.","dlOpenWithMissing":"Nicht installiert: %s","dlTemplateName":"Gespeicherte Dateien so benennen","dlTemplateHint":"{name} {ext} {site} {title} {date} {time} {n}. Leer = der Name der Seite.","dlBlockedName":"Diese Arten nie von allein herunterladen","dlBlockedHint":"Endungen, mit Leerzeichen getrennt. Du wirst gefragt, nicht abgewiesen.","dlBlockedTitle":"Diese Art herunterladen?","dlBlockedAsk":"\u201e%s\u201c ist eine der Arten, die nicht von allein kommen sollen. Trotzdem holen?","dlAskForName":"Nur bei diesen Arten nach dem Ort fragen","dlAskForHint":"Endungen, mit Leerzeichen getrennt. Der Rest wird ohne Frage gespeichert.","dlBigMbName":"Fragen, wenn ein Download gr\u00f6\u00dfer ist als","dlBigMbHint":"Megabyte. 0 = nie fragen.","dlBigTitle":"Ein gro\u00dfer Download","dlBigAsk":"\u201e%s\u201c ist %s. Starten?","dlNoSpaceAsk":"\u201e%s\u201c ist %s und es ist nicht genug Platz daf\u00fcr. Trotzdem starten?","dlTwiceTitle":"Schon heruntergeladen","dlTwiceAsk":"\u201e%s\u201c liegt schon in den Downloads. Noch einmal holen?","dlTwiceKept":"Die vorhandene Datei wurde behalten","privateDlName":"Private Tabs laden herunter nach","privateDlHint":"Ein eigener Ordner. Leer = der normale Download-Ordner. Die Datei ist so oder so deine; was ein privater Tab nie beh\u00e4lt, ist der Eintrag.","privateDlWipeName":"Diesen Ordner leeren, wenn der letzte private Tab zugeht","privateDlWipeHint":"Nur Dateien, nur dieser Ordner.","dlOriginName":"Die Herkunftsadresse in die Datei schreiben","dlOriginHint":"Das Attribut xdg.origin.url, das jeder Dateimanager liest. Es reist mit der Datei mit.","dlCarryOn":"Weitermachen","dlHold":"Anhalten","dlAtOnceName":"Gleichzeitig laufende Downloads","dlAtOnceHint":"Der Rest wartet in einer Warteschlange. 0 = ohne Grenze.","dlQueued":"Wartet","dlSpeedName":"Gesamte Downloadgeschwindigkeit h\u00f6chstens","dlSpeedHint":"Kilobyte pro Sekunde. 0 = ohne Grenze. Die Engine kennt keine Ratengrenze, also wird f\u00fcr einen Teil jeder Sekunde angehalten \u2014 eine Grenze im Mittel.","dlLaterStarted":"%d geplante Downloads gestartet","dlLater":"Sp\u00e4ter starten\u2026","dlLaterAsk":"In wie vielen Minuten?","dlNotArchive":"Das ist kein Archiv, das hier gelesen werden kann.","dlArchiveUnsafe":"Dieses Archiv will au\u00dferhalb seines Ordners schreiben (%s) \u2014 es wurde nichts entpackt","dlExtractTitle":"Entpacken?","dlExtractAsk":"%d Dateien nach \u201e%s\u201c entpacken?","dlExtracted":"%d Dateien nach %s entpackt","dlExtractFailed":"Entpacken fehlgeschlagen (%s).","dlExtract":"Entpacken","dlArchiveList":"Hineinschauen","dlAutoExtractName":"Anbieten, Archive beim Ankommen zu entpacken","dlAutoExtractHint":"In einen Ordner mit dem Namen des Archivs.","dlModTitle":"In eine Instanz?","dlModAsk":"\u201e%s\u201c nach %s/mods legen?","dlRouteModsName":"Anbieten, geladene Mods in eine Instanz zu legen","dlRouteModsHint":"F\u00fcr eine .jar, mit der Instanzliste von der Spieleseite.","dlModInfo":"Was diese Mod \u00fcber sich sagt","dlModInfoNone":"Diese jar sagt nichts \u00fcber sich.","dlModInfoRow":"%s %s \u2014 %s, Minecraft %s","imgNotRead":"Dieses Bild lie\u00df sich nicht lesen.","imgNotWritten":"Dieses Bild lie\u00df sich nicht schreiben.","imgConverted":"Als %s gespeichert","imgConvert":"Als PNG oder JPEG speichern","imgNoneBig":"Auf dieser Seite ist kein Bild gro\u00df genug.","imgSavingMany":"%d Bilder werden gespeichert","imgSaveAll":"Die Bilder dieser Seite speichern","imgLeastName":"Nur Bilder speichern von mindestens","imgLeastHint":"Pixel auf der l\u00e4ngeren Seite. 0 = alle.","imgBiggestName":"Die volle Gr\u00f6\u00dfe holen, wo es eine gibt","imgBiggestHint":"Nur wo die Adressen der Seite selbst sagen, wie (Twitter, Wikimedia, Reddit).","dlNoTorrent":"Hier ist kein Torrent-Programm installiert.","dlTorrentWent":"An %s gegeben","dlNoYtdlp":"yt-dlp ist hier nicht installiert.","dlYtdlp":"Dieses Video mit yt-dlp speichern","dlYtdlpAudio":"Nur den Ton speichern","dlYtdlpRow":"yt-dlp-Download","dlYtdlpStarted":"yt-dlp l\u00e4uft","dlNoClam":"clamscan ist hier nicht installiert \u2014 es wurde nichts gepr\u00fcft","dlScanName":"Fertige Downloads mit ClamAV pr\u00fcfen","dlScanHint":"Nur wenn clamscan installiert ist. \u201eKein Scanner\u201c und \u201esauber\u201c werden nie als dasselbe gezeigt.","dlScan":"Pr\u00fcfen","dlClean":"Sauber","dlInfected":"ClamAV sagt, \u201e%s\u201c ist infiziert","dlNotGcode":"Das ist keine G-Code-Datei.","dlNoPrinter":"Es ist keine Druckeradresse gesetzt \u2014 das Feld steht in den Einstellungen.","dlPrinterSent":"%s an den Drucker geschickt","dlPrinterFailed":"Der Drucker hat %s nicht angenommen.","dlPrinter":"An den Drucker schicken","printerUrlName":"Adresse des 3D-Druckers (Moonraker)","printerUrlHint":"http://printer.local:7125 \u2014 dein eigenes Ger\u00e4t in deinem Netz. Leer = aus.","dlHashAllName":"F\u00fcr jeden Download eine Pr\u00fcfsumme berechnen","dlHashAllHint":"SHA-256, auf diesem Rechner. Bei sehr gro\u00dfen Dateien langsamer.","dlNotifyName":"Sagen, wenn ein Download fertig ist","dlNotifyHint":"Nur wenn du in einem anderen Fenster bist.","dlDoneTitle":"Download fertig","dlDoneBody":"%s ist fertig","dlNoPreview":"In dieser Datei gibt es nichts zum Ansehen.","dlPreview":"Ansehen","dlOpenIt":"\u00d6ffnen","dlBatchTitle":"Eine Liste herunterladen","dlBatchAsk":"Eine Adresse pro Zeile.","dlBatchNone":"In dieser Liste ist keine brauchbare Adresse.","dlBatchStarted":"%d Downloads gestartet","dlBatch":"Eine Liste von Adressen herunterladen\u2026","dlLinkSaving":"%s wird gespeichert","altSaveName":"Alt+Klick auf einen Link speichert ihn","altSaveHint":"Statt hinzugehen.","upNoImage":"In der Zwischenablage ist kein Bild.","upNoBox":"Auf dieser Seite ist kein Upload-Feld.","upPasted":"Ins Upload-Feld gelegt","upPaste":"Das Bild aus der Zwischenablage ins Upload-Feld legen","upRecent":"Etwas Neueres hochladen","upNoRecent":"Es gibt nichts Neueres zum Hochladen.","upStripped":"Die Kameradaten wurden vorher entfernt","stripUploadName":"Kameradaten vor dem Hochladen aus Bildern entfernen","stripUploadHint":"EXIF und GPS. Das Bild wird neu geschrieben, es reist also nichts anderes mit.","exifKeepHere":"Auf dieser Seite die Kameradaten behalten","pageSaveOne":"Die Seite als eine Datei speichern","pageSaved":"Als %s gespeichert","pageSavedPart":"Als %s gespeichert \u2014 %d Bilder konnten nicht hineingelesen werden","pageSaveFailed":"Diese Seite lie\u00df sich nicht speichern.","pageSaveMd":"Den Artikel als Markdown speichern","mdSaved":"Als %s gespeichert","mdNothing":"Auf dieser Seite ist kein Artikel zum Speichern.","dlSearch":"Downloads durchsuchen","dlSearchAsk":"Name, Adresse oder Seite","dlFilterKind":"Nur diese Art","dlFilterSite":"Nur von dieser Seite","dlQueueMenu":"Wartet","dlQueueUp":"In der Schlange nach vorn","dlQueueDown":"In der Schlange nach hinten","sessionDlName":"Dieser Browser l\u00e4dt herunter nach","sessionDlHint":"Ein Ordner f\u00fcr diesen virtuellen Browser. Leer = der normale.","barMenu":"Die Adresszeile","barPlaceholder":"Suchen oder Adresse eingeben","barNotSecure":"Nicht sicher","barNotSecureTip":"Diese Seite kam \u00fcber http. Was du hier eintippst, geht im Klartext hinaus.","barSecure":"Sichere Verbindung","barLookalike":"Dieser Name ist als ein anderer verkleidet","barLookalikeTip":"Er liest sich wie %s. Schau auf die Adresse, bevor du etwas eintippst.","barInUseTip":"Diese Seite benutzt Kamera, Mikrofon oder Bildschirm","barNoPage":"Hier ist keine Seite.","barCertLook":"Zertifikat ansehen","barCertNone":"Es kam kein Zertifikat zur\u00fcck.","barCertTitle":"Zertifikat f\u00fcr %s","barCookieRule":"Cookies: %s","barCookieAsIs":"wie der Browser eingestellt ist","barAllowed":"Was diese Seite darf","barLockTip":"Was diese Seite darf, und wer sie zu sein behauptet","barCopyTip":"Adresse kopieren","barClearTip":"Zeile leeren","barQrTip":"Adresse als QR-Code zeigen","barAnswerCopied":"Kopiert: %s","barSettingRow":"Einstellungen: %s","barDidYouMean":"Meintest du %s?","barSearchSite":"%s durchsuchen \u2014 tippe, was du suchst","barBackground":"In einem Hintergrundtab ge\u00f6ffnet","barKeywordTitle":"Ein Schlagwort daf\u00fcr","barKeywordAsk":"Das Wort, das \u201e%s\u201c \u00f6ffnet","barKeywordSet":"\u201e%s\u201c \u00f6ffnet es jetzt","barKeywordBad":"Ein Stichwort ist ein Wort ohne Leerzeichen \u2014 es wurde nichts gesetzt.","barNeverSuggest":"Diese Seite nie mehr vorschlagen","barNeverAgain":"%s wird nicht mehr vorgeschlagen","barOtherWindow":"In einem anderen Fenster","barEngines":"Suchen mit","barScopeHint":"@tabs, @lesezeichen, @chronik, @einstellungen, @downloads, @notizen","barProgressName":"Ladefortschritt in der Adresszeile zeigen","barProgressHint":"Eine d\u00fcnne Linie am unteren Rand der Zeile.","barDimPathName":"Die Domain hell, den Rest blass zeigen","barDimPathHint":"Damit paypal.com.evil.ru sich wie evil.ru liest. Nur solange du die Adresse nicht bearbeitest.","barDecodeName":"Adressen lesbar anzeigen","barDecodeHint":"%20, %C3%BC und Punycode als die Zeichen, f\u00fcr die sie stehen. Kopiert wird weiterhin die echte Adresse.","barHideSchemeName":"https:// und www. weglassen","barHideSchemeHint":"Die Adresse kommt vollst\u00e4ndig zur\u00fcck, sobald du sie bearbeitest.","barInlineName":"Domain beim Tippen vervollst\u00e4ndigen","barInlineHint":"Aus den Seiten, die du wirklich besuchst, mit dem Rest markiert.","barRowsName":"Zeilen im Vorschlagsfeld","barRowsHint":"Wie viele Vorschl\u00e4ge gezeigt werden.","barTextSizeName":"Schriftgr\u00f6\u00dfe der Adresszeile","barTextSizeHint":"Prozent, unabh\u00e4ngig vom Rest der Oberfl\u00e4che.","barLockName":"Das Schloss in der Adresszeile zeigen","barLockHint":"Klick darauf zeigt, was die Seite darf.","barCopyBtnName":"Ein Kopierknopf in der Adresszeile","barCopyBtnHint":"Am rechten Ende.","barClearBtnName":"Ein Leeren-Knopf beim Bearbeiten","barClearBtnHint":"Ein \u00d7 am rechten Ende.","barQrBtnName":"Ein QR-Knopf in der Adresszeile","barQrBtnHint":"Zeigt die Adresse als QR-Code f\u00fcrs Handy.","barBottomName":"Die Werkzeugleiste unter die Seite legen","barBottomHint":"Die ganze Leiste, Adresszeile inklusive.","barSourcesName":"Was das Vorschlagsfeld vorschlagen darf","barSourcesHint":"history, bookmarks, tabs, answers, search, settings, windows \u2014 lass weg, was du nicht willst.","privateEngineName":"Private Tabs suchen mit","privateEngineHint":"Der Name einer Suchmaschine, oder leer f\u00fcr die normale.","langEnginesName":"Deutsche Suchen gehen an","langEnginesHint":"Ein Maschinenname f\u00fcr de und einer f\u00fcr en, als de=name en=name. Leer = immer die Voreinstellung.","moneyRatesName":"Wechselkurse f\u00fcr \u201e20 usd in eur\u201c holen","moneyRatesHint":"H\u00f6chstens einmal am Tag, aus der Tagesdatei der Europ\u00e4ischen Zentralbank. Aus = die Antwort sagt das, statt zu raten.","moneyFetched":"Wechselkurse f\u00fcr %d W\u00e4hrungen","moneyFailed":"Die Kurse konnten nicht geholt werden.","enginesName":"Meine eigenen Suchmaschinen","enginesHint":"Eine pro Zeile: Name|https://example.com/?q=%s|Wort. Die Adresse muss sagen, wo die W\u00f6rter hingeh\u00f6ren.","barOpenSearch":"Die Suche dieser Seite hinzuf\u00fcgen","barOpenSearchAdded":"%s kann jetzt aus der Zeile durchsucht werden","barNoSearch":"Diese Seite hat keine Suche geliefert.","devRequests":"Was diese Seite geholt hat","devLogRow":"Anfragen mitschreiben","devLogOn":"Anfragen werden mitgeschrieben","devLogOff":"Das Anfrageprotokoll ist aus und leer","devLogEmpty":"Im Anfrageprotokoll steht nichts.","devLogClear":"Protokoll leeren","devLogHar":"Eine HAR-Datei schreiben","devHarWritten":"%d Anfragen geschrieben \u2014 die Antworten stehen nicht drin, weil dieser Browser Anfragen sieht","devRuleAdded":"%s wird jetzt blockiert","devRulesName":"Adressen blockieren oder umleiten","devRulesHint":"Eine pro Zeile: ein St\u00fcck Adresse blockiert sie, und \u201ewas -> wohin\u201c schickt sie an eine Datei oder eine andere Adresse.","devAgentMenu":"Dieser Seite sagen, der Browser sei","devAgentSet":"Dieser Seite wird gesagt, der Browser sei %s (%s)","devAgentOff":"%s bekommt wieder die Wahrheit","devAgentOffRow":"Die Wahrheit","devHeadersName":"Header hinzuf\u00fcgen","devHeadersHint":"Einer pro Zeile: \u201eName: Wert\u201c f\u00fcr jede Seite, oder \u201eHost | Name: Wert\u201c f\u00fcr eine.","devHeadersMenu":"Was der Server geschickt hat","devHeadersGot":"HTTP %d, %d Header, %d Sicherheitsheader fehlen","devHdrMissing":"Fehlt: %s","devHdrHsts":"HSTS","devHdrCsp":"eine Content-Policy","devHdrNosniff":"no-sniff","devHdrFrames":"Rahmenregeln","devHdrReferrer":"eine Referrer-Policy","devHdrPermissions":"eine Permissions-Policy","devHttp":"Eine Anfrage schicken","devHttpAsk":"Methode und Adresse, als \u201eGET https://example.com/\u201c","devHttpHeaders":"Header, einer pro Zeile (Name: Wert). Leer f\u00fcr keine.","devHttpBody":"Der Inhalt","devHttpBad":"Das ist keine http-Adresse.","devWsMenu":"WebSockets","devWsOff":"Schalte zuerst \u201eOffene Verbindungen notieren\u201c bei den Seitenw\u00e4chtern ein.","devWsNone":"Diese Seite hat keine ge\u00f6ffnet.","devWsOpen":"offen","devWsClosed":"geschlossen","devTimingMenu":"Wie lange es gedauert hat","devTiming":"Erstes Byte nach %d ms, geladen nach %d ms","devTtfb":"Erstes Byte: %d ms","devLoaded":"Geladen: %d ms","themeMine":"Meine Themes","themeEditor":"Dieses Theme bearbeiten","themeEditorSub":"Die acht Farben eines Themes \u00e4ndern und es unter einem eigenen Namen speichern.","themeSave":"Als mein Theme speichern","themeSaved":"Als \u201e%s\u201c gespeichert","themeName":"Ein Name daf\u00fcr","themeDrop":"\u201e%s\u201c l\u00f6schen","themeExport":"Dieses Theme als Datei speichern","themeExported":"Nach %s geschrieben","themeImport":"Ein Theme aus einer Datei lesen","themeImported":"\u201e%s\u201c geh\u00f6rt jetzt dir","themeImportBad":"Aus dieser Datei lie\u00dfen sich keine Farben lesen.","themeAccent":"Eine andere Akzentfarbe","themeAccentSuffix":"(mein Akzent)","themeFaint":"%s auf %s ist %.1f:1 und braucht %.1f:1","themeFaintNone":"Alles darin ist lesbar.","uiSizeName":"Die Gr\u00f6\u00dfe der Browser-Oberfl\u00e4che","uiSizeHint":"Tabs, Werkzeugleiste, Men\u00fcs und Leisten. Die Seiten selbst bleiben unber\u00fchrt \u2014 das ist der Seitenzoom.","uiSize_compact":"Kompakt","uiSize_normal":"Normal","uiSize_big":"Gro\u00df","uiSizeSet":"Oberfl\u00e4che: %s","uiFontName":"Die Schrift der Browser-Oberfl\u00e4che","uiFontHint":"Eigene Men\u00fcs, Tabs und Leisten. Nichtproportionale Schriften stehen zuerst.","uiRadiusName":"Wie rund die Ecken sind","uiRadiusHint":"0 ist eckig. Gilt in jedem Look.","uiGlassName":"Wie durchsichtig Glass ist","uiGlassHint":"Nur der Glass-Look liest das.","uiLabelsName":"W\u00f6rter in der Werkzeugleiste statt Zeichen","uiLabelsHint":"Die Kn\u00f6pfe behalten ihre Symbole; die W\u00f6rter kommen daneben.","uiFocusName":"Wie der Tastaturfokus gezeichnet wird","uiFocusHint":"In den eigenen Fenstern des Browsers, nicht auf Webseiten.","uiFocus_normal":"Wie \u00fcblich","uiFocus_thick":"Ein dicker Rahmen","uiFocus_underline":"Eine Unterstreichung","uiFocus_off":"Gar nicht","uiAnimName":"Die eigene Oberfl\u00e4che animieren","uiAnimHint":"Aus = Tabs, Leisten und Men\u00fcs erscheinen, statt zu gleiten.","uiTabMinName":"Schmalste Breite eines Tabs","uiTabMaxName":"Breiteste Breite eines Tabs","uiToolbarName":"Wie hoch die Werkzeugleiste ist","uiPlainMenusName":"Einfache Men\u00fcs mit gr\u00f6\u00dferen Zeilen","uiPlainMenusHint":"Keine Symbole, mehr Platz zwischen den Zeilen.","appearanceResetName":"Aussehen zur\u00fccksetzen","appearanceResetHint":"Theme, Look, Schriften, Gr\u00f6\u00dfen und Seitenstile. Eine Sicherung bleibt, damit es r\u00fcckg\u00e4ngig gemacht werden kann.","appearanceReset":"Das Aussehen ist wieder wie geliefert","appearanceUndo":"Dieses Zur\u00fccksetzen widerrufen","pageLookName":"Wie Webseiten angezeigt werden","nightDimName":"Seiten abends abdunkeln","nightDimHint":"Dunkelt nur die Seite ab \u2014 die eigenen Fenster des Browsers behalten ihre Helligkeit.","nightFromName":"Von","nightToName":"bis","warmNightName":"Abends w\u00e4rmere Farben","warmNightHint":"Dieselben Stunden wie beim Abdunkeln.","warmStrengthName":"Wie warm","greyName":"Seiten in Grau zeigen","greyHint":"\u00dcberall, oder pro Seite im Seitenmen\u00fc.","greyHere":"%s in Grau zeigen","greyOn":"Grau","greyOff":"Wieder in Farbe","scrollbarsName":"Scrollbalken auf Webseiten","scrollbarsHint":"Eine Seite, die eigene zeichnet, kann im Seitenmen\u00fc ausgenommen werden.","scrollbars_normal":"Wie die Seite sie gemacht hat","scrollbars_thin":"D\u00fcnn","scrollbars_themed":"D\u00fcnn und in meinen Farben","scrollbars_hidden":"Nicht gezeichnet","scrollbarsHere":"Die Scrollbalken von %s in Ruhe lassen","selectionName":"Markierter Text in meiner Akzentfarbe","selectionHint":"Auf Webseiten. Die eigenen Fenster benutzen sie schon.","unstyledName":"Seiten ohne eigenen Hintergrund meinen geben","unstyledHint":"Ein einfaches .txt oder eine alte Seite ist sonst motorwei\u00df.","siteFontSizeName":"Textgr\u00f6\u00dfe f\u00fcr diese Seite","siteFontSizeAsk":"Schriftgr\u00f6\u00dfe in Pixeln f\u00fcr %s. Leer = wie geliefert.","siteFontSizeSet":"%s ist jetzt %dpx","siteFontsName":"Die Schriften, auf die Webseiten zur\u00fcckfallen","siteFontsHint":"Wenn eine Seite keine eigene nennt.","siteFont_standard":"Standard","siteFont_serif":"Serif","siteFont_sans":"Sans-serif","siteFont_mono":"Nichtproportional","siteFont_emoji":"Farbige Emoji","emojiFontHint":"Chromiums Piktogramm-Familie \u2014 was es nimmt, wenn eine Seite ein Emoji verlangt.","sessionTintName":"Die eigene Farbe dieses virtuellen Browsers","sessionTintHint":"Auf der Tableiste und der Adresszeile, damit nie geraten werden muss, welches Konto aktiv ist.","privateTintName":"Die Farbe privater Tabs","privateTintHint":"Ihr Name in der Leiste und eine Linie \u00fcber der Werkzeugleiste.","monoFaviconsName":"Favicons in einer Farbe","monoFaviconsHint":"Die Formen bleiben, die Markenfarben nicht. Lesezeichen behalten ihre.","statusLineName":"Wo ein Link unter der Maus genannt wird","statusLineHint":"Unten links \u00fcber der Seite, in der Adresszeile oder nirgends.","statusLine_bottom":"Unten links","statusLine_bar":"In der Adresszeile","statusLine_off":"Nirgends","statusSizeName":"Wie gro\u00df diese Zeile ist","titleFormatName":"Wie das Fenster hei\u00dft","titleFormatHint":"Hyprland-Regeln und der Fensterwechsler haben nichts anderes, um zwei Fenster zu unterscheiden.","titleFormat_full":"Seite \u2014 Browser","titleFormat_page":"Nur die Seite","titleFormat_site":"Nur die Website","titleFormat_session":"Seite \u2014 virtueller Browser \u2014 Browser","autoHideName":"Tabs und Werkzeugleiste verstecken, bis ich sie brauche","autoHideHint":"Sie kommen zur\u00fcck, wenn die Maus den oberen Rand erreicht, oder mit Strg+L.","revealFsName":"Oberfl\u00e4che im Vollbild am oberen Rand zeigen","revealFsHint":"Im F11-Vollbild, nicht w\u00e4hrend ein Video den Bildschirm hat.","pageColourName":"Einer Seite erlauben, die Werkzeugleiste zu f\u00e4rben","pageColourHint":"Ihr eigenes theme-color-Meta-Tag. Die Farbe eines virtuellen Browsers gewinnt dagegen.","themedErrorsName":"Fehlgeschlagene Ladevorg\u00e4nge im eigenen Stil zeigen","themedErrorsHint":"Einfach, in deiner Palette, mit Enter zum erneuten Versuch.","errTitle":"Diese Seite wurde nicht geladen","errUnknown":"Der Server hat nicht geantwortet.","errAgain":"Erneut versuchen (Enter)","startLayoutName":"Was die Startseite zeigt","startClockName":"Die Uhr","startSecondsName":"Mit Sekunden","startDateName":"Das Datum","startHour24Name":"24-Stunden-Uhr","startSearchName":"Wo das Suchfeld sitzt","startSearch_middle":"In der Mitte","startSearch_top":"Oben","startSearch_bottom":"Unten","startQuickName":"Wie gro\u00df die Schnelllinks sind","wallFolderName":"Ein Ordner mit Hintergrundbildern","wallFolderHint":"Die Startseite wechselt durch die Bilder darin. Es wird nichts kopiert und nichts geladen.","wallEveryName":"Bild wechseln alle","wallEveryHint":"0 = bei jedem neuen Tab ein anderes.","darkSiteName":"Seiten, die in Ruhe gelassen werden","darkSiteHint":"Ein Host pro Zeile. Diese werden nie abgedunkelt oder umgef\u00e4rbt \u2014 die eigene Liste des Browsers mit bereits dunklen Seiten kommt dazu.","darkSiteBuiltin":"Diese l\u00e4sst der Browser schon in Ruhe: %s","darkSiteHere":"%s in Ruhe lassen","darkSiteOn":"%s wird jetzt in Ruhe gelassen","darkSiteOff":"%s wird wieder umgef\u00e4rbt","lookFlat":"Flat Mono","lookFlatSub":"Eckige Ecken, keine Schatten, keine Karten, beschriftet wie ein Terminal.","followSchemeName":"Der Hell/Dunkel-Einstellung des Desktops folgen","followSchemeHint":"Liest die colour-scheme-Einstellung des XDG-Portals und wechselt zwischen deinen zwei Themes.","schemeDarkName":"Das dunkle Theme","schemeLightName":"Das helle Theme","colourFileName":"Einer Farbdatei folgen","colourFileHint":"Eine kitty.conf, base16-YAML oder ein VS-Code-Theme. Der Browser f\u00e4rbt um, wenn die Datei sich \u00e4ndert \u2014 es wird nichts geladen.","colourFileWatching":"Folgt %s","themeStarName":"Lieblings-Themes","themeStarHint":"\u201eN\u00e4chstes Lieblings-Theme\u201c geht durch die markierten; in der Tastenliste der Einstellungen kann es eine Taste bekommen.","themeStar":"Dieses Theme markieren","themeUnstar":"Markierung entfernen","themeCycle":"N\u00e4chstes Lieblings-Theme","themeCycled":"%s","themeNoStars":"Markiere erst ein oder zwei Themes \u2014 die Liste steht in den Einstellungen.","rawViewName":"Einfache Dateien auf meinem Hintergrund","rawViewHint":"Eine .txt, eine .json oder ein einzeln ge\u00f6ffnetes Bild bekommt den Theme-Hintergrund statt Motorwei\u00df.","rawCheckerName":"Ein Schachbrett hinter Bildern","rawCheckerHint":"Damit ein transparentes PNG lesbar ist.","darkPdfName":"Dunkle PDF-Seiten","darkPdfHint":"Invertiert die Seite und setzt die Bilder zur\u00fcck.","devtoolsDarkName":"DevTools in den Farben des Browsers","devtoolsDarkHint":"Dunkel oder hell passend zum Theme, gesetzt bevor das Fenster aufgeht.","rawViewsHere":"Einfache Dateien auf meinem Hintergrund","lookMenuName":"Die Form","appearanceMenu":"Wie es aussieht","a11yName":"Eine Seite lesen","a11yMenu":"Lesehilfe","a11yNoAlt":"kein Alt-Text","a11yUnderlineLinks":"Links immer unterstreichen","a11yBigTargets":"Gr\u00f6\u00dfere Klickfl\u00e4chen","a11yFixContrast":"Zu blassen Text abdunkeln","a11yAltText":"Alt-Text beim \u00dcberfahren, Bilder ohne markieren","a11yBoldStarts":"Den Anfang jedes Wortes fett","a11yBigBars":"Gr\u00f6\u00dfere Scrollbalken auf Seiten","a11yHyphenate":"Lange W\u00f6rter trennen","a11yReflow":"Text aufs Fenster umbrechen statt seitw\u00e4rts scrollen","a11yNoSticky":"Kopf- und Fu\u00dfzeilen losmachen","a11yNoRefresh":"Seiten daran hindern, sich selbst neu zu laden","a11yEscapeOverlays":"Esc schlie\u00dft ein Fenster, das die Seite nicht schlie\u00dft","a11yFocusInView":"Das fokussierte Element in der Mitte halten","a11yFocusTooltips":"Tooltips beim Tastaturfokus zeigen","a11yHoverZoom":"Beim \u00dcberfahren eine gr\u00f6\u00dfere Kopie des Bildes zeigen","a11yAltDragSelect":"Alt-Ziehen markiert die W\u00f6rter eines Links","a11ySpatial":"Pfeiltasten wechseln zwischen Links und Kn\u00f6pfen","a11yCaret":"Cursor-Navigation (F7)","a11yCaretStyle":"Ein Cursor in meiner Akzentfarbe","a11yMonoAudio":"Seitenton auf Mono mischen","a11yBalance":"Balance links/rechts","a11yTextZoom":"Nur die Textgr\u00f6\u00dfe","a11yFont":"Eine Schrift f\u00fcr Seiten","a11yFontHint":"Eine legasthenie-freundliche Familie, falls installiert. Leer = die der Seite.","a11yColourFilter":"Filter f\u00fcr Farbenblindheit","a11yFilter_":"Aus","a11yFilter_fixrg":"Rot-Gr\u00fcn korrigieren","a11yFilter_fixby":"Blau-Gelb korrigieren","a11yFilter_protan":"Protanopie simulieren","a11yFilter_deutan":"Deuteranopie simulieren","a11yFilter_tritan":"Tritanopie simulieren","a11ySpacing":"Zeilen-, Wort- und Buchstabenabstand","a11ySiteOnly":"Nur auf %s","a11ySiteCleared":"%s liest wieder die \u00fcblichen Antworten","a11yAuditName":"Was an dieser Seite nicht stimmt","a11yAuditRow":"%d Felder ohne Bezeichnung, %d Bilder ohne Alt-Text, %d zu blass, %d Spr\u00fcnge in der Gliederung","a11yAuditClean":"Offensichtlich ist nichts verkehrt.","a11yJumpHeading":"N\u00e4chste \u00dcberschrift","a11yJumpHeadingBack":"Vorige \u00dcberschrift","a11yJumpLandmark":"N\u00e4chster Bereich","a11yJumpField":"N\u00e4chstes Formularfeld","a11yMain":"Zum Inhalt springen","a11yField":"In das erste Textfeld","a11yCaretOn":"Cursor-Navigation ist an \u2014 die Pfeiltasten bewegen einen Cursor, Umschalt markiert","a11yCaretOff":"Cursor-Navigation ist aus","a11yFindCursor":"Strg allein l\u00e4sst einen Ring um den Zeiger blinken","a11yTextOnlyZoom":"Nur den Text vergr\u00f6\u00dfern, nicht die Bilder","a11yMagnifier":"Eine Lupe, die dem Zeiger folgt","a11yLensScale":"Wie stark die Lupe vergr\u00f6\u00dfert","a11ySoundCues":"Ein kurzer Ton, wenn eine Seite oder ein Download fertig ist","a11ySoundCuesHint":"Zwei T\u00f6ne, die der Browser selbst erzeugt. Es wird nichts heruntergeladen.","a11yTabStrip":"N\u00e4chster Tab \u00fcber die Tastatur","a11yTabStripBack":"Voriger Tab \u00fcber die Tastatur","a11yTabMenu":"Das Men\u00fc dieses Tabs \u00fcber die Tastatur","a11yPageMenu":"Das Seitenmen\u00fc beim fokussierten Element","a11yNames":"Die eigenen Kn\u00f6pfe f\u00fcr einen Screenreader benennen","a11yNamesDone":"%d Dinge benannt","a11yPanel":"Lesehilfe f\u00fcr diese Seite","a11yCapOn":"Untertitel an \u2014 auf diesem Rechner aufgenommen und erkannt","a11yCapOff":"Untertitel aus","a11yCapName":"Live-Untertitel f\u00fcr das, was ein Tab abspielt","a11yCapHint":"Nimmt die Ausgabe des Rechners in Abschnitten von einigen Sekunden auf und erkennt sie mit dem Programm, das du nennst. Nichts ist mitgeliefert, nichts wird heruntergeladen, und kein Ton verl\u00e4sst den Rechner.","a11yCapNoTool":"Daf\u00fcr braucht es einen Rekorder und eine Spracherkennung \u2014 nenne sie in den Einstellungen (zum Beispiel parec und whisper-cli).","a11yCapNoTranslator":"Daf\u00fcr braucht es einen \u00dcbersetzer auf diesem Rechner \u2014 nenne einen in den Einstellungen (trans oder argos-translate).","a11yCapRecorder":"Der Rekorder","a11yCapTranscriber":"Die Spracherkennung","a11yCapTranslator":"Der \u00dcbersetzer","a11yCapModel":"Die Modelldatei","a11yCapTranslate":"Die Untertitel \u00fcbersetzen","a11yCapTranslateHint":"Die eigenen Untertitel eines Videos, Zeile f\u00fcr Zeile von dem Programm \u00fcbersetzt, das du nennst.","a11yCapFound":"Gefunden: %s","a11yCapMissing":"nicht installiert","descA11y":"Eine Seite lesen: Kontrast, Abst\u00e4nde, die Tasten, die durch sie f\u00fchren, Untertitel und Ton.","a11ySpacingLine":"Zeilenabstand","a11ySpacingWord":"Wortabstand","a11ySpacingLetter":"Buchstabenabstand","a11yPanelHint":"Jede dieser Einstellungen l\u00e4sst sich im Lesehilfe-Fenster f\u00fcr eine einzelne Seite setzen.","navMenu":"Zurechtkommen","navAutoScroll":"Mittelklick und bewegen zum Scrollen","navBoxLinks":"Mit Alt einen Rahmen \u00fcber Links ziehen","navClickableUrls":"Adressen im Text klickbar machen","navNoScrollHijack":"Der Seite das Scrollen nicht \u00fcberlassen","navNoKeyGrab":"Der Seite die Tasten nicht \u00fcberlassen","navStopRefresh":"Die Seite nicht selbst neu laden lassen","navRefreshStopped":"Ein Neuladen, das diese Seite wollte, wurde gestoppt","navAllowRefresh":"Dieses eine Mal erlauben","navOpenedLinks":"%d Links im Hintergrund ge\u00f6ffnet","navNoLinks":"Keine Links in der Auswahl.","navNoUrlThere":"Diese Auswahl ist keine Adresse.","navOpenSelection":"Zur ausgew\u00e4hlten Adresse gehen","navOpenAllLinks":"Jeden Link in der Auswahl \u00f6ffnen","navBoxOpen":"Die Links aus dem Rahmen \u00f6ffnen","navImages":"Die Bilder auf dieser Seite","navNoImages":"Keine Bilder auf dieser Seite.","navImgOpen":"\u00d6ffnen","navImgCopy":"Adresse kopieren","navImgSave":"Speichern","navImgCopyAll":"Alle Adressen kopieren","navViewImage":"Ein Bild in voller Gr\u00f6\u00dfe zeigen","navStructure":"Die Gliederung dieser Seite","navFrames":"Die Rahmen in dieser Seite","navNoFrames":"Diese Seite hat keine Rahmen.","navFrameBlocked":"nicht gezeichnet","navReloadFrame":"Einen Rahmen neu laden","navFindAll":"In allen Tabs suchen","navNoMatches":"In keinem Tab etwas gefunden.","navFindLink":"Einen Link \u00fcber seine W\u00f6rter finden","navFindMarks":"Jeden Treffer markieren","navMobileOn":"Die mobile Version \u2014 Telefonbreite und ein Telefon-User-Agent","navMobileOff":"Zur\u00fcck zur vollen Version","navRewriteName":"Adressen, die vor dem Laden umgeschrieben werden","navRewriteHint":"Eine Regel pro Zeile, als von -> nach. Zum Beispiel reddit.com -> old.reddit.com","navNoteName":"Eine Notiz zu dieser Seite","navNoteAsk":"Woran soll diese Seite dich erinnern? Sie kommt bei jedem Besuch wieder.","navBackOnline":"Wieder online \u2014 geladen","navArchiveName":"Die archivierte Fassung","navArchiveAsk":"Die neueste archivierte Fassung von %s \u00f6ffnen? Das fragt archive.org danach und sagt denen damit, dass du nachgesehen hast.","navErr_dns":"Dieser Name lie\u00df sich nicht aufl\u00f6sen.","navErr_refused":"Der Server hat die Verbindung abgelehnt.","navErr_timeout":"Der Server hat nicht rechtzeitig geantwortet.","navErr_cert":"Dem Zertifikat war nicht zu trauen.","navErr_unknown":"Das Laden schlug fehl, und die Engine sagte nicht, warum.","navErr_other":"Das Laden schlug fehl.","navOtherBrowser":"Im anderen Browser \u00f6ffnen","navPlayer":"Mit dem Player \u00f6ffnen","navNoPlayer":"%s ist nicht installiert.","navHandedToPlayer":"An %s \u00fcbergeben","navPlayerName":"Der externe Player","navPlayerHint":"mpv, oder was einen Stream besser abspielt als eine Webseite.","navCacheCleared":"Cache und Worker von %s sind weg \u2014 wird neu geladen","navPrintSelection":"Die Auswahl drucken","navNoSelection":"Es ist nichts ausgew\u00e4hlt.","navPrinted":"Nach %s geschrieben","navRetryName":"Einen fehlgeschlagenen Ladevorgang wiederholen, wenn das Netz zur\u00fcck ist","navRetryHint":"Alle paar Sekunden eine Pr\u00fcfung, und die Seite l\u00e4dt sich selbst, sobald es eine Antwort gibt.","navAppName":"Welches Programm soll das \u00f6ffnen?","navAppAsk":"Eine %s:-Adresse von %s. Welches Programm soll sie \u00f6ffnen? Die Antwort wird behalten.","navNoApp":"Auf diesem Rechner kann nichts eine %s:-Adresse \u00f6ffnen.","navAppFailed":"%s lie\u00df sich nicht starten.","navHandedTo":"An %s \u00fcbergeben (%s:)","navShellName":"Woanders \u00f6ffnen?","navShellAsk":"Eine %s:-Adresse von %s. Soll Windows sie mit dem Programm \u00f6ffnen, dem diese Art Adresse geh\u00f6rt? Die Antwort wird behalten.","navShellGave":"An Windows \u00fcbergeben (%s:)","navNoAppsYet":"Es wurde noch nichts gefragt.","navAppForgotten":"%s wird n\u00e4chstes Mal wieder gefragt","navPreviewName":"Einen Link ansehen, ohne hinzugehen","navPreviewKeep":"Als Tab behalten","navPreviewClose":"Schlie\u00dfen","navInfoName":"Woraus diese Seite besteht","navInfoLinks":"Ihre Links","navInfoMeta":"Ihre Metadaten","navInfoMedia":"Ihre Medien","navPane":"In der Seitenleiste \u00f6ffnen","navQrName":"Was der Code sagt","navQrRead":"Den QR-Code lesen","navQrNone":"In diesem Bild ist kein lesbarer QR-Code.","navQrOpen":"\u00d6ffnen","navClearCache":"Cache dieser Seite leeren und neu laden","linkPreviewName":"Umschalt und \u00dcberfahren zeigt die verlinkte Seite","linkPreviewHint":"Ein kleines Fenster in einem privaten Beh\u00e4lter, das als Tab behalten werden kann.","descNav":"Auf einer Seite zurechtkommen: woraus sie besteht, was mit einer Auswahl geht, und die Klugheit der Seite aus dem Weg.","navHint":"Diese Schalter lassen sich im Zurechtkommen-Fenster f\u00fcr eine einzelne Seite setzen.","navErrProxy":"Ein Proxy ist eingeschaltet \u2014 vielleicht hat der Proxy versagt, nicht die Seite.","perfMenu":"Was das kostet","perfFreed":"%d Tabs schlafen","perfFreeNow":"Jetzt Speicher freigeben","perfKeepAwake":"Diese Seite nie schlafen legen","perfKeepAwakeName":"Seiten, die nie schlafen oder eingefroren werden","perfKeepAwakeHint":"Amazon Music h\u00f6rt auf, wenn der Tab verworfen wird, Discord verliert den Anruf. Ein Host pro Zeile.","perfFreeze":"Die unt\u00e4tigen Tabs einfrieren","perfFreezeName":"Einen Hintergrundtab einfrieren nach","perfFreezeHint":"Eingefroren beh\u00e4lt die Seite und f\u00fchrt keine Timer aus; schlafend gibt den ganzen Renderer zur\u00fcck. 0 = nie.","perfHog":"%s benutzt im Hintergrund %d%% eines Prozessors","perfHogName":"Sagen, wenn ein Hintergrundtab den Prozessor besch\u00e4ftigt h\u00e4lt","perfHogHint":"\u00dcber eine halbe Minute gemessen, und nur f\u00fcr Tabs, die du nicht ansiehst.","perfStopped":"Der Renderer dieses Tabs wurde gestoppt \u2014 wird neu geladen","perfStop":"Den Prozess dieser Seite stoppen","perfNice":"Hintergrundtabs weniger Anspruch auf den Prozessor geben","perfNiceHint":"Immer nur nach unten, damit nichts verhungern kann \u2014 der vordere Tab und ein Spiel gewinnen einfach.","perfPressure":"Dem Rechner fehlt Speicher \u2014 %d Tabs schlafen","pressureNoPsi":"Dieser Rechner hat keinen Speicherdruck-Z\u00e4hler, das l\u00e4sst sich hier also nicht beobachten \u2014 setz stattdessen ein Gesamt-Speicherlimit, das \u00fcberall funktioniert.","perfPressureName":"Hintergrundtabs schlafen legen, bevor der Rechner auslagert","perfPressureHint":"Liest die Speicherdruck-Zahl des Kernels (PSI), nicht eine Sch\u00e4tzung \u00fcber freien Speicher.","perfBudgetName":"Gesamtes Speicherbudget","perfBudgetHint":"Dar\u00fcber schlafen die Tabs, die du am l\u00e4ngsten nicht angefasst hast. 0 = kein Budget.","perfLeak":"%s ist um %s gewachsen und w\u00e4chst weiter \u2014 ein Neuladen g\u00e4be das zur\u00fcck","perfLeakName":"Einen Tab bemerken, dessen Speicher immer weiter steigt","perfRecovered":"Dieser Tab ist abgest\u00fcrzt (%s) und wurde dort wieder geladen, wo du warst","perfCrashUnknown":"kein Grund genannt","perfBadge":"%d ms \u00b7 %s \u00b7 %d Anfragen","perfBadgeName":"Wie lange diese Seite gebraucht hat","perfData":"Was jeder Tab heruntergeladen hat","perfLazyName":"Bilder au\u00dferhalb des Bildschirms warten lassen","perfLazyDone":"%d Bilder warten jetzt","perfVideoCapName":"Videoqualit\u00e4t begrenzen auf","perfVideoCapHint":"YouTube \u00fcber den eigenen Player, Twitch \u00fcber die Einstellung, die es liest.","perfTimerFloor":"Die Timer dieser Seite ausbremsen auf mindestens","perfPauseHidden":"Animationen in Tabs anhalten, die niemand ansieht","perfStopHiddenVideo":"Stummes Video in einem unsichtbaren Tab anhalten","perfSoftReload":"Neu laden und meine Stelle behalten","perfGpu":"Was die Grafikkarte tut","gpuPickName":"Welche Grafikkarte die Seiten zeichnet","gpuPickHint":"Bei mehreren Karten w\u00e4hlt das System selbst, und die leise Karte ist die langsame. Gilt ab dem n\u00e4chsten Start.","gpuAskName":"Bei jedem Start nach der Karte fragen","gpuAskHint":"Ein Fenster vor dem Browser, das jede Karte dieses Rechners zeigt.","gpuAuto":"Das System entscheiden lassen","gpuBoot":"die, mit der das System startet","gpuDrives":"an dieser h\u00e4ngen deine Bildschirme","gpuRestart":"Gespeichert \u2014 gilt ab dem n\u00e4chsten Start des Browsers.","gpuNone":"Hier gibt es nur eine Grafikkarte, also nichts zu w\u00e4hlen.","gpuWindows":"Welche Karte ein Programm benutzt, entscheidet Windows \u2014 in Einstellungen \u2192 System \u2192 Bildschirm \u2192 Grafik. Das hier sind die Karten, die es dazu hat.","gpuOpenWindows":"Windows-Grafikeinstellungen \u00f6ffnen","gpuMac":"Welche Karte ein Programm benutzt, entscheidet macOS \u2014 und bietet keine M\u00f6glichkeit, das pro Programm zu \u00e4ndern. Das hier sind die Karten, die es hat.","perfGpuNone":"chrome://gpu hat nichts gesagt.","perfVaapiName":"Hardware-Videodekodierung (VA-API)","perfVaapiRestart":"Hardware-Videodekodierung gilt nach einem Neustart","perfFlags":"Chromium-Flags, die sich lohnen","perfFlagRestart":"Dieses Flag gilt nach einem Neustart","flagGpuRaster":"Seiten auf der Grafikkarte zeichnen","flagZeroCopy":"Texturen ohne Kopie \u00fcbergeben","flagSmooth":"sanftes Scrollen in der Engine","flagNoDirect":"den direkten Videodekoder abschalten","flagIgnoreBlock":"die GPU auch nutzen, wenn Chromium dem Treiber misstraut","flagVaapi":"Videodekodierung und -kodierung in Hardware","flagNoWorkarounds":"Chromiums Treiber-Umgehungen \u00fcberspringen","flagProcLimit":"h\u00f6chstens vier Renderer-Prozesse","flagPerSite":"ein Prozess pro Seite, nicht pro Tab","flagNoThrottle":"Hintergrund-Timer nicht ausbremsen","perfCacheName":"Cache auf der Platte, h\u00f6chstens","perfCacheMemoryName":"Den Cache nur im Speicher halten","perfStartup":"Wohin die Startzeit ging","perfScripts":"Was jedes Userscript gekostet hat","perfPreloadName":"Einen Link holen, auf dem die Maus ruht","perfPreloadHint":"F\u00fcr private Tabs immer aus: ein Vorabruf ist f\u00fcr den Server ein Besuch.","perfPreconnectName":"Fr\u00fch Verbindungen zu den meistbesuchten Seiten \u00f6ffnen","perfPreconnectHint":"Es sagt diesen Seiten, dass der Browser l\u00e4uft, bevor du etwas verlangt hast.","perfHousekeep":"Jetzt aufr\u00e4umen","perfHeavy":"%s hat letztes Mal %s gebraucht \u2014 in einem leichten Tab \u00f6ffnen?","perfLogName":"Ein kleines Protokoll \u00fcber Startzeit und Speicher f\u00fchren","perfUnusedName":"Anbieten, Tabs zu schlie\u00dfen, die ungenutzt sind seit","perfClosedUnused":"%d Tabs geschlossen, %d davon vorher als Lesezeichen gespeichert","perfCloseUnused":"Die Tabs schlie\u00dfen, die ich nicht benutze","perfStageName":"Eine gro\u00dfe Sitzung stufenweise wiederherstellen","perfStageHint":"Nur der Tab, auf dem du warst, wird geladen; der Rest wartet, bis du ihn \u00f6ffnest.","perfTabMemory":"%s Speicher","descPerf":"Was der Browser kostet: Speicher, Prozessor, was Seiten herunterladen, und die Kn\u00f6pfe der Engine.","perfHousekeepName":"Aufr\u00e4umen, wenn ich es nicht benutze","perfCapOff":"Wie es kommt","recMenu":"Aufnahmen und Bilder","recOn":"Dieser Tab wird aufgenommen","recBuffer":"Die letzten Sekunden dieses Tabs werden behalten","recOff":"Aufnahme beendet","recSaved":"Nach %s geschrieben","recClip":"Clip nach %s geschrieben","recFailed":"Es lie\u00df sich nichts schreiben.","recNoBuffer":"Es wird nichts behalten \u2014 starte zuerst den R\u00fcckspielpuffer.","recNoFfmpeg":"ffmpeg ist nicht installiert \u2014 stattdessen als GIF geschrieben.","recNoAudio":"Kein Rekorder f\u00fcr den Ton genannt \u2014 das Bild wird ohne ihn aufgenommen.","recStart":"Diesen Tab aufnehmen","recStop":"Aufnahme beenden","recRegion":"Einen Teil des Tabs aufnehmen","recBufferStart":"Die letzten Sekunden behalten","recSaveClip":"Die letzten Sekunden speichern","recAudioOnly":"Nur den Ton aufnehmen","recVoice":"Mit dem Mikrofon aufnehmen","recFpsName":"Bilder pro Sekunde","recFormatName":"Aufnahmen werden gespeichert als","recQualityName":"Aufnahmequalit\u00e4t","recQuality_best":"Beste","recQuality_good":"Gute","recQuality_small":"Kleine","recBufferName":"Wie viele Sekunden der R\u00fcckspielpuffer beh\u00e4lt","recClicksName":"Klicks und Tasten in eine Aufnahme zeichnen","recClicksHint":"F\u00fcr ein Tutorial: ein Ring, wo du klickst, und die gedr\u00fcckte Taste \u2014 nur in der Aufnahme.","recTrim":"Die Enden vor dem Speichern abschneiden","recTrimAsk":"Sekunden, die am Anfang und am Ende weggeschnitten werden, mit Komma getrennt.","shotNone":"Noch keine Aufnahmen.","shotHistory":"Letzte Aufnahmen","shotCopyImage":"Das Bild kopieren","shotAnnotate":"Beschriften","shotDelete":"L\u00f6schen","shotDeleteAll":"Alle l\u00f6schen","shotDeleted":"%d gel\u00f6scht","shotNoImage":"Das ist kein Bild, das sich \u00f6ffnen l\u00e4sst.","shotCopiedLink":"Kopiert, mit der Adresse der Seite","shotMarkdown":"Als Markdown kopiert, mit der Quelle","shotStamp":"Adresse und Datum hinzuf\u00fcgen","shotStampName":"Adresse und Datum auf eine Aufnahme setzen","shotAnnotateName":"Eine Aufnahme beschriften","shotSelectionImage":"Die Auswahl als Bild","shotMobile":"In Telefonbreite aufnehmen","shotHidpi":"In doppelter Gr\u00f6\u00dfe aufnehmen","shotInner":"Einen scrollenden Bereich aufnehmen","shotPdfQuick":"Als PDF speichern, ohne Fragen","shotPdfLong":"Als eine lange PDF-Seite speichern","shotAllTabs":"Jeden Tab aufnehmen","shotAllTabsDone":"%d Tabs nach %s aufgenommen","shotContactSheet":"Eine \u00dcbersicht aller Tabs","shotBackground":"Diesen Tab aufnehmen, ohne hinzugehen","shotTimelapse":"Diese Seite alle paar Minuten aufnehmen","shotTimelapseOn":"%s wird alle %d Minuten aufgenommen","shotTimelapseOff":"Zeitraffer beendet","shotDiff":"Mit der letzten Aufnahme vergleichen","shotDiffNone":"Es gibt noch nichts zum Vergleichen.","shotDiffDone":"%d Pixel haben sich ge\u00e4ndert","shotDiffSized":"%d Pixel haben sich im gemeinsamen Teil ge\u00e4ndert: die Bilder sind nicht gleich gro\u00df (%s und %s)","shotOcr":"Den Text aus einem Bild kopieren","shotOcrNone":"tesseract ist nicht installiert \u2014 nenne es in den Einstellungen, wenn es woanders liegt.","shotOcrDone":"%d Zeichen kopiert","shotQrArea":"Den QR-Code im ausgew\u00e4hlten Bereich lesen","shotUpload":"Auf meinen Server hochladen","shotUploadName":"Wohin eine Aufnahme hochgeladen wird","shotUploadHint":"Eine https://-Adresse, an die sie per PUT geht, oder user@host:/pfad f\u00fcr scp. Freiwillig, und es wird nichts hochgeladen, bis du das w\u00e4hlst.","shotUploaded":"Hochgeladen \u2014 der Link liegt in der Zwischenablage","shotUploadFailed":"Dieser Upload hat nicht funktioniert.","shotUploadOff":"Es ist keine Upload-Adresse gesetzt.","shotDrag":"Eine Aufnahme herausziehen","ocrPathName":"Das OCR-Programm","ffmpegPathName":"Das ffmpeg-Programm","descRecord":"Einen Tab aufnehmen, der R\u00fcckspielpuffer, und was mit einer Aufnahme danach passiert.","keyMenu":"Tasten und Maus","keyGuardName":"Tasten, die ignoriert werden","keyGuardHint":"F1, Einfg und die anderen Ausrutscher. Eine Taste pro Zeile, wie Qt sie schreibt.","keyThroughName":"Seiten, die ihre eigenen Tasten behalten","keyThroughHint":"Strg+K geh\u00f6rt der Suche von Discord und Strg+S einem Editor im Tab.","keyThroughHere":"%s die Taste %s behalten lassen","keyOffHere":"Dieses Tastenk\u00fcrzel auf %s abschalten","keyChordName":"Zweistufige Tasten","keyChordHint":"Die Leittaste, dann ein Buchstabe. F\u00fcr die Befehle, die eine Taste wert sind, aber keine eigene.","keyChordWaiting":"\u2026jetzt ein Buchstabe","keyChordNone":"Auf \u201e%s\u201c liegt nichts.","keyNoLast":"Es wurde noch nichts ausgef\u00fchrt.","keyRepeat":"Das noch einmal","keyQuitAgain":"Strg+Q noch einmal dr\u00fccken, um das Fenster zu schlie\u00dfen","keySessionNumber":"Zum virtuellen Browser %d","keyGroupCycle":"N\u00e4chster Tab in dieser Gruppe","keyPeek":"Zum vorigen Tab schauen","keyMru":"Strg+Tab geht in der Reihenfolge der letzten Benutzung","keyMruHint":"Aus: Strg+Tab geht die Leiste entlang, wie immer.","keyReadline":"Terminal-Tasten in der Adresszeile","keyReadlineHint":"Strg+W, Strg+U, Strg+A, Strg+E, Alt+B und Alt+F, wie in einer Shell.","keyEditor":"Ein Textfeld im Editor bearbeiten","keyEditorName":"Der Editor f\u00fcr ein Textfeld","keyEditorHint":"kitty nvim, oder was sich auf einer Datei \u00f6ffnet und beendet, wenn es fertig ist.","keyNoEditor":"%s ist nicht installiert.","keyNoField":"Es gibt kein Textfeld mit dem Cursor darin.","keyEditedBack":"Zur\u00fcck in die Seite geschrieben","keyRecover":"Text zur\u00fcckholen, den die Seite verloren hat","keyNoLostText":"F\u00fcr dieses Feld wurde nichts behalten.","keyDraftName":"Behalten, was ich tippe, falls die Seite neu l\u00e4dt","keyDraftHint":"Im Session-Storage der Seite, der mit dem Tab stirbt. Es wird nichts auf die Platte geschrieben.","keyScriptName":"Das Skript, das eine Taste ausf\u00fchrt","keyScriptHint":"Eine Datei im Plugin-Ordner oder der Titel eines javascript:-Lesezeichens.","keyScriptRan":"%s lief auf dieser Seite","keyNoScript":"Kein Skript namens \u201e%s\u201c.","keyFirstField":"In das erste Textfeld der Seite","keyVimName":"Vim-Tasten auf einer Seite","keyVimHint":"j und k scrollen, gg und G springen, H und L sind die Chronik, gt und gT die Tabs, / sucht, gi geht ins erste Feld.","keySwipeBack":"Zur\u00fcck","keySwipeForward":"Vorw\u00e4rts","keyGlobalName":"Globale Tasten f\u00fcr den Fenstermanager","keyGlobalHint":"Die Befehle, die in Hyprland gebunden werden. Der Browser beantwortet sie \u00fcber seinen Single-Instance-Socket.","mouseMenu":"Die Maus","mouseSuperDrag":"Einen Link ziehen \u00f6ffnet ihn, Text ziehen sucht ihn","mouseLasso":"Einen Rahmen \u00fcber Links ziehen \u00f6ffnet sie","mouseSwipeNav":"Zwei Finger seitw\u00e4rts gehen vor und zur\u00fcck","mouseAutoScroll":"Mittelklick und bewegen zum Scrollen","mouseAutoScrollHint":"Standardm\u00e4\u00dfig aus: Mittelklick f\u00fcgt auf diesem Desktop ein.","mouseHoverSwitch":"Beim Ziehen \u00fcber einen Tab fahren wechselt zu ihm","mouseTabDouble":"Doppelklick auf einen Tab","mouseTabMiddle":"Mittelklick auf einen Tab","mouseBarDouble":"Doppelklick auf die leere Leiste","mouseAct_close":"Schlie\u00dfen","mouseAct_duplicate":"Duplizieren","mouseAct_newtab":"Neuer Tab","mouseAct_mute":"Stummschalten","mouseAct_pin":"Anpinnen","mouseAct_reload":"Neu laden","mouseAct_nothing":"Nichts","mouseNewTabMiddle":"Mittelklick auf den Neuer-Tab-Knopf \u00f6ffnet die Zwischenablage","mouseWheelStep":"Radschritt","mouseKeyStep":"Pfeiltastenschritt","mouseStepHint":"0 = wie die Engine es macht.","mouseGestureHelp":"Die rechte Taste halten, um das zu sehen","keyLayoutName":"Tastenk\u00fcrzel folgen der Taste, nicht dem Buchstaben","keyLayoutHint":"Auf einer deutschen Tastatur liegen Strg+Z, Strg+/ und Strg++ anders: beide Tasten sind belegt, damit die richtige greift.","keyGlobalRaise":"Den Browser nach vorn holen","ctxOpenLinkTab":"Den Link unter dem Zeiger in einem Tab \u00f6ffnen","ctxCopyLink":"Den Link unter dem Zeiger kopieren","ctxSaveImage":"Das Bild unter dem Zeiger speichern","ctxCopyImage":"Die Adresse des Bildes kopieren","ctxOpenImage":"Das Bild \u00f6ffnen","ctxSearchSelection":"Nach der Auswahl suchen","ctxNothingThere":"Unter dem Zeiger ist nichts dieser Art.","keyOffHereNow":"Dieses Tastenk\u00fcrzel ist auf dieser Seite abgeschaltet.","descKeys":"Die Tasten, die Tasten, die eine Seite beh\u00e4lt, und was die Maus tut.","splitView":"Zwei Seiten nebeneinander","splitOn":"Geteilte Ansicht","splitOff":"Wieder eine Seite","splitNeedsTwo":"Daf\u00fcr braucht es einen zweiten Tab daneben.","splitSync":"Beide H\u00e4lften zusammen scrollen","splitLink":"Den Link neben dieser Seite \u00f6ffnen","tabStripName":"Wo die Tabs sind","tabStrip_top":"\u00dcber der Seite","tabStrip_bottom":"Unter der Seite","tabStrip_left":"Links an der Seite","tabStrip_right":"Rechts an der Seite","tabStripWidthName":"Wie breit eine seitliche Leiste ist","tabRowsName":"Tab-Reihen","tabRowsHint":"Mehr als eine Reihe statt Scrollen. Qts Tableiste bricht nicht um, also werden die Tabs quer zusammengedr\u00fcckt \u2014 zwei Reihen sind lesbar, zehn nicht.","stackSite":"Die Tabs dieser Seite zu einem falten","stackNeedsTwo":"Es gibt nur einen Tab auf dieser Seite.","stackDone":"%d Tabs von %s zusammengefaltet","wsMenu":"Tab-S\u00e4tze","wsSave":"Diese Tabs als Satz behalten","wsAsk":"Wie soll dieser Tab-Satz hei\u00dfen?","wsSaved":"\u201e%s\u201c beh\u00e4lt %d Tabs","wsOpened":"\u201e%s\u201c \u2014 %d Tabs","wsNone":"Noch keine Tab-S\u00e4tze.","wsDrop":"\u201e%s\u201c vergessen","outsideAskName":"Links aus anderen Programmen fragen nach dem virtuellen Browser","outsideAskHint":"Ein Link aus Discord oder dem Terminal kann in den Browser gehen, in dem du f\u00fcr diese Seite angemeldet bist.","outsideAsk":"Welcher virtuelle Browser soll %s \u00f6ffnen?","outsideRuleName":"Regeln f\u00fcr Links aus anderen Programmen","outsideRuleHint":"Eine pro Zeile, als Host = virtueller Browser. Alles andere fragt oder nimmt den vordersten.","windowStateName":"Jedes Fenster kommt zur\u00fcck, wie es war","windowStateHint":"Seine Tabs, sein virtueller Browser, seine Gr\u00f6\u00dfe und wo es auf dem Bildschirm war.","trbarSaid":"Diese Seite sieht aus wie %s.","trbarOnce":"\u00dcbersetzen","trbarAlways":"%s immer \u00fcbersetzen","trbarNever":"%s nie \u00fcbersetzen","trbarNo":"Jetzt nicht","trOfferName":"Anbieten, eine Seite in einer anderen Sprache zu \u00fcbersetzen","trOfferHint":"Eine einfache Leiste oben, einmal pro Sprache und Tab. Dein eigener \u00dcbersetzer wird benutzt, wenn du einen genannt hast.","trWorking":"%d Bl\u00f6cke werden auf diesem Rechner \u00fcbersetzt\u2026","trDone":"\u00dcbersetzt","trNothing":"Auf dieser Seite ist nichts zu \u00fcbersetzen.","trUndone":"%d Bl\u00f6cke wieder wie vorher","trUndo":"Die urspr\u00fcnglichen W\u00f6rter zur\u00fcckholen","trSide":"Die Seite und ihre \u00dcbersetzung nebeneinander","trNow":"Diese Seite \u00fcbersetzen","trRulesName":"Sprachen, \u00fcber die du entschieden hast","trLocalHint":"Mit einem in den Einstellungen genannten \u00dcbersetzer verl\u00e4sst der Text der Seite den Rechner nie; ohne einen wird die Seite zum \u00dcbersetzen an Google Translate geschickt.","pdfKeys":"PDF-Tasten","pdfNext":"N\u00e4chste Seite in diesem PDF","pdfPrev":"Vorige Seite in diesem PDF","pdfFit":"Breite einpassen","pdfRotate":"Drehen","pdfBackTo":"Zur\u00fcck auf Seite %d, wo du warst","pdfPlaceName":"Merken, wo ich in einem PDF war","readerPrint":"Den Artikel ohne Beiwerk drucken","readerPrinted":"Nach %s geschrieben","synMenu":"Synonyme","synNoDict":"Daf\u00fcr braucht es das Programm dict und einen Thesaurus.","synNone":"Keine anderen W\u00f6rter f\u00fcr \u201e%s\u201c.","spellAdd":"\u201e%s\u201c zu meinen W\u00f6rtern hinzuf\u00fcgen","spellIgnore":"Hier ignorieren","spellAdded":"\u201e%s\u201c ist jetzt ein Wort","lookupWord":"Was dieses Wort in der anderen Sprache hei\u00dft","lookupNoTool":"Daf\u00fcr braucht es einen \u00dcbersetzer auf diesem Rechner \u2014 nenne einen in den Einstellungen.","cleanPasteName":"Tracking aus einer Adresse entfernen, die ich in eine Seite einf\u00fcge","cleanPasteHint":"Dieselbe Reinigung, die die Adresszeile macht, dort wo eingef\u00fcgt wird.","epubOpen":"Ein Buch \u00f6ffnen (.epub)","epubOpened":"%s \u2014 %d Kapitel","epubBad":"Das ist kein Buch, das sich hier lesen l\u00e4sst.","epubEmpty":"In diesem Buch ist nichts Lesbares.","permWants":"%s m\u00f6chte %s.","permThisRun":"Nur bis du den Browser schlie\u00dft.","permMic":"dein Mikrofon benutzen","permCam":"deine Kamera benutzen","permMicCam":"Mikrofon und Kamera benutzen","permNotify":"Benachrichtigungen zeigen","permMouse":"deinen Mauszeiger \u00fcbernehmen","ownName":"Was der Browser selbst sendet","ownNone":"Er hat noch nichts f\u00fcr sich selbst geholt.","ownClear":"Diese Liste leeren","ownWatch":"Weiter mitschreiben","ownWatchHint":"Verbindungen, die der Browser f\u00fcr sich selbst macht \u2014 Vorschl\u00e4ge, Update-Pr\u00fcfung, Favicons. Seiten stehen nicht darin, die geh\u00f6ren der Engine.","usName":"Userscripts auf dieser Seite","usNone":"Du hast keine Userscripts installiert.","usRanHere":"Lief auf dieser Seite","usNotHere":"Lief hier nicht","usWhen":"L\u00e4uft: %s","torName":"Ein Fenster \u00fcber Tor \u00f6ffnen","torNone":"Tor h\u00f6rt nicht auf 127.0.0.1:9050.","torOpened":"Ein eigenes Fenster, \u00fcber Tor.","torHint":"Eigener Prozess, eigene Daten, alles darin \u00fcber den SOCKS-Port. Chromium liest seinen Proxy beim Start, deshalb kann es kein einzelner Tab dieses Fensters sein.","fsAskName":"Fragen, bevor eine Seite den ganzen Schirm nimmt","fsAskHint":"Die Anfrage der Engine kann nicht auf eine Antwort warten, deshalb wird der Schirm gegeben und eine Leiste bietet an, ihn zur\u00fcckzunehmen und das f\u00fcr die Seite zu merken.","fsBarSaid":"%s hat den ganzen Schirm.","fsBarKeep":"Das ist in Ordnung","fsBarStop":"Zur\u00fcckgeben","fsBarNever":"Nie f\u00fcr diese Seite","fsDenied":"%s darf den Schirm nicht nehmen.","offlineName":"Eine Kopie der Seite behalten, wenn ich sie als Lesezeichen speichere","offlineHint":"Eine MHTML-Datei pro Lesezeichen, hier auf der Platte, damit die Seite noch lesbar ist, wenn sie verschwindet.","offlineKept":"Eine Kopie der Seite ist gesichert.","offlineNone":"Von der gibt es keine gesicherte Kopie.","offlineOpen":"Die gesicherte Kopie lesen","trailName":"Wie ich hierhergekommen bin","trailNone":"Es ist noch nichts aufgeschrieben.","trailOpen":"Diese \u00f6ffnen","treeName":"Verlauf als Baum","thumbsName":"Ein Tag in Bildern","thumbsNone":"Keine Bilder f\u00fcr diesen Tag.","thumbsKeep":"Von jeder gelesenen Seite ein kleines Bild behalten","thumbsHint":"Ein 240-Pixel-PNG pro Adresse, in deinem eigenen Ordner. Es wird nichts hochgeladen, und ein privater Tab wird nie gesichert.","impHistName":"Verlauf aus einem anderen Browser \u00fcbernehmen","impHistNone":"Kein Chrome- oder Firefox-Verlauf gefunden.","impHistBad":"Diese Verlaufsdatei lie\u00df sich nicht lesen.","impHistDone":"%d Seiten \u00fcbernommen.","movedName":"Die Seite ist umgezogen","movedAsk":"Dieses Lesezeichen landet jetzt woanders.\n\nWar: %s\nJetzt: %s\n\nLesezeichen aktualisieren?","movedYes":"Aktualisieren","movedNo":"So lassen","movedDone":"Das Lesezeichen zeigt auf die neue Adresse.","wbName":"Nach einer Archivkopie suchen","wbHint":"Fragt archive.org, ob es eine Kopie hat. Das ist das Einzige hier, das eine Adresse von diesem Rechner schickt, und nur wenn du danach fragst.","wbNone":"Das Archiv hat keine Kopie dieser Seite.","wbFound":"Die Archivkopie vom %s.","remName":"An dieses Lesezeichen erinnern","remAsk":"An welchem Tag? (JJJJ-MM-TT)","remNone":"Es ist nichts f\u00e4llig.","remDue":"%d Lesezeichen sind f\u00e4llig \u2014 %s","favDockName":"Favoriten neben der Seite offen halten","favDockHint":"Dieselbe Leiste, im Fenster statt dar\u00fcber.","histEncName":"Den Verlauf verschl\u00fcsselt halten","histEncHint":"Unter einem Schl\u00fcssel deines Tresors. Solange der Tresor zu ist, ist der Verlauf nicht lesbar und wird nicht \u00fcberschrieben.","histEncNeedsVault":"\u00d6ffne zuerst den Tresor \u2014 der Schl\u00fcssel kommt daher.","k1Name":"Was der Drucker macht","k1Asking":"Frage den Drucker\u2026","k1NoAnswer":"Der Drucker hat nicht geantwortet.","k1State":"Zustand: %s","k1Done":"Fertig: %s%%","k1Left":"Rest: %s","k1Nozzle":"D\u00fcse: %s \u00b0C von %s","k1Bed":"Bett: %s \u00b0C von %s","spellNoDicts":"F\u00fcr die Engine ist kein deutsches oder englisches W\u00f6rterbuch installiert.","panelName":"Auswahl in die Seitenleiste schicken","panelNone":"In der Seitenleiste ist nichts offen.","panelNoSel":"Es ist nichts ausgew\u00e4hlt.","panelTyped":"In die Leiste eingesetzt.","feedName":"Empfehlungen verstecken, die ich nicht wollte","feedHint":"Das YouTube-Startraster, die Shorts-Regale und Twitchs empfohlene Kan\u00e4le. Was versteckt wird, steht unten, nicht versteckt in einem Klumpen.","webmailName":"mailto:-Links \u00f6ffnen in","webmailHint":"Eine Schreibseite deines Webmails statt eines Mailprogramms. Keins = dem Desktop \u00fcberlassen.","floatName":"Einen Teil dieser Seite oben anpinnen","floatAsk":"Welchen Teil? (ein CSS-Selektor, z.\u00a0B. #chat)","floatOn":"Dieser Teil ist in einem Fenster oben.","floatOff":"Die angepinnten Teile sind geschlossen.","modeName":"Modi","modeSave":"Diese Einrichtung als Modus behalten\u2026","modeAsk":"Wie hei\u00dft dieser Modus?","modeSaved":"\u201e%s\u201c ist gespeichert.","modeOn":"Modus: %s","modeNone":"Du hast noch keine Modi.","modeDrop":"\u201e%s\u201c vergessen","phoneName":"Diesen Tab aufs Handy schicken","phoneNoTool":"Daf\u00fcr braucht es kdeconnect-cli.","phoneNoDevice":"KDE Connect sieht kein gekoppeltes Ger\u00e4t.","phoneSent":"An %s geschickt.","ocrName":"Den Text aus diesem Bild kopieren","ocrNoImage":"Auf dieser Seite ist kein Bild gefunden.","transNoteName":"Das Transkript als Notiz speichern","transNoneHere":"Dieses Video hat keine Untertitel zum Lesen.","transNoted":"%d Zeilen als Notiz gespeichert.","icsName":"Aus der Auswahl eine Kalenderdatei machen","icsNoDate":"In der Auswahl ist kein Datum.","icsSaved":"Nach %s geschrieben.","agendaName":"Kalenderdatei f\u00fcr den heutigen Tag","agendaHint":"Eine .ics-Datei lokal oder im eigenen Netz. Wiederholungen (RRULE) werden nicht ausgerechnet \u2014 sie fehlen lieber, als am falschen Tag zu stehen.","agendaNone":"Heute nichts.","logName":"Der Tag","logLine":"%d Notizen, %d To-dos erledigt, %d Minuten auf Seiten mit Limit.","logNoteName":"Die Tageszusammenfassung als Notiz behalten","autocapName":"Untertitel f\u00fcr dieses Video machen","autocapNoTool":"Daf\u00fcr braucht es ffmpeg und einen Transcriber (whisper) auf diesem Rechner.","autocapNoVideo":"Auf dieser Seite ist kein Video.","autocapHasTracks":"Dieses Video hat schon Untertitel.","autocapRefused":"Dieses Video liegt nicht unter einer Webadresse, die diese Seite weitergeben darf \u2014 daf\u00fcr werden keine Untertitel gemacht.","autocapBlob":"Dieser Player f\u00fcttert sich durch die Seite selbst (eine blob:-Quelle), die von au\u00dfen niemand lesen kann. Nimm daf\u00fcr die Live-Untertitel.","autocapWorking":"Hole den Ton heraus und h\u00f6re zu\u2026","autocapNoSound":"Aus diesem Video lie\u00df sich kein Ton lesen.","autocapNoWords":"Der Transcriber hat nichts zur\u00fcckgegeben.","autocapDone":"%d Untertitel, am Video.","adName":"Werbung und Tracker per Liste blocken","adHint":"Dateien im EasyList-Format (.txt) in deinem eigenen Ordner. Es wird nichts geholt, solange du nicht fragst: die Listen sind Dateien, die du dort ablegst, oder Adressen, die du unten nennst.","adHere":"Auf %s blocken","adDirName":"Ordner, in dem deine Filterlisten liegen","adUrlsName":"Adressen, von denen Listen geholt werden","adUrlsHint":"Eine pro Zeile, und nur wenn du \u201eListen holen\u201c dr\u00fcckst. Ein Blocker, der heimlich einen Listenserver anruft, verr\u00e4t jemandem, was er dir vorsetzen soll.","adCounts":"%d Regeln, %d Versteckregeln, aus %d Listen","adSkipped":"%d Zeilen, die diese Listen wollen und die das hier nicht macht","adBlockedHere":"%d auf dieser Seite geblockt","adReload":"Ordner neu einlesen","adFetch":"Listen holen","adLoaded":"%d Listen, %d Regeln.","adFetched":"%d Listen geholt.","adNoUrls":"In den Einstellungen sind keine Listenadressen genannt.","adNoModule":"adblock.py liegt nicht neben dem Browser.","thirdCookieName":"Cookies von anderen Seiten ablehnen","thirdCookieHint":"Nur die Seite, auf der du bist, darf eine setzen. Anmeldungen, die \u00fcber eine andere Seite laufen, brauchen diese Seite in der Liste darunter \u2014 das Seitenmen\u00fc tr\u00e4gt sie mit einem Klick ein.","thirdCookieHere":"Auf %s durchlassen","thirdCookieCount":"%d auf dieser Seite abgelehnt","gestName":"Mausgesten, Rocker und Tasten 4-9","gestHint":"Rechte Taste halten und ziehen: links ist zur\u00fcck, rechts vorw\u00e4rts, hoch l\u00e4dt neu, runter \u00f6ffnet einen Tab, runter-rechts schlie\u00dft einen, hoch-runter holt einen zur\u00fcck. Rechts halten + links klicken ist zur\u00fcck, links halten + rechts klicken ist vorw\u00e4rts, rechts halten + Rad geht durch die Tabs.","gestList":"Was eine Geste bedeutet","gestButtons":"Was die Tasten 4-9 machen","barKeyTip":"F\u00fcr diese Seite ist eine Anmeldung gespeichert","barKeyName":"Den Schl\u00fcssel in der Adresszeile zeigen","barKeyNone":"F\u00fcr diese Seite ist keine Anmeldung gespeichert.","barKeyFill":"Eintragen","barKeyCopy":"Passwort kopieren","barKeyOpen":"Eintrag \u00f6ffnen","barKeyManage":"Alle Passw\u00f6rter\u2026","barKeyCopied":"Kopiert. Die Zwischenablage wird in einer Minute geleert.","barKeyNoSecret":"Dieser Eintrag hat kein Passwort zum Kopieren.","mediaCatchUp":"Mit 1,1x zum Live-Rand aufholen","barCopyAddress":"Adresse kopieren","tabsName":"Tabs","devTools":"Entwicklerwerkzeuge","devLook":"Die Seite ansehen","devPretend":"So tun als ob","devWorkbench":"Werkbank","devEngine":"Die Engine","devOn":"%s ist an","devOff":"%s ist aus","devRuler":"Lineal","devOutlines":"Jede Box umranden","devHidden":"Versteckte Formularfelder zeigen","devNoCss":"Ohne jedes CSS","devPerf":"Bilder, lange Aufgaben und Spr\u00fcnge","devKeys":"Tastencodes zeigen","devFonts":"Schriften dieser Seite","devFontsWait":"Schriften werden gelesen\u2026","devFontFiles":"Geladene Schriftdateien","devPalette":"Farben dieser Seite","devPaletteWait":"Farben werden gelesen\u2026","devNothing":"Hier gibt es nichts zu zeigen.","devImage":"Was dieses Bild wirklich ist","devNoImage":"Auf dieser Seite ist kein Bild.","devImageInfo":"%d\u00d7%d, gezeichnet mit %d\u00d7%d, %s","devOverlay":"Ein Mockup \u00fcber die Seite legen","devAuditRun":"Die Seite durchsehen","devAudit":"%d Elemente, %d Punkte zum Ansehen: %s","devLinkCheck":"Die Links dieser Seite pr\u00fcfen","devLinkCheckOff":"Die Linkpr\u00fcfung ist aus \u2014 der Schalter steht in den Einstellungen (sie besucht jede Adresse der Seite).","devLinksBad":"%d Links sind kaputt, angefangen mit %s","devLinksOk":"Jeder Link hat geantwortet","devSizes":"In einer anderen Gr\u00f6\u00dfe","devSize":"%s \u2014 %d\u00d7%d","devSizeOff":"Zur\u00fcck zum Fenster","devMediaMenu":"Als andere Art Bildschirm","devMediaDarkRow":"Dunkel","devMediaLightRow":"Hell","devMediaPrint":"Druck","devMediaMotion":"Weniger Bewegung","devMediaOff":"Aus","devMediaDark":"Der Seite wird gesagt, es sei dunkel","devMediaLight":"Der Seite wird gesagt, es sei hell","devMedia":"Der Seite wird gesagt: %s","devPlaceRow":"Woanders sein","devPlaceAsk":"Breite, L\u00e4nge, Zeitzone, Sprache \u2014 was du brauchst (52.5, 13.4, Europe/Berlin, de-DE)","devPlace":"Der Seite wird gesagt: %s","devThrottleMenu":"Eine schlechtere Verbindung","devThrottleSlow":"Langsam","devThrottleVerySlow":"Sehr langsam","devThrottleOffline":"Offline","devThrottleOff":"Wieder normal","devThrottle":"Dieser Tab h\u00e4ngt an einer %s-Verbindung","devOffline":"Dieser Tab ist offline","devRegex":"Regul\u00e4rer Ausdruck","devRegexAsk":"Das Muster","devRegexText":"Der Text zum Ausprobieren","devRegexBad":"Dieses Muster l\u00e4sst sich nicht \u00fcbersetzen: %s","devDiff":"Zwei Texte vergleichen","devDiffLeft":"Der erste Text","devDiffRight":"Der zweite Text","devMini":"MiniMessage-Vorschau","devMiniAsk":"MiniMessage, alte Codes oder eine JSON-Komponente","devOpenFile":"Eine Datei zum Lesen \u00f6ffnen","devSnippets":"Schnipsel","devNoSnippets":"Es sind keine Schnipsel gespeichert.","devSnippetNew":"Ein neuer Schnipsel","devSnippetName":"Wie hei\u00dft er?","devSnippetCode":"Das JavaScript, das auf der Seite laufen soll","devSnippetRan":"\u2192 %s","devClipboard":"Was in der Zwischenablage liegt","devClipEmpty":"Die Zwischenablage ist leer.","devOpenGraph":"Als Link-Vorschau","devOgMissing":"Fehlt: %s","devErrorsMenu":"Fehler auf dieser Seite","devErrors":"%d Fehler auf dieser Seite","devNoErrors":"Auf dieser Seite gibt es keine Fehler.","devClearErrors":"Liste leeren","devStorage":"Local- und Session-Storage","devCopyValue":"Wert kopieren","devRemove":"Entfernen","devCookies":"Cookies dieser Seite","devNoCookies":"F\u00fcr diese Seite wurden keine Cookies gesehen.","devCookieNew":"Ein neues Cookie","devCookieName":"Sein Name","devCookieValue":"Sein Wert","devCookiesTxt":"Eine cookies.txt schreiben","devCookiesTitle":"cookies.txt schreiben","devCookiesWritten":"%d Cookies geschrieben \u2014 wer diese Datei liest, ist f\u00fcr diese Seiten du","devCert":"Das Zertifikat","devWorkers":"Service Worker","devNoWorkers":"Hier gibt es keine Service Worker.","devDropWorkers":"Abmelden","devSwDropped":"%d Service Worker abgemeldet","devCacheRow":"Kein Cache f\u00fcr diesen Tab","devCacheOff":"Dieser Tab benutzt den Cache nicht","devCacheOn":"Dieser Tab benutzt den Cache wieder","devHardReloadRow":"Cache dieser Seite leeren und neu laden","devHardReload":"Cache geleert, wird neu geladen","devNoJsRow":"Einmal ohne JavaScript laden","devNoJs":"Wird einmal ohne JavaScript geladen","devWatch":"Neu laden, wenn sich ein Ordner \u00e4ndert","devWatching":"%s wird beobachtet","devInternals":"Chromiums eigene Seiten","devGpu":"Grafik","devMediaInternals":"Medien","devMedia2":"Medien","devWebrtc":"WebRTC","devNetExport":"Netzwerkprotokoll","devHistograms":"Histogramme","devProcesses":"Prozesse","devQuota":"Speicherkontingent","devUkm":"Messwerte","devDebugRow":"Port f\u00fcr Fernsteuerung","devDebugOn":"Der Debug-Port ist nach einem Neustart an \u2014 wer ihn auf diesem Rechner erreicht, kann diesen Browser steuern","devDebugOff":"Der Debug-Port ist nach einem Neustart aus","devLocalCerts":"Selbstsignierte Zertifikate in diesem Netz annehmen","devLocalCertsOn":"Selbstsignierte Zertifikate gelten nur f\u00fcr localhost und das Heimnetz","devLocalCertAccepted":"%s angenommen \u2014 es liegt auf diesem Rechner oder in diesem Netz","devLocalCertsOff":"Selbstsignierte Zertifikate werden wieder abgelehnt","devFlagsRestart":"Die Flags gelten nach einem Neustart","devFlagsName":"Chromium-Flags","devFlagsHint":"Eines pro Zeile. Sie werden einmal beim Start gelesen, eine \u00c4nderung gilt also nach einem Neustart. Ein falsches Flag kann den Start verhindern.","devHostsName":"Einen Namen auf eine Adresse zeigen lassen","devHostsHint":"Eines pro Zeile: example.com 192.0.2.10. Nur f\u00fcr diesen Browser, und erst nach einem Neustart.","devLinkCheckName":"Links einer Seite pr\u00fcfen d\u00fcrfen","devLinkCheckHint":"Aus als Voreinstellung: es besucht jede Adresse der Seite und sagt damit jedem dieser Server, dass du nachgesehen hast.","devDebugName":"Port f\u00fcr Fernsteuerung","devDebugHint":"F\u00fcr Playwright und CDP-Werkzeuge. Aus als Voreinstellung, und die Engine bindet ihn nur an diesen Rechner.","devLocalCertsName":"Selbstsignierte Zertifikate auf localhost und im Heimnetz annehmen","devLocalCertsHint":"Nur f\u00fcr Adressen auf diesem Rechner oder in den privaten Bereichen \u2014 nie f\u00fcr eine Seite im Internet.","devSnippetsName":"Meine JavaScript-Schnipsel","devSnippetsHint":"Einer pro Zeile: Name|der Code. Sie laufen nur, wenn du einen ausw\u00e4hlst.","mediaMenu2":"Video und Ton, mehr davon","mediaPicture":"Das Bild","mediaSound":"Der Ton","filterBrighter":"Heller","filterDarker":"Dunkler","filterMoreContrast":"Mehr Kontrast","filterLessContrast":"Weniger Kontrast","filterMoreColour":"Mehr Farbe","filterLessColour":"Weniger Farbe","filterReset":"Zur\u00fcck auf normal","turnRight":"Nach rechts drehen","turnLeft":"Nach links drehen","turnFlip":"Spiegeln","turnReset":"Geradestellen","zoomIn2":"Hineinzoomen","zoomOut2":"Herauszoomen","zoomCrop":"Rahmen f\u00fcllen (beschneiden)","zoomReset2":"Ganzes Bild","hideCursorName":"Maus \u00fcber einem laufenden Video verbergen","hideCursorHint":"Nach zwei Sekunden ohne Bewegung.","statsMedia":"%d\u00d7%d \u00b7 %.2fx \u00b7 %d von %d Bildern verloren \u00b7 %.1f s gepuffert","statsShow":"Was dieses Video ist","endsAt":"%d:%02d \u00fcbrig \u2014 endet um %s","endsAtShow":"Wann das hier endet","mediaResume2":"Videos dort fortsetzen, wo ich war","mediaResumeName":"Videos dort fortsetzen, wo ich war","mediaResumeHint":"Pro Video, auf diesem Rechner. Alles unter zwei Minuten wird in Ruhe gelassen.","mediaResumed2":"Weiter bei %d:%02d","mediaHistory":"Was ich gesehen habe","mediaHistNone":"Noch nichts.","mediaHistClear":"Alles vergessen","mediaLeftOf":" \u00b7 %d min \u00fcbrig","capMenu":"Untertitel","capToggle":"Untertitel an oder aus","capNone":"Dieses Video hat keine Untertitel.","capOnName":"Videos mit Untertiteln starten","capOnHint":"Wo das Video sie hat.","capLangName":"Untertitelsprache","capLangHint":"Ein Code wie de oder en. Leer = der erste.","capSizeName":"Untertitelgr\u00f6\u00dfe","capSizeHint":"Prozent der \u00fcblichen Gr\u00f6\u00dfe. 0 = wie die Seite es macht.","capColourName":"Untertitelfarbe","capBackName":"Untertitelhintergrund","capBottomName":"Untertitel anheben","capBottomHint":"Pixel vom unteren Rand. 0 = wohin die Seite sie setzt.","subsOpen":"Untertitel aus einer Datei laden","subsAdded":"%s geladen","subsFailed":"Diese Untertiteldatei war nicht lesbar.","subsSaved":"Geschrieben nach %s","subsClear":"Geladene Untertitel entfernen","transcript":"Transkript","transCopy":"Ganzes Transkript kopieren","transSave":"Als .srt speichern","chapters":"Kapitel","chapNone":"Keine Zeitmarken auf dieser Seite.","audioLevel":"Lautst\u00e4rke ausgleichen","audioEq":"Equalizer","eqFlat":"Neutral","eqVoice":"Stimme","eqBass":"Mehr Bass","eqTreble":"Mehr H\u00f6hen","eqNight":"Nacht","eqPodcast":"Podcast","audioBalance":"Balance","audioLeft":"Mehr links","audioRight":"Mehr rechts","audioCentre":"Mittig","audioMono":"Beide Kan\u00e4le als einen","audioCrossfeed":"Crossfeed f\u00fcr Kopfh\u00f6rer","audioTaken":"Ein anderes Skript h\u00e4lt den Ton dieses Videos schon.","skipSilence":"Durch die leisen Stellen laufen","audioOut":"Diesen Tab abspielen \u00fcber","sinkNone":"Diese Engine l\u00e4sst eine Seite ihre Ausgabe nicht w\u00e4hlen.","sinkRefused":"Diese Ausgabe wurde abgelehnt.","micForSite":"Mikrofon f\u00fcr %s","callAudioFor":"Anrufton f\u00fcr %s","callGain":"Automatische Verst\u00e4rkung","callNoise":"Rauschunterdr\u00fcckung","callEcho":"Echounterdr\u00fcckung","devDefault":"Was das System benutzt","devNoList":"Die Seite hat die Gerätenamen noch nicht bekommen — erlaube einmal das Mikrofon, dann erscheinen sie.","autoplayFor":"Autoplay auf %s","autoplayAllow":"Laufen lassen","autoplayMute":"Laufen lassen, stumm","autoplayBlock":"Nicht laufen lassen","autoplayDefault":"Wie \u00fcberall sonst","muteAlways":"%s immer stumm","duckName":"Die anderen Tabs leiser machen","duckHint":"Wenn der vordere Tab etwas abspielt, gehen die anderen auf diesen Wert. 0 = aus, 100 = unver\u00e4ndert.","pauseCallsName":"Musik w\u00e4hrend eines Anrufs anhalten","pauseCallsHint":"Wenn ein Tab das Mikrofon benutzt. Braucht \u201esagen, wenn eine Seite das Mikrofon benutzt\u201c.","callPaused":"%d Tabs f\u00fcr den Anruf angehalten","callResumed":"%d Tabs spielen wieder","pauseHiddenName":"Video anhalten, wenn sein Tab verdeckt ist","pauseHiddenHint":"Und wieder starten, wenn du zur\u00fcckkommst.","holdFastName":"Punkt halten f\u00fcr doppelte Geschwindigkeit","holdFastHint":"Auf jedem Video, solange die Taste gedr\u00fcckt ist.","heldEmbedsName":"Eingebettete Player erst auf Klick laden","heldEmbedsHint":"Ein YouTube- oder Twitch-Embed bleibt ein Platzhalter, bis du ihn dr\u00fcckst.","embedOpen":"Dieses Embed auf seiner eigenen Seite \u00f6ffnen","embedNone":"Da ist kein eingebetteter Player.","audioOnly":"Nur Ton (Video ausblenden)","shortsPlayerName":"Shorts im normalen Player \u00f6ffnen","shortsPlayerHint":"Mit Suchleiste und Geschwindigkeitsregler.","spoilerName":"Videol\u00e4ngen und Fortschritt verbergen","spoilerHint":"Keine Dauer-Abzeichen, keine Fortschrittsbalken, keine Vorschauen.","qualityFor":"Qualit\u00e4t auf %s","qualityAuto":"Wie die Seite entscheidet","mediaLinks":"Videos und T\u00f6ne auf dieser Seite","mediaLinksNone":"Keine auf dieser Seite.","playInMpv":"In mpv abspielen","trackNoticeName":"Sagen, wenn der Titel wechselt","trackNoticeHint":"Eine Desktop-Benachrichtigung mit Titel und Interpret. Standardm\u00e4\u00dfig aus.",
 "readMenu2":"Lesen und Text","readerSel":"Lesemodus f\u00fcr die Auswahl","readNextPage":"Die n\u00e4chste Seite anh\u00e4ngen","readNoNext":"Keine n\u00e4chste Seite gefunden.","readNext":"Hole die n\u00e4chste Seite\u2026","readerOptions":"Lesemodus-Einstellungen","readerImagesName":"Bilder zeigen","readerHyphensName":"Trennen und Blocksatz","readerSerifName":"Serifenschrift","readerWidthCh":"%d Zeichen breit","readSaveMd":"Artikel als Markdown speichern","readToNote":"Artikel in eine Notiz legen","readSaved":"Gespeichert nach %s","readSaveFailed":"Das konnte nicht geschrieben werden.","readBackTo":"Zur\u00fcck, wo du warst (%d px)","readResumeName":"Lange Seiten dort \u00f6ffnen, wo ich aufgeh\u00f6rt habe","readResumeHint":"Die Stelle wird f\u00fcr die letzten f\u00fcnfzig Seiten gemerkt, auf diesem Rechner.","readProgressName":"Zeigen, wie weit die Seite gelesen ist","readProgressHint":"Eine d\u00fcnne Linie oben.","readFootnotesName":"Fu\u00dfnoten dort zeigen, wo die Markierung ist","readFootnotesHint":"Beim \u00dcberfahren einer Referenz erscheint sie, statt nach unten zu springen.","readAbbrName":"W\u00f6rter markieren, die die Seite erkl\u00e4rt","readAbbrHint":"Abk\u00fcrzungen mit Erkl\u00e4rung bekommen eine gepunktete Linie und einen Tooltip.","readCodeName":"Schlichte Codebl\u00f6cke einf\u00e4rben","readCodeHint":"Code, den die Seite grau gelassen hat, bekommt die Theme-Farben.","readNoLineNumbersName":"Code ohne Zeilennummern kopieren","readNoLineNumbersHint":"Logs und Pastebins schreiben sie in den Text; das nimmt sie wieder heraus.","readSelBarName":"Eine kleine Leiste \u00fcber markiertem Text","readSelBarHint":"Kopieren, suchen, \u00fcbersetzen, nachschlagen und markieren, direkt an den W\u00f6rtern.","readDraftsName":"Merken, was ich in Textfelder schreibe","readDraftsHint":"Im Speicher der Seite selbst, damit ein Neuladen oder Absturz keinen langen Beitrag verliert. Beim Absenden gel\u00f6scht.","readPlainPasteName":"Strg+Umschalt+V f\u00fcgt ohne Formatierung ein","readPlainPasteHint":"Und die Seite darf es nicht wieder aufh\u00fcbschen.","renderFilesName":"Einfache Dateien richtig anzeigen","renderFilesHint":"Eine .md gerendert, ein .log mit Zeilennummern, ein Feed als Liste.","showHidden":"Zeigen, was die Seite versteckt","shownHidden":"%s Stellen aufgeklappt","readRuler":"Leselineal","lineWidth":"Textbreite auf %s","lineWidthOff":"Wie die Seite es macht","encodingMenu":"Textkodierung","encAuto":"Wie die Seite sagt","langForSite":"%s fragen nach","langDe":"Deutsch","langEn":"Englisch","translateSel":"Auswahl \u00fcbersetzen (geht an Google)","defineSel":"Was bedeutet dieses Wort","defineTitle":"%s","dictionarySiteName":"W\u00f6rterbuchseite","dictionarySiteHint":"Wird benutzt, wenn kein Offline-W\u00f6rterbuch (dict) installiert ist. {} ist die Stelle f\u00fcr das Wort.","convertSel":"Auswahl umrechnen","convertNone":"In der Auswahl ist nichts zum Umrechnen.","unicodeSel":"Was diese Zeichen sind","unicodeTitle":"%d Zeichen, %d davon merkw\u00fcrdig","diffSel":"Auswahl mit der Zwischenablage vergleichen","diffTitle":"Die Unterschiede","diffSame":"Sie sind gleich.","fieldTools":"Textfelder","fieldFont":"Gro\u00dfe Monoschrift in diesem Feld","fieldStats":"W\u00f6rter und Lesezeit","fieldEditor":"In meinem Editor bearbeiten","externalEditorName":"Mein Texteditor","externalEditorHint":"Leer = was von kate, gedit, nvim oder vim installiert ist.","editorNone":"Es ist kein Texteditor installiert.","editorOpened":"In %s ge\u00f6ffnet \u2014 speichern und schlie\u00dfen legt den Text zur\u00fcck","editorBack":"Der Text ist wieder im Feld \u2713","draftsRestore":"Zur\u00fccklegen, was ich getippt hatte","draftsBack":"%s Textfelder zur\u00fcckgelegt \u2713","draftsNone":"F\u00fcr diese Seite wurde nichts gemerkt.","plainPaste":"Ohne Formatierung einf\u00fcgen","replaceT":"Suchen und ersetzen","replaceFind":"Suchen","replaceWith":"Ersetzen durch","replaceDone":"%s ersetzt","statsLine":"%d W\u00f6rter \u00b7 %d Zeichen \u00b7 %d S\u00e4tze \u00b7 etwa %d min","fileView":"Diese Datei anzeigen als","fileMd":"Gerendertes Markdown","fileLines":"Text mit Zeilennummern","fileRaw":"Reiner Text","fileFeed":"Liste der Feed-Eintr\u00e4ge","hlLibrary":"Alles, was ich markiert habe","hlNoneYet":"Noch nichts markiert.","hlExport":"Als Markdown herausschreiben","hlExported":"Geschrieben nach %s","spellLangsName":"Rechtschreibpr\u00fcfung in","spellLangsHint":"Zwei gleichzeitig sind in Ordnung \u2014 ein deutscher Beitrag mit englischen Modnamen soll nicht von vorn bis hinten unterstrichen sein.",
 "deskMenu":"Notizen und Werkzeuge","notesTitle":"Notizen","notesOpen":"Notizpanel","notesTab":"Notizen","notesSearch":"Suchen","notesNone":"Noch keine Notizen.","notesMissing":"notes.py liegt nicht neben dem Browser.","noteTitle":"Titel","noteTags":"Schlagw\u00f6rter","noteSave":"Speichern","noteBack":"Zur\u00fcck","noteClipPage":"Diese Seite","noteThisPage":"Diese Seite notieren","noteMade":"Notiert \u2713","notesFolderName":"Wo die Notizen liegen","notesFolderHint":"Ein Ordner mit einfachen .md-Dateien \u2014 jeder Editor und dein Backup k\u00f6nnen sie lesen. Leer = neben den Einstellungen.","todoTab":"To-do","todoNew":"Etwas zu tun","todoDone":"Fertig","todoClear":"Leeren","todoDue":"f\u00e4llig %s","todoFromTab":"Dieser Tab","todoThisTab":"Aus diesem Tab ein To-do machen","todoAdded":"Auf der Liste \u2713","todoDueNow":"Jetzt f\u00e4llig: %s","clipsTab":"Kopiertes","clipsNone":"Noch nichts kopiert.","clipsOff":"Der Kopierverlauf ist aus.","clipsClear":"Leeren","clipCopy":"Kopieren","clipHistoryName":"Merken, was ich kopiere","clipHistoryHint":"Eine Liste des letzten Kopierten, nur im Speicher und nie aus einem privaten Tab. Standardm\u00e4\u00dfig aus, weil es h\u00e4ufig genug eine Liste von Passw\u00f6rtern ist.","clipSel":"Auswahl in die heutige Notiz","clipSaved":"\u00dcbernommen \u2713","clipNothing":"Es ist nichts ausgew\u00e4hlt.","collTab":"Sammlungen","collNone":"Noch keine Sammlungen.","collOpen":"Zeigen","collNew":"Diese Seite hinzuf\u00fcgen zu\u2026","snipTab":"Textbausteine","snipNone":"Noch keine Bausteine.","snipKey":";ip","snipText":"was eingesetzt wird","snipHint":"Tippe den Schl\u00fcssel in ein Textfeld, und er wird zum Text.","snippetsName":"Textbausteine","snippetsHint":"Kurze Schl\u00fcssel, die beim Tippen zu l\u00e4ngerem Text werden.","captureT":"Schnelle Notiz","captureAsk":"Eine Zeile f\u00fcr die heutige Notiz. Die Seite, auf der du bist, kommt darunter.","captureSaved":"Aufgeschrieben \u2713","focusMenu":"Fokus","focusMinutes":"%d Minuten blockieren","focusThisSite":"%s w\u00e4hrend des Fokus blockieren","focusOn":"Fokus f\u00fcr %d Minuten","focusOff":"Fokus aus","focusStop":"Fokus beenden","focusTitle":"Fokus","focusBlocked":"%s ist w\u00e4hrend des Fokus blockiert.","focusLeft":"%d min %02d s \u00fcbrig","focusUntilWord":"Die Sperre endet von selbst.","limitThisSite":"Tagesgrenze f\u00fcr %s","limitNone":"Keine Grenze","limitTitle":"Das war das Tagespensum","limitBlocked":"%s ist f\u00fcr heute durch.","limitUsed":"%d von %d Minuten verbraucht","limitUp":"%s: die %d Minuten von heute sind um","limitSoon":"%s: %d Minuten bleiben heute","timerMenu":"Timer","timerMinutes":"%d Minuten","timerSet":"%s auf %d Minuten gestellt","timerUp":"%s ist um","timerLeft":"%s \u2014 %d:%02d \u00fcbrig","timerOne":"Timer","pomStart":"Pomodoro (25 + 5)","pomWork":"Arbeit","pomRest":"Pause","breakNow":"Du bist seit %d Minuten dran \u2014 steh einen Moment auf.","breakAfterName":"An eine Pause erinnern nach","breakAfterHint":"Minuten tats\u00e4chlicher Benutzung. 0 = nie.","desktopNotifyName":"Desktop-Benachrichtigungen benutzen","desktopNotifyHint":"\u00dcber notify-send, wenn es installiert ist. Aus = die Zeile im Browser ist alles.","dndEntry":"Nicht st\u00f6ren","dndOn":"%d Minuten lang st\u00f6rt nichts","dndOff":"Wieder Benachrichtigungen","dndHeld":"%d Benachrichtigungen kamen, w\u00e4hrend nichts st\u00f6ren durfte","notifyMenu":"Was das Web geschickt hat","notifyNone":"Noch nichts.","snoozeMenu":"Diesen Tab sp\u00e4ter","snooze30":"in 30 Minuten","snooze2h":"in 2 Stunden","snooze8h":"in 8 Stunden","snoozeMorning":"morgen fr\u00fch","snoozePrivate":"Ein privater Tab kann nicht zur\u00fcckgestellt werden: er m\u00fcsste dazu aufgeschrieben werden.","snoozed":"Zur\u00fcck um %s","snoozeBack":"%d Tabs sind zur\u00fcck","snoozeNow":"%d jetzt zur\u00fcckholen","zenMode":"Zen-Modus","zenOn":"Zen-Modus \u2014 dieselbe Taste bringt alles zur\u00fcck","zenOff":"Zen-Modus aus","everythingT":"Alles durchsuchen","everythingAsk":"Tabs, Lesezeichen, Verlauf, Notizen, To-dos und Kopiertes:","everythingNone":"Kein Treffer.","kindTab":"Tab","kindBookmark":"Lesezeichen","kindHistory":"Verlauf","kindNote":"Notiz","kindTodo":"To-do","kindCollection":"Sammlung","kindClip":"Kopiertes","copyMenu":"Kopieren als","copySelMd":"Auswahl als Markdown","copyClean2":"Seite als reinen Text","copyHighlight":"Link auf die Auswahl","tableCopy":"Diese Tabelle","tableMd":"Tabelle als Markdown","tableCsv":"Tabelle als CSV","tableTab":"Tabelle tabgetrennt","tableNone":"Keine Tabelle auf dieser Seite.","tableCopied":"%d Zeilen kopiert \u2713","linksMenu":"Links auf dieser Seite","linksNone":"Keine Links auf dieser Seite.","linksCopyAll":"Alle kopieren","linksMails":"%d E-Mail-Adressen","sumSel":"Auswahl zusammenrechnen","sumLine":"%d Zahlen \u00b7 Summe %g \u00b7 Mittel %g","sumNone":"Keine Zahlen in der Auswahl.","textTools":"Textwerkzeuge","textUpper":"GROSSBUCHSTABEN","textLower":"kleinbuchstaben","textTitle":"Erste Buchstaben Gro\u00df","textSort":"Zeilen sortieren","textDedupe":"Doppelte Zeilen entfernen","textTrim":"Leerzeichen abschneiden","textJoin":"Mit Kommas verbinden","textNoField":"Klicke zuerst in ein Textfeld.","charPicker":"Zeichen einf\u00fcgen","charGerman":"Deutsch","charQuotes":"Anf\u00fchrungszeichen und Striche","charSigns":"Zeichen","charArrows":"Pfeile und Haken","charMinecraft":"Minecraft","charCodes":"Minecraft-Farbcodes","bigEditor":"In einem gro\u00dfen Feld bearbeiten","listToTodo":"Eine Liste dieser Seite zu To-dos machen","listNone":"Keine Liste auf dieser Seite.","listMade":"%d Dinge zu tun \u2713","timeNote":"Diesen Moment des Videos notieren","timeNoteSaved":"Der Moment steht in der heutigen Notiz \u2713","extOpenWith":"\u00d6ffnen mit","extNone":"Es ist nichts installiert, womit das geht.","extMissing":"%s ist nicht installiert.","extOpened":"In %s ge\u00f6ffnet","qrTitle":"Als QR-Code","qrSel":"Auswahl als QR-Code","qrMissing":"qrencode ist nicht installiert \u2014 damit zeichnet das hier den Code.","qrFailed":"Dieser Code konnte nicht gezeichnet werden.","countdownName":"Countdowns auf der Startseite","countdownHint":"Je ein Name und ein Datum. Gez\u00e4hlt wird hier, gezeigt wird hier.",
 "cookieRule":"Cookies dieser Seite","cookieAllow":"Behalten","cookieClose":"Behalten, bis ich den Browser schlie\u00dfe","cookieBlock":"Nicht behalten","cookieNoSite":"Hier ist keine Seite.","cookiePrivateNote":"Privater Tab \u2014 seine Cookies verschwinden beim Schlie\u00dfen, und von hier wird keine Regel gespeichert","permOverview":"Was Seiten d\u00fcrfen","permNone":"Es wurde noch nichts erlaubt.","permRevokeAll":"Alles zur\u00fccknehmen","permLog":"Wann es benutzt wurde","permNoLog":"Es hat noch nichts etwas benutzt.","permAllow":"Erlauben","permDeny":"Ablehnen","permOnce":"Diesmal","permDaysName":"Unbenutzte Berechtigung vergessen nach","permDaysHint":"Tagen. 0 = nie. Eine Berechtigung, die leise abl\u00e4uft, ist eine Seite, die leise nicht mehr funktioniert.","mediaInUse":"In Benutzung: %s","mediaStopIn":"%s in \u201e%s\u201c abschalten","mediaNoneInUse":"Nichts benutzt Mikrofon oder Kamera.","guardMediaLog":"Sagen, wenn eine Seite Mikrofon, Kamera oder Bildschirm benutzt","sessThrowaway":"Einweg","sessCleanRoom":"Reinraum","sessNewThrowaway":"Neuer Einweg-Browser","cleanRoomName":"Diese Seite im Reinraum \u00f6ffnen","cleanRoomHere":"%s immer im Reinraum \u00f6ffnen","certTitle":"Das Zertifikat von %s","certFor":"Ausgestellt f\u00fcr","certIssuer":"Ausgestellt von","certValid":"G\u00fcltig","certTls":"Verbindung","certIp":"Adresse","certNames":"Gilt auch f\u00fcr","certShow":"Zertifikat von %s anzeigen","certWatch":"Sagen, wenn %s sein Zertifikat wechselt","certChanged":"%s benutzt ein anderes Zertifikat als vorher","certUnverified":"Dieses Zertifikat ist nicht best\u00e4tigt (selbst signiert oder f\u00fcr einen anderen Namen): das Folgende sagt es \u00fcber sich selbst.","certChangedLine":"\u26a0 Das ist nicht das Zertifikat, das diese Seite zuletzt hatte.","certFailed":"Das Zertifikat konnte nicht geholt werden. %s","certNoSite":"Hier ist keine Seite.","certExceptions":"Zertifikate, denen du traust","certForget":"%s nicht mehr trauen","certErrorT":"%s hat ein Zertifikatsproblem","certErrorB":"%s hat ein Zertifikat gesendet, das dieser Browser nicht annimmt:\n\n%s\n\nDiesem einen Zertifikat f\u00fcr diesen Host ab jetzt trauen? Sage nein, au\u00dfer das ist dein eigener Rechner, dein Drucker oder dein Server \u2014 bei allem anderen ist ein kaputtes Zertifikat die ganze Warnung, die du bekommst.","connTitle":"Die Verbindung zu %s","connDetails":"Was diese Verbindung ist","connProxy":"Proxy","connDirect":"direkt","mixedCheck":"Unsichere Teile auf dieser Seite","mixedNone":"Alles auf dieser Seite kam \u00fcber https.","mixedTitle":"Unsichere Teile","mixedBody":"%d Dinge auf dieser Seite wurden \u00fcber einfaches http geholt:\n\n%s","dataMenu":"Was Seiten gespeichert haben","dataNone":"Es wurde noch nichts gespeichert.","bounceClean":"%d nur durchlaufene Seiten l\u00f6schen","bounceCleaned":"%d durchlaufene Seiten gel\u00f6scht","loginsHere":"%d Seiten halten dich angemeldet","signOutOf":"Von %s abmelden","signedOut":"%s abgemeldet","workersMenu":"Service Worker","workersNone":"Keine auf dieser Seite.","workersDrop":"Abmelden","cacheOnly":"Nur den Cache leeren","protoAskT":"Eine Seite will eine Linkart \u00fcbernehmen","protoAskB":"%s will das sein, was %s:-Links \u00f6ffnet. Erlauben?","protoMenu":"Seiten, die Links \u00fcbernehmen","protoNone":"Keine.","protoForget":"%s vergessen","lockTitle":"Gesperrt","lockAsk":"Dein Wort","lockWrong":"Das war es nicht.","lockSetT":"Fenster sperren","lockSetAsk":"Ein Wort zum Entsperren. Leer = keine Sperre.","lockSet":"Das Fenster kann jetzt gesperrt werden \u2713","lockOff":"Die Sperre ist aus","lockNotSet":"Es ist kein Sperrwort gesetzt \u2014 das steht in den Einstellungen.","lockNow":"Fenster sperren","lockAfterName":"Fenster sperren nach","lockAfterHint":"Minuten, in denen niemand etwas anr\u00fchrt. 0 = nie.","privExport":"Privatsph\u00e4re-Regeln exportieren","privImport":"Privatsph\u00e4re-Regeln importieren","privExported":"%d Regeln geschrieben \u2713","privImported":"%d Regeln \u00fcbernommen \u2713","trackerBadgeName":"Anzahl des Abgelehnten anzeigen","trackerBadgeHint":"Eine kleine Zahl in der Adressleiste.","trackerBadgeTip":"%d Anfragen abgelehnt, %d Adressen ges\u00e4ubert, %d Cookies abgelehnt","clearExitName":"Beim Schlie\u00dfen l\u00f6scht dieser virtuelle Browser","clearExitJarHint":"Jeder virtuelle Browser hat seine eigene Antwort.","clearExitCookies":"Cookies","clearExitCache":"Cache","clearExitHistory":"Verlauf","clearExitDownloads":"Die Downloadliste",
@@ -7594,9 +7649,25 @@ PAGE_LOOK_JS = r"""(function (want) {
     css.push("::selection { background: " + want.accent +
              " !important; color: " + want.bg + " !important; }");
   }
-  if (want.unstyled) {
+  var bare = false;
+  if (want.unstyled && document.documentElement) {
     /* a page with no background of its own: white is the engine's
-       default, not the page's wish, so the theme's is no less true */
+       default, not the page's wish, so the theme's is no less true.
+       Read with our own sheet off, or the second run would see the
+       theme's colour and take it for the page's. */
+    var mine = document.getElementById("__pagelook");
+    if (mine) mine.disabled = true;
+    var clear = function (node) {
+      if (!node) return true;
+      var st = getComputedStyle(node);
+      return st.backgroundImage === "none"
+        && (st.backgroundColor === "rgba(0, 0, 0, 0)"
+            || st.backgroundColor === "transparent");
+    };
+    bare = clear(document.documentElement) && clear(document.body);
+    if (mine) mine.disabled = false;
+  }
+  if (bare) {
     css.push("html:not([style*=background]) { background: " + want.bg +
              " !important; }");
     css.push("html:not([style*=background]) body:not([style*=background])" +
@@ -7662,10 +7733,16 @@ PAGE_LOOK_JS = r"""(function (want) {
     filters.push("sepia(" + (want.warm / 100 * 0.6) + ")");
   if (want.grey || has(want.greyHosts)) filters.push("grayscale(1)");
   var el = document.getElementById("__pagelook");
+  /* the root's filter is shared with the accessibility script: each
+     keeps its own part and the value is the two together, so neither
+     wipes the other's */
+  var parts = window.__filterParts = window.__filterParts || {};
+  parts.look = filters.join(" ");
+  var joined = [parts.look, parts.a11y].filter(Boolean).join(" ");
   if (!css.length && !filters.length) {
     if (el) el.remove();
     if (document.documentElement) {
-      document.documentElement.style.filter = "";
+      document.documentElement.style.filter = joined;
     }
     return "clean";
   }
@@ -7678,7 +7755,7 @@ PAGE_LOOK_JS = r"""(function (want) {
   if (document.documentElement) {
     /* the filter goes on the page's own root, so the browser's chrome
        and our own windows are untouched by it */
-    document.documentElement.style.filter = filters.join(" ");
+    document.documentElement.style.filter = joined;
   }
   return filters.length ? "filtered" : "styled";
 /* the payload is substituted by name rather than with %s: the sheets
@@ -7755,6 +7832,9 @@ PERF_JS = r"""(function (want) {
     window.__perfVideo = true;
     var check = function () {
       if (!document.hidden) return 0;
+      /* the listener below stays on the page for good, so the switch
+         is read each time and not once when it was attached */
+      if (!(window.__perfWant || {}).stopHiddenVideo) return 0;
       var stopped = 0;
       var media = document.querySelectorAll("video");
       for (var i = 0; i < media.length; i++) {
@@ -7896,6 +7976,9 @@ NAV_JS = r"""(function (want) {
       var tag = parent.tagName;
       if (tag === "A" || tag === "SCRIPT" || tag === "STYLE"
           || tag === "TEXTAREA" || tag === "CODE") continue;
+      /* an HTML element inside SVG text is not drawn, so the words
+         would vanish */
+      if (parent.namespaceURI !== "http://www.w3.org/1999/xhtml") continue;
       if (!pattern.test(node.nodeValue || "")) continue;
       pattern.lastIndex = 0;
       nodes.push(node);
@@ -8098,15 +8181,22 @@ NAV_JS = r"""(function (want) {
       return JSON.stringify(out);
     };
     window.__navViewImage = function (which) {
-      var pics = window.__navPics || [];
-      if (!pics.length) {
-        pics = window.__navPics = Array.prototype.map.call(
-          document.querySelectorAll("img"), function (el) {
-            return el.currentSrc || el.src;
-          }).filter(Boolean);
-      }
+      /* read again each time: a page that adds or swaps pictures as it
+         scrolls left the list stale. The one on show stays the one on
+         show if it is still there. */
+      var shown = (window.__navPics || [])[window.__navPicAt || 0];
+      var pics = window.__navPics = Array.prototype.filter.call(
+        document.querySelectorAll("img"), function (el) {
+          /* the viewer's own picture is not one of the page's: in the
+             list, "next" from the last picture stayed on it for good */
+          return !(el.closest && el.closest("#__navviewer"))
+                 && el.id !== "__navviewerpic";
+        }).map(function (el) {
+          return el.currentSrc || el.src;
+        }).filter(Boolean);
       if (!pics.length) return "none";
       var at = window.__navPicAt || 0;
+      if (shown && pics.indexOf(shown) >= 0) at = pics.indexOf(shown);
       if (which === "next") at = (at + 1) % pics.length;
       else if (which === "prev") at = (at - 1 + pics.length) % pics.length;
       else if (which === "off") {
@@ -8413,7 +8503,10 @@ NAV_JS = r"""(function (want) {
     var tryClick = function () {
       var rows = rules();
       for (var i = 0; i < rows.length; i++) {
-        var el = document.querySelector(rows[i]);
+        var el = null;
+        /* the selector is hand-written: a bad one throws, and must not
+           stop the rows after it */
+        try { el = document.querySelector(rows[i]); } catch (e) { el = null; }
         if (!el) continue;
         var box = el.getBoundingClientRect();
         if (box.width < 1 || box.height < 1) continue;
@@ -8692,10 +8785,16 @@ A11Y_JS = r"""(function (want) {
       } else {
         svg.querySelector("feColorMatrix").setAttribute("values", matrix);
       }
-      root.style.filter = "url(#__a11yfilter)";
+      /* kept beside the page look's own part (see PAGE_LOOK_JS) */
+      var fparts = window.__filterParts = window.__filterParts || {};
+      fparts.a11y = "url(#__a11yfilter)";
+      root.style.filter = [fparts.look, fparts.a11y]
+        .filter(Boolean).join(" ");
     }
   } else if (root.style.filter.indexOf("__a11yfilter") >= 0) {
-    root.style.filter = "";
+    var gparts = window.__filterParts = window.__filterParts || {};
+    gparts.a11y = "";
+    root.style.filter = gparts.look || "";
   }
 
   var sheet = document.getElementById("__a11y");
@@ -8880,7 +8979,11 @@ A11Y_JS = r"""(function (want) {
       if (!parent) continue;
       var tag = parent.tagName;
       if (tag === "SCRIPT" || tag === "STYLE" || tag === "TEXTAREA"
+          || tag === "OPTION" || parent.isContentEditable
           || parent.className === "__a11yb") continue;
+      /* an HTML span inside SVG text is not drawn, so the words would
+         vanish */
+      if (parent.namespaceURI !== "http://www.w3.org/1999/xhtml") continue;
       nodes.push(node);
     }
     nodes.forEach(mark);
@@ -9287,8 +9390,11 @@ def chrome_style(config=None, mark="", private=False):
                 "QLineEdit#urlbar { border: 1px solid %s; }\n"
                 "#chrome { border-top: 2px solid %s; }" % (colour, colour))
     size = config.get("uiSize")
-    rows = UI_SIZES.get(size if size in UI_SIZES else DEFAULT_UI_SIZE)
-    if size in UI_SIZES and size != DEFAULT_UI_SIZE:
+    # a list or a dict from a hand-edited file is unhashable, and the
+    # lookups below would raise
+    size = size if isinstance(size, str) and size in UI_SIZES else None
+    rows = UI_SIZES.get(size or DEFAULT_UI_SIZE)
+    if size and size != DEFAULT_UI_SIZE:
         out.append(
             "QTabBar::tab { padding: %dpx 6px %dpx 14px; }\n"
             "QToolButton { padding: %dpx %dpx; }\n"
@@ -9303,7 +9409,7 @@ def chrome_style(config=None, mark="", private=False):
             bits.append('font-family: "%s";' % family.replace('"', ""))
         if isinstance(points, (int, float)) and 8 <= points <= 28:
             bits.append("font-size: %dpx;" % int(points))
-        elif size in UI_SIZES:
+        elif size:
             bits.append("font-size: %dpx;" % rows["font"])
         out.append("* { %s }" % " ".join(bits))
     radius = config.get("cornerRadius")
@@ -11071,7 +11177,8 @@ def kitty_colours(text):
         if len(parts) != 2:
             continue
         name = parts[0].strip().lower()
-        value = parts[1].strip().strip('"\'').split()[0] if parts[1] else ""
+        tokens = parts[1].strip().strip('"\'').split()
+        value = tokens[0] if tokens else ""
         if re.fullmatch(r"[0-9a-fA-F]{6}", value):
             value = "#" + value
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
@@ -11345,10 +11452,18 @@ class TabWidget(QTabWidget):
     def tabInserted(self, index):
         super().tabInserted(index)
         self._tell_sidebar()
+        self._refit_rows()
 
     def tabRemoved(self, index):
         super().tabRemoved(index)
         self._tell_sidebar()
+        self._refit_rows()
+
+    def _refit_rows(self):
+        # the multi-row squeeze depends on the tab count
+        fit = getattr(self.browser, "_fit_tab_rows", None)
+        if fit is not None:
+            fit()
 
     def _tell_sidebar(self):
         side = getattr(self.browser, "sidebar", None)
@@ -14255,6 +14370,10 @@ class PasswordVault:
             e = self._normalize({"type": "login", "host": host,
                                  "username": username, "created": now})
             self.items().append(e)
+            before = None
+        else:
+            before = dict(e, history=[dict(h) for h in
+                                      (e.get("history") or [])])
         if e.get("password") != password:
             self._remember_password(e, e.get("password", ""))
             e["changed"] = now
@@ -14264,6 +14383,11 @@ class PasswordVault:
         if not self._save(e):
             if fresh:
                 self.items().remove(e)   # the store refused it: no ghost row
+            elif before is not None:
+                # an existing login keeps what the store still has, not a
+                # password and history it never took
+                e.clear()
+                e.update(before)
             return None
         return e
 
@@ -14773,6 +14897,7 @@ class PasswordVault:
         # "instead of what is there" only for a store this writes whole:
         # a remote one is never told to delete, so emptying the list
         # here only emptied the screen
+        was_items = list(self.items())
         if replace and self.provider.eager:
             self.items()[:] = []
         taken = 0
@@ -14784,7 +14909,12 @@ class PasswordVault:
             self.items().append(item)
             taken += 1
         if self.provider.eager:
-            self._save()
+            if not self._save():
+                # nothing reached the file, so the page must not say
+                # "Imported" over rows that vanish at the next start, and
+                # a replace must not leave the old list emptied
+                self.items()[:] = was_items
+                return -1
             return taken
         return self._store_imported(self.items()[-taken:] if taken else [])
 
@@ -14819,8 +14949,21 @@ class PasswordVault:
         if not added:
             return 0
         if self.provider.eager:
-            self._save()
-            return len(added)
+            if self._save():
+                return len(added)
+            # the write did not land: what this import appended is taken
+            # back off and an updated login is put back as it was, so the
+            # page does not report rows that vanish at the next start
+            gone = [one for one in added
+                    if appended is None
+                    or any(one is new for new in appended)]
+            self.items()[:] = [one for one in self.items()
+                               if not any(one is g for g in gone)]
+            for item in added:
+                if kept_as and id(item) in kept_as:
+                    item.clear()
+                    item.update(kept_as[id(item)])
+            return 0
         kept = 0
         for item in added:
             if self._save(item):
@@ -18292,7 +18435,11 @@ class WebPage(QWebEnginePage):
                         # compose tab without a click (a page on a timer
                         # opened one every half second)
                         return False
-                    self.browser.open_mailto(url.toString(), self._view)
+                    # ...and a script's location.href is a "link click"
+                    # too: from the tab in front only, once in a while
+                    if self.browser._page_may_act(self._view, "mailto",
+                                                  every=5.0):
+                        self.browser.open_mailto(url.toString(), self._view)
                     return False
             # magnet: and .torrent belong to the torrent client, and
             # ts3server:// to TeamSpeak -- but a page only gets to ask
@@ -18938,7 +19085,7 @@ class WebView(QWebEngineView):
         sub.addAction(ui("noteThisPage")).triggered.connect(
             lambda: browser.page_to_note(self))
         sub.addAction(ui("todoThisTab")).triggered.connect(
-            lambda: browser.tab_to_todo())
+            lambda: browser.tab_to_todo(view=self))
         sub.addAction(ui("listToTodo")).triggered.connect(
             lambda: browser.checklist_from_page(self))
         copies = sub.addMenu(ui("copyMenu"))
@@ -18953,11 +19100,11 @@ class WebView(QWebEngineView):
             lambda m=links: (m.clear(),
                              browser.page_links(
                                  self, then=lambda out:
-                                 browser._fill_links(m, out))))
+                                 browser._fill_links(m, out, view=self))))
         sub.addMenu(browser.text_tools_menu(QMenu(ui("textTools"), sub)))
         sub.addMenu(browser.external_menu()).setText(ui("extOpenWith"))
         sub.addAction(ui("qrTitle")).triggered.connect(
-            lambda: browser.qr_code())
+            lambda: browser.qr_code(browser._tab_url(self)))
 
     def _hide_element_action(self, menu, pos):
         """"Hide this element": the element hider, started from the
@@ -19035,7 +19182,10 @@ class WebView(QWebEngineView):
             read.addAction(ui(label)).triggered.connect(
                 lambda _, w=what: browser.access_switch(w, view=self))
         host = self.url().host().removeprefix("www.")
-        if host:
+        # not on a private tab: each per-site setting writes the host into
+        # config.json, which a private tab's site must never be (zoom
+        # already refuses for the same reason)
+        if host and not getattr(self, "private", False):
             sizes = read.addMenu(ui("accMinFont"))
             for size in (0, 14, 16, 18, 20):
                 sizes.addAction(ui("accMinFontOff") if not size
@@ -19219,6 +19369,8 @@ class WebView(QWebEngineView):
         browser = self.browser
         if theme_web is None or not theme_web.enabled(browser):
             return
+        if getattr(self, "private", False):
+            return       # the site would go into themeWebSkip on disk
         url = self.url()
         if url.scheme() not in ("http", "https"):
             return
@@ -20457,7 +20609,7 @@ class TabOverview(QWidget):
             if shot is not None:
                 card.setIcon(QIcon(shot))
                 card.setIconSize(shot.size())
-            card.setText(self.browser._elide(info["title"], 26))
+            card.setText(_amp(self.browser._elide(info["title"], 26)))
             card.setToolTip(literal(info["url"]))
             card.clicked.connect(
                 lambda _c=False, v=info["view"]: self.pick(v))
@@ -23020,8 +23172,8 @@ class PinButton(QToolButton):
         if self.toolButtonStyle() != Qt.ToolButtonStyle.ToolButtonIconOnly:
             # a plain character budget, not fontMetrics: the sheet's font
             # only reaches the widget on polish, long after this
-            self.setText(name if len(name) <= 12
-                         else name[:11].rstrip() + "\u2026")
+            self.setText(_amp(name if len(name) <= 12
+                              else name[:11].rstrip() + "\u2026"))
         # a pin's name can be a page title, which is a string a website
         # wrote: it is escaped into markup that renders back as itself
         self.setToolTip(literal("%s\n%s" % (name, self.pin["url"])))
@@ -23193,7 +23345,7 @@ class TaskBar(QWidget):
     def _overflow_menu(self):
         menu = QMenu(self)
         for pin in self._pins[self._shown:self.MAX_BUTTONS]:
-            action = menu.addAction(pin.get("name") or pin["url"])
+            action = menu.addAction(_amp(pin.get("name") or pin["url"]))
             icon = _icon_from_data(pin.get("icon", ""))
             if not icon.isNull():
                 action.setIcon(icon)
@@ -23510,8 +23662,26 @@ class Dock(QWidget):
         return max(150, self.title.sizeHint().width(),
                    self.by.sizeHint().width()) + 30
 
+    def _shown(self):
+        """How many pins get a cell. The row used to give every pin one,
+        so in a narrow window the ones past the edge were neither
+        painted nor reachable. When they do not all fit, the last cell
+        is a menu for the rest."""
+        parent = self.parentWidget()
+        if parent is None:
+            return len(self._icons)
+        room = (max(160, parent.width() - 24) - 2 * self.PAD
+                - self._music_width() - 2 * self.SHADOW)
+        fit = max(1, room // self.CELL)
+        if len(self._icons) <= fit:
+            return len(self._icons)
+        return fit - 1
+
+    def _cut(self):
+        return self._shown() < len(self._icons)
+
     def _wanted(self):
-        row = max(len(self._icons), 1) * self.CELL
+        row = max(self._shown() + (1 if self._cut() else 0), 1) * self.CELL
         width = 2 * self.PAD + row + self._music_width() + 2 * self.SHADOW
         height = (2 * self.PAD + self.ICON_MAX + self.DOT + 4
                   + 2 * self.SHADOW)
@@ -23551,10 +23721,30 @@ class Dock(QWidget):
         out = []
         left = self.island().left() + self.PAD
         top = self.baseline() - self.CELL
-        for i, (pin, pixmap) in enumerate(self._icons):
+        for i, (pin, pixmap) in enumerate(self._icons[:self._shown()]):
             out.append((QRect(left + i * self.CELL, top,
                               self.CELL, self.CELL), pin, pixmap))
         return out
+
+    def more_cell(self):
+        """The cell after the last pin that fits, when some do not."""
+        if not self._cut():
+            return None
+        return QRect(self.island().left() + self.PAD
+                     + self._shown() * self.CELL,
+                     self.baseline() - self.CELL, self.CELL, self.CELL)
+
+    def _overflow_menu(self, where):
+        menu = QMenu(self)
+        for pin in self._pins[self._shown():]:
+            action = menu.addAction(_amp(pin.get("name") or pin["url"]))
+            icon = _icon_from_data(pin.get("icon", ""))
+            if not icon.isNull():
+                action.setIcon(icon)
+            action.setData(pin["url"])
+        chosen = menu.exec(where)
+        if chosen is not None and chosen.data():
+            self.browser.open_pin(chosen.data())
 
     def _size_at(self, centre):
         """How big the icon in the cell centred on `centre` is drawn. A
@@ -23616,6 +23806,12 @@ class Dock(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
+        more = self.more_cell()
+        if (more is not None and more.contains(event.position().toPoint())
+                and event.button() == Qt.MouseButton.LeftButton):
+            where = self.mapToGlobal(more.topLeft())
+            QTimer.singleShot(0, lambda: self._overflow_menu(where))
+            return
         pin = self.hit(event.position().toPoint())
         if pin is None:
             super().mousePressEvent(event)
@@ -23671,6 +23867,13 @@ class Dock(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self._paint_glass(painter)
+        more = self.more_cell()
+        if more is not None:
+            painter.setPen(QColor(theme_color("bright")))
+            font = painter.font()
+            font.setPixelSize(22)
+            painter.setFont(font)
+            painter.drawText(more, Qt.AlignmentFlag.AlignCenter, "\u00bb")
         if self._icons:
             dot = QColor(theme_color("accent"))
             for rect, pin, pixmap in self.item_rects():
@@ -23763,6 +23966,12 @@ class Browser(QMainWindow):
     _last_touch = _shared_list("last_touch")
     _break_from = _shared_list("break_from")
     _todo_said = _shared_list("todo_said")
+    # one undo record for the browser, as the lists are one
+    _history_undo = _shared_list("history_undo")
+    _history_undo_at = _shared_list("history_undo_at")
+    _bookmark_undo = _shared_list("bookmark_undo")
+    _bookmark_undo_at = _shared_list("bookmark_undo_at")
+    _bookmark_undo_taken = _shared_list("bookmark_undo_taken")
     del _shared_list
 
     def __init__(self, initial_url=None, share=None, private=False,
@@ -24732,6 +24941,36 @@ class Browser(QMainWindow):
     def _save_groups(self, quiet=False):
         if getattr(self, "_app_url", None):
             return     # an app window's one site is not his session
+        data, session_tabs = self._session_rows()
+        # every other ordinary window's tabs too: only the window that
+        # writes the session was saved, so a second window's tabs were
+        # gone after a quit or a crash, and missing from the crash offer.
+        # (They come back in one window; a group of the same name in two
+        # windows comes back as one group.)
+        for win in self.windows():
+            if win is self or getattr(win, "_app_url", None) \
+                    or getattr(win, "_all_private", False):
+                continue
+            try:
+                more, loose = win._session_rows()
+            except RuntimeError:
+                continue
+            for group in more:
+                home = next((d for d in data
+                             if d.get("name") == group.get("name")), None)
+                if home is not None:
+                    home["urls"].extend(group["urls"])
+                else:
+                    data.append(group)
+            for sid, rows in loose.items():
+                session_tabs.setdefault(sid, []).extend(rows)
+        self.config["tabGroups"] = data
+        self.config["sessionTabs"] = session_tabs
+        return self._write_session_state(data, session_tabs, quiet)
+
+    def _session_rows(self):
+        """This window's groups and loose tabs, as the session keeps
+        them: (groups, {virtual browser: [tab, ...]})."""
         data = []
         for g in self.groups:
             # a throwaway browser (the clean room) has nowhere to write:
@@ -24767,7 +25006,6 @@ class Browser(QMainWindow):
                          "gid": self.group_ids.get(g),
                          "session": self.group_sessions.get(g, "main"),
                          "urls": urls})
-        self.config["tabGroups"] = data
         # loose tabs are saved per virtual browser too (start pages
         # excluded — every start spawns a fresh one anyway)
         session_tabs = {}
@@ -24832,7 +25070,43 @@ class Browser(QMainWindow):
                 else:
                     session_tabs.setdefault(
                         getattr(split, "session", "main"), []).append(row)
-        self.config["sessionTabs"] = session_tabs
+        # a popped-out tab is out of the strip as well: in no save, it was
+        # lost if the browser crashed while it was out
+        for mini in list(getattr(self, "_popouts", None) or []):
+            view = getattr(mini, "view", None)
+            state = getattr(mini, "_state", None) or {}
+            sid = state.get("session", "main")
+            if view is None or getattr(view, "private", False) \
+                    or self.session_is_throwaway(sid):
+                continue
+            try:
+                u = self._tab_url(view)
+                fresh = (_same_page(view.url(), START_PAGE)
+                         or self._is_blank_tab(view))
+            except RuntimeError:
+                continue
+            if not u or fresh or _is_pane_url(u) or self.restore_excluded(u):
+                continue
+            row = {"u": u, "t": getattr(view, "_last_title", "") or ""}
+            # with what he set on it, as a tab in the strip is saved
+            if getattr(view, "pinned", False):
+                row["p"] = 1
+            if getattr(view, "locked", False):
+                row["l"] = 1
+            if getattr(view, "tab_name", None):
+                row["n"] = view.tab_name
+            if getattr(view, "_seen_wall", None):
+                row["w"] = int(view._seen_wall)
+            g = state.get("group")
+            home = next((d for d in data if d.get("name") == g),
+                        None) if g else None
+            if home is not None:
+                home["urls"].append(row)
+            else:
+                session_tabs.setdefault(sid, []).append(row)
+        return data, session_tabs
+
+    def _write_session_state(self, data, session_tabs, quiet=False):
         kept_sessions = [e for e in self.sessions
                          if not self.session_is_throwaway(e.get("sid"))]
         self.config["sessions"] = kept_sessions
@@ -24875,6 +25149,8 @@ class Browser(QMainWindow):
                                     lazy=bool(u), title=t, at_end=True)
                 if view is None:
                     continue
+                if not getattr(view, "_last_title", ""):
+                    view._last_title = t or ""
                 self._restore_seen(view, item)
                 if item.get("n"):
                     view.tab_name = item["n"]
@@ -24909,10 +25185,18 @@ class Browser(QMainWindow):
         logs = []
         for view in views:
             try:
-                logs.append(view.page().console_log)
+                page = view.page()
+                # a private tab's sites are not written down anywhere,
+                # and this record is a file
+                if self._page_is_private(page):
+                    continue
+                logs.append(page.console_log)
             except Exception:
                 continue
-        frames = _video_frames(logs)
+        frames = _video_frames(logs, key=_FRAME_KEY)
+        # what is written is the checked reports, not the raw lines
+        logs = [[{"text": _FRAME_MARK + json.dumps(fact)}
+                 for fact in frames]]
         # ...and nothing is written again for a browser that has been
         # sitting still: the record is rewritten when the sampler has
         # something new to say about a video, which is what changes.
@@ -25485,7 +25769,7 @@ class Browser(QMainWindow):
         return True
 
     def _idle_tick(self):
-        quiet = int(self.config.get("idleAfter") or 300)
+        quiet = _sane_number(self.config.get("idleAfter")) or 300
         last = float(getattr(self, "_last_input", 0) or 0)
         if last and time.time() - last >= quiet:
             if not getattr(self, "_idle_since", 0):
@@ -25521,6 +25805,8 @@ class Browser(QMainWindow):
         the class would quietly replace this one and the popovers
         would stop following the window."""
         super().resizeEvent(event)
+        # tabs squeezed for a width the window no longer has
+        self._fit_tab_rows()
         cover = getattr(self, "_lock_cover", None)
         if cover is not None:
             # the lock covers the window at every size: maximised, it
@@ -25624,6 +25910,8 @@ class Browser(QMainWindow):
             lambda v=view: setattr(v, "_came_from",
                                    self._tab_url(v)))
         view.loadStarted.connect(lambda v=view: setattr(v, "_hops", []))
+        # the developer overlays live in the page: a new page has none
+        view.loadStarted.connect(lambda v=view: setattr(v, "_dev_on", {}))
         view.loadFinished.connect(
             lambda _ok, v=view: setattr(v, "_in_flight", False))
         view.loadFinished.connect(lambda ok, v=view: self._autofill(v, ok))
@@ -25663,6 +25951,11 @@ class Browser(QMainWindow):
         view.loadFinished.connect(
             lambda ok, v=view: ok or (self.config.get("autoRetry", False)
                                       and self.retry_when_online(view=v)))
+        # a load that worked ends the waiting for that tab -- but not the
+        # themed error page's own (setHtml under the failed address
+        # answers loadFinished(True), which cancelled the retry just set)
+        view.loadFinished.connect(
+            lambda ok, v=view: ok and self._retry_cancel(v))
         # a page that finished in a tab he is not looking at says so,
         # and a page with a note of its own brings it up
         view.loadFinished.connect(
@@ -25687,7 +25980,7 @@ class Browser(QMainWindow):
         # mono and the balance on every page, not only on the ones open
         # when the switch was flipped (and after a restart: none)
         view.loadFinished.connect(
-            lambda ok, v=view: ok and self.audio_shape_wanted()
+            lambda ok, v=view: ok and self.audio_shape_wanted(v)
             and self.apply_audio_shape(one=v))
         # the gaming and streaming switches, each of which does nothing
         # unless he turned it on (see _play_settled). A moment after the
@@ -26314,6 +26607,11 @@ class Browser(QMainWindow):
                or getattr(view, "_requested", ""))
         if not url:
             return
+        # a tab opened and never used shows the start page, which is a
+        # file: address and so not empty: Ctrl+Shift+T brought back that
+        # blank page and left the tab he meant one entry further down
+        if self._is_blank_tab(view) or _same_page(url, START_PAGE):
+            return
         trail, at = self.tab_history(view)
         self._closed_tabs.append({
             "url": url,
@@ -26325,6 +26623,10 @@ class Browser(QMainWindow):
             # is only half the tab back
             "trail": trail,
             "at": at,
+            # the promises he made about it: they came back without them
+            "p": 1 if getattr(view, "pinned", False) else 0,
+            "l": 1 if getattr(view, "locked", False) else 0,
+            "n": getattr(view, "tab_name", None) or "",
         })
         del self._closed_tabs[:-CLOSED_TABS_MAX]
 
@@ -26352,6 +26654,14 @@ class Browser(QMainWindow):
         self._restore_tab_index(view, saved.get("index"))
         self.restore_tab_history(view, saved.get("trail"),
                                  saved.get("at"))
+        if saved.get("n"):
+            view.tab_name = saved["n"]
+        if saved.get("l"):
+            view.locked = True
+        if saved.get("p"):
+            self.pin_tab(self.tabs.indexOf(view), True)
+        elif saved.get("n") or saved.get("l"):
+            self._refresh_tab_label(view)
         return view
 
     def _restore_tab_index(self, view, want):
@@ -27159,6 +27469,8 @@ class Browser(QMainWindow):
         old = self._group_of(view)
         if old == group:
             return
+        if group is not None and getattr(view, "private", False):
+            return     # a private tab is never written into a group
         title = self.tabs.tabText(index)
         was_current = view is self.current()
         self.tabs.removeTab(index)
@@ -27242,6 +27554,8 @@ class Browser(QMainWindow):
         menu = QMenu(self)
         if getattr(view, "private", False):
             pass   # a private tab joins no group: its jar is not one
+        elif getattr(view, "pinned", False):
+            pass   # nor a pinned one: pinning takes a tab out of groups
         elif group is None:
             menu.addAction("Add tab to new group\u2026").triggered.connect(
                 lambda: self._tab_to_new_group(self.tabs.indexOf(view)))
@@ -27326,7 +27640,7 @@ class Browser(QMainWindow):
         menu.addSeparator()
         copy = menu.addMenu(ui("tabCopy"))
         copy.addAction(ui("tabCopyThis")).triggered.connect(
-            lambda: self.copy_tab_urls("this"))
+            lambda: self.copy_tab_urls("this", view=view))
         copy.addAction(ui("tabCopyAll")).triggered.connect(
             lambda: self.copy_tab_urls("all"))
         copy.addAction(ui("tabCopyMd")).triggered.connect(
@@ -27437,6 +27751,14 @@ class Browser(QMainWindow):
             name = getattr(view, "_last_title", None) or "New tab"
         if view.page().isAudioMuted():
             name = self.MUTE_MARK + name
+        if getattr(self, "_recording_mark", False):
+            # every title change, unread counter and mute toggle comes
+            # through here: without the mark the tab looked unrecorded
+            # while the recording went on
+            rec = self.recording_now()
+            on = getattr(rec, "view", None) if rec is not None else None
+            if on is None or on is view:
+                name = "\u25cf " + name
         return name
 
     #: what the strip puts in front of a title: silent, recording, loaded
@@ -27522,7 +27844,11 @@ class Browser(QMainWindow):
             if self._group_of(view) is not None:
                 self._move_tab_to_group(self.tabs.indexOf(view), None)
             last = -1
-            for i, other in self._real_tabs():
+            # this virtual browser's pinned tabs only: another one's pin
+            # further right left this one's pinned tab behind a loose tab
+            # or sent it past tabs that are not its own
+            for i, other in self._real_tabs(
+                    session=getattr(view, "session", "main")):
                 if other is not view and getattr(other, "pinned", False):
                     last = i
             here = self.tabs.indexOf(view)
@@ -27627,7 +27953,7 @@ class Browser(QMainWindow):
         view = self.tabs.widget(index)
         if view is None or self._is_header(view):
             return 0
-        host = view.url().host().removeprefix("www.")
+        host = as_qurl(self._tab_url(view)).host().removeprefix("www.")
         if not host:
             return 0
         gone = 0
@@ -27642,7 +27968,8 @@ class Browser(QMainWindow):
                     getattr(other, "locked", False)
                     or bool(getattr(other, "private", False)) != private):
                 continue
-            if other.url().host().removeprefix("www.") == host:
+            if as_qurl(self._tab_url(other)).host().removeprefix(
+                    "www.") == host:
                 at = self.tabs.indexOf(other)
                 if at >= 0:
                     self.close_tab(at, ask=False)
@@ -27654,12 +27981,13 @@ class Browser(QMainWindow):
         view = self.tabs.widget(index)
         if view is None or self._is_header(view):
             return None
-        host = view.url().host().removeprefix("www.")
+        host = as_qurl(self._tab_url(view)).host().removeprefix("www.")
         if not host:
             return None
         session = getattr(view, "session", "main")
         members = [v for _, v in self._real_tabs(session=session)
-                   if v.url().host().removeprefix("www.") == host
+                   if as_qurl(self._tab_url(v)).host().removeprefix(
+                       "www.") == host
                    and not getattr(v, "private", False)
                    and not getattr(v, "pinned", False)]
         if not members:
@@ -27703,20 +28031,23 @@ class Browser(QMainWindow):
                 self.tabs.tabBar().moveTab(at, slot)
         return len(order)
 
-    def tab_urls(self, which="all", markdown=False):
-        """The addresses of the open tabs, as text."""
+    def tab_urls(self, which="all", markdown=False, view=None):
+        """The addresses of the open tabs, as text. `view`: the tab that
+        "this" means (the right-clicked one; the current tab by default)."""
         if which == "group":
             group = self._group_of(self.current())
             tabs = self._real_tabs(group=group) if group is not None else []
         elif which == "this":
-            view = self.current()
+            view = self.current() if view is None else view
             tabs = ([(self.tabs.indexOf(view), view)]
                     if view is not None else [])
         else:
             tabs = self._real_tabs(session=self.active_session)
         lines = []
         for i, view in tabs:
-            url = view.url()
+            # a restored tab has no url() until it loads: its address is
+            # the one it will open
+            url = as_qurl(self._tab_url(view))
             # the browser's own pages are not addresses anyone wants
             # pasted into a chat: a file:// path with this run's key on it
             if url.scheme() not in ("http", "https"):
@@ -27726,8 +28057,8 @@ class Browser(QMainWindow):
             lines.append("[%s](%s)" % (title, text) if markdown else text)
         return "\n".join(lines)
 
-    def copy_tab_urls(self, which="all", markdown=False):
-        text = self.tab_urls(which, markdown)
+    def copy_tab_urls(self, which="all", markdown=False, view=None):
+        text = self.tab_urls(which, markdown, view=view)
         if text:
             QGuiApplication.clipboard().setText(text)
             self.flash(self._ui_str("tabsCopied"))
@@ -27765,7 +28096,9 @@ class Browser(QMainWindow):
         view = self.tabs.widget(index)
         if view is None or self._is_header(view):
             return None
-        url = view.url().toString()
+        # its address even before it has loaded (a restored tab): from
+        # url() that was "" and nothing happened
+        url = self._tab_url(view)
         if not url:
             return None
         if sid != self.active_session:
@@ -27776,7 +28109,7 @@ class Browser(QMainWindow):
         view = self.tabs.widget(index)
         if view is None or self._is_header(view):
             return None
-        url = view.url().toString()
+        url = self._tab_url(view)
         return self.new_tab(url=url or None, private=True)
 
     def goto_tab_number(self, n):
@@ -27925,6 +28258,14 @@ class Browser(QMainWindow):
         self._restore_tab_index(view, saved.get("index"))
         self.restore_tab_history(view, saved.get("trail"),
                                  saved.get("at"))
+        if saved.get("n"):
+            view.tab_name = saved["n"]
+        if saved.get("l"):
+            view.locked = True
+        if saved.get("p"):
+            self.pin_tab(self.tabs.indexOf(view), True)
+        elif saved.get("n") or saved.get("l"):
+            self._refresh_tab_label(view)
         return view
 
     def bookmark_all_tabs(self, group=None):
@@ -27939,7 +28280,7 @@ class Browser(QMainWindow):
                                        group=group):
             if getattr(view, "private", False):
                 continue      # nothing a private tab was on is written down
-            url = view.url()
+            url = as_qurl(self._tab_url(view))
             if url.scheme() not in ("http", "https") or _is_pane_url(
                     url.toString()):
                 continue
@@ -27979,7 +28320,9 @@ class Browser(QMainWindow):
         tab is dragged or closed, and a bulk action that works off
         stale indices closes the wrong tabs."""
         live = []
-        for _, view in self._real_tabs():
+        # this virtual browser's only: a tab ctrl-clicked before a switch
+        # is hidden now, and "close selected" closed what he cannot see
+        for _, view in self._real_tabs(session=self.active_session):
             if view in self._sel_views:
                 live.append(view)
         self._sel_views = live
@@ -28016,7 +28359,13 @@ class Browser(QMainWindow):
         if first < 0:
             first = index
         lo, hi = sorted((first, index))
-        self._sel_views = [v for i, v in self._real_tabs() if lo <= i <= hi]
+        # the strip holds every virtual browser's tabs side by side, and
+        # a folded group's too: the range is the tabs in between that
+        # are on screen, not the hidden ones that sit among them
+        bar = self.tabs.tabBar()
+        self._sel_views = [
+            v for i, v in self._real_tabs(session=self.active_session)
+            if lo <= i <= hi and bar.isTabVisible(i)]
         self._sel_anchor = anchor
         self.tabs.tabBar().update()
         return self.selected_tabs()
@@ -28079,7 +28428,11 @@ class Browser(QMainWindow):
 
     def group_selection(self, name=None):
         """Every selected tab into one new group, in one step."""
-        tabs = self.selected_tabs()
+        # the menu keeps private tabs out of groups and a pinned tab
+        # belongs to the window: a selection that held one moved it in
+        tabs = [v for v in self.selected_tabs()
+                if not getattr(v, "private", False)
+                and not getattr(v, "pinned", False)]
         if not tabs:
             return None
         if name is None:
@@ -28386,7 +28739,7 @@ class Browser(QMainWindow):
                 label = group + " · " + label
             if not bar.isTabVisible(i):
                 label += "  (" + self._ui_str("tabHidden") + ")"
-            action = menu.addAction(self._elide(label, 60))
+            action = menu.addAction(_amp(self._elide(label, 60)))
             action.triggered.connect(lambda _c=False, v=view:
                                      self.focus_tab(v))
         if not menu.actions():
@@ -28530,6 +28883,17 @@ class Browser(QMainWindow):
         return True
 
     # ---- what was open: sets, snapshots, and the crash list ----
+    def _kept_state(self, state, asked=False):
+        """tab_state for what is written to disk (sets, snapshots, tabs
+        put aside, saved groups): never a throwaway browser's tab (the
+        clean room's bank page came back in the regular jar from a
+        snapshot), and -- unless he asked for exactly these tabs to be
+        kept (asked=True: put aside, save the group) -- no site he said
+        must not be restored."""
+        return [s for s in state
+                if not self.session_is_throwaway(s.get("s", "main"))
+                and (asked or not self.restore_excluded(s.get("u", "")))]
+
     def tab_state(self, session=None, indices=None):
         """What it takes to open these tabs again, as plain data."""
         out = []
@@ -28583,6 +28947,11 @@ class Browser(QMainWindow):
                                 lazy=bool(lazy), group=group,
                                 session=session,
                                 title=entry.get("t") or None)
+            # the title it was saved with, until it loads: only in the
+            # tab's text, a relabel (mute, lock) made it "New tab", and
+            # the next save wrote that over the real one
+            if not getattr(view, "_last_title", ""):
+                view._last_title = entry.get("t") or ""
             if entry.get("n"):
                 view.tab_name = entry["n"]
             if entry.get("l"):
@@ -28645,7 +29014,7 @@ class Browser(QMainWindow):
         name = str(name or "").strip()
         if not name:
             return 0
-        state = self.tab_state(session=self.active_session)
+        state = self._kept_state(self.tab_state(session=self.active_session))
         if not state:
             return 0
         self.tabsets()[name] = {"t": int(time.time()), "tabs": state}
@@ -28688,8 +29057,7 @@ class Browser(QMainWindow):
             # encrypt_history) and not written again while it is on
             return 0
         # never a site he said must not be written down for restoring
-        state = [s for s in self.tab_state()
-                 if not self.restore_excluded(s.get("u", ""))]
+        state = self._kept_state(self.tab_state())
         if not state:
             return 0
         kept = [s for s in self.config.get("tabSnapList", [])
@@ -28735,7 +29103,8 @@ class Browser(QMainWindow):
         if indices is None:
             indices = [i for i, _ in self._real_tabs(
                 session=self.active_session)]
-        state = self.tab_state(indices=set(indices))
+        state = self._kept_state(self.tab_state(indices=set(indices)),
+                                 asked=True)
         if not state:
             return []
         self.aside_sets().append({"t": int(time.time()),
@@ -28746,7 +29115,9 @@ class Browser(QMainWindow):
             # a private tab is never written into the set, so closing it
             # here would not put it away -- it would simply lose it
             if (widget is not None and not self._is_header(widget)
-                    and not getattr(widget, "private", False)):
+                    and not getattr(widget, "private", False)
+                    and not self.session_is_throwaway(
+                        getattr(widget, "session", "main"))):
                 going.append(widget)
         # putting EVERY tab away left none, and closing the last tab
         # closes the window: a fresh tab first, so the window stays
@@ -28788,8 +29159,11 @@ class Browser(QMainWindow):
         closing it is not losing it."""
         if group not in self.groups:
             return 0
-        state = self.tab_state(
-            indices={i for i, _ in self._real_tabs(group=group)})
+        if self.session_is_throwaway(self.group_sessions.get(group, "main")):
+            return 0
+        state = self._kept_state(self.tab_state(
+            indices={i for i, _ in self._real_tabs(group=group)}),
+            asked=True)
         self.saved_groups()[group] = {
             "colour": self.group_colors.get(group, "#6c7086"),
             "t": int(time.time()), "tabs": state}
@@ -29038,7 +29412,8 @@ class Browser(QMainWindow):
             seen += 1
         return root
 
-    def new_window(self, url=None, private=False, app_url=None):
+    def new_window(self, url=None, private=False, app_url=None,
+                   minimized=False):
         """Ctrl+N: a second window of this same browser.
 
         It shares this one's cookie jars, bookmarks, passwords and
@@ -29049,7 +29424,10 @@ class Browser(QMainWindow):
                       private=private, app_url=app_url)
         win.resize(self.width(), self.height())
         win.move(self.x() + 40, self.y() + 40)
-        win.show()
+        if minimized:
+            win.showMinimized()
+        else:
+            win.show()
         return win
 
     def new_private_window(self):
@@ -29064,7 +29442,7 @@ class Browser(QMainWindow):
                 label = "%d. %s" % (n, win._window_label())
             except RuntimeError:
                 continue
-            action = menu.addAction(self._elide(label, 60))
+            action = menu.addAction(_amp(self._elide(label, 60)))
             action.setCheckable(True)
             action.setChecked(win is self)
             action.triggered.connect(lambda _c=False, w=win: w._come_to_front())
@@ -29621,12 +29999,17 @@ class Browser(QMainWindow):
     def go_page(self, back=False):
         """The page's own next/previous link, or the number in the
         address counted up or down."""
+        # the tab the tool runs on, kept: the answer comes back later,
+        # and by then another tab may be in front, which got this tab's
+        # next page loaded into it
+        target = self.current()
+
         def load(url):
             if url and QUrl(url).scheme() in ("http", "https"):
-                view = self.current()
-                if view is not None:
-                    view.load(QUrl(url))
-        return self.page_tool("nextpage", then=load, back=bool(back))
+                if target is not None and self._live_page(target) is not None:
+                    target.load(QUrl(url))
+        return self.page_tool("nextpage", view=target, then=load,
+                              back=bool(back))
 
     def jump_heading(self, back=False):
         return self.page_tool("heading", then=None, back=bool(back))
@@ -29675,6 +30058,11 @@ class Browser(QMainWindow):
             "discord.com": ("", "url"),
         }
         if host not in wrappers:
+            return url
+        # a link on one of these sites is a wrapper only at the path the
+        # site wraps with: google.com/search?q=https://x is a search
+        wrap_path = wrappers[host][0]
+        if wrap_path and target.path().strip("/") != wrap_path:
             return url
         query = QUrlQuery(target.query())
         for name in ("q", "u", "url", "target", "to"):
@@ -29728,10 +30116,14 @@ class Browser(QMainWindow):
 
     def media_speed(self, step=0.0, absolute=None, view=None):
         """Faster or slower, and remembered for this site."""
+        # the tab the script runs on, not the one in front when the
+        # answer arrives: that one's site got the speed saved
+        view = view if view is not None else self.current()
+
         def done(rate):
             if rate:
                 self.flash("%.2fx" % rate)
-                self._remember_media(view or self.current(), "speed", rate)
+                self._remember_media(view, "speed", rate)
         return self.media_tool("rate", view=view, then=done,
                                step=step, absolute=absolute)
 
@@ -29743,17 +30135,21 @@ class Browser(QMainWindow):
         return self.media_tool("playpause", view=view, want=want)
 
     def media_boost(self, factor, view=None):
+        view = view if view is not None else self.current()
+
         def done(got):
             if got:
                 self.flash("%d%%" % round(got * 100))
-                self._remember_media(view or self.current(), "boost", got)
+                self._remember_media(view, "boost", got)
         return self.media_tool("boost", view=view, then=done, factor=factor)
 
     def media_volume(self, step, view=None):
+        view = view if view is not None else self.current()
+
         def done(got):
             if got is not None and got >= 0:
                 self.flash("%d%%" % round(got * 100))
-                self._remember_media(view or self.current(), "volume", got)
+                self._remember_media(view, "volume", got)
         return self.media_tool("volume", view=view, then=done, step=step)
 
     def media_loop(self, view=None):
@@ -30473,18 +30869,39 @@ class Browser(QMainWindow):
         self.flash(self._ui_str("privForgotten") % host)
         return before - len(self.history)
 
-    def panic(self):
+    def panic(self, _others=True):
         """One key: everything silent, every tab on a blank page, every
-        pane shut. For the moment someone walks in."""
+        pane shut. For the moment someone walks in. Every window, and
+        every tab popped out of one, not only the window the key was
+        pressed in."""
+        was_paused = getattr(self, "_paused_media", None)
         self.close_pane()
         self.mute_all_tabs(on=True)
-        self.pause_all_media() if not getattr(self, "_paused_media", None) \
-            else None
+        self.pause_all_media() if not was_paused else None
         for i, view in self._real_tabs():
             try:
                 view.setUrl(QUrl("about:blank"))
             except RuntimeError:
                 pass
+        # popped-out tabs are not in the strip: they kept playing
+        for mini in list(getattr(self, "_popouts", None) or []):
+            view = getattr(mini, "view", None)
+            if view is None:
+                continue
+            try:
+                view.page().setAudioMuted(True)
+                if not was_paused:
+                    self.media_tool("pauseall", view=view)
+                view.setUrl(QUrl("about:blank"))
+            except RuntimeError:
+                pass
+        if _others:
+            for win in self.windows():
+                if win is not self:
+                    try:
+                        win.panic(_others=False)
+                    except (AttributeError, RuntimeError):
+                        pass
         if getattr(self, "vault", None) is not None:
             try:
                 self.lock_vault()
@@ -32550,9 +32967,13 @@ class Browser(QMainWindow):
         self._guarded_run(entry["id"], fn)()
 
     def run_action(self, action_id):
+        """An action by name, through the same door as its key: the lock,
+        the site's switched-off keys and the open pane count here too.
+        Called straight, a chord letter or "do that again" ran an action
+        the site had switched off, and over an open pane."""
         for entry in self.actions_list():
             if entry["id"] == action_id:
-                entry["run"]()
+                self._palette_run(entry)
                 return True
         return False
 
@@ -33660,6 +34081,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
 
         def got(urls):
+            # what the page listed, web and blob addresses only: a
+            # "file:///home/.../secret.zip" link was fetched by the browser
+            # itself, past the block a page has on local files, and copied
+            # into the downloads folder
+            urls = [u for u in (urls or [])
+                    if QUrl(str(u)).scheme() in ("http", "https", "blob")]
             if not urls:
                 self.flash(self._ui_str("dlNothing"))
                 return
@@ -33921,7 +34348,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """Tabs he has not looked at for a while, asleep. Off by
         default; never the tab in front, never one making a sound, never
         a pinned one unless he says so."""
-        minutes = int(self.config.get("sleepAfter", 0) or 0)
+        minutes = _sane_number(self.config.get("sleepAfter", 0))
         if not minutes:
             return 0
         now = time.monotonic()
@@ -34176,13 +34603,27 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def delete_group(self, group):
         """Close the group's tabs and its header."""
+        any_private = False
         for i in reversed(self._group_indices(group)):
             w = self.tabs.widget(i)
-            self._drop_share(w)
+            any_private = any_private or getattr(w, "private", False)
             # what close_tab does for one tab, done for each of these:
+            # a page in fullscreen, a find bar, a recording in progress
+            # (its timer fired on the deleted page and the frames were
+            # lost) and a place on the recently-closed list
+            if w is getattr(self, "_fs_view", None):
+                self._exit_page_fullscreen()
+            self._drop_share(w)
             # a permission card left up for a closed page would still
             # store an "always allow" for it (see _drop_permission_asks)
             self._drop_permission_asks(w)
+            bar = getattr(self, "_findbar", None)
+            if bar is not None:
+                bar.forget(w)
+            rec = self.recording_now()
+            if rec is not None and getattr(rec, "view", None) is w:
+                self.stop_recording()
+            self._remember_closed(w, i)
             self.tabs.removeTab(i)
             w._closed = True
             w.deleteLater()
@@ -34197,6 +34638,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.collapsed.pop(group, None)
         self.group_sessions.pop(group, None)
         self.group_ids.pop(group, None)
+        # a private tab in the group: its jar and the marks on the strip
+        # lasted until some later private close
+        if any_private:
+            self._drop_private_profile()
+        self._update_private_marks()
+        self._update_tab_count()
         self._ensure_tab_or_quit()
 
     def _ensure_tab_or_quit(self):
@@ -34412,6 +34859,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         if view is None or self._is_header(view):
             return ""
+        if self._private_of(view):
+            return ""           # a rule is saved by host in config.json
         zoom = view.zoomFactor() or 1.0
         js = """(function(){
           var el = document.elementFromPoint(%d, %d);
@@ -34532,7 +34981,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             action.setChecked(self.config.get(self.GUARD_KEY[name], False))
             action.triggered.connect(
                 lambda _c=False, n=name: self.toggle_guard(n))
-        if host:
+        private = self._private_of(view)
+        if host and private:
+            # the exceptions, API blocks and hidden elements are saved by
+            # host in config.json: set from a private tab they wrote down
+            # the site and applied to normal tabs. Only the place has a
+            # memory-only home.
+            menu.addSeparator()
+            menu.addAction(ui("cookiePrivateNote")).setEnabled(False)
+            menu.addAction(ui("guardPlace") % host).triggered.connect(
+                lambda _c=False, h=host: self.ask_fake_place(h))
+        elif host:
             menu.addSeparator()
             sub = menu.addMenu(ui("guardOffHere") % host)
             for name in page_guard.GUARDS:
@@ -34575,7 +35034,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """Two numbers, typed in. Nothing looks them up: a browser that
         went to a geocoder to work out what "Berlin" means would be
         doing the one thing this feature is for avoiding."""
-        here = self.fake_place(host) or {}
+        # a private tab's place is kept in memory for the private jar
+        # only: written to config.json it left the site on disk and gave
+        # the place to normal tabs as well
+        private = self._private_of()
+        here = (_PRIVATE_PLACES.get(host) if private
+                else self.fake_place(host)) or {}
         text, ok = QInputDialog.getText(
             self, self._ui_str("guardPlaceT"), self._ui_str("guardPlaceAsk"),
             text=("%s, %s" % (here.get("lat", ""), here.get("lon", ""))
@@ -34584,11 +35048,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return None
         text = text.strip()
         if not text:
+            if private:
+                _PRIVATE_PLACES.pop(host, None)
+                self.refresh_guard_scripts()
+                return None
             return self.fake_place(host, lat="")
         parts = re.split(r"[,\s]+", text)
         if len(parts) < 2:
             self.flash(self._ui_str("guardPlaceBad"))
             return None
+        if private:
+            try:
+                where = {"lat": float(parts[0]), "lon": float(parts[1])}
+            except ValueError:
+                self.flash(self._ui_str("guardPlaceBad"))
+                return None
+            _PRIVATE_PLACES[host] = where
+            self.refresh_guard_scripts()
+            return where
         return self.fake_place(host, parts[0], parts[1])
 
     # ---- navigation guards ----
@@ -35214,7 +35691,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if row["used"]:
                 label += "  (%s)" % time.strftime(
                     "%d.%m.", time.localtime(row["used"]))
-            action = menu.addAction(self._elide(label, 60))
+            action = menu.addAction(_amp(self._elide(label, 60)))
             action.triggered.connect(
                 lambda _c=False, k=row["key"]: self.revoke_permission(k))
         if not rows:
@@ -36536,17 +37013,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                 else "readSaveFailed"))
         return note
 
-    def tab_to_todo(self, index=None, close=True):
+    def tab_to_todo(self, index=None, close=True, view=None):
         """This tab as a to-do with its link, and the tab closed: the
-        way to put something off without leaving it open for a week."""
+        way to put something off without leaving it open for a week.
+
+        `view`: the page the menu was opened on. From a popped-out tab
+        (not in the strip) this filed and CLOSED the main window's
+        current tab instead -- past its lock."""
         drawer = self.desk()
-        index = self.tabs.currentIndex() if index is None else index
-        view = self.tabs.widget(index)
+        if view is not None:
+            index = self.tabs.indexOf(view)
+        else:
+            index = self.tabs.currentIndex() if index is None else index
+            view = self.tabs.widget(index)
         if drawer is None or view is None or self._is_header(view):
             return []
         rows = drawer.add_todo(self._view_title(view) or self._tab_url(view),
                                link=self._tab_url(view))
-        if close:
+        if close and index >= 0:
             self.close_tab(index, ask=False)
         self.flash(self._ui_str("todoAdded"))
         return rows
@@ -36605,9 +37089,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.config["clipHistory"] = want
         self.save_config(quiet=True)
         clipboard = QGuiApplication.clipboard()
-        if want and not getattr(self, "_clip_hooked", False):
-            clipboard.dataChanged.connect(self._clipboard_changed)
-            self._clip_hooked = True
+        # only the root window writes the history down, so it is the one
+        # that has to be hooked: switched on from another window, that
+        # window was hooked, refused every copy, and the list stayed empty
+        root = self._root_window()
+        if want and not getattr(root, "_clip_hooked", False):
+            clipboard.dataChanged.connect(root._clipboard_changed)
+            root._clip_hooked = True
         if not want:
             # off means the list goes: kept in memory, its copies (as
             # often as not passwords) were still searchable and shown
@@ -37568,6 +38056,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         drawer = self.desk()
         if drawer is None:
             return False
+        # read now: when the answer came back he could be on another tab
+        source = view if view is not None else self.current()
+        try:
+            url = self._tab_url(source) if source is not None else ""
+        except RuntimeError:
+            url = ""
 
         def done(raw):
             try:
@@ -37579,7 +38073,6 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if then is not None:
                     then(0)
                 return
-            url = self._tab_url(self.current())
             made = 0
             for item in lists[0][:40]:
                 drawer.add_todo(item, link=url if made == 0 else "")
@@ -37613,8 +38106,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 join = "&" if "?" in url else "?"
                 link = "%s%st=%d" % (url.split("&t=")[0], join, at)
             note = drawer.daily_note()
-            drawer.append_note(note["id"], "- [%s @ %d:%02d](%s)" % (
-                out.get("title", "")[:120], at // 60, at % 60, link))
+            # no folder to write to gives no note at all, and a failed
+            # append gives none either: "saved" must not be shown then
+            if note is None or drawer.append_note(
+                    note["id"], "- [%s @ %d:%02d](%s)" % (
+                        out.get("title", "")[:120], at // 60, at % 60,
+                        link)) is None:
+                self.flash(self._ui_str("readSaveFailed"))
+                return
             self.flash(self._ui_str("timeNoteSaved"))
 
         return self.desk_tool("videotime", view=view, then=done)
@@ -37637,6 +38136,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 widget.setVisible(self.bookmarks_bar_on())
             elif widget is getattr(self, "sessrow", None):
                 widget.setVisible(len(self.sessions) > 1)
+            elif widget is self.tabs.tabBar():
+                # shown outright it came back in an app window, beside
+                # the tab sidebar, or with one tab and the strip set to
+                # hide
+                self._apply_strip_visibility()
             else:
                 widget.show()
         self.flash(self._ui_str("zenOn") if want else self._ui_str("zenOff"))
@@ -37830,7 +38334,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             label = "%s  ·  %s" % (self._ui_str("kind" + row["kind"]
                                                      .capitalize()),
                                         row["title"] or row["url"])
-            action = menu.addAction(self._elide(label, 70))
+            action = menu.addAction(_amp(self._elide(label, 70)))
             if row["kind"] == "tab":
                 action.triggered.connect(
                     lambda _c=False, i=row["id"]:
@@ -37972,7 +38476,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             label = "%s  %s: %s" % (
                 time.strftime("%H:%M", time.localtime(row.get("t", 0))),
                 row.get("origin", ""), row.get("title", ""))
-            action = menu.addAction(self._elide(label, 70))
+            action = menu.addAction(_amp(self._elide(label, 70)))
             action.setToolTip(row.get("body", ""))
             action.setEnabled(False)
         if not rows:
@@ -38081,17 +38585,27 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.save_config(quiet=True)
         return on
 
-    def _fill_links(self, menu, out):
+    def _fill_links(self, menu, out, view=None):
         """The link and email list, into a menu that is already open."""
         menu.clear()
-        links = (out or {}).get("links", [])
+        # web addresses only (the list is read in the page's own world,
+        # where the page can answer anything), and from a private tab
+        # opened privately: they went into the normal jar, signed in
+        links = [row for row in (out or {}).get("links", [])
+                 if isinstance(row, dict)
+                 and QUrl(str(row.get("url") or "")).scheme()
+                 in ("http", "https")]
         mails = (out or {}).get("mails", [])
+        private = self._private_of(view)
+        session = getattr(view, "session", None) if view is not None \
+            else None
         for row in links[:30]:
-            action = menu.addAction(self._elide(row.get("text")
-                                                or row["url"], 60))
+            action = menu.addAction(_amp(self._elide(
+                str(row.get("text") or row["url"]), 60)))
             action.setToolTip(row["url"])
             action.triggered.connect(
-                lambda _c=False, u=row["url"]: self.new_tab(url=u))
+                lambda _c=False, u=row["url"]: self.new_tab(
+                    url=u, private=private, session=session))
         if links:
             menu.addSeparator()
             menu.addAction(self._ui_str("linksCopyAll")).triggered.connect(
@@ -38100,7 +38614,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if mails:
             sub = menu.addMenu(self._ui_str("linksMails") % len(mails))
             for who in mails[:30]:
-                sub.addAction(who).triggered.connect(
+                sub.addAction(_amp(str(who))).triggered.connect(
                     lambda _c=False, w=who:
                     QGuiApplication.clipboard().setText(w))
         if not links and not mails:
@@ -38787,12 +39301,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                  ("konsole", ["--nofork", "-e"]),
                  ("xterm", ["-e"]), ("gnome-terminal", ["--wait", "--"]))
 
+    GUI_EDITOR_WAIT = {"kate": "--block", "gedit": "--wait",
+                       "mousepad": "--disable-server"}
+
     def _editor_command(self, program):
         """How to start this editor so he can use it: as it is, or
         inside a terminal when it is one that draws in a terminal. None
         when it needs one and there is none."""
         if Path(program).name not in self.TERMINAL_EDITORS:
-            return [program]
+            # these hand the file to a running copy or fork and return at
+            # once: the field got its old text back while the editor was
+            # still opening on a file already deleted
+            wait = self.GUI_EDITOR_WAIT.get(Path(program).name)
+            return [program] + ([wait] if wait else [])
         for name, between in self.TERMINALS:
             term = shutil.which(name)
             if term:
@@ -39196,7 +39717,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             lambda: self.read_page_tool("ruler"))
         view = self.current()
         host = self._host_of(view.url()) if view is not None else ""
-        if host:
+        if host and not getattr(view, "private", False):
             width = menu.addMenu(ui("lineWidth") % host)
             for columns in (0, 70, 90, 110):
                 action = width.addAction(ui("lineWidthOff") if not columns
@@ -39469,7 +39990,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                              row["at"] % 60)
             if left:
                 label += self._ui_str("mediaLeftOf") % (left // 60)
-            action = menu.addAction(self._elide(label, 70))
+            action = menu.addAction(_amp(self._elide(label, 70)))
             action.triggered.connect(
                 lambda _c=False, u=row["url"]: self.new_tab(url=u))
         if not rows:
@@ -40126,8 +40647,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 rows = json.loads(raw or "[]")
             except (TypeError, ValueError):
                 rows = []
+            # the scheme is the page's own choice, and mpv has handlers
+            # (edl://, ytdl://, file://) that no page should reach
+            rows = [r for r in rows if isinstance(r, dict)
+                    and str(r.get("url") or "").lower().startswith(
+                        ("http://", "https://"))] \
+                if isinstance(rows, list) else []
             if then is not None:
-                then(rows if isinstance(rows, list) else [])
+                then(rows)
         return self.media_tool2("medialinks", view=view, then=done)
 
     def play_in_mpv(self, url=None, view=None):
@@ -40591,6 +41118,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         rows = self.config.setdefault("videoMoments", [])
         if not isinstance(rows, list):
             rows = self.config["videoMoments"] = []
+        if not all(isinstance(r, dict) for r in rows):
+            # a hand-edited string or null would crash every lookup
+            rows[:] = [r for r in rows if isinstance(r, dict)]
         if url is None:
             return rows
         bare = self._bare_media_url(url)
@@ -40682,7 +41212,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             label = self._pretty_time(row.get("at"))
             if row.get("note"):
                 label += "  " + row["note"][:40]
-            menu.addAction(label).triggered.connect(
+            menu.addAction(_amp(label)).triggered.connect(
                 lambda _c=False, r=row: self.moment_open(r, view=view))
         return menu
 
@@ -41604,6 +42134,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         rows = self.config.setdefault("clipMarks", [])
         if not isinstance(rows, list):
             rows = self.config["clipMarks"] = []
+        if not all(isinstance(r, dict) for r in rows):
+            rows[:] = [r for r in rows if isinstance(r, dict)]
         return rows
 
     def clip_mark(self, view=None, note=""):
@@ -43244,18 +43776,33 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         host = PasswordVault.normalize_host(host)
         family = set([host]) | set(self.vault.linked_hosts(
             host, self.linked_lines()))
-        elsewhere = []
+        others = []
         for entry in self.vault.logins():
             other = entry.get("host", "")
             if not other or other in family:
                 continue
             if other.endswith("." + host) or host.endswith("." + other):
                 continue
-            if self.vault.reveal(entry.get("id"), "password") == password:
-                elsewhere.append(other)
-        if elsewhere and warn:
-            self.flash(self._ui_str("reuseWarn") % elsewhere[0], ms=6000)
-        return elsewhere
+            others.append((other, entry.get("id")))
+        vault = self.vault
+
+        def verdict(secrets):
+            elsewhere = [other for (other, _i), secret
+                         in zip(others, secrets) if secret == password]
+            if elsewhere and warn:
+                self.flash(self._ui_str("reuseWarn") % elsewhere[0],
+                           ms=6000)
+            return elsewhere
+
+        if not vault.provider.eager and others:
+            # one `op item get` per login: on the GUI thread the window
+            # froze on every caught login. All of them on one worker, and
+            # the warning comes when it is done.
+            self.vault_job(
+                lambda: [vault.reveal(i, "password") for _o, i in others],
+                verdict)
+            return []
+        return verdict([vault.reveal(i, "password") for _o, i in others])
 
     def open_change_password(self, host=None, then=None):
         """The site’s own change-password page, where it has one.
@@ -43346,17 +43893,30 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         base = (str(self.config.get("breachApi", "")).rstrip("/")
                 or "https://api.pwnedpasswords.com")
-        self._breach_left = len(set(row["prefix"] for row in wanted))
-        self._breach_found = []
+        # the counters belong to this run: a second run started before
+        # the first one finished reset shared ones and the first never
+        # reported (or reported early)
+        run = {"left": len(set(row["prefix"] for row in wanted)),
+               "found": [], "failed": 0}
         for prefix in sorted(set(row["prefix"] for row in wanted)):
             reply = self._nam.get(QNetworkRequest(
                 QUrl("%s/range/%s" % (base, prefix))))
             reply.finished.connect(
                 lambda r=reply, pre=prefix: self._breach_answer(
-                    r, pre, wanted, then))
+                    r, pre, wanted, then, run))
         return True
 
-    def _breach_answer(self, reply, prefix, wanted, then=None):
+    def _breach_answer(self, reply, prefix, wanted, then=None, run=None):
+        if run is None:
+            run = {"left": 1, "found": [], "failed": 0}
+        try:
+            failed = (reply.error()
+                      != QNetworkReply.NetworkError.NoError)
+        except (AttributeError, RuntimeError):
+            failed = False
+        if failed:
+            # an answer that never came is not an answer of "clean"
+            run["failed"] += 1
         body = bytes(reply.readAll()).decode("utf-8", "replace")
         reply.deleteLater()
         seen = {}
@@ -43373,18 +43933,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 continue
             count = seen.get(row["rest"])
             if count:
-                self._breach_found.append({"id": row["id"],
-                                           "host": row["host"],
-                                           "times": count})
-        self._breach_left = max(0, getattr(self, "_breach_left", 1) - 1)
-        if self._breach_left:
+                run["found"].append({"id": row["id"],
+                                     "host": row["host"],
+                                     "times": count})
+        run["left"] = max(0, run["left"] - 1)
+        if run["left"]:
             return None
-        found = list(getattr(self, "_breach_found", None) or [])
+        found = list(run["found"])
         if then:
             then(found)
         elif found:
             self.flash(self._ui_str("breachFound")
                        % (len(found), found[0]["host"]), ms=6000)
+        elif run["failed"]:
+            self.flash(self._ui_str("breachFailed"), ms=6000)
         else:
             self.flash(self._ui_str("breachClean"))
         return found
@@ -44024,7 +44586,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             label = row["title"]
             if row.get("username"):
                 label += "   " + row["username"]
-            action = menu.addAction(label)
+            action = menu.addAction(_amp(label))
             field = {"login": "password", "card": "number",
                      "note": "body", "apikey": "key"}.get(row["type"],
                                                           "password")
@@ -44685,6 +45247,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if request is not None:
             try:
                 if request.isPaused():
+                    # resumed by hand while it waited its turn: out of the
+                    # queue, or it runs uncounted and is started again
+                    if entry.pop("queued", None):
+                        queue = getattr(self, "_dl_queue", None) or []
+                        if item_id in queue:
+                            queue.remove(item_id)
                     request.resume()
                     return True
             except RuntimeError:
@@ -44848,7 +45416,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def scheduled_downloads(self):
         rows = self.config.setdefault("dlLater", [])
-        return rows if isinstance(rows, list) else []
+        if not isinstance(rows, list):
+            return []
+        # rows with an address and a number for their time, cleaned in
+        # place: a string row, or "when": "tomorrow", raised in every tick
+        # and no download, however due, ever started again
+        good = [row for row in rows
+                if isinstance(row, dict) and row.get("url")]
+        for row in good:
+            when = row.get("when")
+            if isinstance(when, bool) or not isinstance(when, (int, float)):
+                row["when"] = _sane_number(when)
+        if len(good) != len(rows):
+            rows[:] = good
+        return rows
 
     def _schedule_tick(self):
         """Anything whose time has come, started now."""
@@ -45248,6 +45829,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     return True
                 at += 2 + int.from_bytes(raw[at + 2:at + 4], "big")
             return False
+        if raw[:4] in (b"II*\x00", b"MM\x00*"):
+            # a TIFF keeps its camera and GPS tags in the directory, not
+            # behind an "Exif" word: treated as always carrying them
+            return True
         return b"Exif" in raw[:65536]
 
     def biggest_image_url(self, url):
@@ -46070,9 +46655,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # one more -clean (n).jpg in his downloads per upload
             scratch = tempfile.mkdtemp(prefix="browser-upload-")
             cleaned = self.strip_metadata(source, folder=scratch)
-            if cleaned:
-                source = Path(cleaned)
-                self.flash(self._ui_str("upStripped"))
+            if not cleaned:
+                # the picture has camera data and could not be cleaned:
+                # the original must not go up instead, unannounced
+                shutil.rmtree(scratch, ignore_errors=True)
+                self.flash(self._ui_str("imgNotWritten"), ms=5000)
+                return False
+            source = Path(cleaned)
+            self.flash(self._ui_str("upStripped"))
         try:
             data = base64.b64encode(source.read_bytes()).decode()
         except OSError:
@@ -47638,17 +48228,25 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         performance overlay, the key viewer. Each one remembers
         whether it is on, per window, so pressing the entry again
         turns it off."""
-        held = getattr(self, "_dev_on", None)
+        target = self.current() if view is None else view
+        holder = target if target is not None else self
+        held = getattr(holder, "_dev_on", None)
         if held is None:
-            held = self._dev_on = {}
+            held = holder._dev_on = {}
         want = (not held.get(flag, False)) if on is None else bool(on)
         held[flag] = want
         self.flash(self._ui_str(("devOn" if want else "devOff"))
                    % self._ui_str(flag))
         return self.dev_tool(name, view=view, then=then, arg=want)
 
-    def dev_on(self, flag):
-        return bool((getattr(self, "_dev_on", None) or {}).get(flag, False))
+    def dev_on(self, flag, view=None):
+        """Whether a switch is on in the page in front: the overlays
+        are in the page, so the answer belongs to the tab."""
+        target = self.current() if view is None else view
+        if target is None:
+            target = self
+        return bool((getattr(target, "_dev_on", None) or {}).get(flag,
+                                                                 False))
 
     def page_fonts(self, view=None, then=None):
         """Which fonts the page renders in, and where they came from."""
@@ -48714,6 +49312,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         attr = QWebEngineSettings.WebAttribute
         if what in ("dark", "light"):
+            # kept on the tab: every navigation re-asks the darkening
+            # and would otherwise undo the choice
+            view._media_scheme = what
             try:
                 page.settings().setAttribute(attr.ForceDarkMode,
                                              what == "dark")
@@ -48729,6 +49330,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                       " !important;scroll-behavior:auto !important}",
             "off": "",
         }.get(what, "")
+        if what == "off" and getattr(view, "_media_scheme", None):
+            view._media_scheme = None
+            try:
+                self._apply_page_force_dark(view)
+            except RuntimeError:
+                pass
         page.runJavaScript(
             "(function (css) {"
             " var old = document.getElementById('__media');"
@@ -49181,9 +49788,23 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.flash(self._ui_str("devSnippetRan")
                            % str(text)[:80], ms=5000)
 
-        page.runJavaScript("(function(){ try { return (%s); }"
-                           " catch (e) { return 'error: ' + e.message; }"
-                           " })()" % code, MAIN_WORLD_ID, got)
+        def first(raw):
+            # the expression form always answers with a list; nothing at
+            # all means the wrapper did not compile, i.e. the code is
+            # statements (a semicolon, a var, two lines, a comment at the
+            # end). Those run as a script, and an error comes back as text
+            # instead of as nothing.
+            if isinstance(raw, list) and len(raw) == 2:
+                got(raw[1])
+                return
+            page.runJavaScript(
+                "(function(){ try { return (0, eval)(%s); }"
+                " catch (e) { return 'error: ' + e.message; }"
+                " })()" % json.dumps(str(code)), MAIN_WORLD_ID, got)
+
+        page.runJavaScript("(function(){ try { return [1, (\n%s\n)]; }"
+                           " catch (e) { return [2, 'error: ' + e.message]; }"
+                           " })()" % code, MAIN_WORLD_ID, first)
         return True
 
     def snippets_menu(self, menu=None, view=None):
@@ -49415,7 +50036,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                   ("devKeys", "devKeys", "keyviewer")):
             action = look.addAction(ui(label))
             action.setCheckable(True)
-            action.setChecked(self.dev_on(flag))
+            action.setChecked(self.dev_on(flag, view=view))
             action.triggered.connect(
                 lambda checked, name=tool, key=flag:
                 self.dev_switch(name, key, view=view, on=checked))
@@ -51769,9 +52390,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         and not here holds it off nowhere."""
         if url is None:
             url = view.url()
+        chosen = getattr(view, "_media_scheme", None)
         view.page().settings().setAttribute(
             QWebEngineSettings.WebAttribute.ForceDarkMode,
-            self.page_darkening(url) == "force")
+            (chosen == "dark") if chosen in ("dark", "light")
+            else self.page_darkening(url) == "force")
 
     def _refresh_page_force_dark(self):
         """The same question re-asked of every tab and every pane that
@@ -51885,13 +52508,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """He has gone to a tab: its "loaded" mark has done its job,
         and the clock on "how long since he looked at it" starts for
         the one he has just left."""
-        was = getattr(self, "_seen_index", None)
-        if was is not None:
-            old = self.tabs.widget(was)
-            if old is not None and not self._is_header(old):
-                old._last_seen = time.time()
-        self._seen_index = index
+        old = getattr(self, "_seen_view", None)
+        if old is not None:
+            try:
+                if not self._is_header(old):
+                    old._last_seen = time.time()
+            except RuntimeError:
+                pass
         view = self.tabs.widget(index) if index >= 0 else None
+        # the view itself, not its place: after a close or a drag the
+        # place holds another tab
+        self._seen_view = view
         if view is not None and not self._is_header(view):
             view._last_seen = time.time()
             self.clear_background_mark(view)
@@ -52203,19 +52830,29 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return True
 
     def _opensearch_answer(self, reply, host, name):
+        failed = reply.error() != QNetworkReply.NetworkError.NoError
         body = bytes(reply.readAll()).decode("utf-8", "replace")
         reply.deleteLater()
+        if failed:
+            self.flash(self._ui_str("barNoSearch"))
+            return ""
         found = re.search(r'<Url[^>]*type="text/html"[^>]*template="'
                           r'([^"]+)"', body) or re.search(
             r'<Url[^>]*template="([^"]+)"[^>]*type="text/html"', body)
         if not found:
-            self.flash(self._ui_str("barCertNone"))
+            # a certificate has nothing to do with it: the file was not
+            # a search description
+            self.flash(self._ui_str("barNoSearch"))
             return ""
         template = html.unescape(found.group(1))
         title = re.search(r"<ShortName>([^<]+)</ShortName>", body)
         pretty = html.unescape(title.group(1)) if title else (name or host)
         if not self.note_opensearch(host, pretty, template):
             return ""
+        # what note_opensearch kept, not the page's text: that one still
+        # had its optional {language} and {count?} braces, which every
+        # search through the new engine sent to the site as they were
+        template = self.opensearch_for(host) or template
         self.add_engine(pretty, template.replace("{searchTerms}", "%s"),
                         engine_id=host)
         self.flash(self._ui_str("barOpenSearchAdded") % pretty)
@@ -52323,6 +52960,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._history_view = view
         self._record_history(view.url(), title)
         self._history_view = None
+        if not self.config.get("history", True):
+            # with history off nothing may be kept about the page: the
+            # picture and the words used to be written all the same,
+            # with no entry to belong to
+            return
         # the picture for the history grid, once the page has drawn
         if self.config.get("historyThumbs", False):
             QTimer.singleShot(1200, lambda v=view, u=self._tab_url(view):
@@ -52562,6 +53204,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if (event.type() == QEvent.Type.KeyPress
                 and getattr(self, "_chord_waiting", False)
                 and self.isActiveWindow() and self._chord_key(event)):
+            return True
+        # a "&" in a page's title made the tab strip take Alt+<letter>
+        # as a shortcut for that tab: a page could claim keys. The strip
+        # has no mnemonics of its own, so none are let through
+        if (event.type() == QEvent.Type.Shortcut and obj is not None
+                and obj is getattr(getattr(self, "tabs", None), "tabBar",
+                                   lambda: None)()):
             return True
         # anything he did counts as being at the computer, which is
         # what the idle lock waits for the absence of
@@ -53211,7 +53860,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             QWebEngineScript.InjectionPoint.DocumentReady)
         script.setWorldId(QWebEngineScript.ScriptWorldId.ApplicationWorld)
         script.setRunsOnSubFrames(True)
-        script.setSourceCode(VIDEO_WATCH_JS)
+        script.setSourceCode(VIDEO_WATCH_JS.replace("__FRAME_KEY__",
+                                                    _FRAME_KEY))
         return script
 
     def _theme_script(self):
@@ -55473,11 +56123,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def refresh_pins(self):
         """The furniture, told the list changed."""
-        for furniture in (self.taskbar, self.dock):
-            if furniture is not None:
-                furniture.set_pins(self.pins())
-        if self._start_menu is not None and self._start_menu.isVisible():
-            self._start_menu.refresh()
+        # every window: the list is shared, so a pin made or removed in one
+        # window left the others showing (and offering) the old one
+        for win in self._all_windows():
+            try:
+                for furniture in (win.taskbar, win.dock):
+                    if furniture is not None:
+                        furniture.set_pins(self.pins())
+                if (win._start_menu is not None
+                        and win._start_menu.isVisible()):
+                    win._start_menu.refresh()
+            except RuntimeError:
+                continue
 
     def _fill_pin_icon(self, view, icon):
         """A pinned site's favicon, filled in when it arrives. Only ever
@@ -56718,12 +57375,23 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             held = self._preloaded = set()
         if url in held:
             return False
+        page = self._live_page(view)
+        if page is None:
+            return False
         held.add(url)
-        request = QNetworkRequest(QUrl(url))
-        request.setAttribute(
-            QNetworkRequest.Attribute.CacheSaveControlAttribute, True)
-        reply = self._nam.get(request)
-        reply.finished.connect(reply.deleteLater)
+        # a fetch through the browser's own manager had no cache and no
+        # cookies of the page and the engine never saw it: a visit for
+        # the server and no speed-up for him. A prefetch hint in the
+        # page is the engine fetching it into its own cache.
+        code = ("(function (u) { var l = document.createElement('link');"
+                " l.rel = 'prefetch'; l.href = u;"
+                " (document.head || document.documentElement)"
+                ".appendChild(l); })(%s)" % json.dumps(url))
+        try:
+            page.runJavaScript(code, APP_WORLD_ID)
+        except RuntimeError:
+            held.discard(url)
+            return False
         return url
 
     def preconnect_frequent(self, count=6):
@@ -56855,6 +57523,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         out = []
         for index, view in self._real_tabs():
             if view is self.current():
+                continue
+            # a pinned or locked tab, a game, a tab that is making
+            # sound: closed in bulk with no question, though he had said
+            # it stays or must be asked about
+            if (getattr(view, "pinned", False)
+                    or getattr(view, "locked", False)
+                    or getattr(view, "_game", False)
+                    or view.page().recentlyAudible()):
                 continue
             seen = float(getattr(view, "_last_seen", 0) or 0)
             if seen and seen < cut:
@@ -57479,7 +58155,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if page is None:
             return ""
         code = ("(function () {"
-                " var best = '', score = 0;"
+                " var best = null, score = 0;"
                 " var rows = document.querySelectorAll('*');"
                 " for (var i = 0; i < rows.length && i < 4000; i++) {"
                 "  var el = rows[i];"
@@ -57490,12 +58166,25 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 "  var gap = el.scrollHeight - el.clientHeight;"
                 "  if (gap <= score) continue;"
                 "  score = gap;"
-                "  best = el.id ? '#' + el.id"
-                "    : (el.className && typeof el.className === 'string'"
-                "       ? el.tagName.toLowerCase() + '.'"
-                "         + el.className.trim().split(/\\s+/)[0]"
-                "       : el.tagName.toLowerCase()); }"
-                " return best; })()")
+                "  best = el; }"
+                " if (!best) return '';"
+                # a class like md:flex or w-1/2 made querySelector throw,
+                # and a plain one matched the first of many: a path of
+                # positions reaches this element and no other
+                " var path = [], n = best;"
+                " while (n && n.nodeType === 1) {"
+                "  if (n.id) {"
+                "   var one = '#' + CSS.escape(n.id);"
+                "   if (document.querySelectorAll(one).length === 1)"
+                "   { path.unshift(one); break; } }"
+                "  if (n === document.documentElement)"
+                "  { path.unshift('html'); break; }"
+                "  var k = 1, s = n;"
+                "  while ((s = s.previousElementSibling)) k++;"
+                "  path.unshift(n.tagName.toLowerCase()"
+                "   + ':nth-child(' + k + ')');"
+                "  n = n.parentElement; }"
+                " return path.join(' > '); })()")
         return str(self._stashed_now(page, code) or "")
 
     def pdf_quick(self, view=None, long_page=False):
@@ -58580,7 +59269,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     self.toggle_panel(True)
             elif getattr(self, "_panel", None) is not None:
                 self.toggle_panel(False)
-        # the ones that are more than a line in the config
+        # the ones that are more than a line in the config. The theme was
+        # copied into the config and never painted: the window kept its
+        # old look, and the follow-the-desktop check, finding the config
+        # already saying so, never painted it either.
+        if "theme" in mode:
+            self.apply_theme(str(mode["theme"]))
         self.tab_strip_place(str(self.config.get("tabStrip") or "top"))
         self.tab_rows(self.config.get("tabRows") or 1)
         self.hide_feeds(bool(self.config.get("hideFeeds", False)))
@@ -58817,7 +59511,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if then:
                     then("")
                 return
-            ratio = picture.width() / max(1, view.width())
+            # the box is in CSS pixels: the page's zoom scales it as well
+            ratio = (picture.width() / max(1, view.width())) \
+                * self._zoom_of(view)
             cut = picture.copy(int(where["x"] * ratio),
                                int(where["y"] * ratio),
                                max(8, int(where["w"] * ratio)),
@@ -59212,11 +59908,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     then({"refused": True})
                 return
             self._caption_job(src.toString(), maker, transcriber,
-                              view=view, then=then)
+                              view=view, then=then,
+                              source=str(found.get("src") or ""))
 
         return self.video_caption_state(view=view, then=with_state)
 
-    def _caption_job(self, src, maker, transcriber, view=None, then=None):
+    def _caption_job(self, src, maker, transcriber, view=None, then=None,
+                     source=""):
         """ffmpeg, then the transcriber, then the track in the page.
 
         In a folder of its own, made for this run and taken away after
@@ -59232,6 +59930,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 then({})
             return False
         sound = work / "autocap.wav"
+        # which page and which video this is for: the job takes minutes
+        # and the tab may be somewhere else by then
+        try:
+            expect = {"url": view.url().toString() if view is not None
+                      else "", "src": str(source or "")}
+        except RuntimeError:
+            expect = {"url": "", "src": str(source or "")}
         self.flash(self._ui_str("autocapWorking"))
         pull = QProcess(self)
         self._autocap_pull = pull
@@ -59248,7 +59953,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     then({})
                 return
             self._caption_words_job(sound, transcriber, view=view,
-                                    then=then)
+                                    then=then, expect=expect)
 
         pull.finished.connect(pulled)
         # a program that does not start never says "finished": nothing
@@ -59258,7 +59963,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         pull.start()
         return True
 
-    def _caption_words_job(self, sound, transcriber, view=None, then=None):
+    def _caption_words_job(self, sound, transcriber, view=None, then=None,
+                           expect=None):
         """The whole file in words, with its times, as WebVTT."""
         out = sound.parent / "autocap"
         args = transcriber.split()
@@ -59306,7 +60012,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if then:
                     then({})
                 return
-            self.put_captions_on_video(vtt, view=view, then=then)
+            self.put_captions_on_video(vtt, view=view, then=then,
+                                       expect=expect)
 
         proc.finished.connect(done)
         proc.errorOccurred.connect(
@@ -59314,18 +60021,35 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         proc.start()
         return True
 
-    def put_captions_on_video(self, vtt, view=None, then=None):
+    def put_captions_on_video(self, vtt, view=None, then=None, expect=None):
         """A WebVTT file put on the video as a track that shows.
 
         The cues are parsed here and added through addTextTrack: a
         <track> element pointing at a local file would be a
-        cross-origin subtitle and the page would refuse it."""
+        cross-origin subtitle and the page would refuse it.
+
+        `expect` is the page address and the video's source the words
+        were made for: the tab may have gone elsewhere while they were
+        made, and another page's video gets no captions."""
         view = self.current() if view is None else view
         page = self._live_page(view)
         if page is None:
             if then:
                 then({})
             return False
+        want_src = ""
+        if expect:
+            try:
+                same = (not expect.get("url")
+                        or view.url().toString() == expect["url"])
+            except RuntimeError:
+                same = False
+            if not same:
+                self.flash(self._ui_str("autocapNoVideo"))
+                if then:
+                    then({})
+                return False
+            want_src = str(expect.get("src") or "")
         cues = []
         # hours are optional in WebVTT, and openai-whisper leaves them
         # out under an hour (00:03.000 --> 00:06.500): those matched
@@ -59355,8 +60079,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if then:
                 then({})
             return False
-        code = ("(function (cues) {"
-                " var v = document.querySelector('video');"
+        code = ("(function (cues, want) {"
+                " var v = null, all = document.querySelectorAll('video');"
+                " for (var i = 0; i < all.length; i++) {"
+                "  if (!want || (all[i].currentSrc || all[i].src) === want)"
+                "  { v = all[i]; break; } }"
                 " if (!v) return 'novideo';"
                 " var track = v.addTextTrack('captions', 'Made here',"
                 "   'xx');"
@@ -59365,8 +60092,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 "  catch (e) {} });"
                 " track.mode = 'showing';"
                 " window.__autocapCues = cues.length;"
-                " return String(cues.length); })(%s)"
-                % json.dumps(cues[:2000]))
+                " return String(cues.length); })(%s, %s)"
+                % (json.dumps(cues[:2000]), json.dumps(want_src)))
 
         def shown(answer):
             count = 0
@@ -59890,7 +60617,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         which is what makes it useful."""
         url = str(url or "")
         by_url = {}
-        for row in self.visible_history():
+        # newest first, so a page visited twice is followed through the
+        # visit that happened last, not the oldest one
+        for row in reversed(self.visible_history()):
             by_url.setdefault(str(row.get("url") or ""), row)
         trail = []
         seen = set()
@@ -59913,27 +60642,28 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         Rows that came from another page hang under it; the rest are
         roots. A research afternoon reads back as the shape it had."""
         rows = self.visible_history()[-int(limit):]
-        kids = {}
         roots = []
-        known = {str(row.get("url") or "") for row in rows}
+        # the latest visit of each address so far, and how deep it hangs:
+        # keyed by address a page visited twice was one node with the
+        # children of both visits, and the tree looped back on itself
+        last = {}
+        depth = {}
         for row in rows:
             came = str(row.get("f") or "")
             node = {"url": str(row.get("url") or ""),
                     "title": str(row.get("title") or ""),
                     "t": int(row.get("t") or 0), "kids": []}
-            if came and came in known and came != node["url"]:
-                kids.setdefault(came, []).append(node)
-            else:
+            parent = last.get(came) if came != node["url"] else None
+            if parent is None:
                 roots.append(node)
-
-        def hang(node, depth=0):
-            if depth > 8:
-                return node
-            for kid in kids.get(node["url"], []):
-                node["kids"].append(hang(kid, depth + 1))
-            return node
-
-        return [hang(one) for one in roots]
+                depth[id(node)] = 0
+            elif depth[id(parent)] < 9:
+                parent["kids"].append(node)
+                depth[id(node)] = depth[id(parent)] + 1
+            else:
+                continue
+            last[node["url"]] = node
+        return roots
 
     def history_tree_menu(self, menu=None):
         """The tree as nested menus, which is what a tree is on a
@@ -59993,6 +60723,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return False
             if getattr(view, "no_history", False):
                 return False
+            if not self.config.get("history", True):
+                return False        # switched off while this waited
             here = self._tab_url(view)
         except RuntimeError:
             return False
@@ -60152,9 +60884,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 pass
         have = {str(row.get("url") or "") for row in self.history}
         added = 0
+        trimmed = None
         for url, title, when in rows:
             url = str(url or "")
             if not url.startswith("http") or url in have:
+                continue
+            if self.never_record(as_qurl(url).host()):
+                # a site he said is never written down stays out of
+                # the history, the address bar and the history page
                 continue
             have.add(url)
             self.history.append({"url": url, "title": str(title or "")[:300],
@@ -60163,8 +60900,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if added:
             self.history.sort(key=lambda row: int(row.get("t") or 0))
             if len(self.history) > HISTORY_MAX:
+                trimmed = list(self.history)
                 del self.history[:len(self.history) - HISTORY_MAX]
             self.save_history()
+            if trimmed is not None:
+                # the words and thumbnails of the rows that were cut
+                self._history_dropped(trimmed)
         self.flash(self._ui_str("impHistDone") % added)
         return added
 
@@ -62145,15 +62886,33 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # the spine order is in the opf; without reading it, the
             # file order inside the zip is the book's own order in
             # practice, and sorting by name is the honest fallback
+            spent = 0
             for name in sorted(names)[:400]:
+                # a chapter is read up to a cap, whatever its header
+                # says it will unpack to: a zip bomb is not a book
                 try:
-                    raw = book.read(name).decode("utf-8", "replace")
-                except (KeyError, OSError):
+                    with book.open(name) as handle:
+                        data = handle.read(2 * 1024 * 1024)
+                except (KeyError, OSError, RuntimeError, zipfile.BadZipFile):
                     continue
+                # (a longer chapter is kept to its first 2 MB, not dropped)
+                spent += len(data)
+                if spent > 40 * 1024 * 1024:
+                    break
+                raw = data.decode("utf-8", "replace")
                 body = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "", raw)
                 body = re.sub(r"(?is)^.*?<body[^>]*>", "", body)
                 body = re.sub(r"(?is)</body>.*$", "", body)
                 body = re.sub(r"(?i)<img[^>]*>", "", body)
+                # nothing that fetches or navigates: frames, objects,
+                # linked sheets, a refresh, a base address
+                body = re.sub(
+                    r"(?is)<(iframe|object|embed|frame|frameset)\b[^>]*>"
+                    r".*?</\1\s*>", "", body)
+                body = re.sub(
+                    r"(?i)</?(iframe|object|embed|frame|frameset|link|meta"
+                    r"|base|video|audio|source|svg|image)\b[^>]*>",
+                    "", body)
                 title = ""
                 found = re.search(r"(?is)<h[1-3][^>]*>(.*?)</h[1-3]>", body)
                 if found:
@@ -62166,7 +62925,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.flash(self._ui_str("epubEmpty"))
             return False
         palette = theme_palette()
-        parts = ["<!doctype html><meta charset=utf-8>" + NO_SCRIPT_META
+        # no script and no request of any kind: the book's own style is
+        # inline and nothing else may load, submit or set a base
+        policy = ('<meta http-equiv="Content-Security-Policy" content="'
+                  "default-src 'none'; style-src 'unsafe-inline'; "
+                  "form-action 'none'; base-uri 'none'\">")
+        parts = ["<!doctype html><meta charset=utf-8>" + policy
                  + "<title>%s</title>" % html.escape(path.stem),
                  "<style>html,body{background:%s;color:%s;"
                  "font:18px/1.7 Georgia,serif;margin:0}"
@@ -62823,20 +63587,44 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.config["tabRows"] = rows
         self.save_config(quiet=True)
         bar = self.tabs.tabBar()
+        self._rows_sheet = None
         if rows == 1:
             bar.setUsesScrollButtons(True)
             bar.setStyleSheet("")
             self._update_close_buttons()
             return 1
-        bar.setUsesScrollButtons(False)
-        count = max(1, self.tabs.count())
-        across = (count + rows - 1) // rows
-        width = max(60, (self.width() - 40) // max(1, across))
-        bar.setStyleSheet(
-            "QTabBar::tab { min-width: %dpx; max-width: %dpx; }"
-            % (width, width))
+        self._fit_tab_rows()
         self._update_close_buttons()
         return rows
+
+    def _fit_tab_rows(self):
+        """The squeezed width, worked out again from the tabs there are
+        and the room there is.
+
+        A tab bar never wraps: every tab sits in one row, so the width
+        is the room divided by the count, not by the rows. Worked out
+        once, the tabs opened later ran past the edge with no way to
+        reach them. When even the narrowest width does not fit, the
+        scroll buttons come back."""
+        tabs = getattr(self, "tabs", None)
+        try:
+            rows = int((getattr(self, "config", None) or {}).get("tabRows")
+                       or 1)
+        except (TypeError, ValueError):
+            return
+        if rows <= 1 or tabs is None:
+            return
+        bar = tabs.tabBar()
+        count = max(1, tabs.count())
+        width = (self.width() - 40) // count
+        fits = width >= 60
+        width = max(60, width)
+        bar.setUsesScrollButtons(not fits)
+        sheet = ("QTabBar::tab { min-width: %dpx; max-width: %dpx; }"
+                 % (width, width))
+        if sheet != getattr(self, "_rows_sheet", None):
+            self._rows_sheet = sheet
+            bar.setStyleSheet(sheet)
 
     # ---- the tabs of one site, folded together ----
     def stack_site_tabs(self, host=None, on=None):
@@ -62914,9 +63702,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         rows = self.workspaces()
         if name not in rows:
             return False
+        if not any(str(row.get("u") or "").startswith("http")
+                   for row in rows[name] if isinstance(row, dict)):
+            # a set with no pages in it: switching to it closed every
+            # tab but one and opened nothing
+            return []
         was = self.workspace_now()
         if was and not keep:
             self.save_workspace(was)
+        elif not was and not keep and any(
+                (self._tab_url(view) or "").startswith("http")
+                and not getattr(view, "private", False)
+                for _i, view in self._real_tabs()):
+            # no set is current, so the open tabs belonged to none and
+            # would be gone: kept under a name of their own
+            self.save_workspace("previous tabs")
         self.config["workspaceNow"] = name
         self.save_config(quiet=True)
         # the new set first, then the old tabs away: a window with no
@@ -62931,6 +63731,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         keep_ids = {id(one) for one in opened}
         for index, view in list(self._real_tabs()):
             if id(view) in keep_ids:
+                continue
+            # a locked, pinned, private or game tab is not in a saved
+            # set and cannot be got back: it stays open
+            if (getattr(view, "locked", False)
+                    or getattr(view, "pinned", False)
+                    or getattr(view, "private", False)
+                    or getattr(view, "_game", False)):
                 continue
             at = self.tabs.indexOf(view)
             if at >= 0 and self.tabs.count() > 1:
@@ -63003,6 +63810,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         discard, freeze or throttle."""
         if host is None:
             view = self.current() if view is None else view
+            if view is not None and self._private_of(view):
+                # the site would be written to config.json: a private
+                # tab is a promise that nothing about it reaches disk
+                return False
             host = self._host_of(view.url()) if view is not None else ""
         host = str(host or "").lower().removeprefix("www.")
         if not host:
@@ -63060,6 +63871,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if view is self.current() and on:
             return False
         if self.is_kept_awake(view) and on:
+            return False
+        if on and (getattr(view, "_game", False)
+                   or self._capturing(view)):
+            # a call with the microphone muted or a silent screen share
+            # is not "audible", and frozen it dropped the call
+            return False
+        if getattr(view, "pinned", False) and on \
+                and not self.config.get("sleepPinned", False):
             return False
         try:
             if view.page().recentlyAudible() and on:
@@ -63368,7 +64187,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """One look at the pressure, and the budget."""
         found = self.memory_pressure()
         some = (found.get("some") or {}).get("avg10", 0.0)
-        limit = float(self.config.get("pressureLimit") or 10.0)
+        # "abc" here raised in every tick, and the budget below was never
+        # looked at
+        try:
+            limit = float(self.config.get("pressureLimit") or 10.0)
+        except (TypeError, ValueError):
+            limit = 10.0
         acted = []
         if some >= limit:
             # A page nobody is looking at is worth less than a tab he
@@ -63377,7 +64201,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             acted = self.sleep_oldest(2)
             if acted:
                 self.flash(self._ui_str("perfPressure") % len(acted))
-        budget = int(self.config.get("memoryBudget") or 0)
+        budget = _sane_number(self.config.get("memoryBudget") or 0)
         if budget > 0:
             while self.memory_total() > budget * 1024 * 1024:
                 gone = self.sleep_oldest(1)
@@ -63737,10 +64561,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                              " ? window.__navImages() : '[]'",
                              view=view, then=got)
 
-    def image_gallery(self, view=None):
+    def image_gallery(self, view=None, menu=None):
         """Every picture on the page in a plain list: how big it is,
-        what it is called, and what can be done with it."""
-        menu = QMenu(self)
+        what it is called, and what can be done with it.
+
+        The list arrives after the page has answered, so a menu that is
+        already on screen is passed in and filled there; a copy of the
+        actions taken from a fresh menu was always empty."""
+        menu = menu if menu is not None else QMenu(self)
         ui = self._ui_str
 
         def fill(rows):
@@ -64209,6 +65037,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._retry_url = url
         self._retry_view = view
         self._retry_tries = 0
+        # one entry per tab: a second failed tab no longer replaces the
+        # first one's retry
+        rows = self.__dict__.setdefault("_retry_rows", {})
+        rows[view] = [url, 0]
         timer = getattr(self, "_retry_timer", None)
         if timer is None:
             timer = self._retry_timer = QTimer(self)
@@ -64216,27 +65048,55 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         timer.start(5000)
         return True
 
-    def _retry_tick(self):
-        """One try: ask the address whether it is there yet, and load
-        it when it is."""
-        url = str(getattr(self, "_retry_url", "") or "")
-        view = getattr(self, "_retry_view", None)
-        timer = getattr(self, "_retry_timer", None)
-        self._retry_tries = int(getattr(self, "_retry_tries", 0)) + 1
-        if not url or view is None or self._retry_tries > 60:
-            if timer is not None:
-                timer.stop()
+    def _retry_cancel(self, view):
+        """A tab that loaded, or was closed, needs no more tries."""
+        if getattr(view, "_error_loads", 0):
+            view._error_loads -= 1      # that was the error page itself
+            return
+        rows = getattr(self, "_retry_rows", None)
+        if rows:
+            rows.pop(view, None)
+
+    def _retry_still_wanted(self, view, url):
+        """Whether the tab still shows the address that failed. A tab
+        he has moved on from is left as it is."""
+        try:
+            return view.url().toString() == url
+        except RuntimeError:
             return False
+
+    def _retry_tick(self):
+        """One try per waiting tab: ask the address whether it is there
+        yet, and load it when it is."""
+        rows = self.__dict__.setdefault("_retry_rows", {})
+        timer = getattr(self, "_retry_timer", None)
+        for view, row in list(rows.items()):
+            row[1] += 1
+            if row[1] > 60 or not self._retry_still_wanted(view, row[0]):
+                rows.pop(view, None)
+                continue
+            self._retry_ask(view, row[0], rows)
+        if not rows and timer is not None:
+            timer.stop()
+        return True
+
+    def _retry_ask(self, view, url, rows):
         request = QNetworkRequest(QUrl(url))
         reply = self._nam.head(request)
 
         def answered():
             ok = reply.error() == reply.NetworkError.NoError
             reply.deleteLater()
-            if not ok:
+            if not ok or url != (rows.get(view) or [None])[0]:
                 return
-            if timer is not None:
+            rows.pop(view, None)
+            timer = getattr(self, "_retry_timer", None)
+            if not rows and timer is not None:
                 timer.stop()
+            # he may have gone elsewhere while the answer was on its
+            # way: reloading then replaced the page he was reading
+            if not self._retry_still_wanted(view, url):
+                return
             try:
                 view.load(QUrl(url))
                 self.flash(self._ui_str("navBackOnline"))
@@ -64835,8 +65695,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             lambda m=info: (m.clear(), self.page_info_menu(m, view=view)))
         pics = menu.addMenu(ui("navImages"))
         pics.aboutToShow.connect(
-            lambda m=pics: (m.clear(), m.addActions(
-                self.image_gallery(view=view).actions())))
+            lambda m=pics: (m.clear(),
+                            self.image_gallery(view=view, menu=m)))
         frames = menu.addMenu(ui("navFrames"))
         frames.aboutToShow.connect(
             lambda m=frames: (m.clear(), self.frames_menu(m, view=view)))
@@ -64932,8 +65792,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 then("")
             return False
         code = ("(function (want) {"
-                " var pic = want ? document.querySelector("
-                "   'img[src=\"' + want + '\"]') : null;"
+                " var pic = null;"
+                # compared as strings: a quote or a backslash in the
+                # address made a selector that threw before the try
+                " if (want) {"
+                "  var imgs = document.images;"
+                "  for (var i = 0; i < imgs.length; i++) {"
+                "   if (imgs[i].getAttribute('src') === want"
+                "       || imgs[i].src === want) { pic = imgs[i]; break; }"
+                "  } }"
                 " if (!pic) {"
                 "  var all = document.querySelectorAll('img');"
                 "  pic = all.length ? all[0] : null; }"
@@ -65299,13 +66166,23 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         return True
 
-    def audio_shape_wanted(self):
-        want = self.a11y_config()
+    def audio_shape_wanted(self, view=None):
+        want = self.a11y_config(self._audio_host(view))
         try:
             return bool(want.get("monoAudio")) or \
                 float(want.get("balance") or 0.0) != 0.0
         except (TypeError, ValueError):
             return bool(want.get("monoAudio"))
+
+    def _audio_host(self, view):
+        """The host whose accessibility profile applies to this tab, so
+        mono and the balance can be set for one site."""
+        if view is None:
+            return ""
+        try:
+            return self._host_of(view.url())
+        except (AttributeError, RuntimeError):
+            return ""
 
     def apply_audio_shape(self, one=None):
         """Mono, and the balance, for the sound a page makes.
@@ -65313,14 +66190,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         Web Audio in the page: the media elements are routed through a
         merger (both ears the same) or a panner (one ear louder). The
         engine has no mixer the embedder can reach, so this is where it
-        has to happen."""
-        want = self.a11y_config()
-        mono = bool(want.get("monoAudio"))
-        try:
-            balance = float(want.get("balance") or 0.0)
-        except (TypeError, ValueError):
-            balance = 0.0
-        code = """(function (mono, pan) {
+        has to happen.
+
+        Each tab gets the answer for its own site: the profile of that
+        host laid over the global switches."""
+        template = """(function (mono, pan) {
           window.__audioShape = {mono: mono, pan: pan};
           /* a player the page makes later (most video sites build it
              after the load) is shaped when it starts to play */
@@ -65390,7 +66264,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
           return (mono ? "mono" : "stereo") + ":" + pan;
           };
           return window.__audioShapeRun();
-        })(%s, %s)""" % ("true" if mono else "false", json.dumps(balance))
+        })(%s, %s)"""
         done = 0
         views = [one] if one is not None else [
             self.tabs.widget(index) for index in range(self.tabs.count())]
@@ -65400,6 +66274,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             page = self._live_page(view)
             if page is None:
                 continue
+            want = self.a11y_config(self._audio_host(view))
+            try:
+                balance = float(want.get("balance") or 0.0)
+            except (TypeError, ValueError):
+                balance = 0.0
+            code = template % ("true" if want.get("monoAudio") else "false",
+                               json.dumps(balance))
             try:
                 page.runJavaScript(code, MAIN_WORLD_ID, lambda _r: None)
                 done += 1
@@ -65874,7 +66755,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 then(out)
 
         proc.finished.connect(done)
+        # one object per call, for the life of the window: every caption
+        # line added another. Deleted once it has answered.
+        proc.finished.connect(proc.deleteLater)
         proc.errorOccurred.connect(failed)
+        proc.errorOccurred.connect(
+            lambda _e=None: proc.state() == QProcess.ProcessState.NotRunning
+            and proc.deleteLater())
         proc.start(args[0], args[1:])
         return True
 
@@ -67066,18 +67953,28 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         host = str(host or "").lower().removeprefix("www.")
         if not host:
             return False
-        rows = [h for h in (self.config.get("darkSiteRules") or [])
-                if isinstance(h, str)]
-        if host in rows:
-            rows.remove(host)
-            out = False
-        else:
-            rows.append(host)
-            out = True
+        rows = [h.lower().removeprefix("www.").strip()
+                for h in (self.config.get("darkSiteRules") or [])
+                if isinstance(h, str) and h.strip()]
+
+        def covers(h):
+            return host == h or host.endswith("." + h)
+
+        # the menu ticks the box from site_left_alone, which also counts
+        # a parent domain and the built-in list; the toggle has to read
+        # the same state, or clicking a ticked box added one more row
+        if self.site_left_alone(host):
+            self.set_dark_site_rules([h for h in rows if not covers(h)])
+            if any(covers(h) for h in NATIVE_DARK_SITES):
+                # the browser's own list cannot be edited from here
+                self.flash(self._ui_str("darkSiteBuiltin") % host)
+                return True
+            self.flash(self._ui_str("darkSiteOff") % host)
+            return False
+        rows.append(host)
         self.set_dark_site_rules(rows)
-        self.flash(self._ui_str("darkSiteOn" if out else "darkSiteOff")
-                   % host)
-        return out
+        self.flash(self._ui_str("darkSiteOn") % host)
+        return True
 
     # ---- a page that did not load, in the browser's own style ----
     def error_page_html(self, url="", reason="", details=None):
@@ -67161,6 +68058,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not url or view.url().scheme() not in ("http", "https"):
             return False
         found = self.error_details(view=view, url=url, reason=reason)
+        # the one loadFinished(True) this page itself is about to give
+        view._error_loads = getattr(view, "_error_loads", 0) + 1
         page.setHtml(self.error_page_html(url, found["words"],
                                           details=found), QUrl(url))
         return True
@@ -67657,8 +68556,28 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.apply_theme(DEFAULT_THEME, save=False)
         self.apply_look(DEFAULT_LOOK, save=False)
         self.apply_chrome_style()
+        self._apply_appearance_extras()
+        # the switches wrote their defaults back; a reset leaves the keys
+        # absent, as it always did
+        for key in ("monoFavicons", "pageThemeColour", "revealInFullscreen"):
+            self.config.pop(key, None)
+        self.save_config(quiet=True)
         self.flash(self._ui_str("appearanceReset"))
         return was
+
+    def _apply_appearance_extras(self):
+        """The appearance settings that need a call of their own to show:
+        the fonts, flat tab icons, the page's colour in the bar, the
+        peek in fullscreen and the pages of ours that draw from them.
+        Popping or restoring the keys alone left all of these as they
+        were until a restart."""
+        self.apply_site_fonts()
+        self.set_mono_favicons(bool(self.config.get("monoFavicons", False)))
+        self.set_page_theme_colour(
+            bool(self.config.get("pageThemeColour", False)))
+        self.set_reveal_in_fullscreen(
+            bool(self.config.get("revealInFullscreen", False)))
+        self.refresh_own_pages()
 
     def undo_reset_appearance(self):
         """Put the backup back."""
@@ -67672,6 +68591,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.apply_theme(self.config.get("theme", DEFAULT_THEME), save=False)
         self.apply_look(self.config.get("look", DEFAULT_LOOK), save=False)
         self.apply_chrome_style()
+        self._apply_appearance_extras()
         if self.config.get("colourFile"):
             try:
                 self.follow_colour_file(quiet=True)
@@ -68251,6 +69171,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             request.accept()
             request.isFinishedChanged.connect(
                 lambda r=request: self._plugin_downloaded(r))
+            # the tab the link opened has nothing left to show
+            self._close_download_tab(page)
             return
         # the kinds he never wants arriving by themselves
         if self.download_blocked(name):
@@ -68259,6 +69181,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     literal(self._ui_str("dlBlockedAsk") % name)) \
                     != QMessageBox.StandardButton.Yes:
                 request.cancel()
+                # a download that never starts leaves no bar entry to
+                # close the blank target=_blank tab, so it is closed here
+                self._close_download_tab(page)
                 return
         # too big, or no room for it
         trouble = self.download_too_big(request.totalBytes())
@@ -68271,6 +69196,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                             % (name, _pretty_size(request.totalBytes())))) \
                     != QMessageBox.StandardButton.Yes:
                 request.cancel()
+                self._close_download_tab(page)
                 return
         # his own naming pattern, before anything is written
         page_url = ""
@@ -68296,6 +69222,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     != QMessageBox.StandardButton.Yes:
                 request.cancel()
                 self.flash(self._ui_str("dlTwiceKept"))
+                self._close_download_tab(page)
                 return
         if self.download_should_ask(name):
             path, _ = QFileDialog.getSaveFileName(
@@ -68303,6 +69230,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 str(self.download_dir() / request.downloadFileName()))
             if not path:
                 request.cancel()
+                self._close_download_tab(page)
                 return
             request.setDownloadDirectory(str(Path(path).parent))
             request.setDownloadFileName(Path(path).name)
@@ -68754,6 +69682,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def _history_dropped(self, before):
         """After the history was cut down from `before`: the extras of
+        every page that no entry holds any more. (And the undo record of
+        this cut becomes the rows it took: kept as the whole list, an
+        undo also brought back what another window deleted meanwhile.)
+        """
+        if getattr(self, "_history_undo", None) is before:
+            here = {id(e) for e in self.history}
+            self._history_undo = [e for e in before if id(e) not in here]
+        return self._history_extras_dropped(before)
+
+    def _history_extras_dropped(self, before):
+        """After the history was cut down from `before`: the extras of
         every page that no entry holds any more. A page read again since
         keeps its words and its picture though its older visit went
         (prune, a time range); an empty history leaves none at all."""
@@ -68805,7 +69744,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.history = kept
         gone = before - len(self.history)
         if gone:
-            self._note_history_undo(list(old))
+            self._note_history_undo(old)    # the same list, see above
             self.save_history()
             self._history_dropped(old)
         return gone
@@ -69624,6 +70563,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return 0
         self._bookmark_undo = list(self.bookmarks)
         self._bookmark_undo_at = time.monotonic()
+        self._bookmark_undo_taken = None    # worked out at the save after
         kept = []
         used = set()
         for item in raw[:BOOKMARKS_MAX]:
@@ -69659,6 +70599,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     and (a.get("t") is not None
                          or (a.get("url") == b.get("url")
                              and a.get("title") == b.get("title"))))
+        # only what that delete took: an entry deleted since (in another
+        # window, or here) stays deleted
+        taken = getattr(self, "_bookmark_undo_taken", None)
+        if isinstance(taken, set):
+            saved = [e for e in saved
+                     if e.get("id") in now or e.get("id") in taken]
         # an id freed by the delete and taken by a new bookmark since
         # (ids are max+1): that one is somebody else, and the deleted
         # entry comes back under a fresh id, its children with it
@@ -69762,6 +70708,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 tree = None
         self._bookmark_undo = list(self.bookmarks)
         self._bookmark_undo_at = time.monotonic()
+        self._bookmark_undo_taken = None    # worked out at the save after
         fid = _sane_number(self.add_bookmark_folder(
             path.stem[:60] or "Imported", parent))
         if not fid:
@@ -70054,6 +71001,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """A change worth showing everywhere: to disk, then the bar, the
         star and any manager page that is open — and the folder he
         mirrors them to, if he set one."""
+        if getattr(self, "_bookmark_undo", None) \
+                and getattr(self, "_bookmark_undo_taken", 0) is None:
+            # the ids the delete just took: what its undo may bring back
+            here = {e.get("id") for e in self.bookmarks}
+            self._bookmark_undo_taken = {
+                e.get("id") for e in self._bookmark_undo
+                if e.get("id") not in here}
         self.write_bookmarks()
         if self.config.get("bookmarkMirror"):
             self.mirror_bookmarks()
@@ -70253,13 +71207,25 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         The manager is a pane over the current tab, and "open here"
         means that tab — so the pane steps aside first, or the page he
         asked for would arrive behind a screen he cannot see past."""
+        if entry.get("js") and not entry.get("url") and not new_tab:
+            # a bookmarklet has no address, so a click used to do nothing
+            # at all; it runs on the page in front, once the pane is away
+            self.close_pane()
+            self.run_bookmarklet(entry)
+            return
         url = QUrl(entry.get("url") or "")
         if url.scheme() not in ("http", "https"):
             return
         self.close_pane()
-        self.note_bookmark_opened(entry)
         view = self.current()
-        if new_tab or view is None or self._is_header(view):
+        into_new = new_tab or view is None or self._is_header(view)
+        private = (getattr(self, "_all_private", False) if into_new
+                   else getattr(view, "private", False))
+        if not private:
+            # how often and when: from a private tab this went into
+            # bookmarks.json, a private visit with its time on disk
+            self.note_bookmark_opened(entry)
+        if into_new:
             view = self.new_tab(url=url.toString())
         else:
             view.load(url)
@@ -70325,6 +71291,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # what the Undo offer puts back for the next few seconds
         self._bookmark_undo = list(self.bookmarks)
         self._bookmark_undo_at = time.monotonic()
+        self._bookmark_undo_taken = None    # worked out at the save after
         # a folder goes with everything in it, all the way down —
         # folders inside it and their contents too, so nothing is left
         # pointing at a folder that is not there any more
@@ -70795,7 +71762,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def show_unused_bookmarks(self):
         """The ones he never opens, with the offer to delete the lot."""
-        rows = self.unused_bookmarks()
+        # a locked folder says it guards against deletes, and so does
+        # everything inside it
+        rows = [e for e in self.unused_bookmarks()
+                if not self._under_lock(e)]
         if not rows:
             return 0
         answer = QMessageBox.question(
@@ -70807,6 +71777,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return 0
         self._bookmark_undo = list(self.bookmarks)
         self._bookmark_undo_at = time.monotonic()
+        self._bookmark_undo_taken = None    # worked out at the save after
         for entry in rows:
             self._forget_bookmark(entry["id"])
         self.save_bookmarks()
@@ -70823,6 +71794,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return 0
         self._bookmark_undo = list(self.bookmarks)
         self._bookmark_undo_at = time.monotonic()
+        self._bookmark_undo_taken = None    # worked out at the save after
         gone = self.merge_duplicate_bookmarks()
         self.flash(self._ui_str("bmDupesGone") % gone)
         return gone
@@ -71455,9 +72427,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         last set to are the ones used."""
         if not self.vault_password_on():
             return
-        options = self.config.get("pwGen") or {}
+        options = self.config.get("pwGen")
+        if not isinstance(options, dict):
+            # a hand-edited file: a list or a string raised here and
+            # nothing reached the clipboard
+            options = {}
+        try:
+            length = int(options.get("length", 20))
+        except (TypeError, ValueError):
+            length = 20
         password = generate_password(
-            int(options.get("length", 20)),
+            length,
             bool(options.get("symbols", True)),
             bool(options.get("digits", True)),
             bool(options.get("upper", True)),
@@ -71725,6 +72705,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         if not self._external_host_match(url.host()):
             return False
+        # a script's location.href arrives as a link click: from a tab he
+        # is not looking at, or again and again, it started the other
+        # browser on an address of the page's choosing. Only the tab in
+        # front (or one a click just opened), and once in a while.
+        if (view is not None
+                and nav_type == NT.NavigationTypeLinkClicked
+                and not self._page_may_act(view, "handoff:" + url.host())):
+            return False
         cmd = self._external_browser()
         name = os.path.basename(cmd) or cmd
         if not self._external_which(cmd):
@@ -71734,6 +72722,28 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not self._launch_external(cmd, url.toString()):
             return False
         self._external_notice(view, name)
+        return True
+
+    def _page_may_act(self, view, key, every=10.0):
+        """For something a page's navigation starts outside the page (a
+        program, a compose tab) when a script cannot be told from a
+        click: only from the tab in front, or a tab a click has just
+        opened (window.open needs a click to get past the popup block),
+        and not more often than every few seconds for the same thing."""
+        try:
+            front = view is self.current() or bool(
+                getattr(view.page(), "_opener_url", None))
+        except (AttributeError, RuntimeError):
+            front = False
+        if not front:
+            return False
+        now = time.monotonic()
+        done = getattr(self, "_page_acted", None)
+        if not isinstance(done, dict):
+            done = self._page_acted = {}
+        if now - done.get(key, -every) < every:
+            return False
+        done[key] = now
         return True
 
     def _external_notice(self, view, name):
@@ -72491,7 +73501,17 @@ def _proxy_routing(config):
                                             rule.get("profile", "direct"),
                                             missing=("block",))))
     if not rules:
-        return None
+        # with a proxy in the way the engine never resolves a name, so
+        # the block lists (resolver rules) did nothing: the local proxy
+        # is built for them even with no per-site rules. Direct, and a
+        # system with no proxy set, still resolve names themselves.
+        if not _blocked_hosts(config) or active == "direct":
+            return None
+        if active in profiles:
+            if _proxy_hostport(profiles[active]) is None:
+                return None
+        elif _system_proxy_route()[0] == ("direct",):
+            return None
     bypass = []
     if active == "direct":
         default = ("direct",)
@@ -73547,7 +74567,9 @@ DESK_TOOLS = {
   } else if (how === "sort") {
     out = text.split("\n").sort().join("\n");
   } else if (how === "dedupe") {
-    var seen = {}, keep = [];
+    /* no prototype: "constructor" and "toString" were already there
+       on a plain object, and such a line was dropped at first sight */
+    var seen = Object.create(null), keep = [];
     text.split("\n").forEach(function (line) {
       if (seen[line]) return;
       seen[line] = 1; keep.push(line);
@@ -75737,7 +76759,7 @@ MEDIA_TOOLS2 = {
   return JSON.stringify(now);
 })(ARG)""",
 
-"turn": MEDIA_PICK + r"""(function (want) {
+"turn": MEDIA_PICK + MEDIA_XFORM + r"""(function (want) {
   var m = pick();
   if (!m) return "none";
   var now = window.__mediaTurn || {deg: 0, flip: false};
@@ -75745,20 +76767,11 @@ MEDIA_TOOLS2 = {
   if (want && want.flip) now.flip = !now.flip;
   if (want && want.reset) now = {deg: 0, flip: false};
   window.__mediaTurn = now;
-  var css = "rotate(" + now.deg + "deg)"
-          + (now.flip ? " scaleX(-1)" : "");
-  m.style.setProperty("transform", css, "important");
-  /* a quarter turn in a box made for landscape has to be scaled back
-     in, or the sides are cut off */
-  if (now.deg % 180 === 90 && m.clientWidth && m.clientHeight) {
-    var fit = Math.min(1, m.clientHeight / m.clientWidth);
-    m.style.setProperty("transform", css + " scale(" + fit + ")",
-                        "important");
-  }
+  xform(m);
   return JSON.stringify(now);
 })(ARG)""",
 
-"zoom": MEDIA_PICK + r"""(function (want) {
+"zoom": MEDIA_PICK + MEDIA_XFORM + r"""(function (want) {
   var m = pick();
   if (!m) return "none";
   var now = window.__mediaZoom || {scale: 1, x: 0, y: 0, crop: false};
@@ -75771,10 +76784,7 @@ MEDIA_TOOLS2 = {
   }
   window.__mediaZoom = now;
   m.style.setProperty("transform-origin", "center center");
-  m.style.setProperty(
-    "transform",
-    "scale(" + now.scale + ") translate(" + now.x + "px," + now.y + "px)",
-    "important");
+  xform(m);
   m.style.setProperty("object-fit", now.crop ? "cover" : "contain",
                       "important");
   return JSON.stringify(now);
@@ -77351,12 +78361,30 @@ def main():
                 live = [w for w in WINDOWS
                         if not getattr(w, "_all_private", False)
                         and not getattr(w, "_app_url", None)]
-                if win in live:
+                # the window he is in, not always the first: mute, a new
+                # tab or a screenshot landed in window 1 from window 2
+                here = QApplication.activeWindow()
+                if here in live:
+                    target = here
+                elif win in live:
                     target = win
                 elif live:
                     target = live[-1]
                 elif WINDOWS:
-                    target = WINDOWS[-1].new_window()
+                    # only private or app windows are left. A command,
+                    # or a bare background message, needs no new window
+                    # (a media key popped one up over the game); a link
+                    # gets one, minimized if it was sent to stay out of
+                    # the way.
+                    url, quiet = (None, False) \
+                        if message.startswith("cmd ") \
+                        else _parse_handoff(message)
+                    if message.startswith("cmd ") or (url is None and quiet):
+                        target = ([w for w in WINDOWS
+                                   if not getattr(w, "_app_url", None)]
+                                  or WINDOWS)[-1]
+                    else:
+                        target = WINDOWS[-1].new_window(minimized=quiet)
                 else:
                     target = win
                 target._handoff_message(message, reply)

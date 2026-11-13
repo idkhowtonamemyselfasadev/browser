@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part forty-one: seventeenth to nineteenth passes)
+
+The seventeenth search looked at private tabs action by action, the menus,
+restoring tabs and odd settings; the eighteenth at what a web page can start
+outside itself; the nineteenth read browser.py from the first line to the
+last in twenty pieces. Together they confirmed 108 bugs, fixed here:
+
+- **Every window's tabs are saved.** Only the first window's tabs were kept
+  at a quit or a crash; a popped-out tab is kept too, and the crash offer
+  lists them all. Reopened tabs keep their pin, lock and name; restored tabs
+  keep their titles until they load.
+- **Private tabs.** Opening a bookmark from one no longer counts the visit
+  in bookmarks.json, per-site settings are not offered there (they would
+  write the site into the settings), its links open privately, and video
+  frame reports never name a private site.
+- **What a page can start.** A page's script can no longer keep launching
+  your other browser or opening webmail compose tabs; a page title can no
+  longer take an Alt+letter shortcut on the tab strip; "download every
+  linked file" fetches web files only.
+- **Undo** puts back what that delete took, and nothing another window
+  deleted in the meantime.
+- **Page looks.** The colour-blindness filter and the night dimmer no longer
+  switch each other off; "pages with no background" leaves pages that have
+  one alone; bold starts no longer hide text in drawings; the picture viewer
+  follows a page that adds pictures.
+- **Tabs.** Shift+click and the multi-selection stay in the virtual browser
+  you see; closing a blank tab no longer fills "recently closed"; copying
+  every tab, bookmarking them all and opening one elsewhere include tabs not
+  loaded yet; "close unused tabs" and workspaces leave pinned, locked and
+  private tabs alone; Panic covers every window.
+- **Downloads and the vault.** A failed import or save says so instead of
+  reporting success; resuming a waiting download takes it out of the queue;
+  the breach check no longer says "nothing found" when it could not ask.
+- **Smaller fixes:** searches typed as "why: …" stay as typed; a link
+  tracker that was never stripped is; the dock shows a menu for pins that do
+  not fit; bookmarklets run from the bar; captions go on the page they were
+  made for; keep-awake and the guard's fixed place are not written down for
+  a private site; tab rows recount as tabs open; a book cannot load remote
+  pictures; the retry after a failed load leaves a tab you moved on from;
+  locked bookmark folders are never emptied by "delete unused"; block lists
+  hold behind a plain proxy; menus show "&" in page titles; and many smaller
+  things a hand-edited settings file could make go wrong.
 ## 2026-11-13 — line-by-line review, day 3 (part forty: fifteenth and sixteenth passes)
 
 The fifteenth search read the smaller files whole (the Downloads and Notes

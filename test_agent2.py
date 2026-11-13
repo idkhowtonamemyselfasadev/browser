@@ -561,11 +561,12 @@ r = ask("view3", {"op": "viewport", "tab": priv})
 check("...and put back", r.get("ok"), r)
 r = ask("groups", {"op": "groups"})
 check("the groups can be listed", r.get("ok") and "groups" in r, r)
-r = ask("groupmove", {"op": "groups", "move": priv, "group": "agents"})
+# an ordinary tab: a private one joins no group (its jar is not one)
+r = ask("groupmove", {"op": "groups", "move": tid, "group": "agents"})
 check("...and a tab moved into one", r.get("ok"), r)
 check("...which the browser agrees with",
       any(win._group_of(v) == "agents" for _i, v in bridge._views()
-          if getattr(v, "_agent_id", None) == priv),
+          if getattr(v, "_agent_id", None) == tid),
       [win._group_of(v) for _i, v in bridge._views()])
 (scratch / "upload.txt").write_text("a file to upload")
 r = ask("upload", {"op": "upload", "tab": tid,

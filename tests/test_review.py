@@ -1661,6 +1661,7 @@ class _FakeProc2:
     class ProcessState:
         NotRunning = 0
     def state(self): return 0
+    def deleteLater(self): pass     # the translator's process goes when done
 _real_qp2 = B.QProcess
 B.QProcess = _FakeProc2
 for _tool in ("/usr/bin/trans", "/usr/bin/argos-translate", "/opt/mytr"):
@@ -3726,7 +3727,8 @@ finally:
     B.shutil.which = _real_which80
 check("a terminal editor opens in a terminal, a window editor as it is",
       _c1 == ["/usr/bin/kitty", "-e", "/usr/bin/nvim"]
-      and _c2 == ["/usr/bin/kate"] and _c3 is None, str((_c1, _c2, _c3)))
+      and _c2 == ["/usr/bin/kate", "--block"] and _c3 is None,
+      str((_c1, _c2, _c3)))
 
 # ===== batch 82: the MPRIS adaptors answer to their interfaces ==========
 _mp82 = getattr(B, "mpris", None)
@@ -5577,6 +5579,10 @@ _mn109 = _pg109._main_nav_url.toString()
 check("a refused navigation does not vouch for that host's login box",
       "refused109" not in _mn109, _mn109)
 _mt109 = []
+# the click comes from the tab in front (a script's location.href is a
+# "link click" too, so a background tab may not open compose tabs)
+br.tabs.setCurrentWidget(_nv109); H.spin(100)
+br._page_acted = {}
 _real_mu109, _real_om109 = br.mailto_url, br.open_mailto
 br.mailto_url = lambda m: "https://mail.example/compose"
 br.open_mailto = lambda m, v=None: _mt109.append(m)
@@ -8861,6 +8867,1165 @@ check("a live check that failed does not write the channel down as offline",
       _kept173 is True, str(_kept173))
 check("downloads say Yesterday by the calendar",
       "now.getDate() - 1" in (B.APP_DIR / "downloads.html").read_text())
+# ===== seventeenth pass: private actions, menus, restore, config shapes ===
+_t177 = br.new_tab(); H.spin(300)
+H.load(_t177, srv.url("/drafts"))
+H.wait_for(lambda: "drafts" in _t177.url().toString(), 8000)
+_w177 = br.new_window(); H.spin(800)
+_v177 = _w177.new_tab(); H.spin(300)
+H.load(_v177, srv.url("/timers"))
+H.wait_for(lambda: "timers" in _v177.url().toString(), 8000)
+br._save_groups()
+_saved177 = json.dumps(br.config.get("sessionTabs") or {}) \
+    + json.dumps(br.config.get("tabGroups") or [])
+check("the tabs of every window are saved, not only the first window's",
+      "/drafts" in _saved177 and "/timers" in _saved177,
+      _saved177[-300:])
+try:
+    _w177._closing_anyway = True
+    _w177.close()
+except RuntimeError:
+    pass
+H.spin(400)
+# a popped-out tab: saved, and its page menu's to-do does not close another
+_n177 = br.tabs.count()
+_mini177 = br.pop_out_tab(br.tabs.indexOf(_t177))
+H.spin(300)
+br._save_groups()
+_pop177 = "/drafts" in json.dumps(br.config.get("sessionTabs") or {}) \
+    + json.dumps(br.config.get("tabGroups") or [])
+_count177 = br.tabs.count()
+if br.desk() is not None:
+    br.tab_to_todo(view=_t177)
+check("a popped-out tab is saved, and its to-do closes no other tab",
+      _pop177 and br.tabs.count() == _count177,
+      str((_pop177, _count177, br.tabs.count())))
+try:
+    _mini177.close()
+except RuntimeError:
+    pass
+H.spin(300)
+_close_if_open(_t177)
+_tw177 = list(br.config.get("throwawaySessions") or [])
+br.config["throwawaySessions"] = _tw177 + ["tmp-x177"]
+_kept177 = br._kept_state([{"u": "https://bank177.example/", "s": "tmp-x177"},
+                           {"u": "https://ok177.example/", "s": "main"}])
+br.config["throwawaySessions"] = _tw177
+check("a clean room's tab is not kept in sets, snapshots or tabs put aside",
+      [s["u"] for s in _kept177] == ["https://ok177.example/"], str(_kept177))
+_dl177 = br.config.get("dlLater")
+br.config["dlLater"] = ["junk", {"url": "https://x177.example/f",
+                                 "when": "tomorrow"}]
+try:
+    _rows177 = br.scheduled_downloads()
+    _ok177 = len(_rows177) == 1 and isinstance(_rows177[0]["when"], int)
+except Exception as _e177:
+    _ok177 = repr(_e177)
+if _dl177 is None:
+    br.config.pop("dlLater", None)
+else:
+    br.config["dlLater"] = _dl177
+check("a malformed scheduled download does not stop the others",
+      _ok177 is True, str(_ok177))
+check("a permissions table that is not a table is reset, not raised on",
+      B._migrate_permission_config({"permissions": None})["permissions"]
+      == {})
+_pw177 = br.new_window(private=True); H.spin(800)
+_bm177 = {"id": 917701, "type": "link", "url": srv.url("/drafts"),
+          "title": "b177"}
+_pw177.open_bookmark(_bm177)
+H.spin(300)
+_opens177 = _bm177.get("opens")
+try:
+    _pw177._closing_anyway = True
+    _pw177.close()
+except RuntimeError:
+    pass
+H.spin(400)
+check("a bookmark opened in a private window leaves no count behind",
+      _opens177 is None, str(_opens177))
+_h177 = list(br.history)
+br.history[:] = [{"url": "https://x177.example/", "t": 1, "title": "x"},
+                 {"url": "https://y177.example/", "t": 2, "title": "y"}]
+br.delete_history_entries(["https://x177.example/"])
+# deleted elsewhere (another window), with no undo of its own
+br.history = [e for e in br.history if e["url"] != "https://y177.example/"]
+br.undo_history_delete()
+_back177 = sorted(e["url"] for e in br.history)
+br.history = _h177
+br.save_history()
+check("an undo puts back what its delete took, not what was deleted since",
+      _back177 == ["https://x177.example/"], str(_back177))
+_lt177 = br.new_tab(); H.spin(300)
+H.load(_lt177, srv.url("/drafts"))
+H.wait_for(lambda: "drafts" in _lt177.url().toString(), 8000)
+_lt177.locked = True
+_lt177.tab_name = "named177"
+br.close_tab(br.tabs.indexOf(_lt177), ask=False)
+H.spin(300)
+_re177 = br.reopen_closed_tab()
+H.spin(300)
+_state177 = (getattr(_re177, "locked", False),
+             getattr(_re177, "tab_name", None))
+_re177.locked = False
+_close_if_open(_re177)
+check("a reopened tab is locked and named as it was",
+      _state177 == (True, "named177"), str(_state177))
+# ===== eighteenth pass: what a page can start, and its "&" ===============
+_front181 = br.current()
+_bg181 = br.new_tab(switch=False); H.spin(300)
+br.tabs.setCurrentWidget(_front181); H.spin(100)
+_a181 = br._page_may_act(br.current(), "k181")
+_b181 = br._page_may_act(br.current(), "k181")
+_c181 = br._page_may_act(_bg181, "k181bg")
+_close_if_open(_bg181)
+check("a page's navigation may start something outside it only from the "
+      "tab in front, and not again at once",
+      (_a181, _b181, _c181) == (True, False, False),
+      str((_a181, _b181, _c181)))
+_m181 = B.QMenu()
+br._fill_links(_m181, {"links": [{"url": "file:///etc/passwd", "text": "f"},
+                                 {"url": "https://ok181.example/", "text": "o"}],
+                       "mails": []})
+# the link entries carry their address as the tooltip ("copy all" has
+# a tooltip of its own, which is not a link)
+_tips181 = [a.toolTip() for a in _m181.actions() if "://" in a.toolTip()]
+check("the page's link list offers web addresses only",
+      _tips181 == ["https://ok181.example/"], str(_tips181))
+check("a page title cannot claim an Alt+letter on the tab strip",
+      "QEvent.Type.Shortcut" in _in173.getsource(B.Browser.eventFilter))
+check("'download every linked file' keeps to web addresses",
+      '("http", "https", "blob")' in _in173.getsource(
+          B.Browser.download_page_files))
+# ---- 182: gpu record, tidy_typed, params, filters, perf, chrome_style, kitty ----
+import inspect as _inspect182
+
+_k182 = B._FRAME_KEY
+_real182 = '[gpu-frame] ' + json.dumps({"key": _k182, "host": "a.example",
+                                        "decoded": 5, "evil": "x"})
+_forged182 = '[gpu-frame] {"host": "forged.example", "decoded": 1}'
+_got182 = B._video_frames([[{"text": _real182}, {"text": _forged182}]],
+                          key=_k182)
+check("only sampler lines carrying the key are reports",
+      len(_got182) == 1 and _got182[0]["host"] == "a.example", str(_got182))
+check("...and only the known fields of a report are kept",
+      "evil" not in _got182[0] and "key" not in _got182[0], str(_got182))
+check("the sampler script is built with the key, not the placeholder",
+      _k182 in br._video_watch_script().sourceCode()
+      and "__FRAME_KEY__" not in br._video_watch_script().sourceCode())
+_src182 = _inspect182.getsource(B.Browser._gpu_record)
+check("the gpu record skips private pages",
+      "_page_is_private" in _src182 and "key=_FRAME_KEY" in _src182)
+
+check("a search that starts with 'word:' is left as typed",
+      B.tidy_typed("why: is the sky blue") == "why: is the sky blue"
+      and B.tidy_typed("Note: foo bar") == "Note: foo bar",
+      B.tidy_typed("why: is the sky blue"))
+check("a pasted scheme with a stray space is still mended",
+      B.tidy_typed("https:// example.com") == "https://example.com",
+      B.tidy_typed("https:// example.com"))
+
+check("trkCampaign is stripped from a link",
+      "trkCampaign" not in B.clean_url("https://e.example/p?trkCampaign=1&a=2")
+      and "a=2" in B.clean_url("https://e.example/p?trkCampaign=1&a=2"),
+      B.clean_url("https://e.example/p?trkCampaign=1&a=2"))
+
+check("page look and a11y keep their own parts of the root filter",
+      "__filterParts" in B.PAGE_LOOK_JS and "__filterParts" in B.A11Y_JS
+      and "parts.a11y" in B.PAGE_LOOK_JS)
+check("the hidden-video check reads the current setting",
+      "(window.__perfWant || {}).stopHiddenVideo) return 0" in B.PERF_JS)
+check("the unstyled background is applied only to a bare page",
+      "bare = clear(document.documentElement)" in B.PAGE_LOOK_JS
+      and "if (bare)" in B.PAGE_LOOK_JS)
+check("bold starts and clickable urls skip non-HTML text",
+      B.A11Y_JS.count("w3.org/1999/xhtml") >= 1
+      and B.NAV_JS.count("w3.org/1999/xhtml") >= 1)
+check("a bad auto-click selector is caught per row",
+      "try { el = document.querySelector(rows[i]); }" in B.NAV_JS)
+check("the image viewer list is read again each call",
+      "var shown = (window.__navPics" in B.NAV_JS
+      and "if (!pics.length) {\n        pics = window.__navPics" not in B.NAV_JS)
+
+_bad182 = []
+for _v182 in (["big"], {}, 5, None):
+    try:
+        B.chrome_style({"uiSize": _v182, "uiFont": "Sans"})
+    except Exception as _e182:
+        _bad182.append(repr(_v182))
+check("a hand-edited uiSize of the wrong type does not raise",
+      not _bad182, str(_bad182))
+
+try:
+    _kc182 = B.kitty_colours('author: ""\nbase00: \'\'\nbackground "\nforeground #ffffff')
+except Exception as _e182:
+    _kc182 = repr(_e182)
+check("a line of only quotes is skipped, the rest still read",
+      _kc182 == {"text": "#ffffff"}, str(_kc182))
+# ===== batch 183: imports that cannot be written, pins and bookmarklets ====
+class _Eager183(B.VaultProvider):
+    eager = True
+
+    def __init__(self):
+        self.ok = True
+
+    def load(self):
+        return {}
+
+    def save(self, data):
+        return self.ok
+
+
+_ep183 = _Eager183()
+_ev183 = B.PasswordVault(_Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent))),
+                         provider=_ep183)
+_ev183.set_entry("keep183.example", "https", "k", "kpw")
+_ep183.ok = False
+_bw183 = json.dumps({"items": [
+    {"type": 1, "name": "z", "login": {"username": "u", "password": "p",
+                                       "uris": [{"uri": "https://z183.example"}]}}]})
+_n183 = _ev183.import_bitwarden(_bw183)
+check("a Bitwarden import into a vault that cannot write imports nothing",
+      _n183 == 0 and len(_ev183.items()) == 1, str((_n183, len(_ev183.items()))))
+_csv183 = ("url,username,password\nhttps://y183.example,a,b\n"
+           "https://keep183.example,k,newpw\n")
+_n183 = _ev183.import_rows(_csv183)
+check("a CSV import into a vault that cannot write imports nothing and "
+      "restores an updated login",
+      _n183 == 0 and len(_ev183.items()) == 1
+      and _ev183.items()[0]["password"] == "kpw",
+      str((_n183, [i.get("password") for i in _ev183.items()])))
+_ep183.ok = True
+_exp183 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent))) / "v.browservault"
+_ev183.export_encrypted(_exp183, "pass183")
+_ep183.ok = False
+_n183 = _ev183.import_encrypted(_exp183, "pass183", replace=True)
+check("an encrypted replace-import that cannot write reports failure and "
+      "keeps the old list",
+      _n183 == -1 and [i["host"] for i in _ev183.items()] == ["keep183.example"],
+      str((_n183, [i.get("host") for i in _ev183.items()])))
+
+
+class _Lazy183:
+    eager = False
+    locked = False
+
+    def __init__(self):
+        self.fail = False
+        self.row = {"id": "r1", "type": "login", "host": "l183.example",
+                    "username": "u", "password": "old183", "scheme": "https"}
+
+    def load(self):
+        return {"items": [dict(self.row)]}
+
+    def put(self, item):
+        return None if self.fail else {"id": "r1"}
+
+    def delete(self, item_id):
+        return True
+
+
+_lp183 = _Lazy183()
+_lv183 = B.PasswordVault(_Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent))),
+                         provider=_lp183)
+_lp183.fail = True
+_r183 = _lv183.set_entry("l183.example", "https", "u", "new183")
+_row183 = _lv183.items()[0]
+check("a refused password change leaves the existing login as it was",
+      _r183 is None and _row183.get("password") == "old183"
+      and not _row183.get("history"),
+      str((_r183, _row183.get("password"), _row183.get("history"))))
+
+import inspect as _insp183
+check("overview cards double an ampersand in a title",
+      "_amp(" in _insp183.getsource(B.TabOverview.refresh))
+check("pin buttons and the pin overflow menu escape an ampersand",
+      "_amp(" in _insp183.getsource(B.PinButton.set_pin)
+      and "_amp(" in _insp183.getsource(B.TaskBar._overflow_menu))
+
+# the dock only exists under the dock look: without one, the fitting
+# code is checked by reading it
+if getattr(br, "dock", None) is not None:
+    _d183 = br.dock
+    _was183 = (list(_d183._pins), _d183.isVisible())
+    try:
+        _pins183 = [{"url": "https://p%d.example/" % i, "name": "p%d" % i,
+                     "icon": ""} for i in range(40)]
+        _d183.set_pins(_pins183)
+        _par183 = _d183.parentWidget()
+        _cells183 = _d183.cells()
+        _more183 = _d183.more_cell()
+        _room183 = _d183.island().right()
+        check("a dock with more pins than fit draws only those that fit and "
+              "gives the rest a menu cell",
+              _more183 is not None and len(_cells183) < 40
+              and all(c[0].right() <= _room183 for c in _cells183)
+              and _more183.right() <= _room183 + 1,
+              str((len(_cells183), _more183)))
+        _d183.set_pins(_pins183[:2])
+        check("...and a short row has no menu cell",
+              _d183.more_cell() is None and len(_d183.cells()) == 2)
+    finally:
+        _d183.set_pins(_was183[0])
+else:
+    check("a dock with more pins than fit gives the rest a menu cell",
+          "more_cell" in _insp183.getsource(B.Dock))
+
+_cfgpins183 = br.config.get("startPage")
+_seen183 = []
+_orig183 = None
+_w183 = None
+try:
+    _w183 = br.new_window() if hasattr(br, "new_window") else None
+except Exception:
+    _w183 = None
+if _w183 is not None:
+    try:
+        _pk183 = list(br.pins())
+        br.add_pin("https://pinwin183.example/", "pw183")
+        _names183 = [p["name"] for p in _w183.pins()]
+        _bar183 = _w183.taskbar or _w183.dock
+        _have183 = [p["name"] for p in (_bar183._pins if _bar183 else [])]
+        check("a pin made in one window reaches the other window's furniture",
+              _bar183 is None or "pw183" in _have183, str(_have183))
+    finally:
+        br.remove_pin("https://pinwin183.example/")
+        _w183._closing_anyway = True
+        _w183.close()
+else:
+    check("refresh_pins loops over every window",
+          "_all_windows" in _insp183.getsource(B.Browser.refresh_pins))
+
+_calls183 = []
+br.run_bookmarklet = lambda entry, view=None: _calls183.append(entry) or True
+try:
+    br.open_bookmark({"id": 9183, "type": "link", "url": "", "js": "1+1"})
+    check("a plain click on a bookmarklet runs it", len(_calls183) == 1,
+          str(_calls183))
+    br.open_bookmark({"id": 9184, "type": "link", "url": "", "js": "1+1"},
+                     new_tab=True)
+    check("...but opening it 'in a new tab' (or open-all) does not",
+          len(_calls183) == 1, str(_calls183))
+finally:
+    br.__dict__.pop("run_bookmarklet", None)
+# ---- fixes 184: selection, closed tabs, lazy tabs, pins, groups, wrappers, panic ----
+import inspect as _insp184
+_src_sel184 = _insp184.getsource(B.Browser.select_tab_range)
+check("a shift-click range holds only this browser's visible tabs",
+      "active_session" in _src_sel184 and "isTabVisible" in _src_sel184)
+check("the selection drops tabs of another virtual browser",
+      "active_session" in _insp184.getsource(B.Browser.selected_tabs))
+
+
+class _BlankView184:
+    private = False
+
+    def url(self):
+        return B.START_PAGE
+
+
+_n184 = len(br._closed_tabs)
+br._remember_closed(_BlankView184(), 0)
+check("a blank start-page tab is not remembered as closed",
+      len(br._closed_tabs) == _n184, str(len(br._closed_tabs) - _n184))
+
+for _name184 in ("tab_urls", "bookmark_all_tabs", "close_site_tabs",
+                 "group_site_tabs"):
+    check("%s reads the address of a tab not woken up" % _name184,
+          "_tab_url" in _insp184.getsource(getattr(B.Browser, _name184)))
+check("pinning looks only at this browser's pinned tabs",
+      "session=getattr(view" in _insp184.getsource(B.Browser.pin_tab))
+
+_pv184 = br.new_tab(url=srv.url("/twhome"), private=True)
+try:
+    H.wait_for(lambda: "/twhome" in _pv184.url().toString(), 8000)
+    _sel184 = br._sel_views
+    br._sel_views = [_pv184]
+    _got184 = br.group_selection("g184")
+    check("a private tab is not grouped by the selection",
+          _got184 is None and getattr(_pv184, "group", None) is None,
+          str(getattr(_pv184, "group", None)))
+    br._sel_views = _sel184
+finally:
+    _close_if_open(_pv184)
+
+_u184 = "https://www.google.com/search?q=https://example.com/x"
+check("an ordinary link on a wrapper host is not rewritten",
+      br.unwrap_redirect(_u184) == _u184, br.unwrap_redirect(_u184))
+check("a real wrapper link still unwraps",
+      br.unwrap_redirect("https://www.google.com/url?q=https://example.com/x")
+      == "https://example.com/x")
+
+_src_panic184 = _insp184.getsource(B.Browser.panic)
+check("panic reaches the other windows and popped-out tabs",
+      "self.windows()" in _src_panic184 and "_popouts" in _src_panic184)
+# ---- 185: J25-J32 ----
+import inspect as _inspect185
+
+# J25: the next page loads into the tab the tool ran on, not the one in front
+_a185 = br.new_tab(srv.url("/twhome"))
+H.wait_for(lambda: "/twhome" in _a185.url().toString(), 8000)
+_b185 = br.new_tab(srv.url("/drafts"))
+H.wait_for(lambda: "/drafts" in _b185.url().toString(), 8000)
+_saved185 = _a185.load
+_got185 = []
+try:
+    br.tabs.setCurrentWidget(_a185)
+    _a185.load = lambda u: _got185.append(("a", u.toString()))
+    _b185.load = lambda u: _got185.append(("b", u.toString()))
+    _held185 = []
+    br.__dict__["page_tool"] = lambda name, view=None, then=None, **k: (
+        _held185.append((view, then)) or True)
+    br.go_page()
+    br.tabs.setCurrentWidget(_b185)
+    _held185[0][1]("http://example.org/page2")
+    check("185 J25 next page goes to the tab it was asked on",
+          _got185 == [("a", "http://example.org/page2")], str(_got185))
+finally:
+    br.__dict__.pop("page_tool", None)
+    _a185.__dict__.pop("load", None)
+    _b185.__dict__.pop("load", None)
+_src185 = _inspect185.getsource(B.Browser.media_speed)
+check("185 J25 media speed keeps the tab it ran on",
+      "self._remember_media(view, " in _src185, _src185[:80])
+for _v185 in (_a185, _b185):
+    _close_if_open(_v185)
+
+# J26: a chord letter or repeat goes through the per-site key rules
+check("185 J26 run_action uses the guarded door",
+      "_palette_run" in _inspect185.getsource(B.Browser.run_action))
+_ran185 = []
+_old_allowed185 = br.key_allowed_here
+try:
+    br.__dict__["key_allowed_here"] = lambda action_id: False
+    _entry185 = {"id": "x185", "run": lambda: _ran185.append(1), "pane": False}
+    br._palette_run(_entry185)
+    check("185 J26 an action switched off for the site does not run",
+          _ran185 == [])
+finally:
+    br.__dict__.pop("key_allowed_here", None)
+
+# J27: a private tab's place stays in memory, off config.json
+_priv185 = br.new_tab(srv.url("/twhome"), private=True)
+H.wait_for(lambda: "/twhome" in _priv185.url().toString(), 8000)
+_host185 = _priv185.url().host()
+_places185 = dict(br.config.get("fakePlaces") or {})
+_old_dlg185 = B.QInputDialog.getText
+try:
+    br.tabs.setCurrentWidget(_priv185)
+    B.QInputDialog.getText = staticmethod(lambda *a, **k: ("12.5, 34.5", True))
+    br.ask_fake_place(_host185)
+    check("185 J27 private place is in memory",
+          B._PRIVATE_PLACES.get(_host185) == {"lat": 12.5, "lon": 34.5})
+    check("185 J27 private place not in config",
+          (br.config.get("fakePlaces") or {}) == _places185)
+    _menu185 = br.guard_menu()
+    _texts185 = [a.text() for a in _menu185.actions()]
+    check("185 J27 private guard menu has no per-host rule submenus",
+          not any(a.menu() is not None and "%s" not in a.text()
+                  and _host185 in a.text() for a in _menu185.actions()),
+          str(_texts185))
+finally:
+    B.QInputDialog.getText = _old_dlg185
+    B._PRIVATE_PLACES.pop(_host185, None)
+    br.refresh_guard_scripts()
+    _close_if_open(_priv185)
+
+# J28: delete_group stops a recording and updates counts
+_src185 = _inspect185.getsource(B.Browser.delete_group)
+check("185 J28 delete_group stops recording and remembers tabs",
+      all(s in _src185 for s in ("stop_recording", "_remember_closed",
+                                 "_update_private_marks",
+                                 "_update_tab_count")))
+
+# J29: leaving zen follows the strip rules
+_src185 = _inspect185.getsource(B.Browser.zen_mode)
+check("185 J29 zen restores the strip through the strip rule",
+      "_apply_strip_visibility" in _src185)
+_old_app185 = br._app_url
+try:
+    br._app_url = "http://example.org/"
+    br.zen_mode(True)
+    br.zen_mode(False)
+    check("185 J29 no strip back in an app window",
+          not br.tabs.tabBar().isVisible())
+finally:
+    br._app_url = _old_app185
+    br.zen_mode(False)
+    br._apply_strip_visibility()
+
+# J30: switched on from the root window's point of view, the root is hooked
+_src185 = _inspect185.getsource(B.Browser.watch_clipboard)
+check("185 J30 the root window is the one hooked",
+      "root._clipboard_changed" in _src185 and "_root_window()" in _src185)
+
+# J31: GUI editors are started so that they wait
+check("185 J31 kate waits",
+      br._editor_command("/usr/bin/kate") == ["/usr/bin/kate", "--block"])
+check("185 J31 gedit waits",
+      br._editor_command("/usr/bin/gedit") == ["/usr/bin/gedit", "--wait"])
+check("185 J31 an unknown editor is unchanged",
+      br._editor_command("/usr/bin/foo185") == ["/usr/bin/foo185"])
+
+# J32: no note, no traceback and no "saved"
+_flashes185 = []
+
+
+class _Desk185:
+    def daily_note(self):
+        return None
+
+
+_old_desk185 = br.desk
+try:
+    br.__dict__["desk"] = lambda: _Desk185()
+    br.__dict__["flash"] = lambda msg, *a, **k: _flashes185.append(msg)
+    br.__dict__["desk_tool"] = lambda name, view=None, then=None, **k: then(
+        json.dumps({"t": 75, "title": "v"}))
+    _v185 = br.current()
+    br.video_time_note(_v185)
+    check("185 J32 unwritable notes folder says so",
+          _flashes185 == [br._ui_str("readSaveFailed")], str(_flashes185))
+finally:
+    for _n185 in ("desk", "flash", "desk_tool"):
+        br.__dict__.pop(_n185, None)
+# ---- tests for the 186 group ----
+import inspect as _insp186
+
+# J33: a failed reply is not "clean", and the counters belong to a run
+class _Fail186:
+    def readAll(self):
+        return b""
+
+    def error(self):
+        return B.QNetworkReply.NetworkError.HostNotFoundError
+
+    def deleteLater(self):
+        pass
+
+
+_flashes186 = []
+_real_flash186 = br.flash
+br.flash = lambda msg, *a, **k: _flashes186.append(msg)
+try:
+    _run186 = {"left": 1, "found": [], "failed": 0}
+    br._breach_answer(_Fail186(), "AAAAA", [], None, _run186)
+    _other186 = {"left": 2, "found": [], "failed": 0}
+    br._breach_answer(_Fail186(), "AAAAA", [], None, _other186)
+finally:
+    br.__dict__.pop("flash", None)
+check("a failed breach request is not reported as clean",
+      _flashes186 == [br._ui_str("breachFailed")]
+      and br._ui_str("breachClean") not in _flashes186, str(_flashes186))
+check("a breach run keeps its own counters",
+      _run186["left"] == 0 and _other186["left"] == 1)
+
+# J34: no reveal in a GUI-thread loop for a slow provider
+check("the reuse check goes through a worker for a slow provider",
+      "vault_job" in _insp186.getsource(br.check_password_reuse))
+
+# J35: rows that are not dicts
+_mom186 = br.config.get("videoMoments")
+_clp186 = br.config.get("clipMarks")
+try:
+    br.config["videoMoments"] = ["x", None, {"url": "https://a.example/v",
+                                             "t": 1}]
+    br.config["clipMarks"] = [None, "y", {"url": "https://a.example/v"}]
+    _m186 = br.moments("https://a.example/v")
+    _c186 = br.clips()
+    check("moments and clips skip rows that are not dicts",
+          len(_m186) == 1 and len(_c186) == 1, "%s %s" % (_m186, _c186))
+finally:
+    if _mom186 is None:
+        br.config.pop("videoMoments", None)
+    else:
+        br.config["videoMoments"] = _mom186
+    if _clp186 is None:
+        br.config.pop("clipMarks", None)
+    else:
+        br.config["clipMarks"] = _clp186
+
+# J36: carrying on a waiting download takes it out of the queue
+class _Req186:
+    def isPaused(self):
+        return True
+
+    def resume(self):
+        self.resumed = True
+
+
+_req186 = _Req186()
+_ent186 = {"id": 987186, "queued": True, "state": "progressing"}
+_de186 = br.download_entry
+_active186 = br.dl_active
+_queue186 = list(getattr(br, "_dl_queue", None) or [])
+br.download_entry = lambda i: _ent186 if i == 987186 else _de186(i)
+br.dl_active[987186] = _req186
+br._dl_queue = list(_queue186) + [987186]
+try:
+    _ok186 = br.resume_download(987186)
+    check("resuming a waiting download takes it out of the queue",
+          _ok186 and "queued" not in _ent186
+          and 987186 not in br._dl_queue
+          and getattr(_req186, "resumed", False))
+finally:
+    br.__dict__.pop("download_entry", None)
+    br.dl_active.pop(987186, None)
+    br._dl_queue[:] = _queue186
+
+# J37: the switch state is the tab's
+_va186 = br.new_tab()
+H.load(_va186, srv.url("/twhome"))
+H.wait_for(lambda: "/twhome" in _va186.url().toString(), 8000)
+_va186._dev_on = {"devRuler": True}
+check("a developer switch is read from the tab in front",
+      br.dev_on("devRuler", view=_va186) is True
+      and br.dev_on("devRuler", view=br.tabs.widget(0)) is False)
+_va186._dev_on = {}
+_close_if_open(_va186)
+
+# J38: a TIFF is seen as carrying metadata, and a failed strip refuses
+_tf186 = _Path(_tempfile.mkdtemp()) / "a.tif"
+_tf186.write_bytes(b"II*\x00\x08\x00\x00\x00" + b"\x00" * 64)
+check("a TIFF counts as carrying metadata", br.image_has_metadata(_tf186))
+_src186 = _insp186.getsource(br.put_file_in_upload)
+check("an upload that could not be cleaned is refused",
+      "return False" in _src186.split("if not cleaned")[1].split("try:")[0])
+_tf186.unlink()
+
+# J39: statements fall back to a script run
+_src186 = _insp186.getsource(br.run_snippet)
+check("a snippet that is not an expression is run as a script",
+      "eval" in _src186 and "def first" in _src186)
+
+# J40: the tab left is the view, not its index
+_vx186 = br.new_tab()
+_vy186 = br.new_tab()
+H.wait_for(lambda: True, 100)
+br.tabs.setCurrentWidget(_vx186)
+H.spin(50)
+_vx186._last_seen = 1.0
+_vy186._last_seen = 2.0
+_pos186 = br.tabs.indexOf(_vx186)
+br._seen_view = _vx186
+br._tab_looked_at(br.tabs.indexOf(_vy186))
+check("leaving a tab stamps that tab",
+      _vx186._last_seen > 100 and _vy186._last_seen > 100)
+_close_if_open(_vx186)
+_close_if_open(_vy186)
+
+# J41: the chosen scheme survives a navigation
+_vz186 = br.new_tab()
+H.load(_vz186, srv.url("/twhome"))
+H.wait_for(lambda: "/twhome" in _vz186.url().toString(), 8000)
+br.emulate_media("dark", view=_vz186)
+br._apply_page_force_dark(_vz186)
+_fd186 = _vz186.page().settings().testAttribute(
+    B.QWebEngineSettings.WebAttribute.ForceDarkMode)
+br.emulate_media("off", view=_vz186)
+check("emulated dark survives the next navigation", _fd186 is True
+      and getattr(_vz186, "_media_scheme", 1) is None)
+_close_if_open(_vz186)
+# ---- findings 42-50 of the nineteenth pass ----
+import inspect as _insp187
+import types as _types187
+
+# J42: with history off, a picture or words taken a moment later are refused
+_cfg_h187 = br.config.get("history", True)
+_v187 = br.new_tab(); H.load(_v187, srv.url("/twhome"))
+H.wait_for(lambda: "/twhome" in _v187.url().toString(), 8000)
+_u187 = br._tab_url(_v187)
+try:
+    br.config["history"] = True
+    _on187 = br._visit_still_on(_v187, _u187)
+    br.config["history"] = False
+    _off187 = br._visit_still_on(_v187, _u187)
+finally:
+    br.config["history"] = _cfg_h187
+check("history off: a page's picture and words are not kept either",
+      _on187 is True and _off187 is False
+      and 'self.config.get("history", True)'
+      in _insp187.getsource(br._title_changed), str((_on187, _off187)))
+
+# J43 / J44: the engine keeps no optional braces; a failed fetch says so
+_eng187 = []
+
+
+class _Reply187:
+    def __init__(self, body, bad=False):
+        self.body, self.bad = body, bad
+
+    def readAll(self):
+        return self.body
+
+    def error(self):
+        return (B.QNetworkReply.NetworkError.ContentNotFoundError
+                if self.bad else B.QNetworkReply.NetworkError.NoError)
+
+    def deleteLater(self):
+        pass
+
+
+_os187 = json.loads(json.dumps(br.config.get("openSearch") or {}))
+_flashes187 = []
+br.add_engine = lambda name, pattern, **k: _eng187.append(pattern)
+br.flash = lambda text, *a, **k: _flashes187.append(text)
+try:
+    br._opensearch_answer(_Reply187(
+        b'<OpenSearchDescription><ShortName>S187</ShortName>'
+        b'<Url type="text/html" template="https://s187.example/s?q='
+        b'{searchTerms}&amp;hl={language}&amp;n={count?}"/>'
+        b'</OpenSearchDescription>'), "s187.example", "S187")
+    br._opensearch_answer(_Reply187(b"", bad=True), "s187.example", "S187")
+    br._opensearch_answer(_Reply187(b"<html></html>"), "s187.example",
+                          "S187")
+finally:
+    br.__dict__.pop("add_engine", None)
+    br.__dict__.pop("flash", None)
+    br.config["openSearch"] = _os187
+check("an added OpenSearch engine loses the optional braces",
+      len(_eng187) == 1 and "{" not in _eng187[0].replace("{", "", 0)
+      and "%s" in _eng187[0] and "{language}" not in _eng187[0]
+      and "{count" not in _eng187[0], str(_eng187))
+check("a failed OpenSearch fetch does not talk about a certificate",
+      len(_flashes187) >= 3
+      and _flashes187[-1] == _flashes187[-2]
+      and _flashes187[-1] != br._ui_str("barCertNone"),
+      str(_flashes187))
+
+# J45: a mode's theme is applied, not only written
+_modes187 = br.config.get("modes")
+_now187 = br.config.get("modeNow")
+_theme187 = br.config.get("theme")
+_seen187 = []
+br.config["modes"] = {"m187": {"theme": "latte"}}
+br.apply_theme = lambda name, *a, **k: _seen187.append(name)
+try:
+    br.open_mode("m187")
+finally:
+    br.__dict__.pop("apply_theme", None)
+    br.config["modes"] = _modes187
+    br.config["modeNow"] = _now187
+    br.config["theme"] = _theme187
+check("opening a mode paints its theme", _seen187 == ["latte"],
+      str(_seen187))
+
+# J46: the recording mark stays through a relabel
+_had_rec187 = "_recording" in br.__dict__
+_rec187 = br.__dict__.get("_recording")
+_had_mk187 = "_recording_mark" in br.__dict__
+_mk187 = br.__dict__.get("_recording_mark")
+try:
+    br._recording = _types187.SimpleNamespace(view=_v187)
+    br._recording_mark = True
+    _lab187 = br._tab_label(_v187)
+    _ov187 = next((v for _i, v in br._real_tabs() if v is not _v187),
+                  None)
+    _other187 = br._tab_label(_ov187) if _ov187 is not None else ""
+finally:
+    if _had_rec187:
+        br._recording = _rec187
+    else:
+        br.__dict__.pop("_recording", None)
+    if _had_mk187:
+        br._recording_mark = _mk187
+    else:
+        br.__dict__.pop("_recording_mark", None)
+check("the recorded tab's label keeps its mark",
+      _lab187.startswith("● ")
+      and not _other187.startswith("● "), str((_lab187, _other187)))
+
+# J47: pinned, locked and game tabs are not "unused"
+_cur187 = br.current()
+br.tabs.setCurrentWidget(v15 if v15 is not _v187 else _cur187)
+H.spin(100)
+_v187._last_seen = 1
+_res187 = {}
+try:
+    for _how in ("plain", "pinned", "locked", "game"):
+        _v187.pinned = _how == "pinned"
+        _v187.locked = _how == "locked"
+        _v187._game = _how == "game"
+        _res187[_how] = any(r["view"] is _v187
+                            for r in br.unused_tabs(days=1))
+finally:
+    _v187.pinned = _v187.locked = _v187._game = False
+check("unused tabs skip pinned, locked and game tabs",
+      _res187 == {"plain": True, "pinned": False, "locked": False,
+                  "game": False}, str(_res187))
+
+# J48: captions are refused for a page the tab has left
+_flashes187.clear()
+_r48 = br.put_captions_on_video(
+    "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nhi\n", view=_v187,
+    expect={"url": "http://other187.invalid/", "src": ""})
+check("captions are not put on another page's video", _r48 is False,
+      str(_r48))
+
+# J49 / J50: source checks (the page JS and the crop need a real image)
+_src49 = _insp187.getsource(br._tallest_scroller)
+check("the scrolling-area selector is a unique path, not tag.class",
+      "nth-child" in _src49 and "CSS.escape" in _src49
+      and "split(/" not in _src49)
+check("the OCR crop follows the page zoom",
+      "self._zoom_of(view)" in _insp187.getsource(br.ocr_selection))
+
+_close_if_open(_v187)
+# ---- fixes 188: prefetch, keep-awake, freeze, rows, workspaces, history tree, epub, import ----
+import inspect as _insp188
+_src_pre188 = _insp188.getsource(B.Browser.preload_link)
+check("a hover prefetch goes through the engine, not the own manager",
+      "_nam" not in _src_pre188 and "prefetch" in _src_pre188)
+check("the most visited hosts are never written into a page",
+      "createElement" not in _insp188.getsource(B.Browser.preconnect_frequent))
+
+_pv188 = br.new_tab(url=None, private=True)
+_kw188 = list(br.config.get("keepAwake") or [])
+try:
+    H.spin(300)
+    br.tabs.setCurrentWidget(_pv188)
+    check("keep-awake from a private tab writes nothing",
+          br.keep_tab_awake() is False
+          and list(br.config.get("keepAwake") or []) == _kw188)
+finally:
+    br.config["keepAwake"] = _kw188
+    _close_if_open(_pv188)
+
+class _FakePage188:
+    def __init__(self):
+        self.state = None
+
+    def recentlyAudible(self):
+        return False
+
+    def setLifecycleState(self, s):
+        self.state = s
+
+
+class _FakeView188:
+    private = False
+    pinned = False
+    _game = False
+
+    def __init__(self):
+        self._p = _FakePage188()
+
+    def page(self):
+        return self._p
+
+    def url(self):
+        return B.QUrl("https://example.invalid/")
+
+
+_fv188 = _FakeView188()
+_sp188 = br.config.get("sleepPinned")
+try:
+    _fv188._game = True
+    check("a game tab is not frozen", br.freeze_tab(_fv188, True) is False)
+    _fv188._game = False
+    _fv188.pinned = True
+    br.config["sleepPinned"] = False
+    check("a pinned tab is not frozen", br.freeze_tab(_fv188, True) is False)
+    _fv188.pinned = False
+    br._media_live = list(getattr(br, "_media_live", None) or []) + [
+        {"view": _fv188}]
+    check("a tab in a call is not frozen",
+          br._capturing(_fv188) is False
+          or br.freeze_tab(_fv188, True) is False)
+finally:
+    br._media_live = [r for r in (getattr(br, "_media_live", None) or [])
+                      if r.get("view") is not _fv188]
+    if _sp188 is None:
+        br.config.pop("sleepPinned", None)
+    else:
+        br.config["sleepPinned"] = _sp188
+
+_rows188 = br.config.get("tabRows")
+_w188 = br.width()
+try:
+    br.tab_rows(2)
+    _sheet188 = br.tabs.tabBar().styleSheet()
+    br.resize(_w188 + 200, br.height())
+    H.spin(200)
+    check("the row width follows the window",
+          br.tabs.tabBar().styleSheet() != _sheet188
+          or br.width() == _w188, _sheet188)
+finally:
+    br.resize(_w188, br.height())
+    br.tab_rows(int(_rows188 or 1))
+    if not _rows188:
+        br.config.pop("tabRows", None)
+check("the row width is worked out from the tab count",
+      "tabs.count()" in _insp188.getsource(B.Browser._fit_tab_rows))
+
+_ws188 = dict(br.workspaces())
+_now188 = br.workspace_now()
+try:
+    br.config["workspaces"] = dict(_ws188, empty188=[{"u": "file:///x"}])
+    _n188 = br.tabs.count()
+    check("a set with no pages in it closes nothing",
+          br.open_workspace("empty188") == []
+          and br.tabs.count() == _n188)
+finally:
+    br.config["workspaces"] = _ws188
+    br.config["workspaceNow"] = _now188
+_src_ws188 = _insp188.getsource(B.Browser.open_workspace)
+check("a workspace switch keeps locked, pinned and private tabs",
+      all(w in _src_ws188 for w in ("locked", "pinned", "private")))
+
+_hist188 = br.history
+try:
+    br.history = [
+        {"url": "http://a188/", "t": 1, "f": ""},
+        {"url": "http://b188/", "t": 2, "f": "http://a188/"},
+        {"url": "http://a188/", "t": 3, "f": "http://b188/"},
+    ]
+    br.visible_history = lambda: br.history
+    tree188 = br.history_tree()
+
+    def _depth188(n):
+        return 1 + max([_depth188(k) for k in n["kids"]] or [0])
+    check("a page visited twice does not make the tree loop",
+          max(_depth188(n) for n in tree188) <= 3, str(tree188))
+    check("the trail follows the latest visit",
+          [r["url"] for r in br.history_trail("http://a188/")][-1]
+          == "http://a188/")
+finally:
+    br.__dict__.pop("visible_history", None)
+    br.history = _hist188
+
+_src_ep188 = _insp188.getsource(B.Browser.open_epub)
+check("an epub allows no request and strips frames and links",
+      "default-src 'none'" in _src_ep188 and "iframe" in _src_ep188
+      and "base-uri" in _src_ep188 and "2 * 1024 * 1024" in _src_ep188)
+check("a history import honours never-record and cleans trimmed rows",
+      "never_record" in _insp188.getsource(B.Browser.import_history_from)
+      and "_history_dropped" in _insp188.getsource(
+          B.Browser.import_history_from))
+# ---- J59-J65 ----
+import inspect as _insp_x189
+
+# J59: the Images submenu is filled in the live menu
+_menu_x189 = B.QMenu(br)
+_got_x189 = br.image_gallery(view=br.current(), menu=_menu_x189)
+check("J59 image_gallery fills the menu it is given",
+      _got_x189 is _menu_x189)
+check("J59 nav menu passes the live submenu",
+      "image_gallery(view=view, menu=m)" in _insp_x189.getsource(br.nav_menu))
+# kept: the page answers later and fills it then (deleted here, the
+# answer found no menu)
+
+# J60: mono audio is read per site
+_sites_x189 = br.config.get("a11ySites")
+_tab_x189 = br.new_tab(url=B.QUrl(srv.url("/twhome")))
+_v_x189 = br.current()
+H.wait_for(lambda: "/twhome" in _v_x189.url().toString(), 8000)
+try:
+    _h_x189 = br._host_of(_v_x189.url())
+    br.config["a11ySites"] = {_h_x189: {"monoAudio": True}}
+    check("J60 per-site mono makes the shaping wanted for that tab",
+          br.audio_shape_wanted(_v_x189) is True)
+    check("...and not for no tab", br.audio_shape_wanted() is False
+          or br.a11y_config().get("monoAudio"))
+finally:
+    if _sites_x189 is None:
+        br.config.pop("a11ySites", None)
+    else:
+        br.config["a11ySites"] = _sites_x189
+    _close_if_open(_v_x189)
+
+# J61: a subdomain of a left-alone site can be un-excluded
+_rules_x189 = br.config.get("darkSiteRules")
+_calls_x189 = []
+try:
+    br.config["darkSiteRules"] = ["example.com"]
+    check("J61 subdomain reads as left alone",
+          br.site_left_alone("sub.example.com") is True)
+    _out_x189 = br.toggle_site_dark("sub.example.com")
+    check("J61 toggling it takes the parent rule out",
+          _out_x189 is False
+          and br.site_left_alone("sub.example.com") is False,
+          br.config.get("darkSiteRules"))
+    _native_x189 = sorted(B.NATIVE_DARK_SITES)[0]
+    check("J61 a built-in site stays left alone, and says so",
+          br.toggle_site_dark(_native_x189) is True
+          and br.site_left_alone(_native_x189) is True)
+finally:
+    if _rules_x189 is None:
+        br.config.pop("darkSiteRules", None)
+    else:
+        br.config["darkSiteRules"] = _rules_x189
+    br.set_dark_site_rules(_rules_x189 or [])
+
+# J62: a tab that has moved on is not reloaded
+_tab_x189 = br.new_tab(url=B.QUrl(srv.url("/twhome")))
+_w_x189 = br.current()
+H.wait_for(lambda: "/twhome" in _w_x189.url().toString(), 8000)
+try:
+    check("J62 still wanted at the failed address",
+          br._retry_still_wanted(_w_x189, _w_x189.url().toString()) is True)
+    check("J62 not wanted once the tab shows something else",
+          br._retry_still_wanted(_w_x189, srv.url("/elsewhere")) is False)
+    br.retry_when_online(view=_w_x189, url=srv.url("/twhome"))
+    br.retry_when_online(view=br.current(), url=srv.url("/drafts"))
+    check("J62 one retry entry per tab",
+          _w_x189 in br._retry_rows)
+    br._retry_cancel(_w_x189)
+    check("J62 a load that worked cancels the retry",
+          _w_x189 not in br._retry_rows)
+finally:
+    br._retry_rows.clear()
+    if getattr(br, "_retry_timer", None) is not None:
+        br._retry_timer.stop()
+    _close_if_open(_w_x189)
+
+# J63: the translator process is deleted, the QR picture is found by string
+_src_x189 = _insp_x189.getsource(br.run_translator)
+check("J63 run_translator deletes its process",
+      "proc.finished.connect(proc.deleteLater)" in _src_x189)
+check("J63 read_qr_image no longer builds a selector from the address",
+      "querySelector(" not in _insp_x189.getsource(br.read_qr_image)
+      .split("document.querySelectorAll")[0])
+
+# J64: reset and undo re-apply the keys that need a call of their own
+_seen_x189 = []
+_names_x189 = ("apply_site_fonts", "set_mono_favicons",
+               "set_page_theme_colour", "set_reveal_in_fullscreen",
+               "refresh_own_pages")
+_saved_x189 = {k: br.config.get(k, "__absent__")
+               for k in ("monoFavicons", "pageThemeColour",
+                         "revealInFullscreen", "siteFonts", "appearanceBackup")}
+try:
+    for _n_x189 in _names_x189:
+        setattr(br, _n_x189, lambda *a, _n=_n_x189, **k: _seen_x189.append(_n))
+    br.config["siteFonts"] = {"sans": "Sans"}
+    br.reset_appearance()
+    check("J64 reset re-applies fonts, favicons, bar colour, fullscreen, pages",
+          set(_seen_x189) == set(_names_x189), _seen_x189)
+    del _seen_x189[:]
+    br.undo_reset_appearance()
+    check("J64 undo re-applies them too",
+          set(_seen_x189) == set(_names_x189), _seen_x189)
+finally:
+    for _n_x189 in _names_x189:
+        br.__dict__.pop(_n_x189, None)
+    for _k_x189, _v_x189b in _saved_x189.items():
+        if _v_x189b == "__absent__":
+            br.config.pop(_k_x189, None)
+        else:
+            br.config[_k_x189] = _v_x189b
+
+# J65: unused bookmarks inside a locked folder are not offered
+_bms_x189 = br.bookmarks
+_ask_x189 = B.QMessageBox.question
+try:
+    br.bookmarks = [
+        {"id": "f189", "type": "folder", "title": "F", "locked": True,
+         "parent": ""},
+        {"id": "a189", "type": "link", "title": "A", "url": "https://a.test/",
+         "parent": "f189", "t": 1, "used": 1},
+        {"id": "b189", "type": "link", "title": "B", "url": "https://b.test/",
+         "parent": "", "t": 1, "used": 1}]
+    B.QMessageBox.question = staticmethod(
+        lambda *a, **k: B.QMessageBox.StandardButton.Yes)
+    br.show_unused_bookmarks()
+    _ids_x189 = sorted(e["id"] for e in br.bookmarks)
+    check("J65 the locked folder keeps its link, the loose one goes",
+          _ids_x189 == ["a189", "f189"], _ids_x189)
+finally:
+    B.QMessageBox.question = _ask_x189
+    br.bookmarks = _bms_x189
+# ---- tests for the 190 group ----
+import inspect as _insp190
+
+# J66: every early return in _download closes the blank download tab
+_src190 = _insp190.getsource(B.Browser._download)
+check("a declined or cancelled download closes its blank tab",
+      _src190.count("self._close_download_tab(page)") >= 5, str(
+          _src190.count("self._close_download_tab(page)")))
+
+# J67: block lists reach the RuleProxy behind a plain named proxy
+_keys190 = ("activeProxy", "proxyProfiles", "proxyAuto", "blockHosts",
+            "blockReplay", "phishingList")
+_cfg190 = {"activeProxy": "p190", "proxyAuto": {"rules": []},
+           "proxyProfiles": [{"name": "p190", "type": "socks5",
+                              "host": "127.0.0.1", "port": 9}],
+           "blockHosts": ["blocked190.example"], "blockReplay": False,
+           "phishingList": False}
+_plan190 = B._proxy_routing(_cfg190)
+_cfg190["blockHosts"] = []
+_none190 = B._proxy_routing(_cfg190)
+_cfg190["blockHosts"] = ["blocked190.example"]
+_cfg190["activeProxy"] = "direct"
+_direct190 = B._proxy_routing(_cfg190)
+check("a block list behind a plain proxy gets a routing plan",
+      _plan190 is not None and _plan190[0] == []
+      and _plan190[2][0] == "socks5", str(_plan190))
+check("no block list, or a direct connection, keeps the plain flags",
+      _none190 is None and _direct190 is None)
+
+# J68: a hand-edited pwGen
+_pw190 = br.config.get("pwGen")
+_vp190 = br.vault_password_on
+_clip190 = []
+_real_copy190 = br._copy_secret_text
+br.vault_password_on = lambda: True
+br._copy_secret_text = lambda text, *a, **k: _clip190.append(len(text))
+_ok190 = True
+try:
+    for _bad190 in ([1], "x", {"length": "abc"}, {"length": None}):
+        br.config["pwGen"] = _bad190
+        try:
+            br.generate_to_clipboard()
+        except Exception as e:
+            _ok190 = False
+            _clip190.append(repr(e))
+finally:
+    br.__dict__.pop("vault_password_on", None)
+    br.__dict__.pop("_copy_secret_text", None)
+    if _pw190 is None:
+        br.config.pop("pwGen", None)
+    else:
+        br.config["pwGen"] = _pw190
+check("a hand-edited pwGen still puts a password on the clipboard",
+      _ok190 and len(_clip190) == 4, str(_clip190))
+
+# J69: dedupe keeps lines named like Object members
+check("dedupe uses a prototype-free table",
+      "Object.create(null)" in B.MEDIA_XFORM + _insp190.getsource(B)
+      and "seen = Object.create(null), keep" in _insp190.getsource(B))
+
+# J70: turn and zoom compose one transform
+check("turn and zoom write through one shared transform",
+      "xform(m)" in B.MEDIA_TOOLS["turn"]
+      and "xform(m)" in B.MEDIA_TOOLS["zoom"]
+      and "scale(\" + z.scale" in B.MEDIA_XFORM
+      and "rotate(\" + t.deg" in B.MEDIA_XFORM)
+
+# J71/J72: the hand-off target
+_main190 = _insp190.getsource(B.main)
+check("a command with only private windows left opens no window",
+      'message.startswith("cmd ")' in _main190
+      and "new_window(minimized=quiet)" in _main190)
+check("a command goes to the window he is in",
+      "QApplication.activeWindow()" in _main190)
+check("new_window can come up minimized",
+      "minimized" in _insp190.signature(B.Browser.new_window).parameters)
+
+# JS6: only web addresses become media links
+_rows190 = []
+_real190 = br.media_tool2
+br.media_tool2 = lambda name, view=None, then=None, arg=None: then(json.dumps([
+    {"url": "https://a.example/v.mp4", "title": "a"},
+    {"url": "edl://x.mp4", "title": "b"},
+    {"url": "file:///etc/x.mp4", "title": "c"},
+    {"url": "HTTP://a.example/w.mp3", "title": "d"}, "junk"]))
+try:
+    br.media_links(then=lambda rows: _rows190.extend(rows))
+finally:
+    br.__dict__.pop("media_tool2", None)
+check("media links keep only http and https rows",
+      [r["title"] for r in _rows190] == ["a", "d"], str(_rows190))
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

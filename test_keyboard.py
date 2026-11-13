@@ -105,9 +105,21 @@ menu.close()
 print("\n(5) the cheat sheet")
 before = win.tabs.count()
 tab = win.open_cheatsheet()
-H.spin(900)
+
+
+def _sheet_text():
+    try:
+        return H.js(tab, "document.body ? document.body.textContent : ''",
+                    B.MAIN_WORLD_ID) or ""
+    except AssertionError:
+        return ""
+
+
+# the page itself, not a fixed wait: under a CPU quota the sheet took
+# longer than 900 ms to arrive, and this read an empty page every time
+H.wait_for(lambda: "Ctrl+" in _sheet_text(), 8000)
 check("it opens in a tab", win.tabs.count() == before + 1)
-text = H.js(tab, "document.body.textContent", B.MAIN_WORLD_ID) or ""
+text = _sheet_text()
 check("with the keys in it", "Ctrl+T" in text and "Ctrl+W" in text,
       text[:60])
 check("and what they do", "New tab" in text, text[:60])
