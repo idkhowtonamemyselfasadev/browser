@@ -2736,7 +2736,9 @@
   // what refresh_own_pages calls after Settings changes the layout or
   // the wallpaper: nothing here defined it, so an open start page kept
   // the old clock, search position and pictures until reloaded
-  window.__settingsChanged = () => { loadExtras(); };
+  // the search engine too: the form kept the old one's address until the
+  // tab was hidden and shown again
+  window.__settingsChanged = () => { loadExtras(); refreshSettings(); };
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) syncSettings();
   });

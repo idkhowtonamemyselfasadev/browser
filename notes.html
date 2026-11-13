@@ -82,6 +82,14 @@
   // what he was typing into an "add" box: the search box redraws the
   // list, and the box with it, and the half-typed to-do was gone
   const drafts = {};
+  // set when a write failed, shown once by the next drawing
+  let failMsg = false;
+  function failLine(body) {
+    if (!failMsg) return;
+    failMsg = false;
+    body.appendChild(el("div", "empty", STR.readSaveFailed
+      || "That could not be written."));
+  }
   function keep(box, name) {
     box.value = drafts[name] || "";
     box.addEventListener("input", () => { drafts[name] = box.value; });
@@ -257,6 +265,7 @@
   function renderTodo(body, q) {
     desk("todos", {}, (rows) => {
       body.innerHTML = "";
+      failLine(body);
       const add = el("div", "row");
       const box = el("input");
       box.type = "text";
@@ -265,7 +274,10 @@
       const go = el("button", "act", "+");
       const send = () => {
         if (!box.value.trim()) return;
-        desk("addTodo", {text: box.value}, () => {
+        desk("addTodo", {text: box.value}, (res) => {
+          // not written: the words stay in the box (drafts.todo keeps
+          // them over the redraw) instead of vanishing with no message
+          if (res === false) { failMsg = true; render(); return; }
           box.value = ""; drafts.todo = ""; render();
         });
       };
@@ -281,7 +293,10 @@
         if (group === done && done.length) {
           const head = el("h2", "", STR.todoDone || "Done");
           const clear = el("button", "act warn", STR.todoClear || "Clear");
-          clear.onclick = () => desk("clearDone", {}, () => render());
+          clear.onclick = () => desk("clearDone", {}, (res) => {
+            if (res === false) failMsg = true;
+            render();
+          });
           const line = el("div", "row");
           line.append(head, clear);
           body.appendChild(line);
@@ -294,7 +309,10 @@
           tick.type = "checkbox";
           tick.checked = row.done;
           tick.onchange = () => desk("toggleTodo", {id: row.id, text: row.text},
-                                     () => render());
+                                     (res) => {
+            if (res === false) failMsg = true;
+            render();
+          });
           const grow = el("div", "grow");
           grow.appendChild(el("div", "", row.text));
           if (row.link) {
@@ -307,10 +325,16 @@
           const up = el("button", "act", "↑");
           up.onclick = () => desk("moveTodo", {id: row.id, text: row.text,
                                                delta: -1},
-                                  () => render());
+                                  (res) => {
+            if (res === false) failMsg = true;
+            render();
+          });
           const drop = el("button", "act warn", "✕");
           drop.onclick = () => desk("deleteTodo", {id: row.id, text: row.text},
-                                    () => render());
+                                    (res) => {
+            if (res === false) failMsg = true;
+            render();
+          });
           item.append(tick, grow, up, drop);
           body.appendChild(item);
         }
@@ -402,6 +426,7 @@
   function renderSnippets(body, q) {
     desk("snippets", {}, (table) => {
       body.innerHTML = "";
+      failLine(body);
       body.appendChild(el("div", "sub", STR.snipHint
         || "Type the key in any text field to insert the text."));
       const rows = Object.keys(table || {}).sort();
@@ -415,7 +440,10 @@
                     el("div", "sub pre", (table[key] || "").slice(0, 120)));
         const drop = el("button", "act warn", "✕");
         drop.onclick = () => desk("setSnippet", {key: key, text: ""},
-                                  () => render());
+                                  (res) => {
+          if (res === false) failMsg = true;
+          render();
+        });
         item.append(grow, drop);
         body.appendChild(item);
       }
@@ -436,7 +464,8 @@
       const go = el("button", "act", "+");
       go.onclick = () => {
         if (!key.value.trim()) return;
-        desk("setSnippet", {key: key.value, text: text.value}, () => {
+        desk("setSnippet", {key: key.value, text: text.value}, (res) => {
+          if (res === false) { failMsg = true; render(); return; }
           key.value = ""; text.value = "";
           drafts.snipKey = ""; drafts.snipText = ""; render();
         });

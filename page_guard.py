@@ -83,6 +83,18 @@ def _host(text):
     return str(text or "").strip().lower().removeprefix("www.")
 
 
+def _table(config, key):
+    """A per-site table from the config: a dict, or empty. A hand-edited
+    file with a list or a number there made every guard build raise."""
+    value = config.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _listed(config, key):
+    value = config.get(key)
+    return value if isinstance(value, list) else []
+
+
 def rules(config):
     """What the script needs to know, as plain data.
 
@@ -111,7 +123,7 @@ def rules(config):
             apis[_host(host)] = sorted(
                 {target for name in wanted for target in API_TARGETS[name]})
     places = {}
-    for host, where in (config.get("fakePlaces") or {}).items():
+    for host, where in _table(config, "fakePlaces").items():
         try:
             lat = float(where.get("lat"))
             lon = float(where.get("lon"))
@@ -133,13 +145,13 @@ def rules(config):
         "apis": apis,
         "places": places,
         "hide": hide,
-        "keep": [_host(h) for h in config.get("leaveTrapSites", []) or []],
-        "allow": [_host(h) for h in config.get("popupSites", []) or []],
+        "keep": [_host(h) for h in _listed(config, "leaveTrapSites")],
+        "allow": [_host(h) for h in _listed(config, "popupSites")],
         "mics": {_host(h): str(d)[:200] for h, d in
-                 (config.get("micSites") or {}).items() if d},
+                 _table(config, "micSites").items() if d},
         "calls": {_host(h): {k: bool(v) for k, v in (row or {}).items()
                              if k in ("gain", "noise", "echo")}
-                  for h, row in (config.get("callAudio") or {}).items()
+                  for h, row in _table(config, "callAudio").items()
                   if isinstance(row, dict)},
         "fonts": str(config.get("localFontStack")
                      or "system-ui, sans-serif")[:200],

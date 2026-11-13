@@ -1,5 +1,69 @@
 # Changelog
 
+## 2026-11-13 — line-by-line review, day 3 (part forty-three: twenty-first to twenty-third passes)
+
+Three searches with one question each. The twenty-first asked what outlives
+the tab, window or menu it belongs to; the twenty-second what happens when
+the disk is full, a file is unreadable or hand-edited, or a program fails;
+the twenty-third followed each of the 349 settings in Settings to where it
+takes effect. 110 bugs, fixed here:
+
+- **Settings reach every window.** Page zoom, the tab strip's place, width
+  and look, the address bar's buttons and place, the tab count, ad-hiding,
+  the reading helps (spacing, text size, colours, balance), the controller,
+  the CPU, leak and memory watchers, pause-for-calls, tab snapshots and the
+  video quality cap used to change only the window Settings was opened from.
+- **Settings take effect at once, and off means off.** Twitch ad muting and
+  bonus claiming, the request log, click recording, clean paste, keys to
+  ignore, layout keys, auto-retry, password eye buttons, pausing hidden
+  tabs, keeping fast, drafts, the spoiler shield, code line numbers, the
+  selection bar, the hidden cursor and captions now switch on and off in
+  open tabs; the few that can only apply to the next page say so.
+- **Switches that did nothing now work:** the notes folder (without a
+  restart), keeping Favourites docked, text labels on the toolbar (and their
+  off switch no longer flattens every button), the Discord and tracker
+  badges, lazy images, the magnifier's zoom, middle-click on the new-tab
+  button, the arrow-key step (after the page has had the key), freezing idle
+  tabs after the chosen time, lower priority for background tabs.
+- **What Settings shows is what is in effect:** spell-check languages, the
+  glass strength, "close unused tabs" (0 now means never, and says so),
+  night times typed as 7 or 25:00, the money rates switch, the ffmpeg and
+  OCR "found" lines, theme names, wheel and key steps (no reversed
+  scrolling); saving the Developer card no longer wipes snippets saved from
+  the menu; a reading switch no longer writes back an old copy of the whole
+  table.
+- **Nothing lost when a write fails.** An unreadable passwords file is no
+  longer replaced by a nearly empty vault; a generated password the vault
+  could not save stays on the clipboard and says so; an unreadable or
+  damaged history file is set aside instead of being overwritten; a
+  damaged snippets file too; a note or to-do list that is not UTF-8 is
+  copied to .bak before it is rewritten; the daily bookmark backup, HAR and
+  bookmark exports are written whole or not at all; to-dos and snippets
+  that could not be written are not reported as added.
+- **Failures are reported.** Archives that need a password or are damaged,
+  saving a page as Markdown, PDFs, captures of every tab, the contact sheet
+  and the timelapse, a failed recording encode (now saved as a GIF instead
+  of thrown away), a translator that returns nothing, the external editor's
+  result; and the download queue moves on after an extraction error.
+- **Hand-edited config no longer stops the browser starting** (block lists,
+  proxy profiles and rules, the automatic proxy's default) or breaks
+  per-site zoom, page guards or the history page.
+- **Big books** open cut to the chapters that fit, with a note, instead of
+  as a blank page.
+- **Leaks and late answers.** Menus are freed when they close; pinned
+  screenshots, background jobs and the hidden GPU page are freed when done;
+  a reopened tab's history walk stops when you navigate yourself; a
+  bookmark's saved scroll only applies to the bookmark's own page; "all
+  tabs" captures and phone-view shots survive a tab closing mid-way; a
+  plain recording stops before memory runs out; the magnifier, link
+  preview and cursor ring close with their window; the audio shaper lets go
+  of players the page removed.
+
+Tests: the first part of the checks for these fixes runs in the review
+suite (142 new checks); suites that read the page after a fixed wait now
+wait for the thing itself (Settings answering, the bar's own blank tab,
+the zoomed page's address).
+
 ## 2026-11-13 — line-by-line review, day 3 (part forty-two: twentieth pass)
 
 The twentieth search read every module next to browser.py and every page of

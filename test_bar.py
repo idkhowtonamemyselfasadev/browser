@@ -709,7 +709,11 @@ check("...and ninety-nine is not finished either",
 # new tab, honoured exactly as intended. `blank=True` is the one that
 # opens a tab and loads nothing (see `if not blank:` in new_tab).
 H.wait_for(lambda: win.urlbar.progress() == 0, timeout=8000)
-loading = win.current()
+# a tab of its own that loads nothing: the tab in front could still have
+# a page coming in, and that real load finishing in the background set
+# its line back to 0 (red on main too, under a CPU quota)
+loading = win.new_tab(url=None, blank=True)
+H.spin(150)
 win.bar_progress(60, loading)
 check("a loading tab puts its line up", win.urlbar.progress() == 0.6,
       win.urlbar.progress())

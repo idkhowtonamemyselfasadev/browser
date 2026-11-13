@@ -1087,6 +1087,7 @@
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_devtoolsDarkName">DevTools in the browser's colours</span>
+            <span class="wnote" id="t_devtoolsDarkNote">Only used when the inspector opens through a debug port; the built-in inspector keeps its own colours.</span>
             <span class="wsub" id="t_devtoolsDarkHint"></span>
           </span>
           <input type="checkbox" id="devtoolsdark"><span class="wsw"></span>
@@ -1451,6 +1452,7 @@
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_perfNice">Give background tabs a lower claim on the processor</span>
+            <span class="wnote" id="t_niceNote">Applies to pages you open from now on.</span>
             <span class="wsub" id="t_perfNiceHint"></span>
           </span>
           <input type="checkbox" id="nicebackground"><span class="wsw"></span>
@@ -1458,6 +1460,7 @@
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_perfPauseHidden">Pause animations in tabs nobody is looking at</span>
+            <span class="wnote" id="t_perfPauseNote">Applies to pages you open from now on.</span>
           </span>
           <input type="checkbox" id="perfpausehidden"><span class="wsw"></span>
         </label>
@@ -1520,12 +1523,13 @@
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_perfLogName">Keep a small log of start-up time and memory</span>
+            <span class="wnote" id="t_perfLogNote">Applies from the next start.</span>
           </span>
           <input type="checkbox" id="perflogon"><span class="wsw"></span>
         </label>
         <div class="wrow">
           <span class="wlabel">
-            <span class="wname" id="t_perfUnusedName">Offer to close tabs not looked at for</span>
+            <span class="wname" id="t_perfUnusedName">Offer to close tabs not looked at for (days, 0 = never)</span>
           </span>
           <input type="number" id="closeunuseddays" min="0" max="365" style="width:80px">
         </div>
@@ -3037,6 +3041,7 @@
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_guardClipboardRead">Never let a page read the clipboard</span>
+            <span class="wnote" id="t_guardClipNote">Applies to pages you open from now on.</span>
           </span>
           <input type="checkbox" id="guardclipboardread"><span class="wsw"></span>
         </label>
@@ -3061,6 +3066,7 @@
         <label class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_guardNoFrames">Block frames from other sites</span>
+            <span class="wnote" id="t_guardFramesNote">Applies to pages you open from now on.</span>
           </span>
           <input type="checkbox" id="guardnoframes"><span class="wsw"></span>
         </label>
@@ -3683,6 +3689,29 @@
     if (window._settings) window._settings[key] = value;
   }
 
+  // one entry of a table, merged by the browser into its own copy: the
+  // page's copy was taken when it loaded and may be older than a switch
+  // changed in a menu or in another window since
+  function saveNested(table, key, value) {
+    if (bridge) bridge.setSetting(table + "Field", JSON.stringify([key, value]));
+    if (window._settings) {
+      const was = Object.assign({}, window._settings[table] || {});
+      was[key] = value;
+      window._settings[table] = was;
+    }
+  }
+
+  // read back after saving: the browser may have refused, reshaped or
+  // overridden a value, and the box kept what was typed
+  function rereadSettings(apply) {
+    if (!(bridge && bridge.getSettings)) return;
+    bridge.getSettings((j) => {
+      let s = {};
+      try { s = JSON.parse(j) || {}; } catch (err) { return; }
+      apply(s);
+    });
+  }
+
   // the one line on this page that is a warning rather than a note
   function paintWarn() {
     const w = document.getElementById("masterwarn");
@@ -4070,6 +4099,11 @@
     setVal("shotupload", s.shotUpload || "");
     setVal("ocrpath", s.ocrPath || "");
     setVal("ffmpegpath", s.ffmpegPath || "");
+    paintCaptureTools(s);
+  }
+
+  function paintCaptureTools(s) {
+    const S = window.STR || {};
     const tools = s.captureTools || {};
     for (const [id, key] of [["ocrfound", "tesseract"],
                              ["ffmpegfound", "ffmpeg"]]) {
@@ -4094,7 +4128,11 @@
                              ["ocrpath", "ocrPath"],
                              ["ffmpegpath", "ffmpegPath"]]) {
       const el = document.getElementById(id);
-      if (el) el.onchange = () => saveSetting(key, el.value.trim());
+      if (el) el.onchange = () => {
+        saveSetting(key, el.value.trim());
+        // the label said "Found" for the old path after a wrong one
+        if (id !== "shotupload") rereadSettings(paintCaptureTools);
+      };
     }
   }
 
@@ -4285,10 +4323,7 @@
         check.id = "nav_" + key;
         check.checked = !!want[key];
         check.onchange = () => {
-          const was = Object.assign({},
-            (window._settings && window._settings.nav) || {});
-          was[key] = check.checked;
-          saveSetting("nav", was);
+          saveNested("nav", key, check.checked);
         };
         row.appendChild(check);
         const sw = document.createElement("span");
@@ -4399,10 +4434,7 @@
   }
 
   function saveA11y(key, value) {
-    const was = Object.assign({},
-      (window._settings && window._settings.a11y) || {});
-    was[key] = value;
-    saveSetting("a11y", was);
+    saveNested("a11y", key, value);
   }
 
   function bindA11y() {
@@ -4454,6 +4486,9 @@
     for (const [id, key, fallback] of LOOK_CHOICES)
       setVal(id, s[key] || fallback);
     for (const [id, key] of LOOK_NUMBERS) setVal(id, s[key] || 0);
+    // never set: the Glass look's own see-through level is in effect (about
+    // this far along), and 0 is solid chrome, so 0 must not be shown
+    if (typeof s.glassStrength !== "number") setVal("glassstrength", 40);
     for (const [id, key] of LOOK_TEXTS) setVal(id, s[key] || "");
     const fonts = s.siteFonts || {};
     setVal("sitefontstandard", fonts.standard || "");
@@ -4531,7 +4566,17 @@
     }
     for (const [id, key] of LOOK_TEXTS) {
       const el = document.getElementById(id);
-      if (el) el.onchange = () => saveSetting(key, el.value.trim());
+      if (el) el.onchange = () => {
+        saveSetting(key, el.value.trim());
+        // a time or a theme name the browser does not accept stays out,
+        // and the box must not go on showing it
+        if (["nightDimFrom", "nightDimTo", "schemeDark",
+             "schemeLight"].includes(key))
+          rereadSettings((s) => {
+            el.value = s[key] || "";
+            if (window._settings) window._settings[key] = s[key] || "";
+          });
+      };
     }
     for (const [id, role] of [["sitefontstandard", "standard"],
                               ["sitefontserif", "serif"],
@@ -5616,7 +5661,10 @@
             t_smoothScroll:"smoothScroll",
             t_smoothScrollHint:"smoothScrollHint",
             t_smoothNote:"restartLater", t_autoNote:"restartLater",
-            t_pdfNote:"restartLater",
+            t_pdfNote:"restartLater", t_perfPauseNote:"restartLater",
+            t_guardClipNote:"restartLater", t_guardFramesNote:"restartLater",
+            t_niceNote:"restartLater", t_perfLogNote:"startLater",
+            t_devtoolsDarkNote:"devtoolsDarkNote",
             t_blockAutoplay:"blockAutoplay",
             t_tabWheelName:"tabWheelName", t_tabWheelHint:"tabWheelHint",
             t_tabCountName:"tabCountName", t_tabCountHint:"tabCountHint",
@@ -6209,7 +6257,21 @@
         window._settings.historyEncrypted = !!s.historyEncrypted;
     });
   };
-  bindSwitch("spellboth", "spellBoth");
+  // read back after saving: with no dictionary installed the browser puts
+  // the switch back, and a success rewrites the language list
+  function rereadSpell(s) {
+    document.getElementById("spellboth").checked = !!s.spellBoth;
+    document.getElementById("spelllangs").value =
+      (s.spellLangs || []).join(", ");
+    if (window._settings) {
+      window._settings.spellBoth = !!s.spellBoth;
+      window._settings.spellLangs = s.spellLangs || [];
+    }
+  }
+  document.getElementById("spellboth").onchange = (e) => {
+    saveSetting("spellBoth", e.target.checked);
+    rereadSettings(rereadSpell);
+  };
   bindSwitch("hidefeeds", "hideFeeds");
   bindSwitch("logtonote", "logToNote");
   document.getElementById("webmail").onchange = (e) => {
@@ -6495,6 +6557,8 @@
 
   document.getElementById("spelllang").onchange = (e) => {
     saveSetting("spellCheckLang", e.target.value);
+    // one language picked: the pair that overrode it is gone
+    rereadSettings(rereadSpell);
   };
   for (const f of PAGE_FIELDS) {
     document.getElementById(f.box + "save").onclick =

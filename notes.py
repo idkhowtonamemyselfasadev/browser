@@ -18,6 +18,7 @@ it is files and dictionaries, so it can be tested on its own.
 import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -42,6 +43,21 @@ def _write_atomic(path, text):
     leaves the note as it was, not half of it or nothing. A note, the
     to-do list and the snippets are his own words, and the one copy."""
     path = Path(path)
+    # a file saved by another editor in Latin-1 or cp1252 is read with
+    # the bad bytes replaced and was then written back as UTF-8 with the
+    # replacements in it: its own text was gone. The original bytes are
+    # kept beside it, once, before the first rewrite; a copy that fails
+    # stops the write, like any other failed save.
+    try:
+        old = path.read_bytes()
+    except FileNotFoundError:
+        old = b""
+    try:
+        old.decode("utf-8")
+    except UnicodeDecodeError:
+        keep = path.with_name(path.name + ".bak")
+        if not keep.exists():
+            shutil.copyfile(path, keep)
     tmp = path.with_name(path.name + ".new")
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
@@ -375,8 +391,12 @@ class Desk:
         try:
             lines = self.todo_path().read_text(
                 encoding="utf-8", errors="replace").splitlines()
-        except OSError:
+        except FileNotFoundError:
             lines = []
+        except OSError:
+            # there but not readable: writing the panel's list over it
+            # would replace the file with a part of what it holds
+            return False
         slots = [i for i, line in enumerate(lines) if self._TODO.match(line)]
         old = [r for r in rows if isinstance(r.get("id"), int)]
         new = [r for r in rows if not isinstance(r.get("id"), int)]
@@ -410,7 +430,10 @@ class Desk:
                      "link": str(link or "")[:2000], "due": int(due or 0)})
         if not rows[-1]["text"]:
             return []
-        self._write_todos(rows)
+        # False when the file could not be written: the panel kept the
+        # typed words out of the box and showed the list without them
+        if not self._write_todos(rows):
+            return False
         return self.todos()
 
     def toggle_todo(self, tid, done=None):
@@ -418,12 +441,14 @@ class Desk:
         for row in rows:
             if row["id"] == int(tid):
                 row["done"] = (not row["done"]) if done is None else bool(done)
-        self._write_todos(rows)
+        if not self._write_todos(rows):
+            return False
         return self.todos()
 
     def delete_todo(self, tid):
         rows = [r for r in self.todos() if r["id"] != int(tid)]
-        self._write_todos(rows)
+        if not self._write_todos(rows):
+            return False
         return self.todos()
 
     def move_todo(self, tid, delta):
@@ -444,13 +469,15 @@ class Desk:
         else:
             to = max(0, min(len(rows) - 1, at + step))
             rows.insert(to, rows.pop(at))
-        self._write_todos(rows)
+        if not self._write_todos(rows):
+            return False
         return self.todos()
 
     def clear_done_todos(self):
         rows = [r for r in self.todos() if not r["done"]]
         gone = len(self.todos()) - len(rows)
-        self._write_todos(rows)
+        if not self._write_todos(rows):
+            return False
         return gone
 
     def due_todos(self, at=None):
@@ -541,10 +568,33 @@ class Desk:
                 if str(k).strip()}
 
     def set_snippet(self, key, text):
-        table = self.snippets()
         key = str(key or "").strip()[:40]
         if not key:
             return {}
+        # a file with a typo in it read as "no snippets" and the next add
+        # wrote one entry over all the rest. One that does not parse is
+        # moved aside first (one that cannot be read at all stops the
+        # save), so what was in it can still be got back.
+        path = self.snippet_path()
+        try:
+            parsed = json.loads(path.read_bytes().decode("utf-8"))
+            broken = not isinstance(parsed, dict)
+        except FileNotFoundError:
+            broken = False
+        except OSError:
+            return False
+        except ValueError:
+            broken = True
+        if broken:
+            name = "%s.corrupt-%d" % (path.name, int(time.time()))
+            aside, n = path.with_name(name), 1
+            while aside.exists():   # never over an earlier copy
+                aside, n = path.with_name("%s-%d" % (name, n)), n + 1
+            try:
+                path.replace(aside)
+            except OSError:
+                return False
+        table = self.snippets()
         if text:
             table[key] = str(text)[:4000]
         else:
@@ -552,7 +602,7 @@ class Desk:
         try:
             _write_atomic(self.snippet_path(), json.dumps(table, indent=1))
         except OSError:
-            return {}
+            return False
         return table
 
     def expand(self, word):

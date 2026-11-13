@@ -244,6 +244,16 @@ view = settings_view(win)
 check("Settings opens", view is not None)
 if view is not None:
     page = view.page()
+
+    def _answers():
+        # Settings, filled from this big config under a CPU quota, can be
+        # busy past one js() timeout: the checks wait until it answers
+        try:
+            return H.js(view, "document.readyState",
+                        B.MAIN_WORLD_ID) == "complete"
+        except AssertionError:
+            return False
+    H.wait_for(_answers, 30000)
     check("under glass the engine paints no base behind it",
           page.backgroundColor().alpha() == 0,
           page.backgroundColor().name())

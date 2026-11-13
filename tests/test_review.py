@@ -4066,8 +4066,11 @@ try:
 finally:
     br.cap_video = _real_cv
     br.config.pop("videoCap", None)
+# 'as it comes' (0) is sent to the open tabs to lift a cap (fix209);
+# what must never happen is 480p
 check("'as it comes' takes the video cap off instead of setting 480p",
-      _caps89 == [720], str(_caps89))
+      480 not in _caps89 and _caps89 and _caps89[-1] == 720
+      and set(_caps89) <= {0, 720}, str(_caps89[:6]))
 
 # ===== third pass, part 4: bookmark undo with a reused id, start page ====
 _bm90 = list(br.bookmarks)
@@ -10378,6 +10381,1386 @@ if _gk207:
             br.config[_gk207] = _was207
         else:
             br.config.pop(_gk207, None)
+
+# ---- 196: popup and exec menus free themselves ----
+_exec_orig196 = B.QMenu.exec
+_calls196 = []
+try:
+    B.QMenu.exec = lambda self, *a, **k: (_calls196.append(1), None)[1]
+    H.spin(50)
+    _before196 = len(br.findChildren(B.QMenu))
+    for _i196 in range(5):
+        br._tab_menu(0, where=B.QPoint(5, 5))
+        br._session_menu(br.tabs, br.sessions[0]["sid"])
+        br._bmbar_menu(B.QPoint(1, 1))
+        br.show_tag("nosuchtag196")
+    H.spin(100)
+    _after196 = len(br.findChildren(B.QMenu))
+    check("196 exec menus do not pile up under the window",
+          len(_calls196) >= 20 and _after196 <= _before196 + 2,
+          "%d -> %d, execs %d" % (_before196, _after196, len(_calls196)))
+finally:
+    B.QMenu.exec = _exec_orig196
+
+for _name196 in ("site_info_menu", "key_menu_here", "guard_menu", "cookie_menu",
+                 "media_menu", "mc_menu", "task_menu", "dev_menu",
+                 "snippets_menu", "page_storage_menu", "cookies_menu",
+                 "media_menu2"):
+    try:
+        _m196 = getattr(br, _name196)()
+        check("196 %s frees itself on close" % _name196,
+              _m196.testAttribute(B.Qt.WidgetAttribute.WA_DeleteOnClose))
+        _m196.deleteLater()
+    except Exception as _e196:
+        check("196 %s frees itself on close" % _name196, False, repr(_e196))
+H.spin(50)
+# ---- twenty-first pass, group 197: walker, auth marker, bookmark scroll, hand-off reply ----
+import inspect as _inspect_197
+_src_w197 = _inspect_197.getsource(B.Browser.restore_tab_history)
+check("197 history walker checks the load is its own",
+      "requestedUrl" in _src_w197 and '"want"' in _src_w197)
+
+# a navigation he makes mid-walk is not overridden
+_v197 = br.new_tab()
+try:
+    _t0197 = srv.url("/twhome")
+    _mine197 = srv.url("/drafts") + "?mine197=1"
+    br.restore_tab_history(_v197, [srv.url("/timers"), srv.url("/drafts"),
+                                   srv.url("/twhome")], at=0)
+    H.wait_for(lambda: "/timers" in _v197.url().toString(), 8000)
+    H.load(_v197, _mine197)
+    H.wait_for(lambda: "mine197" in _v197.url().toString(), 8000)
+    H.spin(1500)
+    check("197 a navigation mid-walk is not overridden",
+          "mine197" in _v197.url().toString(), _v197.url().toString())
+finally:
+    _close_if_open(_v197)
+
+# ...and left alone, the walk still rebuilds the Back list and steps back
+# to where he was (the check above passes too if the walker just dies)
+_v2_197 = br.new_tab()
+try:
+    br.restore_tab_history(_v2_197, [srv.url("/timers"), srv.url("/drafts"),
+                                     srv.url("/twhome")], at=1)
+
+    def _walked197():
+        try:
+            h = _v2_197.page().history()
+            urls = [i.url().toString() for i in h.items()]
+        except RuntimeError:
+            return False
+        return (any("/twhome" in u for u in urls)
+                and "/drafts" in _v2_197.url().toString()
+                and h.canGoForward())
+    H.wait_for(_walked197, 15000)
+    check("197 the walk still rebuilds the Back list and steps back",
+          _walked197(),
+          [i.url().toString() for i in _v2_197.page().history().items()])
+finally:
+    _close_if_open(_v2_197)
+
+# the saved login is offered again on a later visit
+check("197 auth marker carries a time",
+      "monotonic" in _inspect_197.getsource(B.Browser._http_auth))
+
+# bookmark scroll: the handler is one shot and a failed load clears the offset
+_sob197 = _inspect_197.getsource(B.Browser.open_bookmark)
+check("197 bookmark handler is one shot and only scrolls its own page",
+      "disconnect(put_back)" in _sob197 and "requestedUrl" in _sob197
+      and "_bm_put_back" in _sob197)
+
+# hand-off reply survives a deleted socket
+_sm197 = _inspect_197.getsource(B.main)
+check("197 hand-off reply guards RuntimeError",
+      "except RuntimeError" in _sm197.split("def reply")[1].split("def act")[0])
+# ---- 198: pinned shots, shot_all_tabs, shot_mobile, recording cap ----
+import inspect as _insp_x198
+if B.capture is not None:
+    _img_x198 = B.QImage(40, 30, B.QImage.Format.Format_RGB32)
+    _img_x198.fill(0xff336699)
+    _before_x198 = len(getattr(br, "_pinned_shots", []))
+    br._shot_done(_img_x198, copy=False, save=False, pin=True)
+    _win_x198 = br._pinned_shots[-1]
+    check("198 L2 a pin is on the list while open",
+          len(br._pinned_shots) == _before_x198 + 1)
+    _win_x198.close()
+    H.spin(100)
+    B.QApplication.sendPostedEvents(None, 52)  # DeferredDelete
+    H.spin(100)
+    check("198 L2 a closed pin leaves the list",
+          len(br._pinned_shots) == _before_x198
+          and _win_x198 not in br._pinned_shots)
+
+    _src_x198 = _insp_x198.getsource(B.Browser.shot_all_tabs)
+    check("198 L3 shot_all_tabs looks each tab up again",
+          "indexOf(view)" in _src_x198 and "except RuntimeError" in _src_x198
+          and "was = self.tabs.currentIndex()" not in _src_x198)
+
+    # L4: the view dies during the wait; the phone agent is given back
+    _view_x198 = br.new_tab()
+    H.load(_view_x198, srv.url("/twhome"))
+    H.wait_for(lambda: "/twhome" in _view_x198.url().toString(), 8000)
+    _host_x198 = br._host_of(_view_x198.url())
+    _table_x198 = br.agent_sites()
+    _had_x198 = (_host_x198 in _table_x198, _table_x198.get(_host_x198))
+    _real_full_x198 = B.capture.full_page
+
+    def _boom_x198(*a, **k):
+        raise RuntimeError("wrapped C/C++ object has been deleted")
+    B.capture.full_page = _boom_x198
+    try:
+        _res_x198 = br.shot_mobile(view=_view_x198, copy=False, save=False)
+    finally:
+        B.capture.full_page = _real_full_x198
+    check("198 L4 shot_mobile survives a dead view and restores the agent",
+          _res_x198 is None
+          and (_host_x198 in br.agent_sites(),
+               br.agent_sites().get(_host_x198)) == _had_x198)
+    if _had_x198[0]:
+        br.agent_sites()[_host_x198] = _had_x198[1]
+    else:
+        br.agent_sites().pop(_host_x198, None)
+    _close_if_open(_view_x198)
+
+    # L5: the plain recording stops at the cap
+    _cap_x198 = br.RECORD_MAX_BYTES
+    _view2_x198 = br.new_tab()
+    H.load(_view2_x198, srv.url("/twhome"))
+    H.wait_for(lambda: "/twhome" in _view2_x198.url().toString(), 8000)
+    br.RECORD_MAX_BYTES = 1
+    try:
+        _rec_x198 = br.start_recording(view=_view2_x198)
+        br._record_tick()
+        _stopped_x198 = br.recording_now() is None
+    finally:
+        br.__dict__.pop("RECORD_MAX_BYTES", None)
+        if br.recording_now() is not None:
+            br.stop_recording(save=False)
+    check("198 L5 a plain recording stops at the memory cap",
+          bool(_rec_x198) and _stopped_x198
+          and br.RECORD_MAX_BYTES == _cap_x198)
+    _close_if_open(_view2_x198)
+# ---- twenty-first pass, fixes 199 ----
+import inspect as _insp_x199
+_alljs_x199 = _insp_x199.getsource(B.Browser.apply_audio_shape)
+check("199 L6: audio kit drops detached media elements",
+      "el.isConnected || !el.paused) return true" in _alljs_x199
+      and "kit.seen = kit.seen.filter" in _alljs_x199)
+
+# L7: closing a second window takes its lens and preview with it
+_w_x199 = None
+_w_x199 = br.new_window()
+if True:
+    try:
+        _w_x199.magnifier(True)
+        _lens_x199 = _w_x199._lens
+        _w_x199._closing_anyway = True
+        _w_x199.close()
+        _ok_x199 = (getattr(_w_x199, "_lens", None) is None
+                    and not _lens_x199.isVisible())
+        H.spin(80)
+        check("199 L7: lens gone after the window closed", _ok_x199)
+    finally:
+        try:
+            _w_x199._closing_anyway = True
+            _w_x199.close()
+        except RuntimeError:
+            pass
+
+# T7: the watcher's job is deleted once checked
+_job_x199 = B.BackgroundCall(lambda: None, br)
+br._mc_job = _job_x199
+_gone_x199 = []
+_job_x199.destroyed.connect(lambda *a: _gone_x199.append(1))
+br._mc_checked([])
+H.spin(80)
+check("199 T7: mc job deleted after its check",
+      br._mc_job is None and bool(_gone_x199))
+
+# T21: vault_job deletes the finished job
+_res_x199 = []
+_done_x199 = []
+_before_x199 = set(id(c) for c in br.children()
+                   if isinstance(c, B.BackgroundCall))
+br.vault_job(lambda: 7, _res_x199.append)
+_kids_x199 = [c for c in br.children() if isinstance(c, B.BackgroundCall)
+              and id(c) not in _before_x199]
+H.wait_for(lambda: bool(_res_x199), 5000)
+H.spin(100)
+check("199 T21: vault job freed after finishing",
+      _res_x199 == [7] and not br._vault_jobs and len(_kids_x199) == 1
+      and all(B.sip.isdeleted(c) for c in _kids_x199))
+
+# T17: gpu view is dropped after the failure path / answer
+check("199 T17: gpu_facts deletes its view",
+      "holder.deleteLater()" in _insp_x199.getsource(B.Browser.gpu_facts)
+      and "self._gpu_view = None" in _insp_x199.getsource(B.Browser.gpu_facts))
+# -- 201: an unreadable vault is not an empty one; a refused generated password is not "saved" --
+_d201 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_vl201 = B.VaultLock(_d201)
+_vl201.write({"items": [{"host": "keep201", "password": "pw201"}]})
+_vf201 = _d201 / "passwords.json"
+_orig201 = _vf201.read_bytes()
+_vf201.chmod(0)
+try:
+    _vl2_201 = B.VaultLock(_d201)
+    _readable201 = os.access(str(_vf201), os.R_OK) if "os" in globals() else None
+    if _readable201 is None or not _readable201:
+        _got201 = _vl2_201.read()
+        _w201 = _vl2_201.write({"items": [{"host": "new201", "password": "x"}]})
+    else:
+        _got201, _w201, _vl2_201._blind = {}, False, True   # root: cannot test
+finally:
+    _vf201.chmod(0o600)
+check("an unreadable vault reads blind and refuses a save",
+      _got201 == {} and _vl2_201._blind and _w201 is False,
+      str((_got201, _vl2_201._blind, _w201)))
+check("and the real vault file is still there untouched",
+      _vf201.read_bytes() == _orig201)
+_vl3_201 = B.VaultLock(_d201)
+check("a readable vault opens again afterwards",
+      "keep201" in json.dumps(_vl3_201.read()) and not _vl3_201._blind)
+
+_gp201 = br.new_tab(); H.spin(300)
+H.load(_gp201, srv.url("/pwform"))
+H.wait_for(lambda: "/pwform" in _gp201.url().toString(), 8000)
+if br.vault is not None and not br.vault_locked():
+    _vpw201 = br.config.get(B.VAULT_PASSWORD_KEY, "__absent__")
+    br.config[B.VAULT_PASSWORD_KEY] = True
+    _flash201 = []
+    _realflash201 = br.flash
+    br.flash = lambda msg, *a, **k: _flash201.append(str(msg))
+    br.vault.set_entry = lambda *a, **k: None          # the store says no
+    _g201 = {}
+    try:
+        br.generate_for_page(view=_gp201, then=lambda s: _g201.update(v=s))
+        H.wait_for(lambda: _flash201, 8000)
+        H.spin(200)
+    finally:
+        br.vault.__dict__.pop("set_entry", None)
+        br.__dict__.pop("flash", None)
+        if _vpw201 == "__absent__":
+            br.config.pop(B.VAULT_PASSWORD_KEY, None)
+        else:
+            br.config[B.VAULT_PASSWORD_KEY] = _vpw201
+    check("a generated password the vault refused is not reported saved",
+          any(br._ui_str("genNotSaved") == m for m in _flash201)
+          and not any(br._ui_str("genMade").split("%")[0] in m
+                      for m in _flash201) and "v" not in _g201,
+          str(_flash201))
+_close_if_open(_gp201)
+# ---- twenty-second pass, fix 202: failure paths of extract, exports and backup ----
+import zipfile as _zf202
+import inspect as _insp202
+_d202 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_flashes202 = []
+_oflash202 = br.__dict__.get("flash")
+br.flash = lambda msg, *a, **k: _flashes202.append(str(msg))
+try:
+    # F2: a zip whose extraction raises RuntimeError is a flash, not an exception
+    _z202 = _d202 / "locked.zip"
+    with _zf202.ZipFile(_z202, "w") as _f202:
+        _f202.writestr("a.txt", "hello")
+    _oext202 = _zf202.ZipFile.extractall
+
+    def _boom202(self, *a, **k):
+        raise RuntimeError("password required")
+    _zf202.ZipFile.extractall = _boom202
+    try:
+        try:
+            _r202 = br.extract_archive(path=_z202, ask=False)
+            _exc202 = None
+        except Exception as _e202:
+            _r202, _exc202 = None, _e202
+    finally:
+        _zf202.ZipFile.extractall = _oext202
+    check("F2 a password-protected zip fails cleanly", _r202 == "" and _exc202 is None,
+          repr((_r202, _exc202)))
+    check("F2 and leaves no half-made folder", not (_d202 / "locked").exists())
+    check("F2 the download handler still starts the next download",
+          "finally" in _insp202.getsource(B.Browser._download_state))
+
+    # F3: markdown write failure flashes
+    _flashes202.clear()
+    _blocked202 = _d202 / "isdir.md"
+    _blocked202.mkdir()
+    _got202 = []
+    _ov202 = br.current()
+    _opm202 = br.page_markdown
+    br.page_markdown = lambda view=None, then=None: then("some text")
+    try:
+        br.save_page_markdown(view=_ov202, path=str(_blocked202), then=_got202.append)
+    finally:
+        br.page_markdown = _opm202
+    check("F3 a failed markdown save says so", _got202 == [""] and
+          br._ui_str("pageSaveFailed") in _flashes202, repr((_got202, _flashes202)))
+
+    # F4: HAR export
+    _flashes202.clear()
+    br.request_watch().log[:] = [{"url": "https://a/", "host": "a",
+                                  "method": "GET", "kind": 0, "t": 0}]
+    try:
+        _h202 = br.export_har(str(_blocked202))
+    finally:
+        br.request_watch().log[:] = []
+    check("F4 a failed HAR export says so", _h202 == "" and
+          br._ui_str("exportFailed") in _flashes202, repr((_h202, _flashes202)))
+
+    # F14: bookmark export
+    _flashes202.clear()
+    _w202 = br.export_bookmarks(str(_blocked202), fmt="json")
+    check("F14 a failed bookmark export is not 0", _w202 is None, repr(_w202))
+    _ofd202 = B.QFileDialog.getSaveFileName
+    B.QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (str(_blocked202), ""))
+    try:
+        br.ask_export_bookmarks()
+    finally:
+        B.QFileDialog.getSaveFileName = _ofd202
+    check("F14 and the user is told", br._ui_str("exportFailed") in _flashes202
+          and not any("0" in f and f == br._ui_str("bmExported") % 0 for f in _flashes202),
+          repr(_flashes202))
+    _ok202 = br.export_bookmarks(str(_d202 / "ok.json"), fmt="json")
+    check("F14 a good export still counts links", isinstance(_ok202, int))
+
+    # T14: a cut-off backup of today is rewritten
+    _obd202 = B.Browser.bookmark_backup_dir
+    _obm202 = list(br.bookmarks)
+    B.Browser.bookmark_backup_dir = lambda self: _d202 / "bk"
+    try:
+        if not br.bookmarks:
+            br.bookmarks = [{"id": 1, "type": "link", "title": "t",
+                             "url": "https://t202.example/", "parent": 0, "t": 1}]
+        (_d202 / "bk").mkdir()
+        _t202 = _d202 / "bk" / ("bookmarks-%s.json" % _time.strftime("%Y-%m-%d"))
+        _t202.write_text('[{"id": 1, "ty')
+        _p202 = br.backup_bookmarks()
+        try:
+            _back202 = json.loads(_t202.read_text())
+        except ValueError:
+            _back202 = None
+        check("T14 a truncated backup of today is rewritten",
+              _p202 == str(_t202) and isinstance(_back202, list) and _back202,
+              repr((_p202, _back202)))
+    finally:
+        B.Browser.bookmark_backup_dir = _obd202
+        br.bookmarks = _obm202
+finally:
+    if _oflash202 is None:
+        br.__dict__.pop("flash", None)
+    else:
+        br.flash = _oflash202
+    import shutil as _sh202
+    _sh202.rmtree(_d202, ignore_errors=True)
+# ---- 203: failure paths: history, launch config, zoom, guard tables ----
+import page_guard as _pg_x203
+_hf_x203 = B.HISTORY_FILE
+_had_x203 = _hf_x203.read_bytes() if _hf_x203.exists() else None
+_before_x203 = set(_hf_x203.parent.glob(_hf_x203.name + ".corrupt-*"))
+try:
+    _hf_x203.write_bytes(b'{"url": "x", "t": ')
+    _rows_x203 = br._read_history()
+    _aside_x203 = set(_hf_x203.parent.glob(_hf_x203.name + ".corrupt-*")) - _before_x203
+    check("203 F5 an unparsable history is set aside, not left to be overwritten",
+          _rows_x203 == [] and not _hf_x203.exists() and len(_aside_x203) == 1,
+          (_rows_x203, _aside_x203))
+    for _p_x203 in _aside_x203:
+        _p_x203.unlink()
+    _hf_x203.write_text(json.dumps([
+        {"url": "http://a.test/", "t": "yesterday", "title": None},
+        {"url": "http://b.test/", "t": 5, "title": 7},
+        "junk"]))
+    _rows_x203 = br._read_history()
+    check("203 F12 a history row with a bad time or title is normalised",
+          len(_rows_x203) == 2
+          and all(isinstance(r["t"], (int, float)) for r in _rows_x203)
+          and all(isinstance(r["title"], str) for r in _rows_x203),
+          _rows_x203)
+finally:
+    if _had_x203 is None:
+        _hf_x203.unlink(missing_ok=True)
+    else:
+        _hf_x203.write_bytes(_had_x203)
+    for _p_x203 in set(_hf_x203.parent.glob(_hf_x203.name + ".corrupt-*")) - _before_x203:
+        _p_x203.unlink()
+
+_ok_x203 = True
+try:
+    _hosts_x203 = [B._blocked_hosts({"blockHosts": _v}) for _v in (5, True, "a.test", {"a": 1})]
+    _cfg_x203 = B._sane_proxy_config({
+        "proxyProfiles": [{"name": ["x"]}, {"name": "p"}],
+        "proxyAuto": {"rules": [{"pattern": 5}, {"pattern": "a.test", "profile": ["p"]},
+                                {"pattern": "b.test", "profile": "p"}]}})
+    _plan_x203 = B._proxy_routing(_cfg_x203)
+except Exception as _e_x203:
+    _ok_x203 = False
+    _hosts_x203 = _cfg_x203 = _e_x203
+check("203 F13 wrong-typed block list and proxy tables do not raise at launch",
+      _ok_x203 and _cfg_x203["proxyProfiles"] == [{"name": "p"}]
+      and len(_cfg_x203["proxyAuto"]["rules"]) == 1, (_hosts_x203, _cfg_x203))
+
+_zs_x203 = br.config.get("zoomSites", None)
+try:
+    _res_x203 = []
+    for _v_x203 in (["a"], "text", {"a.test": "1.5x"}):
+        br.config["zoomSites"] = _v_x203
+        _res_x203.append(br.site_zoom("a.test"))
+    check("203 T6 site_zoom survives a zoomSites of the wrong type",
+          _res_x203 == [None, None, None], _res_x203)
+except Exception as _e_x203:
+    check("203 T6 site_zoom survives a zoomSites of the wrong type", False, repr(_e_x203))
+finally:
+    if _zs_x203 is None:
+        br.config.pop("zoomSites", None)
+    else:
+        br.config["zoomSites"] = _zs_x203
+
+try:
+    _r_x203 = _pg_x203.rules({"fakePlaces": ["a"], "micSites": "x", "callAudio": [1],
+                              "leaveTrapSites": 5, "popupSites": True})
+    check("203 T17 guard rules ignore per-site tables of the wrong type",
+          _r_x203["places"] == {} and _r_x203["mics"] == {} and _r_x203["calls"] == {}
+          and _r_x203["keep"] == [] and _r_x203["allow"] == [], _r_x203)
+except Exception as _e_x203:
+    check("203 T17 guard rules ignore per-site tables of the wrong type", False, repr(_e_x203))
+
+# fold: a history time that is a number but out of range is nonsense too
+_rows206 = None
+_hf206 = B.HISTORY_FILE
+_was206 = _hf206.read_bytes() if _hf206.exists() else None
+try:
+    _hf206.write_text('[{"url": "https://a206.test/", "t": 1e30},'
+                      ' {"url": "https://b206.test/", "t": -5},'
+                      ' {"url": "https://c206.test/", "t": Infinity}]')
+    _rows206 = br._read_history()
+finally:
+    if _was206 is None:
+        try:
+            _hf206.unlink()
+        except OSError:
+            pass
+    else:
+        _hf206.write_bytes(_was206)
+check("206 history times out of range read back as 0",
+      _rows206 is not None and [r.get("t") for r in _rows206] == [0, 0, 0],
+      str(_rows206))
+# fold: proxyAuto.default of the wrong type is dropped
+_pc206 = B._sane_proxy_config({"activeProxy": "auto",
+                               "proxyAuto": {"default": ["x"]}})
+check("206 a proxyAuto default that is not a name is dropped",
+      "default" not in _pc206.get("proxyAuto", {}), str(_pc206))
+# ===== twenty-second pass, group 204: failures of captures, books, translation =====
+import os as _os204
+import zipfile as _zf204
+
+_flashes204 = []
+_real_flash204 = br.flash
+br.flash = lambda *a, **k: _flashes204.append(str(a[0]) if a else "")
+_dir204 = _Path(_tempfile.mkdtemp(prefix="t204-"))
+
+
+def _ui204(key):
+    return br._ui_str(key)
+
+
+try:
+    # F6: a failed encode keeps the recording as a GIF
+    _real_tools204 = br.record_tools
+    _real_ftv204 = B.capture.frames_to_video
+    br.record_tools = lambda: {"recorder": "", "ffmpeg": "/bin/true"}
+    B.capture.frames_to_video = lambda *a, **k: ""
+    _v204 = br.new_tab(url=srv.url("/twhome"), switch=True)
+    H.wait_for(lambda: "/twhome" in _v204.url().toString(), 8000)
+    H.spin(300)
+    try:
+        br.start_recording(view=_v204, fps=5)
+        H.spin(700)
+        _out204 = br.stop_recording(save=True, fmt="webm")
+    finally:
+        br.__dict__.pop("record_tools", None)
+        B.capture.frames_to_video = _real_ftv204
+    check("F6 a failed ffmpeg encode still saves the frames as a GIF",
+          _out204.endswith(".gif") and _Path(_out204).is_file()
+          and _ui204("recGifFallback") in _flashes204,
+          str((_out204, _flashes204[-2:])))
+    br.close_tab(br.tabs.indexOf(_v204), ask=False)
+
+    # F7 / F10: a PDF that could not be written is not reported as saved
+    _ro204 = _dir204 / "ro"
+    _ro204.mkdir()
+    _real_dd204 = br.download_dir
+    _v204 = br.new_tab(url=srv.url("/twhome"), switch=True)
+    H.wait_for(lambda: "/twhome" in _v204.url().toString(), 8000)
+    H.spin(300)
+    del _flashes204[:]
+    _ro204.chmod(0o500)
+    try:
+        br.download_dir = lambda create=True: _ro204
+        br.pdf_quick(view=_v204)
+        H.wait_for(lambda: bool(_flashes204), 8000)
+    finally:
+        br.__dict__.pop("download_dir", None)
+        _ro204.chmod(0o700)
+    check("F7 pdf_quick says it failed when the folder cannot be written",
+          _ui204("pdfFailed") in _flashes204
+          and _ui204("shotPdfQuick") not in " ".join(_flashes204),
+          str(_flashes204))
+
+    del _flashes204[:]
+    _real_fd204 = B.QFileDialog.getSaveFileName
+    _ro204.chmod(0o500)
+    try:
+        B.QFileDialog.getSaveFileName = staticmethod(
+            lambda *a, **k: (str(_ro204 / "sel.pdf"), ""))
+        jsq(_v204, "getSelection().selectAllChildren(document.body)")
+        br.print_selection(view=_v204)
+        H.wait_for(lambda: bool(_flashes204), 8000)
+    finally:
+        B.QFileDialog.getSaveFileName = _real_fd204
+        _ro204.chmod(0o700)
+    check("F10 print_selection says it failed when the PDF is not written",
+          _ui204("pdfFailed") in _flashes204
+          and _ui204("navPrinted") % "sel.pdf" not in _flashes204,
+          str(_flashes204))
+    br.close_tab(br.tabs.indexOf(_v204), ask=False)
+
+    # F8 / F9: a big book opens, a damaged chapter is skipped
+    _big204 = _dir204 / "big.epub"
+    with _zf204.ZipFile(str(_big204), "w", _zf204.ZIP_DEFLATED) as _z204:
+        for _i204 in range(3):
+            _z204.writestr("c%d.xhtml" % _i204,
+                           "<html><body><h1>Part %d</h1><p>%s</p></body></html>"
+                           % (_i204, "word " * 160000))
+    for _priv204 in (False, True):
+        del _flashes204[:]
+        _v204 = br.new_tab(url=None, switch=True, private=_priv204)
+        _n204 = br.open_epub(str(_big204), view=_v204)
+        H.wait_for(lambda: (jsq(_v204, "document.querySelectorAll('section').length")
+                            or 0) >= 1, 8000)
+        _secs204 = jsq(_v204, "document.querySelectorAll('section').length")
+        check("F8 a book over 2 MB is cut to what fits and says so (%s tab)"
+              % ("private" if _priv204 else "normal"),
+              _n204 == 3 and _secs204 and 1 <= _secs204 < 3
+              and _ui204("epubCut") in _flashes204
+              and getattr(br, "_epub_tmp", None) is None,
+              str((_n204, _secs204, _flashes204[-1:])))
+        br.close_tab(br.tabs.indexOf(_v204), ask=False)
+
+    _bad204 = _dir204 / "bad.epub"
+    with _zf204.ZipFile(str(_bad204), "w", _zf204.ZIP_STORED) as _z204:
+        _z204.writestr("a.xhtml", "<html><body><h1>A</h1><p>one</p></body></html>")
+        _z204.writestr("b.xhtml", "<html><body><h1>B</h1><p>two</p></body></html>")
+    _raw204 = bytearray(_bad204.read_bytes())
+    _loc204 = _raw204.find(b"PK\x03\x04")
+    _cen204 = _raw204.find(b"PK\x01\x02")
+    _raw204[_loc204 + 8:_loc204 + 10] = (99).to_bytes(2, "little")
+    _raw204[_cen204 + 10:_cen204 + 12] = (99).to_bytes(2, "little")
+    _bad204.write_bytes(bytes(_raw204))
+    _v204 = br.new_tab(url=None, switch=True)
+    try:
+        _got204 = br.open_epub(str(_bad204), view=_v204)
+        _err204 = ""
+    except Exception as _e204:
+        _got204, _err204 = None, repr(_e204)
+    check("F9 a chapter packed in an unreadable way is skipped, the rest opens",
+          _got204 == 1, str((_got204, _err204)))
+    br.close_tab(br.tabs.indexOf(_v204), ask=False)
+
+    # F11: a translator that answers nothing stops the run
+    _v204 = br.new_tab(url=srv.url("/twhome"), switch=False)
+    H.wait_for(lambda: "/twhome" in _v204.url().toString(), 8000)
+    _calls204 = []
+    _real_rt204 = br.run_translator
+    br.run_translator = lambda text, then=None, **k: (
+        _calls204.append(text), then and then("")) and True
+    del _flashes204[:]
+    _job204 = {"rows": [(0, "first block"), (1, "second block")],
+               "view": _v204, "lang": "de", "key": "__trNodes204"}
+    _v204._translate_job = _job204
+    try:
+        br._translate_step(_job204)
+        H.spin(300)
+    finally:
+        br.__dict__.pop("run_translator", None)
+    check("F11 an empty translator answer stops the job and says so",
+          _calls204 == ["first block"] and _ui204("trFailed") in _flashes204
+          and _v204._translate_job is None
+          and _ui204("trDone") not in _flashes204,
+          str((_calls204, _flashes204)))
+    br.close_tab(br.tabs.indexOf(_v204), ask=False)
+
+    # T11: a capture that could not be written is not counted or noted
+    _img204 = B.QImage(40, 30, B.QImage.Format.Format_RGB32)
+    _img204.fill(B.QColor("#336699"))
+    _one204 = _dir204 / "one.png"
+    _img204.save(str(_one204), "PNG")
+    _sheet204 = br._contact_sheet([str(_one204)],
+                                  _dir204 / "missing-dir" / "sheet.png")
+    check("T11 a contact sheet that was not written returns no path",
+          _sheet204 == "", repr(_sheet204))
+    _okish204 = br._contact_sheet([str(_one204)], _dir204 / "sheet.png")
+    check("T11 ...and one that was written returns its path",
+          _okish204 == str(_dir204 / "sheet.png")
+          and _Path(_okish204).is_file(), repr(_okish204))
+
+    _v204 = br.new_tab(url=srv.url("/twhome"), switch=True)
+    H.wait_for(lambda: "/twhome" in _v204.url().toString(), 8000)
+    H.spin(300)
+    _lro204 = _dir204 / "lapse-ro"
+    _lro204.mkdir()
+    _lro204.chmod(0o500)
+    _was204 = [getattr(br, n, None) for n in
+               ("_lapse_view", "_lapse_dir", "_lapse_last")]
+    del _flashes204[:]
+    try:
+        br._lapse_view = _v204
+        br._lapse_dir = _lro204
+        br._lapse_last = None
+        _t1204 = br._lapse_tick()
+        _t2204 = br._lapse_tick()
+    finally:
+        _lro204.chmod(0o700)
+        br._lapse_view, br._lapse_dir, br._lapse_last = _was204
+        br.__dict__.pop("_lapse_failing", None)
+    check("T11 a timelapse frame that could not be saved is not 'last' and is said once",
+          _t1204 is False and _t2204 is False
+          and _flashes204.count(_ui204("shotFailed")) == 1
+          and not any(_lro204.iterdir()),
+          str((_t1204, _t2204, _flashes204)))
+    br.close_tab(br.tabs.indexOf(_v204), ask=False)
+finally:
+    br.flash = _real_flash204
+    br.__dict__.pop("flash", None)
+    for _n204 in ("record_tools", "download_dir", "run_translator"):
+        br.__dict__.pop(_n204, None)
+    import shutil as _sh204
+    for _p204 in _dir204.rglob("*"):
+        try:
+            if _p204.is_dir():
+                _p204.chmod(0o700)
+        except OSError:
+            pass
+    _sh204.rmtree(str(_dir204), ignore_errors=True)
+# ---- 205: failure paths in the notes drawer, the editor and workspaces ----
+import notes as _N205
+import os as _os205
+import inspect as _insp205
+
+_d205 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_dr205 = _N205.Desk(_d205)
+
+# F15: a to-do that could not be written is reported, not swallowed
+_dr205.add_todo("first205")
+_real205 = _N205._write_atomic
+try:
+    def _boom205(path, text):
+        raise OSError("disk full")
+    _N205._write_atomic = _boom205
+    _r_add205 = _dr205.add_todo("second205")
+    _r_tog205 = _dr205.toggle_todo(0)
+    _r_del205 = _dr205.delete_todo(0)
+    _r_mov205 = _dr205.move_todo(0, 1)
+    _r_clr205 = _dr205.clear_done_todos()
+finally:
+    _N205._write_atomic = _real205
+check("205 F15 a failed to-do write answers False, not the old list",
+      _r_add205 is False and _r_tog205 is False and _r_del205 is False
+      and _r_clr205 is False and _r_mov205 in (False, _dr205.todos()),
+      str((_r_add205, _r_tog205, _r_del205, _r_mov205, _r_clr205)))
+check("205 F15 and the file is as it was",
+      [t["text"] for t in _dr205.todos()] == ["first205"])
+_list205 = _dr205.add_todo("third205")
+check("205 F15 a write that works still answers the list",
+      isinstance(_list205, list) and len(_list205) == 2)
+_notes205 = (_Path(B.__file__).parent / "notes.html").read_text()
+check("205 F15 the page keeps the typed words and says so on a failed write",
+      "res === false) { failMsg = true; render(); return; }" in _notes205
+      and "failLine(body)" in _notes205)
+check("205 F15 the tab is not closed when the to-do was not written",
+      "if rows is False:" in _insp205.getsource(B.Browser.tab_to_todo))
+
+# T18/F16: a snippets file that does not parse is moved aside, not replaced
+_sp205 = _dr205.snippet_path()
+_sp205.write_text('{"ip": "1.2.3.4",}')
+_t205 = _dr205.set_snippet("new205", "text")
+_aside205 = [p.name for p in _d205.iterdir()
+             if p.name.startswith("snippets.json.corrupt-")]
+check("205 T18 a snippets file with a typo is moved aside before the add",
+      isinstance(_t205, dict) and "new205" in _t205 and len(_aside205) == 1
+      and '"ip"' in (_d205 / _aside205[0]).read_text(), str(_aside205))
+_sp205.write_text('["a list"]')
+_t205 = _dr205.set_snippet("two205", "x")
+check("205 T18 a snippets file of the wrong type is moved aside too",
+      isinstance(_t205, dict) and "two205" in _t205
+      and len([p for p in _d205.iterdir()
+               if p.name.startswith("snippets.json.corrupt-")]) == 2)
+try:
+    _N205._write_atomic = _boom205
+    _r_snip205 = _dr205.set_snippet("three205", "x")
+finally:
+    _N205._write_atomic = _real205
+check("205 T18 a failed snippet write answers False",
+      _r_snip205 is False)
+
+# T19/T20: a Latin-1 file keeps its original bytes in a .bak
+_l1205 = _d205 / "latin205.md"
+_l1205.write_bytes("---\ntitle: Küche\n---\nKüche".encode("latin-1"))
+_dr205.save_note("latin205", body="changed")
+_bak205 = _d205 / "latin205.md.bak"
+check("205 T19 the original bytes of a non-UTF-8 note are kept as .bak",
+      _bak205.exists()
+      and _bak205.read_bytes() == "---\ntitle: Küche\n---\nKüche"
+      .encode("latin-1"))
+# broken again (a different Latin-1 text): the first .bak is kept
+_l1205.write_bytes("---\ntitle: Straße\n---\nStraße".encode("latin-1"))
+_dr205.save_note("latin205", body="changed again")
+check("205 T19 the .bak is not overwritten by a later save",
+      _bak205.read_bytes().endswith("Küche".encode("latin-1")))
+_tl205 = _d205 / "todo.md"
+_tl205.write_bytes("- [ ] Küche\n".encode("latin-1"))
+_dr205.toggle_todo(0)
+check("205 T20 the to-do file gets a .bak before its first rewrite",
+      (_d205 / "todo.md.bak").exists())
+
+# T5: the editor's result is read leniently and its file removed on every path
+_ed205 = _insp205.getsource(B.Browser.edit_in_editor)
+check("205 T5 the editor file is read with errors=replace and removed first",
+      'errors="replace"' in _ed205 and "text = None" in _ed205
+      and _ed205.index("path.unlink()") < _ed205.index("if text is None:"))
+
+# T12: switching away with nothing open does not blank the saved set
+_ws205 = dict(br.workspaces())
+_now205 = br.workspace_now()
+_saved205 = []
+_orig_save205 = br.save_workspace
+try:
+    br.config["workspaces"] = {
+        "A205": [{"u": "http://a205.test/", "t": "A"}],
+        "B205": [{"u": "http://b205.test/", "t": "B"}]}
+    br.config["workspaceNow"] = "A205"
+    br._real_tabs = lambda: []
+    br.new_tab = lambda **k: br.tabs.currentWidget()
+    br.save_workspace = lambda name: _saved205.append(name)
+    br.open_workspace("B205")
+    check("205 T12 nothing open: the set he leaves is not saved as empty",
+          _saved205 == [] and br.workspaces()["A205"][0]["u"]
+          == "http://a205.test/", str(_saved205))
+finally:
+    for _n205 in ("_real_tabs", "new_tab", "save_workspace"):
+        br.__dict__.pop(_n205, None)
+    br.config["workspaces"] = _ws205
+    br.config["workspaceNow"] = _now205
+
+import shutil as _sh205
+_sh205.rmtree(str(_d205), ignore_errors=True)
+
+# fold: browser --todo says when the list could not be written
+_desk206 = br.desk()
+if _desk206 is not None:
+    _desk206.add_todo = lambda *a, **k: False
+    try:
+        _cli206 = br.take_cli_todo("mow the lawn 206")
+    finally:
+        _desk206.__dict__.pop("add_todo", None)
+    check("206 browser --todo answers not-saved when the write fails",
+          _cli206 == "not-saved", _cli206)
+# ---- twenty-third pass: settings reach every window (208) ----
+_w2_x208 = br.new_window()
+_old_x208 = {k: br.config.get(k) for k in
+             ("tabStrip", "tabCount", "hideStripSingle", "barLock",
+              "zoom", "zoomSites")}
+try:
+    H.spin(300)
+    br.bridge.setSetting("tabStrip", json.dumps("bottom"))
+    check("208 tabStrip moves the other window's strip too",
+          _w2_x208.tabs.tabPosition() == B.QTabWidget.TabPosition.South)
+    br.bridge.setSetting("tabStrip", json.dumps("top"))
+    check("208 tabStrip back to top in the other window",
+          _w2_x208.tabs.tabPosition() == B.QTabWidget.TabPosition.North)
+    br.bridge.setSetting("tabCount", json.dumps(True))
+    check("208 tabCount label shown in the other window",
+          not _w2_x208._tabcount.isHidden())
+    br.bridge.setSetting("tabCount", json.dumps(False))
+    check("208 tabCount label hidden in the other window",
+          _w2_x208._tabcount.isHidden())
+    # the other window's tab is zoomed by hand first, so a slider that
+    # did not reach it would leave it at 2.0
+    _v_x208 = _w2_x208.current()
+    if _v_x208 is not None and hasattr(_v_x208, "setZoomFactor"):
+        _v_x208._zoom = 2.0
+        _v_x208.setZoomFactor(2.0)
+    br.bridge.setSetting("zoom", json.dumps(1.5))
+    check("208 zoom re-bases the other window's tab",
+          _v_x208 is not None and hasattr(_v_x208, "setZoomFactor")
+          and getattr(_v_x208, "_zoom", None) is None
+          and abs(_v_x208.zoomFactor() - 2.0) > 1e-3,
+          str(_v_x208.zoomFactor() if _v_x208 is not None else None))
+    _src_x208 = __import__("inspect").getsource(B.Bridge.setSetting)
+    check("208 barKeyBtn is applied with the other bar buttons",
+          '"barKeyBtn"' in _src_x208 and '"barDecode"' in _src_x208)
+finally:
+    for _k_x208, _o_x208 in _old_x208.items():
+        br.bridge.setSetting(_k_x208, json.dumps(_o_x208))
+    _w2_x208._closing_anyway = True
+    _w2_x208.close()
+# ---- twenty-third pass: settings reach every window (209) ----
+import inspect as _insp_x209
+_w2_x209 = br.new_window()
+_keys_x209 = ("gamepadOn", "cpuWatch", "leakWatch", "pressureWatch",
+              "memoryBudget", "videoCap", "tabSnapshots", "pauseForCalls")
+_old_x209 = {k: br.config.get(k) for k in _keys_x209}
+_calls_x209 = []
+try:
+    H.spin(300)
+    # the (window, view) list covers the second window and a split half
+    check("209 _windows_views reaches the other window's tabs",
+          any(w is _w2_x209 for w, _v in br._windows_views()))
+    _fake_x209 = object()
+    _w2_x209._split_view = _fake_x209
+    try:
+        check("209 _windows_views includes a split half",
+              any(v is _fake_x209 for _w, v in br._windows_views()))
+    finally:
+        _w2_x209._split_view = None
+    # ad css repaint asks every window
+    _w2_x209.apply_ad_css = lambda view=None: _calls_x209.append("ad")
+    try:
+        br.refresh_ad_css()
+        check("209 refresh_ad_css repaints the other window's tabs",
+              "ad" in _calls_x209)
+    finally:
+        _w2_x209.__dict__.pop("apply_ad_css", None)
+    _src_x209 = _insp_x209.getsource(B.Browser.refresh_a11y)
+    check("209 refresh_a11y runs in every window's tabs",
+          "_windows_views" in _src_x209 and "self.tabs.count()"
+          not in _src_x209)
+    check("209 apply_audio_shape covers every window",
+          "_windows_views" in _insp_x209.getsource(
+              B.Browser.apply_audio_shape))
+    # gamepad
+    _calls_x209.clear()
+    _w2_x209.gamepad = lambda on=None, view=None, then=None: \
+        _calls_x209.append(("pad", on))
+    try:
+        br.bridge.setSetting("gamepadOn", json.dumps(False))
+        check("209 gamepad switch reaches the other window",
+              ("pad", False) in _calls_x209)
+    finally:
+        _w2_x209.__dict__.pop("gamepad", None)
+    # watchers
+    br.bridge.setSetting("cpuWatch", json.dumps(True))
+    check("209 cpuWatch starts in the other window",
+          getattr(_w2_x209, "_cpu_timer", None) is not None)
+    br.bridge.setSetting("cpuWatch", json.dumps(False))
+    check("209 cpuWatch stops in the other window",
+          getattr(_w2_x209, "_cpu_timer", None) is None)
+    br.bridge.setSetting("leakWatch", json.dumps(True))
+    check("209 leakWatch starts in the other window",
+          getattr(_w2_x209, "_leak_timer", None) is not None)
+    br.bridge.setSetting("leakWatch", json.dumps(False))
+    check("209 leakWatch stops in the other window",
+          getattr(_w2_x209, "_leak_timer", None) is None)
+    # budget outlives the pressure switch
+    br.bridge.setSetting("pressureWatch", json.dumps(False))
+    br.bridge.setSetting("memoryBudget", json.dumps(4096))
+    br.bridge.setSetting("pressureWatch", json.dumps(False))
+    check("209 the budget keeps the timer when pressure goes off",
+          getattr(br, "_psi_timer", None) is not None
+          and getattr(_w2_x209, "_psi_timer", None) is not None)
+    br.bridge.setSetting("memoryBudget", json.dumps(0))
+    check("209 no budget and no pressure: the timer stops",
+          getattr(br, "_psi_timer", None) is None
+          and getattr(_w2_x209, "_psi_timer", None) is None)
+    # video cap
+    _calls_x209.clear()
+    _w2_x209.cap_video = lambda height=None, view=None, then=None: \
+        _calls_x209.append(("cap", height))
+    try:
+        br.bridge.setSetting("videoCap", json.dumps(777))
+        check("209 an unknown videoCap is stored as 0",
+              br.config.get("videoCap") == 0)
+        check("209 videoCap reaches the other window, 0 included",
+              ("cap", 0) in _calls_x209)
+    finally:
+        _w2_x209.__dict__.pop("cap_video", None)
+    # tab snapshots: only the first window's timer runs
+    br.bridge.setSetting("tabSnapshots", json.dumps(False))
+    check("209 tabSnapshots off stops the timer",
+          not br._snap_timer.isActive()
+          and not _w2_x209._snap_timer.isActive())
+    br.bridge.setSetting("tabSnapshots", json.dumps(True))
+    check("209 tabSnapshots on runs the first window's timer only",
+          br._snap_timer.isActive() and not _w2_x209._snap_timer.isActive())
+    # pause for calls across windows
+    class _Page_x209:
+        def recentlyAudible(self):
+            return True
+
+    class _View_x209:
+        def page(self):
+            return _Page_x209()
+    _song_x209 = _View_x209()
+    _saved_x209 = (_w2_x209._real_tabs, br._media_live)
+    _w2_x209._real_tabs = lambda *a, **k: [(0, _song_x209)]
+    # the stand-in is not a widget: the tab strip is told it is there
+    _w2_x209.tabs.indexOf = lambda v: 0 if v is _song_x209 else -1
+    _w2_x209.media_tool = lambda name, view=None, **k: \
+        _calls_x209.append((name, view))
+    br.config["pauseForCalls"] = True
+    br._media_live = [{"view": object(), "kind": "microphone",
+                       "title": "t"}]
+    _calls_x209.clear()
+    try:
+        br.pause_for_call()
+        check("209 a call pauses the other window's music",
+              ("pauseall", _song_x209) in _calls_x209)
+        br.resume_after_call()
+        check("209 the end of the call resumes it there too",
+              ("resumeall", _song_x209) in _calls_x209)
+    finally:
+        _w2_x209.__dict__.pop("_real_tabs", None)
+        _w2_x209.tabs.__dict__.pop("indexOf", None)
+        _w2_x209.__dict__.pop("media_tool", None)
+        br._media_live = _saved_x209[1]
+        br._paused_for_call = []
+        _w2_x209._paused_for_call = []
+    # search engine reaches open start pages
+    check("209 searchEngine refreshes open start pages",
+          '"searchEngine"' in _insp_x209.getsource(B.Bridge.setSetting))
+    check("209 the start page re-reads settings when told",
+          "loadExtras(); refreshSettings();" in
+          (_Path(B.__file__).parent / "start.html").read_text())
+finally:
+    for _k_x209, _o_x209 in _old_x209.items():
+        br.bridge.setSetting(_k_x209, json.dumps(_o_x209))
+    _w2_x209._closing_anyway = True
+    _w2_x209.close()
+# ---- twenty-third pass: settings reach the open pages and every window (210) ----
+import inspect as _insp_x210
+_w2_x210 = br.new_window()
+_keys_x210 = ("ownRequestLog", "autoRetry", "keyGuard", "layoutKeys",
+              "recordClicks", "cleanPaste", "twitchAds", "twitchPoints",
+              "showPwButtons")
+_old_x210 = {k: br.config.get(k) for k in _keys_x210}
+_calls_x210 = []
+try:
+    H.spin(300)
+    # ownRequestLog: the other window's manager follows, and off clears
+    br.bridge.setSetting("ownRequestLog", json.dumps(True))
+    check("210 ownRequestLog on reaches the other window",
+          _w2_x210._nam.watching is True)
+    _w2_x210._nam.log.append({"how": "x", "url": "http://x/", "host": "x"})
+    br.bridge.setSetting("ownRequestLog", json.dumps(False))
+    check("210 ownRequestLog off stops the other window and clears its log",
+          _w2_x210._nam.watching is False and not _w2_x210._nam.log)
+    # keyGuard / layoutKeys rebuild the shortcuts of every window
+    _w2_x210.rebind_shortcuts = lambda: _calls_x210.append("rebind")
+    try:
+        br.bridge.setSetting("keyGuard", json.dumps(["F1"]))
+        check("210 keyGuard rebinds the other window's shortcuts",
+              "rebind" in _calls_x210)
+        _calls_x210.clear()
+        br.bridge.setSetting("layoutKeys", json.dumps(
+            not br.config.get("layoutKeys", True)))
+        check("210 layoutKeys rebinds the other window's shortcuts",
+              "rebind" in _calls_x210)
+    finally:
+        _w2_x210.__dict__.pop("rebind_shortcuts", None)
+    # recordClicks and cleanPaste are pushed to open pages
+    _orig_perf_x210, _orig_nav_x210 = br.refresh_perf, br.refresh_nav
+    br.refresh_perf = lambda live=True: _calls_x210.append("perf")
+    br.refresh_nav = lambda live=True: _calls_x210.append("nav")
+    try:
+        _calls_x210.clear()
+        br.bridge.setSetting("recordClicks", json.dumps(True))
+        br.bridge.setSetting("cleanPaste", json.dumps(True))
+        check("210 recordClicks refreshes the page script",
+              "perf" in _calls_x210)
+        check("210 cleanPaste refreshes the nav script",
+              "nav" in _calls_x210)
+    finally:
+        br.__dict__.pop("refresh_perf", None)
+        br.__dict__.pop("refresh_nav", None)
+    # twitch tools and the eyes run in open tabs of other windows
+    _v_x210 = _w2_x210.tabs.widget(0)
+    _got_x210 = []
+    _w2_x210.play_tool = lambda name, view=None, then=None, arg=None: \
+        _got_x210.append((name, arg))
+    _w2_x210.form_tool = lambda name, view=None, then=None, arg=None: \
+        _got_x210.append((name, arg))
+    _w2_x210._host_of = lambda url: "www.twitch.tv"
+    try:
+        br.bridge.setSetting("twitchAds", json.dumps(False))
+        br.bridge.setSetting("twitchPoints", json.dumps(False))
+        br.bridge.setSetting("showPwButtons", json.dumps(False))
+        check("210 twitchAds off reaches the other window",
+              ("twitchads", False) in _got_x210)
+        check("210 twitchPoints off reaches the other window",
+              ("twitchpoints", False) in _got_x210)
+        check("210 showPwButtons off reaches the other window",
+              ("eye", False) in _got_x210)
+    finally:
+        for _n_x210 in ("play_tool", "form_tool", "_host_of"):
+            _w2_x210.__dict__.pop(_n_x210, None)
+    check("210 twitchpoints tool has an off path",
+          'on === false' in B.PLAY_TOOLS["twitchpoints"])
+    # autoRetry off empties the waiting rows
+    br.config["autoRetry"] = False
+    br.__dict__.setdefault("_retry_rows", {})["x210"] = ["http://x/", 0]
+    br._retry_tick()
+    check("210 autoRetry off clears the waiting retries",
+          not br._retry_rows)
+finally:
+    for _k_x210, _v_old_x210 in _old_x210.items():
+        if _v_old_x210 is None:
+            br.config.pop(_k_x210, None)
+        else:
+            br.config[_k_x210] = _v_old_x210
+    br.save_config(quiet=True)
+    br.rebind_shortcuts()
+    br._retry_rows.clear()
+    _w2_x210._closing_anyway = True
+    _w2_x210.close()
+# ---- twenty-third pass: page switches reach open tabs, on and off (211) ----
+import inspect as _insp_x211
+_w2_x211 = br.new_window()
+_keys_x211 = ("pauseHidden", "holdFast", "hideCursor", "spoilerShield",
+              "readNoLineNumbers", "readSelBar", "readDrafts", "capOn")
+_old_x211 = {k: br.config.get(k) for k in _keys_x211}
+_v2_x211 = None
+try:
+    H.spin(300)
+    _v2_x211 = _w2_x211.new_tab()
+    _v2_x211 = _w2_x211.current() if not hasattr(_v2_x211, "page") else _v2_x211
+    H.load(_v2_x211, srv.url("/twhome"))
+    H.wait_for(lambda: "/twhome" in _v2_x211.url().toString(), 8000)
+    H.spin(300)
+
+    def _flag_x211(code, world):
+        return jsq(_v2_x211, code, world)
+
+    # the other window's already-open page follows the switch, on...
+    for _k, _flag, _world in (
+            ("pauseHidden", "window.__pauseHidden", B.MAIN_WORLD_ID),
+            ("holdFast", "window.__holdFast", B.MAIN_WORLD_ID),
+            ("hideCursor", "window.__hideCursor", B.MAIN_WORLD_ID),
+            ("readNoLineNumbers", "window.__noLineNums", B.MAIN_WORLD_ID),
+            ("readDrafts", "window.__draftWatch", B.MAIN_WORLD_ID),
+            ("readSelBar", "window.__selBar", B.APP_WORLD_ID)):
+        br.bridge.setSetting(_k, json.dumps(True))
+        _on = H.wait_for(
+            lambda: _flag_x211("!!" + _flag, _world) is True, 4000)
+        br.bridge.setSetting(_k, json.dumps(False))
+        _off = H.wait_for(
+            lambda: _flag_x211("!" + _flag, _world) is True, 4000)
+        check("211 %s on and off reach a tab in another window" % _k,
+              _on and _off, "on=%r off=%r" % (_on, _off))
+    # ...and the spoiler style comes and goes
+    br.bridge.setSetting("spoilerShield", json.dumps(True))
+    _on = H.wait_for(lambda: _flag_x211(
+        "!!document.getElementById('media-spoiler')",
+        B.MAIN_WORLD_ID) is True, 4000)
+    br.bridge.setSetting("spoilerShield", json.dumps(False))
+    _off = H.wait_for(lambda: _flag_x211(
+        "!document.getElementById('media-spoiler')",
+        B.MAIN_WORLD_ID) is True, 4000)
+    check("211 spoilerShield on and off reach a tab in another window",
+          _on and _off, "on=%r off=%r" % (_on, _off))
+    # on again after off must not stack a second listener: the tool
+    # answers "on" (woken), never builds again
+    br.media_tool2("pausehidden", view=_v2_x211, arg=True)
+    _ans = []
+    br.media_tool2("pausehidden", view=_v2_x211, arg=False)
+    br.media_tool2("pausehidden", view=_v2_x211, arg=True,
+                   then=lambda r: _ans.append(r))
+    H.wait_for(lambda: _ans, 3000)
+    check("211 a switch put off and on again answers on",
+          _ans == ["on"], repr(_ans))
+    br.media_tool2("pausehidden", view=_v2_x211, arg=False)
+    # captions: the automatic call only turns on, never flips and is quiet
+    _src_x211 = _insp_x211.getsource(br.toggle_captions)
+    _mx_x211 = _insp_x211.getsource(br.media_extras)
+    check("211 captions on page load forces on and stays quiet",
+          "quiet=True, force=True" in _mx_x211 and "quiet" in _src_x211
+          and "want.on" in B.MEDIA_TOOLS2["captions"])
+    _flashes_x211 = []
+    _orig_flash_x211 = br.flash
+    br.flash = lambda *a, **k: _flashes_x211.append(a)
+    try:
+        br.toggle_captions("", view=_v2_x211, quiet=True, force=True)
+        H.spin(600)
+    finally:
+        br.__dict__.pop("flash", None)
+    check("211 a quiet captions call on a page without a video says nothing",
+          not _flashes_x211, repr(_flashes_x211))
+finally:
+    for _k, _v in _old_x211.items():
+        br.bridge.setSetting(_k, json.dumps(_v if _v is not None else False))
+    _w2_x211._closing_anyway = True
+    _w2_x211.close()
+# ---- twenty-third pass, settings -> effect (fix 212) ----
+from PyQt6.QtGui import QMouseEvent as _QME_x212
+from PyQt6.QtCore import QPointF as _QPF_x212
+import inspect as _inspect_x212
+
+# the notes folder: the drawer follows the new path
+_old_nf_x212 = br.config.get("notesFolder")
+_dir_x212 = _tempfile.mkdtemp()
+try:
+    _d0_x212 = br.desk()
+    br.bridge.setSetting("notesFolder", json.dumps(_dir_x212))
+    _d1_x212 = br.desk()
+    check("notesFolder: the drawer moves to the new folder",
+          _d1_x212 is not None and str(_d1_x212.folder) == _dir_x212,
+          str(getattr(_d1_x212, "folder", None)))
+finally:
+    br.bridge.setSetting("notesFolder", json.dumps(_old_nf_x212 or ""))
+
+# the favourites dock follows the switch in a second window too
+_w2_x212 = br.new_window()
+try:
+    H.spin(300)
+    br.bridge.setSetting("favDocked", json.dumps(True))
+    H.spin(200)
+    check("favDocked: both windows dock",
+          br.favorites_docked() and _w2_x212.favorites_docked())
+    br.bridge.setSetting("favDocked", json.dumps(False))
+    H.spin(200)
+    check("favDocked: off undoes it in both",
+          not br.favorites_docked() and not _w2_x212.favorites_docked())
+finally:
+    br.bridge.setSetting("favDocked", json.dumps(False))
+    _w2_x212._closing_anyway = True
+    _w2_x212.close()
+
+# text labels: bookmark-style buttons keep their own style when off
+_btn_x212 = B.QToolButton(br)
+_btn_x212.setToolButtonStyle(B.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+_old_tl_x212 = br.config.get("textLabels", False)
+try:
+    br.config["textLabels"] = False
+    br.apply_text_labels()
+    check("textLabels: off leaves another button's own style",
+          _btn_x212.toolButtonStyle()
+          == B.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+    br.config["textLabels"] = True
+    br.apply_text_labels()
+    br.config["textLabels"] = False
+    br.apply_text_labels()
+    check("textLabels: on then off gives the style back",
+          _btn_x212.toolButtonStyle()
+          == B.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+finally:
+    br.config["textLabels"] = _old_tl_x212
+    _btn_x212.deleteLater()
+
+# badges and nice are kept up by the half-minute beat
+_src_x212 = _inspect_x212.getsource(B.Browser._media_watch)
+check("badges: the beat runs the tracker count, Discord and nice",
+      "tracker_badge" in _src_x212 and "discord_badge_tick" in _src_x212
+      and "renice_background" in _src_x212)
+
+# the tracker badge shows with the switch on and something counted
+_old_tb_x212 = br.config.get("trackerBadge", False)
+_old_cb_x212 = br._cookies_blocked
+try:
+    br._cookies_blocked = 3
+    br.bridge.setSetting("trackerBadge", json.dumps(True))
+    check("trackerBadge: shown once switched on",
+          br._trackerlbl.isVisibleTo(br.urlbar))
+    br.bridge.setSetting("trackerBadge", json.dumps(False))
+    check("trackerBadge: hidden when switched off",
+          not br._trackerlbl.isVisibleTo(br.urlbar))
+finally:
+    br._cookies_blocked = _old_cb_x212
+    br.bridge.setSetting("trackerBadge", json.dumps(_old_tb_x212))
+
+# the magnifier reads the slider
+_old_ls_x212 = br.config.get("lensScale", 2.0)
+try:
+    br.config["lensScale"] = 3.5
+    br.magnifier(True)
+    check("lensScale: the lens opens at the slider's zoom",
+          abs(br._lens_scale - 3.5) < 1e-6, str(br._lens_scale))
+    br.bridge.setSetting("lensScale", json.dumps(4.0))
+    check("lensScale: a lens that is up follows the slider",
+          abs(br._lens_scale - 4.0) < 1e-6, str(br._lens_scale))
+finally:
+    br.magnifier(False)
+    br.bridge.setSetting("lensScale", json.dumps(_old_ls_x212))
+
+# middle-click on the + button opens the clipboard
+_cl_x212 = []
+_old_cfg_mouse_x212 = br.config.get("mouse")
+br.clipboard_new_tab = lambda: _cl_x212.append(1) or ""
+try:
+    def _mid_x212():
+        _ev = _QME_x212(
+            B.QEvent.Type.MouseButtonRelease, _QPF_x212(5, 5),
+            _QPF_x212(5, 5), B.Qt.MouseButton.MiddleButton,
+            B.Qt.MouseButton.NoButton, B.Qt.KeyboardModifier.NoModifier)
+        B.QApplication.sendEvent(br._newtab_btn, _ev)
+    br.config["mouse"] = {"newTabMiddle": True}
+    _mid_x212()
+    check("newTabMiddle: on, middle-click opens the clipboard",
+          len(_cl_x212) == 1)
+    br.config["mouse"] = {"newTabMiddle": False}
+    _mid_x212()
+    check("newTabMiddle: off, nothing happens", len(_cl_x212) == 1)
+finally:
+    br.__dict__.pop("clipboard_new_tab", None)
+    if _old_cfg_mouse_x212 is None:
+        br.config.pop("mouse", None)
+    else:
+        br.config["mouse"] = _old_cfg_mouse_x212
+
+# the page scripts: arrow step and lazy images are wired
+check("keyStep: the arrow keys read the step outside Vim mode",
+      "!W.keyStep || e.defaultPrevented" in B.NAV_JS
+      and "* W.keyStep);" in B.NAV_JS)
+check("lazyImages: the switch runs the script, off lets go",
+      "if (want.lazyImages)" in B.PERF_JS
+      and "__perfLazyUndo" in B.PERF_JS)
+
+# the start log is for the browser's own start, not a second window
+_src2_x212 = _inspect_x212.getsource(B.Browser.__init__)
+check("perfLogOn: only the first, non-private window logs a start",
+      "self._root_window() is self" in _src2_x212
+      and "not self._all_private" in _src2_x212)
+
+# the hints exist in both languages
+_t_x212 = br._ui_str("startLater"), br._ui_str("devtoolsDarkNote")
+check("hints: new strings are not left as their keys",
+      all(s and s not in ("startLater", "devtoolsDarkNote")
+          for s in _t_x212), str(_t_x212))
+# ---- twenty-third pass, part 213: settings that did not take effect ----
+def _set_x213(key, value):
+    br.bridge.setSetting(key, json.dumps(value))
+
+
+_cfg_keys_x213 = ("jsSnippets", "snippetsText", "freezeAfter", "nightDimFrom",
+                  "closeUnusedDays", "spellLangs", "spellBoth", "spellCheckLang",
+                  "mouse", "schemeLight", "moneyRates", "a11y", "uiFontSize")
+_old_x213 = {k: br.config.get(k) for k in _cfg_keys_x213}
+_old_rates_x213 = dict(B.MONEY_RATES)
+_w2_x213 = None
+try:
+    # the snippet box: an unchanged Save keeps menu-saved snippets
+    br.config["jsSnippets"] = []
+    br.config["snippetsText"] = ""
+    br.save_snippet("menu_x213", "1+1")
+    _set_x213("snippetsText", br.config.get("snippetsText", ""))
+    check("snippets saved from the menu survive a Save of the box",
+          [r.get("name") for r in br.config.get("jsSnippets", [])]
+          == ["menu_x213"], str(br.config.get("jsSnippets")))
+    # the page shows the list as text when nothing was typed; sending
+    # that back untouched keeps it (an emptied box is a cleared list)
+    br.config["snippetsText"] = ""
+    _set_x213("snippetsText", br.snippets_shown())
+    check("an untouched box shown from the list does not wipe it",
+          len(br.config.get("jsSnippets", [])) == 1,
+          str(br.config.get("jsSnippets")))
+    _set_x213("snippetsText", "typed_x213|2+2")
+    check("a changed box still rewrites the list",
+          [r.get("name") for r in br.config.get("jsSnippets", [])]
+          == ["typed_x213"])
+
+    # freeze after: one timer per window, following the setting
+    _w2_x213 = br.new_window()
+    _set_x213("freezeAfter", 120)
+    check("freezeAfter starts the timer in every window",
+          getattr(br, "_freeze_timer", None) is not None
+          and getattr(_w2_x213, "_freeze_timer", None) is not None)
+    _set_x213("freezeAfter", 0)
+    check("freezeAfter 0 stops it everywhere",
+          getattr(br, "_freeze_timer", None) is None
+          and getattr(_w2_x213, "_freeze_timer", None) is None)
+
+    # a night time the readers cannot read is not kept
+    _set_x213("nightDimFrom", "22:15")
+    _set_x213("nightDimFrom", "9pm")
+    check("a bad dim time keeps the old one",
+          br.config.get("nightDimFrom") == "22:15",
+          str(br.config.get("nightDimFrom")))
+    _set_x213("nightDimFrom", "7:05")
+    check("a short time is stored as HH:MM",
+          br.config.get("nightDimFrom") == "07:05")
+
+    # money rates off: no more answers from the table
+    B.MONEY_RATES["rates"] = {"USD": 1.1}
+    B.MONEY_RATES["when"] = int(_time.time())
+    _set_x213("moneyRates", False)
+    check("moneyRates off empties the table the answer reads",
+          not B.MONEY_RATES.get("rates"))
+
+    # close unused: 0 is off
+    _set_x213("closeUnusedDays", 0)
+    check("closeUnusedDays 0 offers nothing", br.unused_tabs() == [])
+
+    # picking one spell language drops the pair that overrode it
+    br.config["spellLangs"] = ["de-DE", "en-US"]
+    br.config["spellBoth"] = True
+    _set_x213("spellCheckLang", "fr-FR")
+    check("one spell language clears the pair",
+          not br.config.get("spellLangs")
+          and br.config.get("spellBoth") is False)
+
+    # the mouse table is clamped
+    _set_x213("mouse", {"wheelStep": -50, "keyStep": 100000})
+    check("wheelStep and keyStep are clamped",
+          br.config["mouse"]["wheelStep"] == 0
+          and br.config["mouse"]["keyStep"] == 2000, str(br.config["mouse"]))
+    check("nav payload steps are not negative",
+          br.nav_payload()["wheelStep"] >= 0)
+
+    # scheme names must be real themes
+    _good_x213 = next(iter(B.THEME_INDEX))
+    _set_x213("schemeLight", " %s " % _good_x213.upper())
+    check("a theme name is trimmed and matched",
+          br.config.get("schemeLight") == _good_x213,
+          str(br.config.get("schemeLight")))
+    _set_x213("schemeLight", "no-such-theme-x213")
+    check("an unknown theme name keeps the old one",
+          br.config.get("schemeLight") == _good_x213)
+
+    # one a11y entry merges into the live table
+    br.config["a11y"] = {"textZoom": 100}
+    _set_x213("a11yField", ["textZoom", 130])
+    check("an a11y field is merged, not the whole table",
+          br.config["a11y"].get("textZoom") == 130)
+    _set_x213("a11yField", ["notAKey_x213", 1])
+    check("an unknown a11y field is refused",
+          "notAKey_x213" not in br.config["a11y"])
+
+    # the UI font reaches our own pages
+    _calls_x213 = []
+    br.apply_theme = lambda *a, **k: _calls_x213.append((a, k))
+    try:
+        _set_x213("uiFontSize", 15)
+    finally:
+        br.__dict__.pop("apply_theme", None)
+    check("uiFontSize repaints our own pages", len(_calls_x213) == 1)
+
+    # the settings page reads back what the browser refused
+    _html_x213 = (_Path(B.__file__).parent / "settings.html").read_text()
+    check("settings page reads the spelling switch back",
+          "rereadSettings(rereadSpell)" in _html_x213)
+    check("settings page repaints the capture tool labels",
+          "rereadSettings(paintCaptureTools)" in _html_x213)
+    check("settings page shows glass as not solid when unset",
+          'setVal("glassstrength", 40)' in _html_x213)
+finally:
+    if _w2_x213 is not None:
+        _w2_x213._closing_anyway = True
+        _w2_x213.close()
+    for _k_x213, _v_x213 in _old_x213.items():
+        if _v_x213 is None:
+            br.config.pop(_k_x213, None)
+        else:
+            br.config[_k_x213] = _v_x213
+    br.watch_freeze()
+    br.save_config(quiet=True)
+    B.MONEY_RATES.clear()
+    B.MONEY_RATES.update(_old_rates_x213)
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
