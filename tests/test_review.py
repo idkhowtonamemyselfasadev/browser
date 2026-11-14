@@ -1499,6 +1499,10 @@ class _FakeProc:
     started = []
     def __init__(self, *a, **k): pass
     def start(self, prog, args): _FakeProc.started.append([prog] + list(args))
+    # a start ends the recorder already going (fix246)
+    def terminate(self): pass
+    def kill(self): pass
+    def waitForFinished(self, ms=0): return True
 _real_qp = B.QProcess
 _real_tools = br.record_tools
 B.QProcess = _FakeProc
@@ -1508,6 +1512,7 @@ for _rec in ("/usr/bin/parec", "/usr/bin/ffmpeg"):
     br._record_audio_start(microphone=True)
 B.QProcess = _real_qp
 br.__dict__.pop("record_tools", None)
+br._audio_proc = None    # the last stand-in is not left as his recorder
 _tab_p, _mic_p, _tab_f, _mic_f = _FakeProc.started
 check("parec records the output's monitor for a tab, the source for a voice",
       "--device=@DEFAULT_MONITOR@" in _tab_p
@@ -13153,6 +13158,1070 @@ check("233 the exit wipe flushes every window first and later flushes stop",
       and '_exit_cleared", False)' in _insp233.getsource(B.Browser._flush_reading_places))
 check("233 a reading sample waits 1.5 s after the load",
       "time.monotonic() - float(loaded) < 1.5" in _insp233.getsource(B.Browser._sample_reading_place))
+
+# ---- 234: notes and collections never share a file by accident ----
+import notes as _N234
+_d234 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_k234 = _N234.Desk(_d234)
+_k234.add_to_collection("C++", "a", "https://a234.example/")
+_k234.add_to_collection("C#", "b", "https://b234.example/")
+_k234.delete_collection("C#")
+check("234 collections whose names differ only in punctuation are separate",
+      "a234" in _k234.collection("C++") and _k234.collections() == ["C++"],
+      str(_k234.collections()))
+_ids234 = [_k234.save_note(title="same234", body=str(_i)) for _i in range(3)]
+_names234 = sorted(p.name for p in _d234.glob("same234*.md"))
+check("234 three notes with one title in one second keep three files",
+      len(_names234) == 3, str(_names234))
+import shutil as _sh234
+_sh234.rmtree(str(_d234), ignore_errors=True)
+_desk234 = br.desk()
+if _desk234 is not None:
+    _desk234.daily_note = lambda *a, **k: None
+    try:
+        _cli234 = br.take_cli_note("hello 234")
+    finally:
+        _desk234.__dict__.pop("daily_note", None)
+    check("234 browser --note answers not-saved when nothing was written",
+          _cli234 == "not-saved", _cli234)
+
+# ---- 235: no unasked merge abort; a restart is sure of the quit first ----
+_app235 = B.APP_DIR
+_g235 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(_g235 / ".git").mkdir()
+try:
+    B.APP_DIR = _g235
+    _idle235 = B._git_busy()
+    (_g235 / ".git" / "MERGE_HEAD").write_text("x")
+    _busy235 = B._git_busy()
+finally:
+    B.APP_DIR = _app235
+    import shutil as _sh235
+    _sh235.rmtree(str(_g235), ignore_errors=True)
+check("235 a merge under way in the checkout is seen (and not auto-updated)",
+      _idle235 is False and _busy235 is True, str((_idle235, _busy235)))
+
+_started235 = []
+_real_sd235 = B.QProcess.startDetached
+B.QProcess.startDetached = staticmethod(lambda *a, **k: _started235.append(a))
+br._confirm_many_tabs = lambda: False
+try:
+    _r235 = br.restart()
+finally:
+    B.QProcess.startDetached = _real_sd235
+    br.__dict__.pop("_confirm_many_tabs", None)
+    for _w235 in br._all_windows():
+        _w235.__dict__.pop("_closing_anyway", None)
+check("235 a restart refused at the close question starts nothing",
+      _r235 is False and _started235 == [], str((_r235, _started235)))
+
+# ---- 237: one history row per visit, however often a tab's title changes ----
+class _Tab237:
+    session = "main"
+    _came_from = ""
+
+_hist237 = list(br.history)
+_hv237 = getattr(br, "_history_view", None)
+_on237 = br.config.get("history", True)
+try:
+    br.config["history"] = True
+    _a237, _b237 = _Tab237(), _Tab237()
+    br._history_view = _a237
+    br._record_history(B.QUrl("https://mail237.example/inbox"), "Inbox")
+    br._history_view = _b237
+    br._record_history(B.QUrl("https://news237.example/"), "News")
+    br._history_view = _a237
+    br._record_history(B.QUrl("https://mail237.example/inbox"), "(1) Inbox")
+    br._history_view = _b237
+    br._record_history(B.QUrl("https://news237.example/b"), "News B")
+    br._history_view = _a237
+    br._record_history(B.QUrl("https://mail237.example/inbox"), "(2) Inbox")
+    _mail237 = [r for r in br.history if "mail237" in r.get("url", "")]
+    check("237 a background tab's title changes keep one history row",
+          len(_mail237) == 1 and _mail237[0]["title"] == "(2) Inbox",
+          str([(r["title"]) for r in _mail237]))
+finally:
+    br.history[:] = _hist237
+    br._history_view = _hv237
+    br.config["history"] = _on237
+    br.save_history()
+
+import inspect as _insp237
+check("237 a locked sealed history is not wiped as if empty",
+      'not getattr(self, "_history_locked", False)' in
+      _insp237.getsource(B.Browser._history_extras_dropped))
+
+# ---- 234b: a collection typed in other capitals is the same one ----
+_d234b = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_k234b = _N234.Desk(_d234b)
+_k234b.add_to_collection("Reading", "a", "https://a234b.example/")
+_k234b.add_to_collection("reading", "b", "https://b234b.example/")
+check("234b 'reading' after 'Reading' adds to the same collection",
+      _k234b.collections() == ["Reading"]
+      and "b234b" in _k234b.collection("READING"),
+      str(_k234b.collections()))
+_sh234.rmtree(str(_d234b), ignore_errors=True)
+
+# ---- 238: the per-site proxy's direct route resolves as the engine would ----
+import socket as _s238, struct as _st238, threading as _th238
+from http.server import BaseHTTPRequestHandler as _BH238, \
+    ThreadingHTTPServer as _TS238
+
+_asked238 = []
+
+
+class _Doh238(_BH238):
+    def do_POST(self):
+        q = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        pos, labels = 12, []
+        while q[pos]:
+            labels.append(q[pos + 1:pos + 1 + q[pos]].decode())
+            pos += 1 + q[pos]
+        name = ".".join(labels)
+        qtype = _st238.unpack(">H", q[pos + 1:pos + 3])[0]
+        _asked238.append((name, qtype))
+        question = q[12:pos + 5]
+        if name == "doh238.test" and qtype == 1:
+            body = (_st238.pack(">HHHHHH", 0, 0x8180, 1, 1, 0, 0) + question
+                    + b"\xc0\x0c" + _st238.pack(">HHIH", 1, 1, 60, 4)
+                    + bytes([127, 0, 0, 1]))
+        elif name == "doh238.test":
+            body = _st238.pack(">HHHHHH", 0, 0x8180, 1, 0, 0, 0) + question
+        else:  # NXDOMAIN
+            body = _st238.pack(">HHHHHH", 0, 0x8183, 1, 0, 0, 0) + question
+        self.send_response(200)
+        self.send_header("Content-Type", "application/dns-message")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+class _Origin238(_BH238):
+    def do_GET(self):
+        body = b"hit238 " + self.headers.get("Host", "").encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+_dsrv238 = _TS238(("127.0.0.1", 0), _Doh238)
+_osrv238 = _TS238(("127.0.0.1", 0), _Origin238)
+for _srv in (_dsrv238, _osrv238):
+    _th238.Thread(target=_srv.serve_forever, daemon=True).start()
+_op238 = _osrv238.server_port
+
+
+def _via238(rp, host):
+    c = _s238.create_connection(("127.0.0.1", rp.port), 5)
+    c.settimeout(8)
+    c.sendall(("GET http://%s:%d/ HTTP/1.1\r\nHost: %s:%d\r\n\r\n"
+               % (host, _op238, host, _op238)).encode())
+    got = b""
+    try:
+        while True:
+            chunk = c.recv(4096)
+            if not chunk:
+                break
+            got += chunk
+    except OSError:
+        pass
+    c.close()
+    return got
+
+
+_rp238 = B.RuleProxy([], [], ("direct",),
+                     doh="http://127.0.0.1:%d/dns-query{?dns}"
+                     % _dsrv238.server_port,
+                     overrides=[("ovr238.test", "127.0.0.1"),
+                                ("*.nowhere238.test", "~NOTFOUND")])
+try:
+    _a238 = _via238(_rp238, "doh238.test")
+    _b238 = _via238(_rp238, "nx238.test")
+    _c238 = _via238(_rp238, "ovr238.test")
+    _d238 = _via238(_rp238, "a.nowhere238.test")
+    _e238 = _via238(_rp238, "doh238.test.")
+finally:
+    _rp238.close()
+check("238 a direct route behind the per-site proxy asks his DoH server",
+      b"hit238 doh238.test" in _a238 and ("doh238.test", 1) in _asked238,
+      repr((_a238[-60:], _asked238[:4])))
+check("238 ...and with no DoH answer there is no connection, not the "
+      "system resolver", _b238.startswith(b"HTTP/1.1 502")
+      and ("nx238.test", 1) in _asked238, repr(_b238[:40]))
+check("238 his host overrides reach a direct route (and ~NOTFOUND refuses)",
+      b"hit238 ovr238.test" in _c238 and _d238.startswith(b"HTTP/1.1 502")
+      and not any(n.startswith(("ovr238", "a.nowhere238"))
+                  for n, _t in _asked238),
+      repr((_c238[-40:], _d238[:30])))
+check("238 a name with its root dot is looked up as the name",
+      b"hit238" in _e238, repr(_e238[-40:]))
+_rp238b = B.RuleProxy([], [], ("direct",))
+try:
+    _f238 = _via238(_rp238b, "127.0.0.1")
+finally:
+    _rp238b.close()
+check("238 without DoH an address still goes straight there",
+      b"hit238" in _f238, repr(_f238[-40:]))
+check("238 the DoH address the proxy gets is the one the engine flag gets",
+      B._doh_template({"doh": True, "dohUrl": "https://d.example/q"})
+      == "https://d.example/q"
+      and B._doh_template({"doh": False, "dohUrl": "https://d.example/q"})
+      == "" and B._doh_template({"doh": True, "dohUrl": "https://a b"}) == ""
+      and "--dns-over-https-templates=https://d.example/q"
+      in B._privacy_flags({"doh": True, "dohUrl": "https://d.example/q"})
+      and B._host_override_rows({"hostOverrides": "# x\na.test 1.2.3.4\n"
+                                                  "b,c 1.1.1.1\nd e f"})
+      == [("a.test", "1.2.3.4")])
+import inspect as _insp238
+check("238 the launch hands the proxy his DoH server and overrides",
+      "doh=_doh_template(config)" in _insp238.getsource(B._install_proxy_flags)
+      and "overrides=_host_override_rows(config)"
+      in _insp238.getsource(B._install_proxy_flags))
+_dsrv238.shutdown()
+_osrv238.shutdown()
+
+# socks: lengths in bytes, an address as an address
+_seen238 = {}
+
+
+def _socks238(srv):
+    conn, _ = srv.accept()
+    conn.settimeout(5)
+
+    def rd(n):
+        buf = b""
+        while len(buf) < n:
+            chunk = conn.recv(n - len(buf))
+            if not chunk:
+                raise OSError("closed")
+            buf += chunk
+        return buf
+    try:
+        head = rd(2)
+        rd(head[1])
+        conn.sendall(b"\x05\x02")
+        ver_ulen = rd(2)
+        user = rd(ver_ulen[1])
+        plen = rd(1)[0]
+        _seen238["user"] = user
+        _seen238["pw"] = rd(plen)
+        conn.sendall(b"\x01\x00")
+        req = rd(4)
+        _seen238["atyp"] = req[3]
+        if req[3] == 4:
+            _seen238["addr"] = rd(16)
+        elif req[3] == 1:
+            _seen238["addr"] = rd(4)
+        else:
+            _seen238["addr"] = rd(rd(1)[0])
+        rd(2)
+        conn.sendall(b"\x05\x00\x00\x01" + bytes(6))
+    except OSError as exc:
+        _seen238["err"] = str(exc)
+    finally:
+        conn.close()
+
+
+_ss238 = _s238.create_server(("127.0.0.1", 0))
+_th238.Thread(target=_socks238, args=(_ss238,), daemon=True).start()
+try:
+    _up238 = B.RuleProxy._socks_upstream(
+        ("socks5", "127.0.0.1", _ss238.getsockname()[1], "üser",
+         "pässwörd"), "::1", 443)
+    _up238.close()
+    _sok238 = True
+except OSError as exc:
+    _sok238 = str(exc)
+_ss238.close()
+check("238 socks credentials go by their length in bytes, an IPv6 address "
+      "as one", _sok238 is True and _seen238.get("user") == "üser".encode()
+      and _seen238.get("pw") == "pässwörd".encode()
+      and _seen238.get("atyp") == 4
+      and _seen238.get("addr") == _s238.inet_pton(_s238.AF_INET6, "::1"),
+      repr((_sok238, _seen238)))
+
+# ---- 239: a root dot on the end of a name hides it from no block list ----
+from PyQt6.QtWebEngineCore import QWebEngineUrlRequestInfo as _QRI239
+
+
+class _Info239:
+    def __init__(self, url, first=""):
+        self._u = B.QUrl(url)
+        self._f = B.QUrl(first or url)
+        self.blocked = None
+        self.redirected = None
+
+    def requestUrl(self):
+        return self._u
+
+    def firstPartyUrl(self):
+        return self._f
+
+    def resourceType(self):
+        return _QRI239.ResourceType.ResourceTypeScript
+
+    def requestMethod(self):
+        return b"GET"
+
+    def block(self, on):
+        self.blocked = on
+
+    def redirect(self, url):
+        self.redirected = url.toString()
+
+    def setHttpHeader(self, name, value):
+        pass
+
+
+_was239 = B._BLOCKED_AT_LAUNCH
+B._BLOCKED_AT_LAUNCH = frozenset({"track239.example",
+                                  B._block_entry("bücher239.example")})
+_w239 = B.RequestWatch(br)
+try:
+    _i1 = _Info239("https://cdn.track239.example./r.js", "https://p.example/")
+    _w239._work(_i1)
+    _i2 = _Info239("https://track239.example./r.js", "https://p.example/")
+    _w239._work(_i2)
+    _i3 = _Info239("https://fine239.example./r.js", "https://p.example/")
+    _w239._work(_i3)
+    _i4 = _Info239("https://b\u00fccher239.example./r.js", "https://p.example/")
+    _w239._work(_i4)
+finally:
+    B._BLOCKED_AT_LAUNCH = _was239
+check("239 a blocked name with its root dot is refused by the interceptor",
+      _i1.blocked is True and _i2.blocked is True and _i3.blocked is None,
+      str((_i1.blocked, _i2.blocked, _i3.blocked)))
+check("239 ...an international one too (the lists keep its xn-- form)",
+      _i4.blocked is True, str((_i4.blocked, _i4.requestUrl().host())))
+check("239 the launch keeps the block lists for the interceptor",
+      "_BLOCKED_AT_LAUNCH = frozenset(_blocked_hosts(config))"
+      in _insp238.getsource(B._install_privacy_flags))
+import adblock as _ab239
+_r239 = _ab239.Rules()
+_r239.load_text("||ads239.example^\n", "t239")
+check("239 a filter-list rule matches its host written with the root dot",
+      _r239.blocks("https://cdn.ads239.example./x.js", "p.example", "script")
+      and _r239.blocks("https://ads239.example.:8443/x", "p.example.",
+                       "script")
+      and not _r239.blocks("https://ok239.example./x.js", "p.example",
+                           "script"))
+
+
+class _Rules239:
+    def ready(self):
+        return True
+
+    def blocks(self, url, page_host="", kind="other"):
+        return "||rule239^"
+
+
+_ab_was239 = br.config.get("adBlock")
+br.config["adBlock"] = True
+br.ad_rules = lambda: _Rules239()
+try:
+    _y1 = br.ad_block_check("https://ads.example/x.js",
+                            _Info239("https://ads.example/x.js",
+                                     "https://evilyoutube-nocookie.com/"),
+                            "ads.example")
+    _y2 = br.ad_block_check("https://ads.example/x.js",
+                            _Info239("https://ads.example/x.js",
+                                     "https://www.youtube-nocookie.com/e"),
+                            "ads.example")
+finally:
+    del br.ad_rules
+    if _ab_was239 is None:
+        br.config.pop("adBlock", None)
+    else:
+        br.config["adBlock"] = _ab_was239
+check("239 only youtube-nocookie.com itself is let past the filter lists",
+      _y1 == "||rule239^" and _y2 == "", str((_y1, _y2)))
+check("239 the YouTube script runs on youtube-nocookie.com, not on names "
+      "ending in it", 'h === "youtube-nocookie.com"' in B.YOUTUBE_JS
+      and 'h.endsWith(".youtube-nocookie.com")' in B.YOUTUBE_JS
+      and 'h.endsWith("youtube-nocookie.com")' not in B.YOUTUBE_JS)
+
+# ---- 240: header rules, map rules and block-list lines as written ----
+_hr_was240 = br.config.get("headerRules")
+br.config["headerRules"] = ("*.hdr240.example | X-W240: 1\n"
+                            "xn--bcher-kva.example | X-I240: 2")
+try:
+    _h1 = br.headers_for("a.hdr240.example")
+    _h2 = br.headers_for("hdr240.example")
+    _h3 = br.headers_for("bücher.example")
+    _h4 = br.headers_for("other240.example")
+finally:
+    if _hr_was240 is None:
+        br.config.pop("headerRules", None)
+    else:
+        br.config["headerRules"] = _hr_was240
+check("240 a '*.site' header rule reaches the site and its subdomains",
+      ("X-W240", "1") in _h1 and ("X-W240", "1") in _h2 and not _h4,
+      str((_h1, _h2, _h4)))
+check("240 a header rule for an international name reaches it",
+      ("X-I240", "2") in _h3, str(_h3))
+br.url_rules = lambda: [("loop240.example/a",
+                         "https://loop240.example/a/index.html")]
+try:
+    _m1 = _Info239("https://loop240.example/a", "https://loop240.example/")
+    _w239._work(_m1)
+    _m2 = _Info239("https://loop240.example/a/index.html",
+                   "https://loop240.example/")
+    _w239._work(_m2)
+finally:
+    del br.url_rules
+check("240 a map rule whose target it matches again redirects once",
+      _m1.redirected == "https://loop240.example/a/index.html"
+      and _m2.redirected is None, str((_m1.redirected, _m2.redirected)))
+_bh240 = B._blocked_hosts({"blockHosts": [
+    "https://t240.example/path", "*.w240.example", "dot240.example.",
+    "bücher240.example", "bad host", "www.x240.example"]})
+check("240 block-list lines typed as addresses, wildcards or international "
+      "names still block", {"t240.example", "w240.example", "dot240.example",
+                            "xn--bcher240-65a.example", "x240.example"}
+      <= set(_bh240) and "bad host" not in _bh240, str(_bh240))
+
+# ---- 241: tab files read back, snapshots per virtual browser, theme keys ----
+import tempfile as _tf241
+from pathlib import Path as _P241
+_d241 = _P241(_tf241.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(_d241 / "tabs.html").write_text(
+    '<ul><li><a href="https://t241.example/s?a=1&amp;b=2">x</a></li></ul>',
+    encoding="utf-8")
+_opened241 = []
+br.new_tab = lambda *a, **k: _opened241.append(k.get("url"))
+try:
+    _got241 = br.import_tabs(str(_d241 / "tabs.html"))
+finally:
+    del br.new_tab
+check("241 an HTML tab list reads its addresses back unescaped",
+      _got241 == ["https://t241.example/s?a=1&b=2"]
+      and _opened241 == ["https://t241.example/s?a=1&b=2"],
+      str((_got241, _opened241)))
+_u241 = "https://snap241.example/x"
+br.snapshots = lambda: [{"t": 1, "tabs": [{"u": _u241, "s": "Twitch241"}]}]
+br.open_tab_state = lambda entries, *a, **k: list(entries)
+try:
+    br.tab_state = lambda *a, **k: [{"u": _u241, "s": "main"}]
+    _r1 = br.restore_snapshot()
+    br.tab_state = lambda *a, **k: [{"u": _u241, "s": "Twitch241"}]
+    _r2 = br.restore_snapshot()
+finally:
+    del br.snapshots, br.open_tab_state, br.tab_state
+check("241 a snapshot tab open only in another virtual browser is restored",
+      [e["s"] for e in _r1] == ["Twitch241"] and _r2 == [], str((_r1, _r2)))
+check("241 themes named in another script get keys of their own",
+      B.custom_theme_key("Тема") != B.custom_theme_key("日本語")
+      and B.custom_theme_key("Тема").startswith(B.CUSTOM_PREFIX)
+      and B.custom_theme_key("Тема") != B.CUSTOM_PREFIX + "theme"
+      and B.custom_theme_key("My Theme") == B.CUSTOM_PREFIX + "my-theme"
+      and B.custom_theme_key("Café noir") == B.CUSTOM_PREFIX + "caf-noir",
+      str((B.custom_theme_key("Тема"), B.custom_theme_key("日本語"))))
+
+# ---- 242: another browser's history: the newest visits, real visits only ----
+import sqlite3 as _sq242
+_h242 = list(br.history)
+_now242 = int(_time.time()) - 3600
+_ff242 = _d241 / "places.sqlite"
+_con242 = _sq242.connect(str(_ff242))
+_con242.execute("PRAGMA journal_mode=WAL")
+_con242.execute("CREATE TABLE moz_places (url TEXT, title TEXT,"
+                " last_visit_date INTEGER)")
+_con242.commit()
+_con242.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+_con242.execute("PRAGMA wal_autocheckpoint=0")
+_con242.execute("INSERT INTO moz_places VALUES (?,?,?)",
+                ("https://wal242.example/", "in the log", _now242 * 1000000))
+_con242.execute("INSERT INTO moz_places VALUES (?,?,NULL)",
+                ("https://never242.example/", "bookmarked only"))
+_con242.commit()
+_wal242 = _P241(str(_ff242) + "-wal").stat().st_size
+_cr242 = _d241 / "History"
+_c2 = _sq242.connect(str(_cr242))
+_c2.execute("CREATE TABLE urls (url TEXT, title TEXT, last_visit_time INTEGER)")
+_c2.execute("INSERT INTO urls VALUES (?,?,?)",
+            ("https://chrome242.example/", "c",
+             (_now242 + 11644473600) * 1000000))
+_c2.execute("INSERT INTO urls VALUES (?,?,0)",
+            ("https://zero242.example/", "z"))
+_c2.commit()
+_c2.close()
+try:
+    _n1 = br.import_history_from(path=str(_ff242), which="firefox")
+    _n2 = br.import_history_from(path=str(_cr242), which="chrome")
+    _rows242 = {r.get("url"): r for r in br.history
+                if "242.example" in str(r.get("url"))}
+finally:
+    _con242.close()
+    br.history[:] = _h242
+    br.save_history()
+check("242 Firefox visits still in its write-ahead log are imported",
+      _wal242 > 0 and "https://wal242.example/" in _rows242
+      and _rows242["https://wal242.example/"].get("t") == _now242,
+      str((_n1, _wal242, sorted(_rows242))))
+check("242 places never visited are not imported as visits in 1970 or 1601",
+      "https://never242.example/" not in _rows242
+      and "https://zero242.example/" not in _rows242
+      and _rows242.get("https://chrome242.example/", {}).get("t") == _now242,
+      str(sorted(_rows242)))
+check("242 no copy of the other browser's database is left behind",
+      not list(B.CONFIG_FILE.parent.glob("import-*.sqlite*")),
+      str(list(B.CONFIG_FILE.parent.glob("import-*"))))
+
+# ---- 243: an encrypted Bitwarden export; Settings after a privacy import ----
+_enc243 = json.dumps({"encrypted": True, "encKeyValidation_DO_NOT_EDIT": "2.x",
+                      "items": [{"type": 1, "name": "2.aaa|bbb|ccc",
+                                 "login": {"username": "2.ddd|eee|fff",
+                                           "password": "2.ggg|hhh|iii",
+                                           "uris": [{"uri": "2.j|k|l"}]}}]})
+try:
+    _bw243 = B.PasswordVault.import_bitwarden(None, _enc243)
+except Exception as _e243:
+    _bw243 = repr(_e243)[:80]
+check("243 Bitwarden's encrypted export is refused, not filed as logins",
+      _bw243 == 0, str(_bw243))
+_set243 = (_P241(B.__file__).parent / "settings.html").read_text(
+    encoding="utf-8")
+_pi243 = _set243[_set243.index('getElementById("privimport").onclick'):]
+_pi243 = _pi243[:_pi243.index("\n  };\n")]
+check("243 a privacy import re-reads Settings so Save cannot undo it",
+      "bridge.importPrivacy((n) =>" in _pi243
+      and "bridge.getSettings(" in _pi243 and "load(window._settings)"
+      in _pi243, _pi243[:200])
+import shutil as _sh241
+_sh241.rmtree(str(_d241), ignore_errors=True)
+
+
+# ---- 244-246: capture and recording, the 42nd pass ----
+import stat as _stat246, tempfile as _tf246
+from pathlib import Path as _P246
+
+
+class _V246(B.QWidget):
+    """A stand-in for a tab: a widget that is not in the strip."""
+    zoom = 1.0
+    ratio = 1.0
+
+    def url(self):
+        return B.QUrl("https://cap246.example/page")
+
+    def zoomFactor(self):
+        return self.zoom
+
+    def devicePixelRatioF(self):
+        return self.ratio
+
+    def page(self):
+        outer = self
+
+        class _Page:
+            def profile(self):
+                return outer
+        return _Page()
+
+
+def _img246(w=40, h=30):
+    img = B.QImage(w, h, B.QImage.Format.Format_RGB32)
+    img.fill(B.Qt.GlobalColor.white)
+    return img
+
+
+_cap246 = B.capture
+_keys246 = {k: br.config.get(k, "<none>") for k in
+            ("shotRedact", "shotDir", "shotHistory", "shotFormat",
+             "shotUpload")}
+_tmp246 = _tf246.TemporaryDirectory(prefix="review246-")
+_dir246 = _P246(_tmp246.name)
+
+
+def _restore246():
+    for k, v in _keys246.items():
+        if v == "<none>":
+            br.config.pop(k, None)
+        else:
+            br.config[k] = v
+
+
+try:
+    br.config["shotDir"] = str(_dir246)
+
+    # 244: redaction is counted, so a nested capture cannot un-blur the first
+    _calls = []
+    _real_redact = _cap246.redact
+    _cap246.redact = lambda view, world, on=True: _calls.append(bool(on))
+    br.config["shotRedact"] = True
+    _v = _V246()
+    try:
+        br._shot_prepare(_v)
+        br._shot_prepare(_v)
+        br._shot_finish(_v)
+        _mid = list(_calls)
+        br._shot_finish(_v)
+    finally:
+        _cap246.redact = _real_redact
+    check("244 the blur stays on until the last capture of a view is done",
+          _mid == [True] and _calls == [True, False], str((_mid, _calls)))
+
+    # 244: a second full-page capture of a view being walked is refused
+    _walks = []
+    _inner = []
+    _real_fp, _real_done = _cap246.full_page, br._shot_done
+    _cap246.redact = lambda *a, **k: None
+
+    def _fake_fp(view, world, **k):
+        _walks.append(1)
+        if len(_walks) == 1:
+            _inner.append(br.shot_full_page(view=view))
+        return _img246()
+    _cap246.full_page = _fake_fp
+    br._shot_done = lambda *a, **k: None
+    try:
+        br.shot_full_page(view=_v)
+    finally:
+        _cap246.full_page = _real_fp
+        _cap246.redact = _real_redact
+        del br._shot_done
+    check("244 a capture started during a full-page walk is refused",
+          len(_walks) == 1 and _inner == [None], str((_walks, _inner)))
+    br._shot_walking = set()
+    _claim246 = getattr(br, "_shot_claim", None)
+    check("244 the walk can start again once it is over",
+          _claim246 is not None and _claim246(_v)
+          and not _claim246(_v) and (br._shot_release(_v) or True)
+          and _claim246(_v) and (br._shot_release(_v) or True))
+
+    # 244: a format that cannot hold the picture does not lose the shot
+    _wide = _img246(16400, 4)
+    _p = _cap246.save(_wide, _dir246, "wide246", fmt="webp")
+    check("244 a WebP too wide to write is saved as a PNG instead",
+          _p is not None and str(_p).endswith(".png")
+          and _p.read_bytes()[:4] == b"\x89PNG", str(_p))
+
+    # 244: an element's rectangle is read after the page settled
+    _events = []
+    _real_js, _real_spin, _real_vis = (_cap246._js, _cap246._spin,
+                                       _cap246.visible)
+
+    def _fake_js(view, code, world):
+        if "scrollIntoView" in code:
+            _events.append("scroll")
+            return [0, 0, 10, 10, 0, 0]
+        if "getBoundingClientRect" in code:
+            _events.append("rect")
+            return [0, 0, 10, 10]
+        _events.append("metrics")
+        return [100, 100, 100, 100, 0, 0, 1]
+    _cap246._js = _fake_js
+    _cap246._spin = lambda ms: _events.append("spin")
+    _cap246.visible = lambda view: _img246(100, 100)
+    try:
+        _cap246.element(_v, 0, "#x")
+    finally:
+        _cap246._js, _cap246._spin, _cap246.visible = (_real_js, _real_spin,
+                                                       _real_vis)
+    check("244 element scrolls instantly and reads its rect after the wait",
+          "instant" in _cap246.ELEMENT_JS and "spin" in _events
+          and "rect" in _events[_events.index("spin"):], str(_events))
+
+    # 245: the diff picture is not a capture, so not the next baseline
+    _a = _dir246 / "a246.png"
+    _img246(40, 30).save(str(_a), "PNG")
+    _second = _img246(40, 30)
+    _second.fill(B.Qt.GlobalColor.black)
+    br.config["shotHistory"] = [str(_a)]
+    br.config["shotFormat"] = "png"
+    _cap246.visible = lambda view: _second
+    try:
+        _res = br.capture_diff(view=_v, against=str(_a))
+    finally:
+        _cap246.visible = _real_vis
+    check("245 a capture diff stays out of the capture history",
+          bool(_res) and _res["path"] and _P246(_res["path"]).is_file()
+          and _res["path"] not in br.config["shotHistory"],
+          str((_res, br.config["shotHistory"])))
+
+    # 245: hidpi never asks Qt for a zoom past 5.0, and names its own tab
+    _seen = {"zoom": [], "size": []}
+
+    class _Sig:
+        def __init__(self):
+            self.cb = []
+
+        def connect(self, cb):
+            self.cb.append(cb)
+
+    class _Shell:
+        def __init__(self):
+            self.loadFinished = _Sig()
+
+        def setPage(self, _p):
+            pass
+
+        def resize(self, w, h):
+            _seen["size"].append((w, h))
+
+        def setZoomFactor(self, z):
+            _seen["zoom"].append(z)
+
+        def show(self):
+            pass
+
+        def hide(self):
+            pass
+
+        def deleteLater(self):
+            pass
+
+        def load(self, _url):
+            for cb in self.loadFinished.cb:
+                B.QTimer.singleShot(0, cb)
+    _real_shell, _real_page = B.QWebEngineView, B.QWebEnginePage
+    B.QWebEngineView = _Shell
+    B.QWebEnginePage = lambda *a, **k: object()
+    _cap246.visible = lambda view: _img246(60, 40)
+    _done = []
+    br._shot_done = lambda *a, **k: _done.append(k.get("view")) or None
+    _v.zoom = 2.5
+    _v.resize(400, 300)
+    try:
+        br.shot_hidpi(view=_v, scale=3)
+    finally:
+        B.QWebEngineView, B.QWebEnginePage = _real_shell, _real_page
+        _cap246.visible = _real_vis
+        del br._shot_done
+        br._hidpi_view = None
+    _z = _seen["zoom"][0] if _seen["zoom"] else 99
+    _w = _seen["size"][0][0] if _seen["size"] else 0
+    check("245 hidpi keeps the shell's zoom within 5.0 and the layout width",
+          _z <= 5.0 and abs(_w / _z - _v.width() / 2.5) < 1, str((_seen,)))
+    check("245 hidpi names the file after its own tab",
+          _done == [_v], str(_done))
+
+    # 245: an inner-area capture names its own tab too
+    _done = []
+    _saved = {n: getattr(br, n, None) for n in
+              ("_live_page", "_inner_facts", "_scroll_inner")}
+    # only the stand-in: a real tab's own timers (the translation offer)
+    # asked this too and got a page with nothing on it
+    _real_live = br._live_page
+    br._live_page = lambda v: object() if v is _v else _real_live(v)
+    br._inner_facts = lambda v, s: {"scrollHeight": 60, "clientHeight": 60,
+                                    "width": 30, "x": 0, "y": 0, "height": 60}
+    br._scroll_inner = lambda *a: True
+    _real_area = B.capture.area
+    _cap246.area = lambda view, rect: _img246(30, 60)
+    br._shot_done = lambda *a, **k: _done.append(k.get("view")) or None
+    try:
+        br.shot_inner(selector="#box", view=_v)
+    finally:
+        for n in _saved:
+            br.__dict__.pop(n, None)
+        del br._shot_done
+        _cap246.area = _real_area
+    check("245 an inner-area capture is named after its own tab",
+          _done == [_v], str(_done))
+
+    # 245: a marked-up picture is named after where it came from
+    _kw = []
+    _old_ann = getattr(br, "_annotator", None)
+    br._shot_done = lambda *a, **k: _kw.append(k) or None
+    _cap246.visible = lambda view: _img246()
+    try:
+        _from_file = br.annotate(_img246())
+        br.save_annotation(_from_file)
+        _from_tab = br.annotate(view=_v)
+        br.save_annotation(_from_tab)
+    finally:
+        _cap246.visible = _real_vis
+        del br._shot_done
+        br._annotator = _old_ann
+    check("245 a marked-up file is not named after the tab in front",
+          len(_kw) == 2 and _kw[0].get("title") == ""
+          and _kw[0].get("host") == "", str(_kw))
+    check("245 a marked-up tab shot keeps the host it was taken from",
+          len(_kw) == 2 and _kw[1].get("host") == "cap246.example",
+          str(_kw))
+
+    # 245: an upload says what kind of file it is
+    _types = {}
+
+    class _Reply:
+        class _S:
+            def connect(self, cb):
+                pass
+        finished = _S()
+
+    class _Nam:
+        def put(self, request, data):
+            _types[_P246(request.url().path()).suffix] = (
+                request.header(B.QNetworkRequest.KnownHeaders
+                               .ContentTypeHeader) or "")
+            return _Reply()
+    _real_nam = br._nam
+    br._nam = _Nam()
+    br.config["shotUpload"] = "https://up246.example/x"
+    try:
+        for ext in (".webp", ".jpg", ".png", ".xyz"):
+            f = _dir246 / ("u246" + ext)
+            f.write_bytes(b"x")
+            br.upload_capture(path=str(f))
+    finally:
+        br._nam = _real_nam
+    _types = {k: (v.decode() if isinstance(v, bytes) else str(v))
+              for k, v in _types.items()}
+    check("245 an upload carries the content type of its file",
+          _types.get(".webp") == "image/webp"
+          and _types.get(".jpg") == "image/jpeg"
+          and _types.get(".png") == "image/png"
+          and _types.get(".xyz") == "application/octet-stream", str(_types))
+
+    # 246: sound-only recording can be stopped from the menu, and a second
+    # start does not leak the first
+    _fake = _dir246 / "parec-fake"
+    _fake.write_text('#!/bin/sh\nfor last; do :; done\n'
+                     'echo wav > "$last"\nexec sleep 30\n')
+    _fake.chmod(_fake.stat().st_mode | _stat246.S_IXUSR)
+    br.record_tools = lambda: {"recorder": str(_fake), "ffmpeg": "",
+                               "tesseract": ""}
+    _first = _second_p = None
+    try:
+        br._record_audio_start(False)
+        _first = getattr(br, "_audio_proc", None)
+        _first.waitForStarted(3000)
+        _stop = br._ui_str("recStop")
+        _menu = br.record_menu(B.QMenu())
+        _has_stop = _stop in [a.text() for a in _menu.actions()]
+        br._record_audio_start(True)
+        _second_p = br._audio_proc
+        # waitForFinished answers False for a process already over,
+        # which is exactly what the fix makes it
+        _ended = (_first.state() == B.QProcess.ProcessState.NotRunning
+                  or _first.waitForFinished(3000))
+        _menu = br.record_menu(B.QMenu())
+        _acts = [a for a in _menu.actions() if a.text() == _stop]
+        if _acts:
+            _acts[0].trigger()
+        _stopped = not br._audio_running() if hasattr(br, "_audio_running") \
+            else getattr(br, "_audio_proc", None) is None
+        check("246 a sound-only recording shows a Stop entry and stops",
+              _has_stop and bool(_acts) and _stopped,
+              str((_has_stop, bool(_acts), _stopped)))
+        check("246 a second sound-only start ends the first recorder",
+              _ended, "first recorder still running")
+        check("246 the sound it recorded is kept",
+              any(f.suffix == ".wav" and f.stat().st_size
+                  for f in _dir246.iterdir()))
+    finally:
+        for p in (_first, _second_p):
+            try:
+                if p is not None and p.state() != B.QProcess.ProcessState.NotRunning:
+                    p.kill()
+                    p.waitForFinished(1000)
+            except RuntimeError:
+                pass
+        br._audio_proc = None
+        del br.record_tools
+
+    # 246: a region is cut in device pixels
+    _rec = _cap246.Recording(fps=10, seconds=0)
+    _rec.region = (10, 20, 100, 50)
+    _rv = _V246()
+    _rv.ratio = 2.0
+    _rec.view = _rv
+    _rec.audio_path = ""
+    _rects = []
+    _old_rec = getattr(br, "_recording", None)
+    br._recording = _rec
+    _cap246.area = lambda view, rect: (_rects.append(list(rect))
+                                       or _img246(10, 10))
+    try:
+        br._record_tick()
+    finally:
+        _cap246.area = _real_area
+        br._recording = _old_rec
+    check("246 a region recording scales its rectangle by the screen ratio",
+          _rects == [[20.0, 40.0, 200.0, 100.0]], str(_rects))
+finally:
+    _restore246()
+    _tmp246.cleanup()
+
+# ---- 247: cookie rules: "until close" really wipes, allowed subdomains stay ----
+from PyQt6.QtNetwork import QNetworkCookie as _QNC247
+_rules_was247 = dict(br.cookie_rules())
+_queued_was247 = set(br._cookies_until_close)
+_calls247 = []
+br.clear_site_data = lambda host, by_rule=False: _calls247.append(
+    (host, by_rule))
+try:
+    br.config["cookieRules"] = {"close247.example": "close",
+                                "sub.close247.example": "allow"}
+    br._cookies_until_close = {"changed247.example", "close247.example"}
+    br.clear_until_close()
+finally:
+    del br.clear_site_data
+check("247 the exit wipe takes every 'until close' site, and not one "
+      "switched back to allow", _calls247 == [("close247.example", True)],
+      str(_calls247))
+
+
+class _Store247:
+    def __init__(self, domains):
+        self._live = {}
+        for d in domains:
+            c = _QNC247(b"c", b"v")
+            c.setDomain(d)
+            self._live[(d, "/", b"c")] = c
+        self.deleted = []
+
+    def deleteCookie(self, cookie):
+        self.deleted.append(cookie.domain())
+
+
+_st247 = _Store247([".p247.example", "sub.p247.example", "x.p247.example"])
+try:
+    br.config["cookieRules"] = {"p247.example": "close",
+                                "sub.p247.example": "allow"}
+    try:
+        B.Browser._delete_host_cookies(
+            _st247, "p247.example",
+            lambda d: br.cookie_rule_for(d) == "allow")
+    except TypeError:          # no keep= before the fix
+        _st247.deleted = ["no keep"]
+    _keeps247 = []
+    br._delete_host_cookies = lambda store, host, keep=None: \
+        _keeps247.append(keep is not None)
+    br.flash = lambda *a, **k: None
+    try:
+        try:
+            br.clear_site_data("nothere247.example", by_rule=True)
+        except TypeError:      # no by_rule before the fix
+            _keeps247.append(None)
+        br.clear_site_data("nothere247.example")
+    finally:
+        del br._delete_host_cookies, br.flash
+finally:
+    br.config["cookieRules"] = dict(_rules_was247)
+check("247 a rule on a site leaves the cookies of a subdomain allowed by name",
+      sorted(_st247.deleted) == [".p247.example", "x.p247.example"]
+      and _keeps247[:1] == [True] and _keeps247[-1:] == [False],
+      str((_st247.deleted, _keeps247)))
+try:
+    br.config["cookieRules"] = {}
+    br.cookie_rule("bücher247.example", "close")
+    _idn247 = (br.cookie_rule_for("xn--bcher247-65a.example"),
+               br.cookie_rule_for(".xn--bcher247-65a.example"),
+               br.cookie_rule("bücher247.example"))
+    br.config["cookieRules"] = {"bücher247b.example": "block"}
+    _old247 = br.cookie_rule_for("xn--bcher247b-q9a.example")
+finally:
+    br.config["cookieRules"] = dict(_rules_was247)
+    br._cookies_until_close = set(_queued_was247)
+check("247 a rule for an international site covers its cookies (xn-- form), "
+      "old rules too", _idn247 == ("close", "close", "close")
+      and _old247 == "block", str((_idn247, _old247)))
+
+
+class _Sig247:
+    def connect(self, fn):
+        pass
+
+
+class _FakeStore247:
+    def __init__(self):
+        self.cookieAdded = _Sig247()
+        self.cookieRemoved = _Sig247()
+        self.loads = 0
+
+    def loadAllCookies(self):
+        self.loads += 1
+
+
+class _FakeProfile247:
+    def __init__(self):
+        self.store = _FakeStore247()
+
+    def cookieStore(self):
+        return self.store
+
+    def isOffTheRecord(self):
+        return False
+
+    def storageName(self):
+        return "fake247"
+
+
+try:
+    br.config["cookieRules"] = {"w247.example": "close"}
+    _pa247 = _FakeProfile247()
+    br.watch_cookies(_pa247)
+    br.config["cookieRules"] = {}
+    _pb247 = _FakeProfile247()
+    br.watch_cookies(_pb247)
+finally:
+    br.config["cookieRules"] = dict(_rules_was247)
+check("247 with an 'until close' rule the jar reports its old cookies at start",
+      _pa247.store.loads == 1 and _pb247.store.loads == 0,
+      str((_pa247.store.loads, _pb247.store.loads)))
+
+# ---- 248: whole cookie values, http cookies, private permissions forgotten ----
+_c248 = _QNC247(b"long248", b"v" * 3000)
+_c248.setDomain("long248.example")
+_c248.setPath("/")
+br._note_cookie(_c248, jar="main")
+_row248 = (getattr(br, "_cookie_seen", None) or {}).pop(
+    "main|long248.example|/|long248", {})
+check("248 the cookie editor keeps a long cookie's whole value",
+      len(_row248.get("value", "")) == 3000, str(len(_row248.get("value", ""))))
+
+
+class _View248:
+    def __init__(self, url):
+        self._u = B.QUrl(url)
+
+    def url(self):
+        return self._u
+
+
+_secure248 = []
+_made248 = []
+
+
+def _note248(cookie, jar=""):
+    _secure248.append(bool(cookie.isSecure()))
+    _made248.append(_QNC247(cookie))
+
+
+br._note_cookie = _note248
+try:
+    for _u248 in ("http://plain248.example/", "https://tls248.example/"):
+        _fv248 = _View248(_u248)
+        br.current = lambda _v=_fv248: _v
+        br._live_page = lambda v: None
+        br.set_cookie("n248", "1")
+        del br.current, br._live_page
+finally:
+    for _n in ("_note_cookie", "current", "_live_page"):
+        br.__dict__.pop(_n, None)
+    for _ck in _made248:
+        try:
+            br.profile.cookieStore().deleteCookie(_ck)
+        except RuntimeError:
+            pass
+check("248 a cookie made on an http page is not Secure, one on https is",
+      _secure248 == [False, True], str(_secure248))
+_pk248 = "https://fp248.example|use the microphone"
+br._private_perms[_pk248] = True
+br.forget_site("fp248.example")
+check("248 forgetting a site forgets what its private tabs were allowed",
+      _pk248 not in br._private_perms, str(list(br._private_perms)[:5]))
+br._private_perms.pop(_pk248, None)
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

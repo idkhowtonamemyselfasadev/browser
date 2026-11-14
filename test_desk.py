@@ -198,7 +198,8 @@ desk.add_to_collection("Mods", "Sodium", "https://modrinth.com/mod/sodium")
 check("a collection is a Markdown list",
       desk.collection("Mods").startswith("- [Sodium](https://"),
       desk.collection("Mods"))
-check("and is listed", "mods" in desk.collections(), desk.collections())
+# listed by the name he gave it (fix234: no longer by its slug)
+check("and is listed", "Mods" in desk.collections(), desk.collections())
 desk.add_clip("hello")
 desk.add_clip("world")
 check("clips are newest first",
@@ -263,7 +264,8 @@ rows = win.tab_to_todo(win.tabs.indexOf(view), close=False)
 check("and a tab can be a to-do",
       any(r["link"] == srv.url("/a") for r in rows), rows[-1])
 path = win.collect_page("Reading", view)
-check("a page goes into a collection", path and "reading" in path, path)
+check("a page goes into a collection",
+      path and "reading" in str(path).lower(), path)
 
 print("\n(8) a quick note, typed into a box")
 real_ask = B.QInputDialog.getMultiLineText

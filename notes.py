@@ -267,8 +267,12 @@ class Desk:
         else:
             note = {}
             nid = self._note_id(title or time.strftime("%Y-%m-%d-%H%M"))
-            if (self.folder / (nid + ".md")).exists():
-                nid = "%s-%d" % (nid, now % 100000)
+            # the second of three same-titled notes in one second got
+            # "x-<time>" and the third the very same name: written over
+            base, n = nid, 2
+            while (self.folder / (nid + ".md")).exists():
+                nid = "%s-%d" % (base, n)
+                n += 1
         note.update({
             "title": str((note.get("title") or "") if title is None
                          else title)[:200],
@@ -511,14 +515,31 @@ class Desk:
         new = self.folder / "collections" / (slug(name) + ".md")
         old = self.folder / "collections" / (slug_old(name) + ".md")
         try:
+            if new.is_file():
+                return new     # made under its slug before: still found
             # only when the old name was a real one: every name in another
             # alphabet used to fall back to "note", and that file is not
             # this collection's
-            if not new.is_file() and old.is_file() \
-                    and slug_old(name, fallback=""):
+            if old.is_file() and slug_old(name, fallback=""):
                 return old     # written by an older version: still found
         except OSError:
             pass
+        # the same name in other capitals is the same collection, as it
+        # was when every name went through the slug: "reading" after
+        # "Reading" made a second, empty one
+        try:
+            for path in (self.folder / "collections").glob("*.md"):
+                if raw and path.stem.lower() == raw.lower():
+                    return path
+        except OSError:
+            pass
+        # a NEW collection is filed under its own name when that is a
+        # safe file name: "C++" and "C#" both slugged to c.md, one file
+        # for two collections, and deleting one took the other with it
+        if (raw and len(raw) <= 120 and raw.strip() == raw
+                and "/" not in raw and "\\" not in raw
+                and not raw.startswith(".") and "\0" not in raw):
+            return self.folder / "collections" / (raw + ".md")
         return new
 
     def collection(self, name):

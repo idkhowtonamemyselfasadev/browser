@@ -95,9 +95,17 @@ METRICS_JS = """(function () {
 ELEMENT_JS = """(function (sel) {
   var el = document.querySelector(sel);
   if (!el) return null;
-  el.scrollIntoView({block: "center", inline: "center"});
+  el.scrollIntoView({block: "center", inline: "center",
+                     behavior: "instant"});
   var r = el.getBoundingClientRect();
   return [r.left, r.top, r.width, r.height, window.scrollX, window.scrollY];
+})(%s)"""
+
+RECT_JS = """(function (sel) {
+  var el = document.querySelector(sel);
+  if (!el) return null;
+  var r = el.getBoundingClientRect();
+  return [r.left, r.top, r.width, r.height];
 })(%s)"""
 
 POINT_JS = """(function (x, y) {
@@ -226,6 +234,11 @@ def element(view, world, selector):
     if not box:
         return QImage()
     _spin(160)
+    # where it is NOW: a page with smooth scrolling was still moving when
+    # the first reading was taken, and the crop landed beside the element
+    again = _js(view, RECT_JS % _q(selector), world)
+    if again:
+        box = again
     shot = visible(view)
     if shot.isNull():
         return shot
@@ -260,9 +273,11 @@ def encode(image, fmt="png", quality=-1):
     data = QByteArray()
     buf = QBuffer(data)
     buf.open(QIODevice.OpenModeFlag.WriteOnly)
-    image.save(buf, FORMATS.get(fmt.lower(), "PNG"), quality)
+    ok = image.save(buf, FORMATS.get(fmt.lower(), "PNG"), quality)
     buf.close()
-    return bytes(data)
+    # a WebP over 16383 px (a JPEG over 65535) cannot be written: what
+    # was left in the buffer is not a picture
+    return bytes(data) if ok else b""
 
 
 def fit_under(image, limit_bytes, fmt="jpeg"):
@@ -270,12 +285,12 @@ def fit_under(image, limit_bytes, fmt="jpeg"):
     (Discord's, by default 10 MB). Quality first, then size: a readable
     screenshot at 70% quality beats a sharp one scaled to a postcard."""
     raw = encode(image, fmt, 92)
-    if len(raw) <= limit_bytes:
+    if raw and len(raw) <= limit_bytes:
         return raw, image
     shrunk = image
     for quality in (80, 70, 60, 50):
         raw = encode(shrunk, fmt, quality)
-        if len(raw) <= limit_bytes:
+        if raw and len(raw) <= limit_bytes:
             return raw, shrunk
     for _ in range(4):
         shrunk = shrunk.scaled(int(shrunk.width() * .75),
@@ -283,7 +298,7 @@ def fit_under(image, limit_bytes, fmt="jpeg"):
                               Qt.AspectRatioMode.KeepAspectRatio,
                               Qt.TransformationMode.SmoothTransformation)
         raw = encode(shrunk, fmt, 70)
-        if len(raw) <= limit_bytes:
+        if raw and len(raw) <= limit_bytes:
             return raw, shrunk
     return raw, shrunk
 
@@ -306,6 +321,11 @@ def save(image, directory, pattern="shot-%Y%m%d-%H%M%S", title="", host="",
     `data` is the picture already encoded (fit_under's bytes), written
     as it is."""
     raw = data if data else encode(image, fmt, quality)
+    if not raw and not data and str(fmt).lower() != "png":
+        # the chosen format could not hold it (a very tall page as WebP):
+        # a PNG, named as one, rather than losing the whole stitched shot
+        fmt = "png"
+        raw = encode(image, fmt, quality)
     if not raw:
         return None
     path = directory / name_for(pattern, title, host, fmt)

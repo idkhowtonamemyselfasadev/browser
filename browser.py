@@ -6,6 +6,7 @@ import base64
 import csv
 import calendar
 import datetime
+import fnmatch
 import functools
 import hashlib
 import hmac
@@ -4653,7 +4654,8 @@ YOUTUBE_JS = r"""
 (function () {
   var h = location.hostname;
   if (!(h === "youtube.com" || h.endsWith(".youtube.com")
-        || h.endsWith("youtube-nocookie.com"))) return;
+        || h === "youtube-nocookie.com"
+        || h.endsWith(".youtube-nocookie.com"))) return;
 
   // AV1 and VP8 used to be hidden from YouTube here, so it would serve VP9
   // instead. The premise was "some QtWebEngine builds report AV1 support but
@@ -11255,8 +11257,14 @@ THEME_SEEDS = ("bg", "surface", "text", "accent", "green", "yellow",
 
 
 def custom_theme_key(name):
-    """A readable key for a theme he named, always prefixed."""
-    slug = re.sub(r"[^a-z0-9]+", "-", str(name or "").lower()).strip("-")
+    """A readable key for a theme he named, always prefixed. A name the
+    slug keeps nothing of ("Тема", "日本語", an emoji) is keyed by a
+    short fingerprint of itself: every one of them was "mine-theme",
+    and importing the second replaced the first."""
+    text = str(name or "")
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    if text.strip() and not slug:
+        slug = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
     return CUSTOM_PREFIX + (slug or "theme")
 
 
@@ -15283,6 +15291,12 @@ class PasswordVault:
             data = json.loads(str(text))
         except (ValueError, TypeError):
             return 0
+        if isinstance(data, dict) and (data.get("encrypted")
+                                       or data.get("passwordProtected")):
+            # its "encrypted (json)" export: every name, user name,
+            # password and address in it is a cipher string, and each
+            # became a login of garbage ("imported 212")
+            return 0
         rows = data.get("items") if isinstance(data, dict) else None
         if not isinstance(rows, list):
             return 0
@@ -16108,6 +16122,25 @@ _PRIVATE_CERTS = {}
 #: yt-dlp jobs started from a private tab, still running: the private
 #: folder is not emptied (nor the jar dropped) under them
 _PRIVATE_YTDLP = set()
+
+
+def _git_busy():
+    """A merge, rebase or cherry-pick half done in the browser's own
+    checkout (a developer's clone): the update starts with "merge
+    --abort", which threw the hand-made resolutions away."""
+    git = APP_DIR / ".git"
+    try:
+        if git.is_file():          # a worktree: "gitdir: <path>"
+            line = git.read_text(encoding="utf-8", errors="replace").strip()
+            if line.startswith("gitdir:"):
+                git = Path(line[7:].strip())
+                if not git.is_absolute():
+                    git = APP_DIR / git
+        return any((git / name).exists() for name in (
+            "MERGE_HEAD", "rebase-merge", "rebase-apply",
+            "CHERRY_PICK_HEAD", "REVERT_HEAD"))
+    except OSError:
+        return False
 
 
 def _git_env():
@@ -26070,11 +26103,13 @@ class Browser(QMainWindow):
                 return
             if code == 0 and out.isdigit() and int(out) > 0:
                 self._stranded = False
-                if self.config.get("autoUpdate", True):
+                if self.config.get("autoUpdate", True) and not _git_busy():
                     # auto mode: pull it in quietly, no toast, no restart
                     # prompt -- the new files load next time it is opened
                     self.bridge.runUpdate()
                 else:
+                    # (a merge or rebase under way in the checkout is
+                    # not aborted on its own: it is offered instead)
                     self._show_toast()
         proc.finished.connect(done)
         proc.setProcessEnvironment(_git_env())
@@ -29890,9 +29925,12 @@ class Browser(QMainWindow):
             entry = kept[which]
         except IndexError:
             return []
-        open_now = {e["u"] for e in self.tab_state()}
+        # the same address open in another virtual browser is not this
+        # tab: the snapshot's own (its jar, its login) was left out
+        open_now = {(e["u"], e.get("s") or "main") for e in self.tab_state()}
         return self.open_tab_state([e for e in entry["tabs"]
-                                    if e.get("u") not in open_now])
+                                    if (e.get("u"), e.get("s") or "main")
+                                    not in open_now])
 
     def aside_sets(self):
         sets = self.config.get("asideSets")
@@ -30078,7 +30116,11 @@ class Browser(QMainWindow):
                                              errors="replace")
         except OSError:
             return []
-        urls = re.findall(r'href=["\']([^"\']+)["\']', text)
+        # an href is HTML: "&amp;" in it is "&" (export_tabs escapes
+        # it), and taken as written every address with a query string
+        # came back as another page
+        urls = [html.unescape(one) for one in
+                re.findall(r'href=["\']([^"\']+)["\']', text)]
         if not urls:
             urls = [line.strip() for line in text.splitlines()]
         out = []
@@ -31192,16 +31234,24 @@ class Browser(QMainWindow):
         fmt = str(self.config.get("shotFormat", "png")).lower()
         return fmt if fmt in ("png", "jpeg", "jpg", "webp") else "png"
 
-    def _shot_done(self, image, copy=True, save=True, pin=False, view=None):
+    def _shot_done(self, image, copy=True, save=True, pin=False, view=None,
+                   title=None, host=None, note=True):
         """What happens to a capture once it has been taken: onto the
-        clipboard, into a file, or into a little window of its own."""
+        clipboard, into a file, or into a little window of its own.
+
+        title and host name the file when the picture is not of the tab
+        in front (a marked-up one, taken from another tab or from a
+        file); note=False keeps a derived picture, a diff, out of the
+        capture history."""
         if capture is None or image is None or image.isNull():
             self.flash(self._ui_str("shotFailed"))
             return None
         view = self.current() if view is None else view
-        title = self._tab_title(self.tabs.indexOf(view)) if view else ""
-        host = view.url().host() if view is not None and hasattr(view, "url") \
-            else ""
+        if title is None:
+            title = self._tab_title(self.tabs.indexOf(view)) if view else ""
+        if host is None:
+            host = view.url().host() \
+                if view is not None and hasattr(view, "url") else ""
         if copy:
             capture.to_clipboard(image)
         path = None
@@ -31224,7 +31274,8 @@ class Browser(QMainWindow):
         if path:
             # every capture in the list: the plain ones were never in it,
             # so "capture diff" compared with some older picture
-            self.note_capture(path)
+            if note:
+                self.note_capture(path)
             self.flash(str(path))
         elif save:
             # nothing written (a full disk, a format with no encoder):
@@ -31252,13 +31303,48 @@ class Browser(QMainWindow):
         """Blur what should not be in a picture, if he asked for that."""
         if capture is None or view is None:
             return
-        if self.config.get("shotRedact", True):
+        # counted per view: a second capture started inside the first's
+        # waiting (shortcut, timer, menu) finished first and took the blur
+        # off the password fields the first was still stitching
+        counts = getattr(self, "_shot_redacts", None)
+        if counts is None:
+            counts = self._shot_redacts = {}
+        key = id(view)
+        n = counts.get(key, 0)
+        if n == 0 and self.config.get("shotRedact", True):
             capture.redact(view, APP_WORLD_ID, True)
             QApplication.processEvents()
+        counts[key] = n + 1
 
     def _shot_finish(self, view):
         if capture is not None and view is not None:
+            counts = getattr(self, "_shot_redacts", None)
+            if counts is None:
+                counts = self._shot_redacts = {}
+            key = id(view)
+            n = counts.get(key, 0) - 1
+            if n > 0:
+                counts[key] = n
+                return
+            counts.pop(key, None)
             capture.redact(view, APP_WORLD_ID, False)
+
+    def _shot_claim(self, view):
+        """Take the right to walk this view down the page. False when a
+        capture of it is already doing that: two walks at once moved the
+        page under each other and un-pinned its headers mid-stitch."""
+        busy = getattr(self, "_shot_walking", None)
+        if busy is None:
+            busy = self._shot_walking = set()
+        if id(view) in busy:
+            return False
+        busy.add(id(view))
+        return True
+
+    def _shot_release(self, view):
+        busy = getattr(self, "_shot_walking", None)
+        if busy is not None:
+            busy.discard(id(view))
 
     def shot_visible(self, copy=True, save=True, pin=False, view=None):
         view = view or self.current()
@@ -31279,12 +31365,18 @@ class Browser(QMainWindow):
             return None
         if not self.shot_allowed(view):
             return None
-        self._shot_prepare(view)
-        self.flash(self._ui_str("shotWorking"))
+        if not self._shot_claim(view):
+            self.flash(self._ui_str("shotWorking"))
+            return None
         try:
-            image = capture.full_page(view, APP_WORLD_ID)
+            self._shot_prepare(view)
+            self.flash(self._ui_str("shotWorking"))
+            try:
+                image = capture.full_page(view, APP_WORLD_ID)
+            finally:
+                self._shot_finish(view)
         finally:
-            self._shot_finish(view)
+            self._shot_release(view)
         return self._shot_done(image, copy, save, view=view)
 
     def shot_element(self, selector, copy=True, save=True, view=None):
@@ -31356,11 +31448,17 @@ class Browser(QMainWindow):
         limit = int(self.config.get("shotLimitMb", 10) or 10) * 1024 * 1024
         if not self.shot_allowed(view):
             return None
-        self._shot_prepare(view)
+        if not self._shot_claim(view):
+            self.flash(self._ui_str("shotWorking"))
+            return None
         try:
-            image = capture.full_page(view, APP_WORLD_ID)
+            self._shot_prepare(view)
+            try:
+                image = capture.full_page(view, APP_WORLD_ID)
+            finally:
+                self._shot_finish(view)
         finally:
-            self._shot_finish(view)
+            self._shot_release(view)
         raw, shrunk = capture.fit_under(image, limit, "jpeg")
         try:
             title = self._tab_title(self.tabs.indexOf(view))
@@ -31613,12 +31711,17 @@ class Browser(QMainWindow):
         for _, view in self._real_tabs():
             self.apply_site_privacy(view)
 
-    def clear_site_data(self, host):
+    def clear_site_data(self, host, by_rule=False):
         """This site's cookies and storage, in every virtual browser,
-        and then the page again so it starts from nothing."""
-        host = (host or "").lower().removeprefix("www.")
+        and then the page again so it starts from nothing. by_rule: a
+        cookie rule asked (block, or "until close"), and a subdomain he
+        allowed by name keeps its cookies."""
+        shown = (host or "").lower().removeprefix("www.")
+        host = _ace_host(host).rstrip(".")
         if not host:
             return 0
+        keep = ((lambda domain: self.cookie_rule_for(domain) == "allow")
+                if by_rule else None)
         gone = 0
         for profile in self._all_profiles():
             store = profile.cookieStore()
@@ -31628,11 +31731,12 @@ class Browser(QMainWindow):
             # bounce-tracker clean-up all left every cookie in place.
             # The ones this run has seen go now; the ones still on disk
             # from earlier runs are loaded, and go as they arrive.
-            self._delete_host_cookies(store, host)
+            self._delete_host_cookies(store, host, keep)
             try:
                 store.loadAllCookies()
                 QTimer.singleShot(
-                    500, lambda st=store: self._delete_host_cookies(st, host))
+                    500, lambda st=store: self._delete_host_cookies(
+                        st, host, keep))
             except (AttributeError, RuntimeError):
                 pass
             try:
@@ -31653,7 +31757,7 @@ class Browser(QMainWindow):
                 continue
             for _, view in rows:
                 try:
-                    here = view.url().host().lower().removeprefix("www.")
+                    here = _ace_host(view.url().host()).rstrip(".")
                 except RuntimeError:
                     continue
                 if here != host and not here.endswith("." + host):
@@ -31665,7 +31769,7 @@ class Browser(QMainWindow):
                     QTimer.singleShot(300, lambda v=view: self._reload_live(v))
                 except RuntimeError:
                     continue
-        self.flash(self._ui_str("privCleared") % host)
+        self.flash(self._ui_str("privCleared") % (shown or host))
         return gone
 
     def _reload_live(self, view):
@@ -31676,15 +31780,20 @@ class Browser(QMainWindow):
             pass
 
     @staticmethod
-    def _delete_host_cookies(store, host):
+    def _delete_host_cookies(store, host, keep=None):
         """Every cookie this jar holds for a site and its subdomains,
-        deleted. Answers how many."""
+        deleted. Answers how many. keep(domain): a subdomain's cookie
+        that answers True stays (one he allowed by name, when a rule on
+        the site above it is what asked)."""
         live = getattr(store, "_live", None) or {}
         gone = 0
         for key, cookie in list(live.items()):
             domain = (cookie.domain() or "").lstrip(".").lower() \
                 .removeprefix("www.")
             if domain == host or domain.endswith("." + host):
+                if keep is not None and domain != host \
+                        and keep(cookie.domain()):
+                    continue
                 try:
                     store.deleteCookie(cookie)
                 except (AttributeError, RuntimeError):
@@ -31746,7 +31855,10 @@ class Browser(QMainWindow):
             self.config["permissionTimes"] = {
                 k: v for k, v in times.items() if not this_key(k)}
         for win in self.windows() or [self]:
-            for name in ("_session_perms", "_perm_used_at"):
+            # the private book too: a private tab's microphone stayed
+            # granted, with no card, until the last private tab closed
+            for name in ("_session_perms", "_perm_used_at",
+                         "_private_perms"):
                 book = getattr(win, name, None)
                 if isinstance(book, dict):
                     for key in [k for k in book if this_key(k)]:
@@ -36455,12 +36567,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not isinstance(rules, dict):
             rules = {}
             self.config["cookieRules"] = rules
+        if any(not str(host).isascii() for host in rules):
+            # a cookie names an international site in its xn-- form and
+            # the menu stored Qt's decoded one: the two never met, and
+            # the rule did nothing
+            rules = {(_ace_host(host) or host): rule
+                     for host, rule in rules.items()}
+            self.config["cookieRules"] = rules
         return rules
 
     def cookie_rule(self, host, rule=None):
         """What a site may keep: "allow" (the default), "close" (gone
         when the browser closes) or "block" (not kept at all)."""
-        host = str(host or "").lower().removeprefix("www.")
+        host = _ace_host(host).rstrip(".")
         if not host:
             return "allow"
         rules = self.cookie_rules()
@@ -36479,13 +36598,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             rules[host] = rule
         self.save_config(quiet=True)
         if rule == "block":
-            self.clear_site_data(host)
+            self.clear_site_data(host, by_rule=True)
+        elif rule == "close":
+            # the cookies it already has (a login from before the rule)
+            # are reported, so the jar holds them when it is closed
+            for profile in self._all_profiles():
+                try:
+                    profile.cookieStore().loadAllCookies()
+                except (AttributeError, RuntimeError):
+                    pass
         return self.cookie_rule(host)
 
     def cookie_rule_for(self, domain):
         """The rule that covers a cookie's own domain. A cookie set for
         .example.com is covered by a rule on example.com."""
-        domain = str(domain or "").lower().lstrip(".").removeprefix("www.")
+        domain = _ace_host(str(domain or "").lstrip(".")).rstrip(".")
         if not domain:
             return "allow"
         rules = self.cookie_rules()
@@ -36519,12 +36646,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return False
 
     def clear_until_close(self):
-        """The sites whose cookies only last the session, cleared."""
+        """The sites whose cookies only last the session, cleared: every
+        site with that rule, not only those seen setting a cookie this
+        run (a login kept from before the rule stayed for good), and
+        none whose rule has changed since (a site switched back to
+        "allow" was wiped anyway)."""
+        hosts = {host for host in self._cookies_until_close
+                 if host and self.cookie_rule_for(host) == "close"}
+        hosts.update(host for host, rule in self.cookie_rules().items()
+                     if host and rule == "close")
         done = 0
-        for host in sorted(self._cookies_until_close):
-            if host:
-                self.clear_site_data(host)
-                done += 1
+        for host in sorted(hosts):
+            self.clear_site_data(host, by_rule=True)
+            done += 1
         self._cookies_until_close.clear()
         return done
 
@@ -49931,8 +50065,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 else 0
         except (RuntimeError, AttributeError, ValueError):
             return False
+        # the whole value (the engine caps a cookie at 4 KB): cut at
+        # 2000, a long login token went out of cookies.txt broken
         seen["%s|%s|%s|%s" % (jar, domain, path, name)] = {
-            "name": name, "value": value[:2000], "domain": domain,
+            "name": name, "value": value, "domain": domain,
             "path": path, "secure": secure, "httpOnly": http_only,
             "expires": when, "jar": str(jar or "")}
         while len(seen) > 4000:
@@ -49940,7 +50076,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return True
 
     def set_cookie(self, name, value, host=None, path="/", days=30,
-                   secure=True):
+                   secure=None):
         """Add or change a cookie by hand — the thing a cookie editor
         is for: trying a flag, a locale, a feature switch.
 
@@ -49960,6 +50096,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     if view is not None else "")
         if not host or not str(name):
             return False
+        if secure is None:
+            # Secure unless the page in front is plain http: a Secure
+            # cookie is never sent there, and the one he made for his
+            # intranet page looked set and did nothing
+            try:
+                secure = as_qurl(view.url()).scheme() != "http" \
+                    if view is not None else True
+            except (AttributeError, RuntimeError):
+                secure = True
         cookie = QNetworkCookie(str(name).encode(), str(value).encode())
         cookie.setDomain(host)
         cookie.setPath(str(path or "/"))
@@ -52152,7 +52297,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             rest = line
             found = re.match(r"^([A-Za-z0-9.\-*]+)\s*\|\s*(.*)$", line)
             if found:
-                host, rest = found.group(1).lower(), found.group(2)
+                # "*.site" is the site and everything under it, which a
+                # plain "site" already means: kept as written, no host
+                # was ever equal to it and the rule did nothing
+                host = found.group(1).lower().removeprefix("*.")
+                rest = found.group(2)
             if ":" not in rest:
                 continue
             name, value = rest.split(":", 1)
@@ -52164,7 +52313,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def headers_for(self, host):
         """The headers to add to a request for this site."""
-        host = str(host or "").lower().removeprefix("www.")
+        # the rules can only be written in the xn-- form (the pattern
+        # above takes ASCII), while Qt hands the request's host over
+        # decoded: an international site never got its headers
+        host = _ace_host(host).rstrip(".")
         out = []
         for where, name, value in self.header_rules():
             if where in ("", "*") or where == host \
@@ -54440,6 +54592,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             or self.active_session
         if sid and sid != "main":
             entry["s"] = sid
+        # the same tab, still on the page it was recorded for, changing
+        # its title (a mail tab's unread count): that row is brought up
+        # to date. Only the very last row was compared, so with another
+        # tab browsing in between every change added one more row -- and
+        # moved a page open all day to "now"
+        # (in the same virtual browser: a row is labelled with the one
+        # the page was read in)
+        row = getattr(tab, "_rec_row", None) if tab is not None else None
+        if (row is not None and getattr(tab, "_rec_url", None) == entry["url"]
+                and row.get("s") == entry.get("s")
+                and any(r is row for r in self.history[-200:])):
+            row["title"] = entry["title"]
+            self.save_history()
+            return
         if self.history and self.history[-1]["url"] == entry["url"]:
             self.history[-1] = entry  # same page: refresh title/time only
         else:
@@ -54449,6 +54615,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 del self.history[:len(self.history) - HISTORY_MAX + 500]
                 # every other cut forgets their page words and pictures
                 self._history_dropped(old)
+        if tab is not None:
+            try:
+                tab._rec_url = entry["url"]
+                tab._rec_row = entry
+            except RuntimeError:
+                pass
         self.save_history()
 
     def _read_history(self):
@@ -57032,6 +57204,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             store.cookieRemoved.connect(safely(removed))
         except (AttributeError, RuntimeError):
             pass
+        # cookies from an earlier run are only reported when asked for:
+        # a site kept "until close" whose login came from before the rule
+        # (or from a run that crashed) was never in hand to delete, and a
+        # blocked site's old cookies were never seen to be blocked
+        if any(rule in ("close", "block")
+               for rule in self.cookie_rules().values()):
+            try:
+                store.loadAllCookies()
+            except (AttributeError, RuntimeError):
+                pass
 
     def known_cookies(self):
         """(name, domain, expiry) for every cookie seen this run."""
@@ -59385,10 +59567,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not self.shot_allowed(view):
                 return None
             image = capture.visible(view)
+            source = self._shot_source(view)
+        else:
+            source = ("", "")
         if image is None or image.isNull():
             return None
         self._annotator = capture.Annotator(image)
+        # saved later, perhaps from another tab: the file is named after
+        # the page it was taken from, and a file or a picture has none
+        self._annotator.source = source
         return self._annotator
+
+    def _shot_source(self, view):
+        """The title and host a capture of this tab is named after."""
+        try:
+            return (self._tab_title(self.tabs.indexOf(view)),
+                    view.url().host())
+        except (AttributeError, RuntimeError):
+            return ("", "")
 
     def annotate_file(self, path):
         """Any picture on disk, in the same editor."""
@@ -59430,7 +59626,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         editor = editor or getattr(self, "_annotator", None)
         if editor is None or editor.image.isNull():
             return ""
-        path = self._shot_done(editor.image, copy=copy, save=True)
+        source = getattr(editor, "source", None) or (None, None)
+        path = self._shot_done(editor.image, copy=copy, save=True,
+                               title=source[0], host=source[1])
         if path:
             self.note_capture(path)
         return str(path or "")
@@ -59473,6 +59671,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             menu.addAction(ui("recTrim")).triggered.connect(
                 lambda: self.ask_trim())
         else:
+            if self._audio_running():
+                # a sound-only recording has no frames, so the state above
+                # said "off" and nothing in the menu could end it
+                menu.addAction(ui("recStop")).triggered.connect(
+                    lambda: self._end_audio_recorder())
             menu.addAction(ui("recStart")).triggered.connect(
                 lambda: self.start_recording(view=view))
             menu.addAction(ui("recBufferStart")).triggered.connect(
@@ -59568,6 +59771,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return None
         if not self.shot_allowed(view):
             return None
+        if not self._shot_claim(view):
+            self.flash(self._ui_str("shotWorking"))
+            return None
+        try:
+            return self._shot_mobile_walk(view, copy, save)
+        finally:
+            self._shot_release(view)
+
+    def _shot_mobile_walk(self, view, copy, save):
+        # a second one started while the first waited saw "_mobile" already
+        # on, kept it, and left the page in phone mode for good
         was = getattr(view, "_mobile", False)
         self.view_as_mobile(view=view, on=True)
         H = 1200
@@ -59624,6 +59838,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return None
         if not url.toString():
             return None
+        # Qt stops a zoom at 5.0: a tab at 200% asked for three times
+        # that got 5.0, a wider layout than the tab's own. A smaller
+        # scale keeps the layout width the same.
+        scale = max(1, min(scale, int(5.0 / max(self._zoom_of(view), .25)
+                                      + 1e-9)))
         wide = max(200, view.width()) * scale
         tall = max(200, view.height()) * scale
         shell = QWebEngineView()
@@ -59647,7 +59866,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._hidpi_view = None
         if shot.isNull():
             return None
-        path = self._shot_done(shot, copy=copy, save=save)
+        path = self._shot_done(shot, copy=copy, save=save, view=view)
         if path:
             self.note_capture(path)
         return path
@@ -59700,7 +59919,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             at += step
         painter.end()
         self._scroll_inner(view, selector, 0)
-        path = self._shot_done(sheet, copy=copy, save=save)
+        path = self._shot_done(sheet, copy=copy, save=save, view=view)
         if path:
             self.note_capture(path)
         return path
@@ -60112,7 +60331,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         picture, changed = capture.diff_images(first, second)
         if picture.isNull():
             return None
-        path = self._shot_done(picture, copy=False, save=True, view=view)
+        # note=False: the diff entered the history and was the baseline
+        # of the next diff, which then compared the page with the last diff
+        path = self._shot_done(picture, copy=False, save=True, view=view,
+                               note=False)
         if first.size() != second.size():
             # only the part both pictures have was compared: said, not
             # passed off as the whole page (a resized window)
@@ -60221,8 +60443,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if where.startswith(("http://", "https://")):
             target = where.rstrip("/") + "/" + name
             request = QNetworkRequest(QUrl(target))
+            # every file went up as image/png, a WebP or JPEG included
+            kind = {".png": "image/png", ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg", ".webp": "image/webp",
+                    ".gif": "image/gif"}.get(
+                        Path(str(path)).suffix.lower(),
+                        "application/octet-stream")
             request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
-                              "image/png")
+                              kind)
             data = Path(str(path)).read_bytes()
             reply = self._nam.put(request, data)
 
@@ -60454,7 +60682,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return self.stop_recording()
         try:
             if rec.region:
-                shot = capture.area(view, rec.region)
+                # the region is in widget pixels and the grab in device
+                # pixels: on a 2x screen it cut the top-left quarter of
+                # what was asked for
+                ratio = (view.devicePixelRatioF()
+                         if hasattr(view, "devicePixelRatioF") else 1.0) or 1.0
+                shot = capture.area(view, [c * ratio for c in rec.region])
             else:
                 shot = capture.visible(view)
         except RuntimeError:
@@ -60483,6 +60716,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not recorder:
             self.flash(self._ui_str("recNoAudio"))
             return ""
+        # one still going is ended first, its file kept as written: the
+        # new process replaced it in _audio_proc and the old one ran on,
+        # unreachable, until the program quit
+        if getattr(self, "_audio_proc", None) is not None:
+            self._end_audio_recorder()
         # beside the recordings, not in the config folder: that is the
         # folder that is synced and backed up, and a microphone
         # recording sat in it -- overwritten by the next one, never in
@@ -60516,6 +60754,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._audio_proc = proc
         proc.start(args[0], args[1:])
         return str(path)
+
+    def _audio_running(self):
+        """Whether a sound recorder is going now."""
+        audio = getattr(self, "_audio_proc", None)
+        if audio is None:
+            return False
+        try:
+            return audio.state() != QProcess.ProcessState.NotRunning
+        except RuntimeError:
+            return False
 
     def _end_audio_recorder(self):
         """The sound recorder's process ended: asked to stop, then killed
@@ -61065,8 +61313,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not text or desk is None:
             return "no-notes"
         note = desk.daily_note()
-        desk.append_note(note["id"] if isinstance(note, dict) else note,
-                         text)
+        if not note:
+            return "not-saved"      # today's note could not be made
+        done = desk.append_note(note["id"] if isinstance(note, dict)
+                                else note, text)
+        if not done:
+            return "not-saved"      # it said "noted" and kept nothing
         return "noted"
 
     def take_cli_todo(self, text=""):
@@ -62572,24 +62824,41 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.flash(self._ui_str("impHistNone"))
             return False
         copy = CONFIG_FILE.parent / ("import-%s.sqlite" % which)
+        sidecars = [Path(str(copy) + end) for end in ("-wal", "-shm")]
+        for one in sidecars:      # a copy left behind by an earlier run
+            try:
+                one.unlink()
+            except OSError:
+                pass
         try:
             _shutil.copyfile(str(path), str(copy))
+            # Firefox keeps the newest visits in the write-ahead log
+            # until it gets round to folding them in: the main file
+            # alone was days behind while Firefox was running
+            if Path(str(path) + "-wal").is_file():
+                _shutil.copyfile(str(path) + "-wal", str(sidecars[0]))
         except OSError:
             return False
         if which == "firefox":
+            # a place never visited (only bookmarked or typed) has no
+            # visit date: it came in as a visit on 1 January 1970
             query = ("SELECT url, title, last_visit_date / 1000000"
                      " FROM moz_places WHERE url LIKE 'http%'"
+                     " AND last_visit_date > 0"
                      " ORDER BY last_visit_date DESC LIMIT ?")
         else:
             # Chrome counts microseconds from 1601; 11644473600 is the
-            # gap to the Unix epoch
+            # gap to the Unix epoch (0 is "never", which was 1601)
             query = ("SELECT url, title,"
                      " last_visit_time / 1000000 - 11644473600"
                      " FROM urls WHERE url LIKE 'http%'"
+                     " AND last_visit_time > 0"
                      " ORDER BY last_visit_time DESC LIMIT ?")
         rows = []
         try:
-            db = sqlite3.connect("file:%s?mode=ro" % copy, uri=True)
+            # read-write, on the copy: a log beside it is only read by a
+            # connection allowed to keep its index file
+            db = sqlite3.connect(str(copy))
             try:
                 rows = list(db.execute(query, (int(limit),)))
             finally:
@@ -62598,16 +62867,23 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.flash(self._ui_str("impHistBad"))
             return False
         finally:
-            try:
-                copy.unlink()
-            except OSError:
-                pass
+            for one in [copy] + sidecars:
+                try:
+                    one.unlink()
+                except OSError:
+                    pass
         have = {str(row.get("url") or "") for row in self.history}
         added = 0
         trimmed = None
         for url, title, when in rows:
             url = str(url or "")
             if not url.startswith("http") or url in have:
+                continue
+            try:
+                when = int(when or 0)
+            except (TypeError, ValueError):
+                when = 0
+            if when <= 0:
                 continue
             if self.never_record(as_qurl(url).host()):
                 # a site he said is never written down stays out of
@@ -63472,8 +63748,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # requests at the network is the one thing that trips its
         # "turn off your ad blocker" wall. So never network-block a
         # YouTube page -- the script removes the ads without being seen.
-        if page_host == "youtube.com" or page_host.endswith(".youtube.com") \
-                or page_host.endswith("youtube-nocookie.com"):
+        # (with the dot: "evilyoutube-nocookie.com" named itself out of
+        # every filter list)
+        if page_host in ("youtube.com", "youtube-nocookie.com") \
+                or page_host.endswith((".youtube.com",
+                                       ".youtube-nocookie.com")):
             return ""
         hit = rules.blocks(text, page_host, request_kind(kind))
         if hit:
@@ -71720,7 +71999,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         every page that no entry holds any more. A page read again since
         keeps its words and its picture though its older visit went
         (prune, a time range); an empty history leaves none at all."""
-        if not self.history:
+        # with the vault shut the sealed rows are only unread, not gone:
+        # an empty list in memory then wiped the thumbnails, places and
+        # address memory of every page that comes back at unlock
+        if not self.history and not getattr(self, "_history_locked", False):
             return self._forget_history_extras(None)
         still = {str(e.get("url", "")) for e in self.history
                  if isinstance(e, dict)}
@@ -75211,6 +75493,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def restart(self):
         """Relaunch the browser (used after an update)."""
+        # a window that asks before closing asks now, before anything is
+        # let go: answered No after the next browser was started, the
+        # quit stopped and two browsers ran on the one profile
+        wins = list(self._all_windows())
+        for win in wins:
+            try:
+                if not win._confirm_many_tabs():
+                    return False
+            except RuntimeError:
+                continue
+        for win in wins:
+            win._closing_anyway = True      # asked once is enough
         if getattr(self, "_instance_server", None) is not None:
             # free the single-instance socket so the successor
             # becomes the new primary instead of handing off to us
@@ -75875,6 +76169,22 @@ class MouseWatch(QObject):
         return False
 
 
+#: the block lists as the engine's resolver was given them at launch
+#: (see _install_privacy_flags), for the one spelling of a name its
+#: rules miss: with the root dot on the end
+_BLOCKED_AT_LAUNCH = frozenset()
+
+
+def _blocked_name(host, blocked=None):
+    """The name, root dot or not, or a domain above it is on the block
+    lists the resolver was given."""
+    blocked = _BLOCKED_AT_LAUNCH if blocked is None else blocked
+    if not blocked:
+        return False
+    labels = str(host or "").lower().strip(".").split(".")
+    return any(".".join(labels[i:]) in blocked for i in range(len(labels)))
+
+
 class RequestWatch(QWebEngineUrlRequestInterceptor):
     """Every request the engine makes, and the four things he can do
     to one.
@@ -75942,7 +76252,22 @@ class RequestWatch(QWebEngineUrlRequestInterceptor):
             if not where or where == "block":
                 info.block(True)
                 return
-            info.redirect(QUrl(where))
+            target = QUrl(where)
+            if target.toString() == text:
+                # already there: a target the rule matches again
+                # ("site/a -> https://site/a/index.html") was sent
+                # back to itself until the engine gave up
+                continue
+            info.redirect(target)
+            return
+
+        # 1b. a name written with its root dot ("tracker.example.") is
+        # the same name to DNS, not to the resolver's MAP rules, which
+        # compare the text: a blocked site, session recorder or phishing
+        # host loaded that way (measured). Refused here instead -- in the
+        # xn-- form the lists keep (Qt hands the host over decoded).
+        if host.endswith(".") and _blocked_name(_ace_host(host)):
+            info.block(True)
             return
 
         # 2. the filter lists, if he has any loaded and this site is
@@ -75990,7 +76315,8 @@ class RuleProxy:
     and absolute-URI HTTP; upstreams are http proxies (with basic
     auth) or socks5."""
 
-    def __init__(self, rules, bypass, default, blocked=()):
+    def __init__(self, rules, bypass, default, blocked=(), doh="",
+                 overrides=()):
         self.rules = rules
         self.bypass = bypass
         self.default = default
@@ -75998,6 +76324,17 @@ class RuleProxy:
         #: resolves a name, so its resolver rules never applied and a
         #: blocked tracker loaded through here (see _blocked_hosts)
         self.blocked = frozenset(blocked or ())
+        #: how a direct route finds an address. The engine never looks
+        #: a name up while it is pointed here, so his DoH server and his
+        #: host overrides -- both resolver flags -- never reached a
+        #: direct route: every name went to the system resolver in plain
+        #: text, and a name he had pointed at a test server went to its
+        #: public address instead (see _direct)
+        self.doh = str(doh or "")
+        self.overrides = [(str(name).lower().rstrip("."), str(where))
+                          for name, where in overrides or ()]
+        self.hosts = _hosts_file() if self.doh else {}
+        self._dns = {}
         self.server = socket.create_server(("127.0.0.1", 0))
         self.port = self.server.getsockname()[1]
         threading.Thread(target=self._accept, daemon=True).start()
@@ -76074,7 +76411,7 @@ class RuleProxy:
             if route[0] == "http":
                 upstream = self._http_upstream(route, head)
             else:
-                upstream = (socket.create_connection((host, port), 15)
+                upstream = (self._direct(host, port)
                             if route[0] == "direct"
                             else self._socks_upstream(route, host, port))
                 if method == "CONNECT":
@@ -76102,6 +76439,58 @@ class RuleProxy:
         client.settimeout(None)
         upstream.settimeout(None)
         self._splice(client, upstream)
+
+    def _direct(self, host, port):
+        """A connection to host:port, its address found the way the
+        engine would have found it itself: his overrides first ("name
+        address" lines, the engine's MAP rules), localhost on this
+        machine, then -- with DoH on, which the engine runs in secure
+        mode -- the hosts file and his DoH server, where no answer is no
+        connection, never the plain system resolver. The system
+        resolver only without DoH."""
+        name = str(host or "").lower().rstrip(".")
+        for pattern, where in self.overrides:
+            if fnmatch.fnmatchcase(name, pattern):
+                if where.upper() == "~NOTFOUND":
+                    raise OSError("his host overrides say: nowhere")
+                name, port = _split_host_port(where, port)
+                name = name.lower().rstrip(".")
+                break
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            pass
+        else:
+            return socket.create_connection((name, port), 15)
+        if name == "localhost" or name.endswith(".localhost"):
+            return socket.create_connection(("127.0.0.1", port), 15)
+        if not self.doh:
+            return socket.create_connection((name, port), 15)
+        if name in self.hosts:
+            return socket.create_connection((self.hosts[name], port), 15)
+        last = OSError("DoH: no address for this name")
+        for address in self._doh_addresses(name):
+            try:
+                return socket.create_connection((address, port), 15)
+            except OSError as exc:
+                last = exc
+        raise last
+
+    def _doh_addresses(self, name):
+        """His DoH server's addresses for a name, kept for as long as
+        the answer says (30 s to 10 min)."""
+        now = time.monotonic()
+        kept = self._dns.get(name)
+        if kept is not None and kept[0] > now:
+            return kept[1]
+        rows = _doh_lookup(self.doh, name)
+        addresses = list(dict.fromkeys(ip for ip, _ttl in rows))
+        if addresses:
+            ttl = min(ttl for _ip, ttl in rows)
+            if len(self._dns) > 2000:
+                self._dns.clear()
+            self._dns[name] = (now + max(30, min(ttl, 600)), addresses)
+        return addresses
 
     @staticmethod
     def _single_use(head):
@@ -76144,15 +76533,34 @@ class RuleProxy:
             upstream.sendall(b"\x05" + bytes([len(methods)]) + methods)
             choice = recvn(upstream, 2)[1]
             if choice == 2:  # username/password, RFC 1929
-                upstream.sendall(bytes([1, len(user)]) + user.encode()
-                                 + bytes([len(password)])
-                                 + password.encode())
+                # lengths in bytes: "pässword" is nine of them, and a
+                # length byte of eight left the server reading the last
+                # one as the next field
+                name = str(user).encode()
+                secret = str(password or "").encode()
+                if len(name) > 255 or len(secret) > 255:
+                    raise OSError("socks user or password too long")
+                upstream.sendall(bytes([1, len(name)]) + name
+                                 + bytes([len(secret)]) + secret)
                 if recvn(upstream, 2)[1] != 0:
                     raise OSError("socks auth refused")
             elif choice != 0:
                 raise OSError("no acceptable socks method")
-            upstream.sendall(b"\x05\x01\x00\x03"
-                             + bytes([len(host)]) + host.encode("latin1")
+            try:
+                literal = ipaddress.ip_address(host)
+            except ValueError:
+                literal = None
+            if literal is not None:
+                # an address goes as an address: as a "name", "::1" was
+                # a name for the server to look up
+                where = ((b"\x01" if literal.version == 4 else b"\x04")
+                         + literal.packed)
+            else:
+                raw = host.encode("latin1")
+                if len(raw) > 255:
+                    raise OSError("name too long for socks")
+                where = b"\x03" + bytes([len(raw)]) + raw
+            upstream.sendall(b"\x05\x01\x00" + where
                              + port.to_bytes(2, "big"))
             reply = recvn(upstream, 4)
             if reply[1] != 0:
@@ -76191,6 +76599,148 @@ class RuleProxy:
                 sock.close()
             except OSError:
                 pass
+
+
+def _split_host_port(text, port):
+    """"name", "name:port", "[v6]" or "[v6]:port" as (host, port)."""
+    text = str(text or "").strip()
+    found = re.fullmatch(r"\[([0-9A-Fa-f:.]+)\](?::(\d{1,5}))?", text)
+    if found:
+        return found.group(1), int(found.group(2) or port)
+    if text.count(":") == 1:
+        name, _, number = text.partition(":")
+        if number.isdigit() and 0 < int(number) < 65536:
+            return name, int(number)
+    return text, port
+
+
+def _hosts_file(path="/etc/hosts"):
+    """The machine's hosts file as {name: address}: read before any DNS
+    server is asked, DoH included."""
+    table = {}
+    try:
+        lines = Path(path).read_text(errors="replace").splitlines()
+    except OSError:
+        return table
+    for line in lines[:5000]:
+        bits = line.split("#", 1)[0].split()
+        if len(bits) < 2:
+            continue
+        try:
+            ipaddress.ip_address(bits[0])
+        except ValueError:
+            continue
+        for name in bits[1:]:
+            table.setdefault(name.lower().rstrip("."), bits[0])
+    return table
+
+
+def _dns_question(name, qtype):
+    """One DNS query in wire format (RFC 1035), id 0 as RFC 8484 asks."""
+    out = struct.pack(">HHHHHH", 0, 0x0100, 1, 0, 0, 0)
+    try:
+        labels = str(name).encode("ascii").split(b".")
+    except UnicodeError:
+        raise OSError("not a name DNS can carry") from None
+    for label in labels:
+        if not 0 < len(label) < 64:
+            raise OSError("not a name DNS can carry")
+        out += bytes([len(label)]) + label
+    return out + b"\x00" + struct.pack(">HH", qtype, 1)
+
+
+def _dns_addresses(message, qtype):
+    """(address, ttl) pairs of one type in a DNS answer; [] for an error
+    answer or one that cannot be read."""
+    try:
+        _id, flags, questions, answers = struct.unpack(">HHHH",
+                                                       message[:8])
+        if not flags & 0x8000 or flags & 0x000F:
+            return []
+
+        def skip(pos):
+            while True:
+                size = message[pos]
+                if size & 0xC0 == 0xC0:
+                    return pos + 2
+                if size == 0:
+                    return pos + 1
+                pos += 1 + size
+
+        pos = 12
+        for _ in range(questions):
+            pos = skip(pos) + 4
+        out = []
+        for _ in range(answers):
+            pos = skip(pos)
+            rtype, _cls, ttl, size = struct.unpack(">HHIH",
+                                                   message[pos:pos + 10])
+            pos += 10
+            data = message[pos:pos + size]
+            pos += size
+            if rtype == qtype == 1 and len(data) == 4:
+                out.append((socket.inet_ntop(socket.AF_INET, data), ttl))
+            elif rtype == qtype == 28 and len(data) == 16:
+                out.append((socket.inet_ntop(socket.AF_INET6, data), ttl))
+        return out
+    except (struct.error, IndexError, ValueError, OSError):
+        return []
+
+
+def _doh_lookup(template, name, timeout=8):
+    """A and AAAA for a name from a DoH server (RFC 8484), POSTed --
+    which every such server takes -- with a template's {?dns} part cut
+    off. Straight to the server, as the engine's own DoH request goes,
+    never through a proxy named in the environment."""
+    import http.client
+    import urllib.request
+    url = str(template or "").split("{", 1)[0]
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    out = []
+    for qtype in (1, 28):
+        request = urllib.request.Request(
+            url, data=_dns_question(name, qtype), method="POST",
+            headers={"Content-Type": "application/dns-message",
+                     "Accept": "application/dns-message",
+                     "User-Agent": "browser"})
+        try:
+            with opener.open(request, timeout=timeout) as answer:
+                out += _dns_addresses(answer.read(65536), qtype)
+        except (OSError, ValueError, http.client.HTTPException):
+            # a garbled reply to one question: the other's answer stands
+            continue
+    return out
+
+
+def _doh_template(config):
+    """His DoH server when DoH is on and the address is one the engine's
+    flag can carry, else "": one test for that flag and for the
+    RuleProxy, which looks up the names the engine hands it."""
+    config = config if isinstance(config, dict) else {}
+    doh = str(config.get("dohUrl") or "").strip()
+    # one value for one switch: the flags are split on spaces, so a
+    # space (or a quote, or a control character) in the address was a
+    # second switch of the file's making -- a renderer prefix runs a
+    # program at the next start
+    if config.get("doh", False) and doh.startswith("https://") \
+            and not re.search(r"[\s\"'\\\x00-\x1f]", doh):
+        return doh
+    return ""
+
+
+def _host_override_rows(config):
+    """His host overrides as (name, address) pairs: the lines, and the
+    refusals, the --host-resolver-rules flag gets (see _startup_flags)."""
+    config = config if isinstance(config, dict) else {}
+    rows = []
+    for line in str(config.get("hostOverrides", "") or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        bits = line.split()
+        if len(bits) == 2 and not any(c in line for c in ',"'):
+            rows.append((bits[0], bits[1]))
+    return rows
 
 
 def _proxy_launch_flags(config):
@@ -76283,7 +76833,9 @@ def _install_proxy_flags():
     real = flags
     if flags.startswith("helper:"):
         _RULE_PROXY = RuleProxy(*_proxy_routing(config),
-                                blocked=_blocked_hosts(config))
+                                blocked=_blocked_hosts(config),
+                                doh=_doh_template(config),
+                                overrides=_host_override_rows(config))
         real = "--proxy-server=127.0.0.1:%d" % _RULE_PROXY.port
     env = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
     env = re.sub(r"\s*--(?:proxy-server|proxy-pac-url)=\S+", "", env)
@@ -76425,6 +76977,25 @@ REPLAY_HOSTS = (
 )
 
 
+def _block_entry(text):
+    """A block-list line as the bare name the resolver rules need, or
+    "". Settings saves what he typed, and "https://tracker.example/",
+    "*.tracker.example", "tracker.example." or an international name
+    stayed on the list while blocking nothing."""
+    host = str(text or "").strip().lower()
+    host = re.sub(r"^[a-z][a-z0-9+.-]*://", "", host)
+    host = re.split(r"[/?#]", host, maxsplit=1)[0].rsplit("@", 1)[-1]
+    if host.count(":") == 1:
+        host = host.split(":", 1)[0]
+    host = host.removeprefix("*.").strip(".").removeprefix("www.")
+    if host and not host.isascii():
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return ""
+    return host if re.fullmatch(r"[a-z0-9.-]+", host) else ""
+
+
 def _blocked_hosts(config):
     """Every name the block lists say is nowhere: his own, the replay
     trackers, the phishing list -- his own and the replay list first,
@@ -76434,8 +77005,8 @@ def _blocked_hosts(config):
     blocked = []
     mine = config.get("blockHosts")
     for host in mine if isinstance(mine, list) else []:
-        host = str(host or "").strip().lower().removeprefix("www.")
-        if host and re.fullmatch(r"[a-z0-9.-]+", host):
+        host = _block_entry(host)
+        if host:
             blocked.append(host)
     if config.get("blockReplay", False):
         blocked.extend(REPLAY_HOSTS)
@@ -76484,13 +77055,8 @@ def _privacy_flags(config):
                      + ("disable_non_proxied_udp"
                         if config.get("webrtcStrict", False) or proxied
                         else "default_public_interface_only"))
-    doh = str(config.get("dohUrl") or "").strip()
-    # one value for one switch: the flags are split on spaces, so a
-    # space (or a quote, or a control character) in the address was a
-    # second switch of the file's making -- a renderer prefix runs a
-    # program at the next start
-    if config.get("doh", False) and doh.startswith("https://") \
-            and not re.search(r"[\s\"'\\\x00-\x1f]", doh):
+    doh = _doh_template(config)
+    if doh:
         flags.append("--enable-features=DnsOverHttps")
         flags.append("--dns-over-https-mode=secure")
         flags.append("--dns-over-https-templates=" + doh)
@@ -76532,8 +77098,8 @@ def _phishing_hosts():
         return []
     out = []
     for line in lines[:20000]:
-        host = line.split("#")[0].strip().lower().removeprefix("www.")
-        if host and re.fullmatch(r"[a-z0-9.-]+", host):
+        host = _block_entry(line.split("#")[0])
+        if host:
             out.append(host)
     return out
 
@@ -76544,10 +77110,11 @@ def _install_privacy_flags():
     Read from the config file rather than from a Browser, for the same
     reason _install_theme_flags does: this runs before there is one.
     """
-    global _PRIVACY_FLAGS_AT_LAUNCH
+    global _PRIVACY_FLAGS_AT_LAUNCH, _BLOCKED_AT_LAUNCH
     config = _launch_config()
     flags = _privacy_flags(config)
     _PRIVACY_FLAGS_AT_LAUNCH = flags
+    _BLOCKED_AT_LAUNCH = frozenset(_blocked_hosts(config))
     if not flags:
         return flags
     env = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")

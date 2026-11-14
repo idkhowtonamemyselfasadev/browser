@@ -6381,7 +6381,16 @@
     if (bridge && bridge.exportPrivacy) bridge.exportPrivacy(() => {});
   };
   document.getElementById("privimport").onclick = () => {
-    if (bridge && bridge.importPrivacy) bridge.importPrivacy(() => {});
+    if (bridge && bridge.importPrivacy) bridge.importPrivacy((n) => {
+      // what the file set has to show here: the form kept the old lists
+      // and the old DoH address, and the next Save sent them back over
+      // the import
+      if (!(n > 0) || !bridge.getSettings) return;
+      bridge.getSettings((s) => {
+        try { window._settings = JSON.parse(s); } catch (e) { return; }
+        load(window._settings);
+      });
+    });
   };
 
   document.getElementById("privsave").onclick = () => {

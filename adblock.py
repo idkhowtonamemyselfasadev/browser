@@ -412,6 +412,23 @@ def parse_line(line):
     return "net", rule
 
 
+def _without_root_dot(url):
+    """The address with the dot after its host taken off
+    ("https://ads.example.:8080/x" -> "https://ads.example:8080/x")."""
+    start = url.find("//") + 2
+    end = start
+    while end < len(url) and url[end] not in "/?#\\":
+        end += 1
+    netloc = url[start:end]
+    at = netloc.rfind("@") + 1
+    hostport = netloc[at:]
+    if hostport.startswith("["):
+        return url
+    name, colon, port = hostport.partition(":")
+    return (url[:start] + netloc[:at] + name.rstrip(".") + colon + port
+            + url[end:])
+
+
 class Rules:
     """Every list he has, indexed, with what it could not read."""
 
@@ -555,7 +572,13 @@ class Rules:
             host = (urlsplit(url).hostname or "").lower()
         except ValueError:
             return None
-        page_host = str(page_host or "").lower().removeprefix("www.")
+        if host.endswith("."):
+            # "ads.example." is ads.example to DNS, but no list writes
+            # the root dot: ||ads.example^ never matched it, and a page
+            # could load any blocked host by adding one
+            url, host = _without_root_dot(url), host.rstrip(".")
+        page_host = str(page_host or "").lower().removeprefix("www.") \
+            .rstrip(".")
         # by site, not by exact host: static.example.com on a page at
         # m.example.com is the site's own, and $third-party rules took
         # its scripts away

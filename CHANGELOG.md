@@ -1,5 +1,74 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part forty-seven: thirty-seventh to forty-third passes)
+
+Seven more searches with one subject each: notes and the desk, the
+update path, history, the network layer, everything that is imported
+or exported, screenshots and recordings, and cookies. 40 bugs, fixed
+here:
+
+- **Notes.** A third note with the same title saved in the same second no
+  longer writes over the second one: names count up (-2, -3) until one is
+  free. Collections whose names differ only in punctuation ("C++" and
+  "C#") no longer share one file, so deleting one cannot delete the
+  other; collections made before keep working. `--note` from the command
+  line says "not saved" when nothing was written, instead of "noted".
+- **Updates and restart.** The automatic update no longer runs while a
+  merge, rebase, cherry-pick or revert is in progress in the checkout
+  (it began with `git merge --abort` and threw the resolutions away); it
+  offers the update instead. Restart asks every window's "close these
+  tabs?" question first, and a No really stops it -- before, the new
+  browser was already starting and two of them ended up on one profile.
+- **History.** A background tab whose title keeps changing (unread
+  counts) updates its own row instead of adding a new one each time
+  another tab visited something in between. With sealed history locked,
+  deleting the last rows in memory no longer wipes the thumbnails,
+  reading places and address memory of pages that come back at unlock.
+- **The network layer.** With per-site proxy rules, every site that goes
+  direct now finds its address the way the engine would: host overrides
+  first, then -- with DoH on -- the hosts file and the DoH server, and no
+  answer means no connection. Before, all of them went to the system
+  resolver in plain text and the DoH setting did nothing. A name written
+  with its root dot ("tracker.example.") no longer slips past the block
+  lists or the filter lists (measured: the resolver rules compare text).
+  Only youtube-nocookie.com itself is let past the filter lists, not any
+  name ending in it. SOCKS logins with letters outside ASCII work, and
+  an IPv6 address goes to the SOCKS server as an address. A "*.site"
+  header rule and one for an international site take effect; a URL map
+  rule whose target it matches again redirects once instead of forever;
+  block-list lines typed as an address, a wildcard or an international
+  name block instead of being kept and ignored.
+- **Imports and exports.** The HTML page of open tabs reads back with its
+  query strings intact. Restoring a snapshot brings back a tab that is
+  open only in another virtual browser. Themes named in another script
+  (or only emoji) no longer replace each other on import. Importing
+  Firefox's history takes the newest visits too (they wait in its
+  write-ahead log), leaves no database copy behind, and no longer files
+  bookmarked-but-never-visited places as visits in 1970 (or Chrome's as
+  1601). Bitwarden's encrypted export is refused instead of filling the
+  vault with cipher strings. A privacy import shows up in Settings at
+  once, so the next Save no longer puts the old lists back.
+- **Screenshots and recordings.** A second capture started while a
+  full-page shot is still walking down the page (a shortcut, a timer) no
+  longer takes the blur off its password fields or moves the page under
+  it: the walk is one at a time and the blur stays until the last
+  capture ends. A full-page shot too tall for WebP is saved as a PNG
+  instead of being lost. An element shot waits for smooth scrolling to
+  stop before it measures. A capture diff stays out of the capture list,
+  so the next diff compares the page and not the last diff. High-DPI
+  shots of a zoomed tab keep its layout; shots of a tab that is not in
+  front, and marked-up pictures, are named after their own page. An
+  upload says what kind of picture it is. A sound-only recording can be
+  stopped from the menu and starting a second one ends the first; a
+  region recording on a 2x screen records the region asked for.
+- **Cookies.** "Delete when I close" deletes the site's cookies even when
+  they were there before the rule was set (or a run crashed), and no
+  longer wipes a site switched back to Allow. A rule on a site leaves the
+  cookies of a subdomain allowed by name. Rules for international sites
+  take effect. The cookie editor and cookies.txt keep long cookie values
+  whole; a cookie made by hand on an http page is one that page gets.
+  Forgetting a site also forgets what its private tabs were allowed.
+
 ## 2026-11-14 — line-by-line review, day 4 (part forty-six: twenty-eighth to thirty-sixth passes)
 
 Nine searches with one subject each: callbacks in loops (none found),
