@@ -1,5 +1,62 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part fifty-two: sixty-fourth to sixty-sixth passes)
+
+Three more searches: a second look at reading and translation, the
+browser's windows and fullscreen modes, and every setting read while the
+browser starts (a hand-edited or restored config.json). 43 bugs, fixed
+here:
+
+- **Reader mode.** Articles on themed blogs are readable in a dark theme:
+  the text takes the theme's colour and the white cards around the
+  article are gone. The reader finds the article on very big pages,
+  leaves the comments out when they sit beside it, and keeps the
+  article's own title. A reader width or size in config.json that is
+  not a number no longer breaks it.
+- **Saving and counting.** "Save as Markdown" and "article to note" no
+  longer copy the page's source indentation (which turned paragraphs
+  into code blocks), hidden menus or noscript text; table cells get a
+  separator and links with brackets survive. The word count counts
+  Chinese, Japanese and Thai words, and a heading with "&" shows in the
+  outline as it is.
+- **Reading places.** A page cleared from the history no longer comes
+  back as a reading place when its tab closes. The numbered-line view
+  of a very long file says how many lines it does not show.
+- **Translation.** A translation stops when its page is left (it kept
+  going and said "Translated"), Undo stops it too, and a second run no
+  longer spoils the copy Undo puts back. Hidden blocks no longer use up
+  the limit, and a page with more than that says it was translated in
+  part. No translation bar on pages Google cannot take. Translating an
+  already translated page, or an address with a user name and password
+  in it, sends the real address and never the password. "C++" in a
+  selection is translated as "C++", a selection inside a frame is found,
+  and late caption translations no longer replace newer lines.
+- **Definitions.** Looking a word up no longer freezes the window for up
+  to four seconds, a lookup that hangs is stopped, and from a private
+  tab the word goes only to a dictionary server on this machine.
+- **Windows.** A video going fullscreen in a popped-out tab fills that
+  small window instead of the main one (where Esc could not undo it). An
+  app window is never swallowed by "gather windows" and never gathers
+  the others into itself; it gets no bookmarks bar or taskbar. A start
+  page moved to its own window keeps its virtual browser and pin.
+  Quitting through the last window empties the private download folder
+  when that is switched on.
+- **Fullscreen.** The window-full video mode ends with its tab (the
+  toolbar stayed hidden over the next one), F11's fullscreen survives a
+  video's fullscreen ending, and the toolbar no longer reappears over a
+  window-full video or inside F11's fullscreen.
+- **A config.json that was edited by hand.** The browser starts even with
+  a number where the safe-flags list belongs, an impossible debug or
+  proxy port (1e400 reads as infinity), a broken proxy list or an old
+  proxy mode of the wrong kind -- each of these stopped it before any
+  window opened. The vault's auto-lock and the library update check keep
+  running with an impossible interval, and a table of the wrong shape
+  (line widths, smallest font sizes, site time limits, the translation
+  language) no longer breaks every page load or a timer. Tab groups,
+  saved tabs, the start-page marker and the performance log of the wrong
+  shape no longer stop the window being built -- which used to set the
+  whole config.json aside, every setting with it.
+
 ## 2026-11-14 — line-by-line review, day 4 (part fifty-one: sixty-first to sixty-third passes)
 
 Three more searches: userscripts, the side panel, the tab rail, screen

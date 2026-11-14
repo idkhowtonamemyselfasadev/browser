@@ -13077,7 +13077,11 @@ import inspect as _insp232
 
 _rs232 = B.READER_TOOLS["reader"]
 check("232 reader clears the article mark off and on",
-      _rs232.index('".__readerbody"') < _rs232.index('getElementById("__readercss")')
+      # fix285 clears the kept-ancestor mark with the article's in one
+      # sweep (".__readerbody, .__readerkeep"), still before the sheet
+      _rs232.find('".__readerbody, .__readerkeep"') >= 0
+      and _rs232.find('".__readerbody, .__readerkeep"')
+      < _rs232.find('getElementById("__readercss")')
       and "classList.remove(\"__readerbody\")" in _rs232)
 
 # reading place written from the last look, at close
@@ -17617,6 +17621,1019 @@ _b283 = _src283.index("def lookalike_warning(host):")
 _out283 = [m.start() for m in _re283.finditer(r"QUrl\(str\(", _src283)
            if not _a283 < m.start() < _b283]
 check("283 no raw QUrl(str(...)) outside as_qurl", not _out283, len(_out283))
+
+# ---- 285-288: reading and translation (the 64th pass): the reader's colours, picker and numbers,
+# the article as text, the word count and outline, reading places, the line view, the translation
+# jobs, the bar's asks, the selection tools, define_word and caption translation ----
+import copy as _copy288
+_ks288 = ("flash", "caption_tools", "run_translator", "page_language",
+          "offer_translation_bar", "_panel_or_private", "caption_overlay",
+          "DICT_WAIT_MS")
+_real288 = {k: br.__dict__.get(k) for k in _ks288}
+_cfg288 = {k: _copy288.deepcopy(br.config.get(k, "__absent__"))
+           for k in ("readerWidth", "readerSize", "readPlaces", "translateRules",
+                     "translateOffer", "translateLang")}
+_which288 = B.shutil.which
+_qp288 = B.QProcess
+_info288 = B.QMessageBox.information
+_open288 = []
+_said288 = []
+_trbar288 = {k: br.__dict__.get(k) for k in
+             ("_trbar_asks", "_trbar_serials", "_trbar_serial",
+              "_translate_lang_asked", "_translate_view", "_trbar_timer")}
+
+
+def _page288(name, html):
+    H.Handler.pages["/" + name] = html
+
+
+def _tab288(path):
+    v = br.new_tab(url=None)
+    _open288.append(v)
+    H.spin(200)
+    H.load(v, srv.url(path))
+    return v
+
+
+def _sel288(v):
+    H.js(v, "var r=document.createRange();r.selectNodeContents(document.body);"
+            "var s=getSelection();s.removeAllRanges();s.addRange(r);1",
+         B.MAIN_WORLD_ID)
+
+
+def _reader_on288(v):
+    br.reader_mode(v)
+    return H.wait_for(lambda: jsq(v, "!!document.getElementById('__readercss')",
+                                  B.MAIN_WORLD_ID), 10000)
+
+
+def _text288(v, tool="articletext"):
+    box = {}
+    br.read_page_tool(tool, view=v, then=lambda raw: box.update(raw=raw))
+    H.wait_for(lambda: "raw" in box, 5000)
+    try:
+        return json.loads(box.get("raw") or "{}")
+    except ValueError:
+        return {}
+
+
+_LONG288 = "A paragraph of real article text that is long enough to count. "
+_pend287 = []
+
+
+def _fake_tr287(text, then=None, lang=None, limit=220, timeout=0):
+    _pend287.append((text, then))
+    return True
+
+
+def _drain287(maxn=140):
+    n = 0
+    while n < maxn:
+        if not H.wait_for(lambda: _pend287, 1500):
+            break
+        _pend287.pop(0)[1]("x%d" % n)
+        n += 1
+    return n
+
+
+class _Sig288:
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, fn):
+        self.slots.append(fn)
+
+    def emit(self, *a):
+        for fn in list(self.slots):
+            fn(*a)
+
+
+class _Proc288:
+    ProcessError = _qp288.ProcessError
+    ProcessState = _qp288.ProcessState
+    ExitStatus = _qp288.ExitStatus
+    made = []
+
+    def __init__(self, parent=None):
+        self.finished = _Sig288()
+        self.errorOccurred = _Sig288()
+        self.deleted = self.killed = self.waited = False
+        self.out = b""
+        self.args = None
+        _Proc288.made.append(self)
+
+    def start(self, prog, args):
+        self.args = (prog, list(args))
+
+    def state(self):
+        return _qp288.ProcessState.Running
+
+    def readAllStandardOutput(self):
+        return self.out
+
+    def waitForFinished(self, ms=0):
+        self.waited = True
+        return False
+
+    def kill(self):
+        if not self.killed:
+            self.killed = True
+            self.finished.emit(9, _qp288.ExitStatus.CrashExit)
+
+    def deleteLater(self, *a):
+        self.deleted = True
+
+
+try:
+    br.__dict__["flash"] = lambda text, *a, **k: _said288.append(str(text))
+
+    # ---------- 285: the reader ----------
+    _page288("t285a", "<title>t285a</title><style>.card{background:#fff;"
+             "box-shadow:0 0 5px #000}.entry p{color:#333}</style>"
+             "<div class='card'><div class='entry'>" + "".join(
+                 "<p>%s%d</p>" % (_LONG288, i) for i in range(5))
+             + "</div></div><div id='side'><p>short</p></div>")
+    # with the site theme off: it repaints the page's own colours, and
+    # the reader's job here is a page nobody themed
+    _tw288 = br.config.get("themeWeb", "__absent__")
+    br.config["themeWeb"] = False
+    B.theme_web.refresh(br)
+    _v = _tab288("/t285a")
+    _on = _reader_on288(_v)
+    _got = json.loads(jsq(_v, "JSON.stringify({p: getComputedStyle("
+                              "document.querySelector('.entry p')).color,"
+                              "b: getComputedStyle(document.body).color,"
+                              "card: getComputedStyle(document.querySelector("
+                              "'.card')).backgroundColor,"
+                              "keep: document.querySelector('.card').className})",
+                              B.MAIN_WORLD_ID)
+                      or "{}")
+    check("285 the reader gives the article's text the theme colour and a kept card no white",
+          # the site theme may have painted the card already: what the
+          # reader adds is the keep mark, whose rule clears the white
+          _on and _got.get("p") == _got.get("b")
+          and ("__readerkeep" in (_got.get("keep") or "")
+               or "__readerbody" in (_got.get("keep") or ""))
+          and _got.get("card") != "rgb(255, 255, 255)", _got)
+    _close_if_open(_v)
+    if _tw288 == "__absent__":
+        br.config.pop("themeWeb", None)
+    else:
+        br.config["themeWeb"] = _tw288
+    B.theme_web.refresh(br)
+
+    _page288("t285c", "<title>t285c</title><div id='wrap'><div id='art'>" + "".join(
+        "<p>%s%d</p>" % (_LONG288, i) for i in range(5))
+        + "</div><div id='comments'><p>%s</p></div></div>" % _LONG288)
+    _v = _tab288("/t285c")
+    _on = _reader_on288(_v)
+    _got = jsq(_v, "(document.querySelector('.__readerbody')||{}).id + '|' + "
+                   "(document.querySelector('.__readerkeep')||{}).id",
+               B.MAIN_WORLD_ID)
+    check("285 the reader narrows a wrapper that holds the comments to the article and marks the kept ancestor",
+          _on and _got == "art|wrap", _got)
+    br.reader_mode(_v)
+    H.wait_for(lambda: not jsq(_v, "!!document.getElementById('__readercss')",
+                               B.MAIN_WORLD_ID), 4000)
+    check("285 switching the reader off takes the kept-ancestor mark away",
+          jsq(_v, "document.querySelectorAll('.__readerkeep,.__readerhide')"
+                  ".length", B.MAIN_WORLD_ID) == 0)
+    _close_if_open(_v)
+
+    _page288("t285b", "<title>t285b</title>" + "<div>menu</div>" * 2500
+             + "<article>" + "".join("<p>%s%d</p>" % (_LONG288, i)
+                                     for i in range(5)) + "</article>")
+    _v = _tab288("/t285b")
+    _on = _reader_on288(_v)
+    _got = jsq(_v, "(document.querySelector('.__readerbody')||{}).tagName",
+               B.MAIN_WORLD_ID)
+    check("285 the reader finds the article after 2500 divs of menu",
+          _on and _got == "ARTICLE", (_on, _got))
+    _close_if_open(_v)
+
+    # 285b: a hand-edited reader width or size
+    _res = []
+    for _w, _s in (("wide", "big"), (100000, 1)):
+        br.config["readerWidth"], br.config["readerSize"] = _w, _s
+        try:
+            _res.append(br.reader_css())
+        except Exception as _e:
+            _res.append(repr(_e))
+    check("285 reader_css reads a hand-edited width and size as the default and clamps the rest",
+          "max-width: 70ch" in _res[0] and "font-size: 19px" in _res[0]
+          and "max-width: 200ch" in _res[1] and "font-size: 8px" in _res[1],
+          [r[:60] for r in _res])
+    for _k in ("readerWidth", "readerSize"):
+        if _cfg288[_k] == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _cfg288[_k]
+
+    # 285c: the article as text
+    _page288("t285d", "<title>t285d</title><header>site header</header>"
+             "<article><header><h1>Main Title</h1></header>"
+             "<p>Some   spaced\n     text here</p><noscript>enable js</noscript>"
+             "<div hidden>secret hidden</div><p aria-hidden='true'>decoy</p>"
+             "<table><tr><td>cell a</td><td>cell b</td></tr></table>"
+             "<p><a href='/x/a b(1)'>the link</a></p>"
+             "<pre>  keep   this\n    indent</pre></article>"
+             "<footer>site footer</footer>")
+    _v = _tab288("/t285d")
+    _t = _text288(_v).get("text", "")
+    check("285 articletext collapses source whitespace, skips hidden and noscript, keeps the article's h1",
+          "# Main Title" in _t and "Some spaced text here" in _t
+          and "enable js" not in _t and "secret hidden" not in _t
+          and "decoy" not in _t and "site header" not in _t
+          and "site footer" not in _t, _t[:300])
+    check("285 articletext puts ' | ' between cells, encodes ')' in links and keeps a pre as it is",
+          "cell a | cell b" in _t and "(1%29)" in _t and "(1))" not in _t
+          and "  keep   this\n    indent" in _t, _t[:400])
+    _close_if_open(_v)
+
+    # 285d: the word count
+    _page288("t285w1", "<title>w1</title><p>私は毎日学校に行きます</p>")
+    _page288("t285w2", "<title>w2</title><p>a - b ' c</p>")
+    _v = _tab288("/t285w1")
+    _box1, _box2 = {}, {}
+    br.word_count(view=_v, then=lambda g: _box1.update(g=g))
+    H.wait_for(lambda: "g" in _box1, 5000)
+    H.load(_v, srv.url("/t285w2"))
+    br.word_count(view=_v, then=lambda g: _box2.update(g=g))
+    H.wait_for(lambda: "g" in _box2, 5000)
+    check("285 the word count splits Japanese into words and counts no lone '-' or apostrophe",
+          (_box1.get("g") or {}).get("words", 0) >= 4
+          and (_box2.get("g") or {}).get("words") == 3,
+          (_box1.get("g"), _box2.get("g")))
+    _close_if_open(_v)
+
+    # 285e: the outline menu
+    _page288("t285o", "<title>o</title><h2>R&amp;D notes</h2>"
+             "<div style='height:3000px'></div><h2>Chapter two</h2>"
+             "<div style='height:3000px'></div>")
+    _v = _tab288("/t285o")
+    _other = br.new_tab(url=None)
+    _open288.append(_other)
+    br.tabs.setCurrentWidget(_v)
+    H.spin(800)
+    # the jump is seen where the reading tools run (a tab that is not in
+    # front does not draw a smooth scroll to its end)
+    for _t in (_v, _other):
+        jsq(_t, "window.__jumped = null; Element.prototype.scrollIntoView = "
+                "function () { window.__jumped = this.textContent; }; 1",
+            B.APP_WORLD_ID)
+    br.__dict__.pop("_outline_menu", None)
+    br.page_outline()
+    H.wait_for(lambda: getattr(br, "_outline_menu", None) is not None, 5000)
+    _menu = getattr(br, "_outline_menu", None)
+    _acts = list(_menu.actions()) if _menu is not None else []
+    _texts = [a.text() for a in _acts]
+    br.tabs.setCurrentWidget(_other)
+    H.spin(200)
+    _chap = [a for a in _acts if "Chapter two" in a.text()]
+    if _chap:
+        _chap[0].trigger()
+    H.wait_for(lambda: jsq(_v, "window.__jumped", B.APP_WORLD_ID), 4000)
+    _y = (jsq(_v, "window.__jumped", B.APP_WORLD_ID),
+          jsq(_other, "window.__jumped", B.APP_WORLD_ID))
+    if _menu is not None:
+        _menu.close()
+    br.__dict__.pop("_outline_menu", None)
+    check("285 the outline menu shows 'R&D' with the ampersand and jumps in the tab it was opened for",
+          any("R&&D notes" in t for t in _texts)
+          and _y == ("Chapter two", None),
+          (_texts, _y))
+    _close_if_open(_v)
+    _close_if_open(_other)
+
+    # ---------- 286: reading places, the line view ----------
+    _page288("t286a", "<title>a</title><p>page a</p>")
+    _page288("t286b", "<title>b</title><p>page b</p>")
+    _va, _vb = _tab288("/t286a"), _tab288("/t286b")
+    _ua, _ub = srv.url("/t286a"), srv.url("/t286b")
+    _va._read_at, _vb._read_at = (_ua, 900), (_ub, 700)
+    br.config["readPlaces"] = {_ua: 900, _ub: 700}
+    br._forget_history_extras([_ua])
+    _after1 = (_va._read_at, _vb._read_at)
+    br._forget_history_extras([_ua, _ub])
+    _after2 = (_va._read_at, _vb._read_at)
+    _vb._read_at = (_ub, 700)
+    try:
+        br._forget_open_reading_places()
+        _all = _vb._read_at
+    except AttributeError:
+        _all = "missing"
+    check("286 clearing a page from the history drops the place an open tab was about to write",
+          _after1 == (None, (_ub, 700)) and _after2 == (None, None),
+          (_after1, _after2))
+    check("286 ...and a clear-all drops every open tab's place", _all is None, _all)
+    _close_if_open(_va)
+    _close_if_open(_vb)
+
+    _page288("t286c", "<title>c</title><pre id='p'>" + "line\n" * 20004 + "last</pre>")
+    _v = _tab288("/t286c")
+    br.render_file("lines", view=_v)
+    _more = br._ui_str("fileMoreLines")
+    # twenty thousand rows: under the suite's load the table took longer
+    # than 8 s (red once in the full run, green alone) -- wait for the
+    # summary row itself
+    _want0 = _more.split("%d")[-1].strip() if "%d" in _more else _more
+    H.wait_for(lambda: _want0 in (jsq(_v, "var t = document.body.firstElementChild; "
+                                          "t && t.lastElementChild ? "
+                                          "t.lastElementChild.textContent : ''") or ""),
+               30000)
+    _last = jsq(_v, "var t = document.body.firstElementChild; "
+                    "t ? t.lastElementChild.textContent : ''") or ""
+    _want = _more.replace("%d", "5") if "%d" in _more else "\x00"
+    check("286 the line view ends with a row that says how many lines are not shown",
+          _want in _last, (_last[:60], _more))
+    _close_if_open(_v)
+
+    # ---------- 287: translation ----------
+    br.__dict__["caption_tools"] = lambda: {"captionTranslator": "/fake/trans"}
+    br.__dict__["run_translator"] = _fake_tr287
+    _page288("t287a", "<title>a</title><p>First block of text</p>"
+             "<p>Second block of text</p><p>Third block of text</p>")
+    _page288("t287b", "<title>b</title><p>Another page entirely</p>")
+    del _said288[:]
+    del _pend287[:]
+    _v = _tab288("/t287a")
+    br.translate_in_place(view=_v, lang="de")
+    H.wait_for(lambda: len(_pend287) >= 1, 5000)
+    if _pend287:
+        _pend287.pop(0)[1]("EINS")
+    H.wait_for(lambda: len(_pend287) >= 1, 5000)
+    H.load(_v, srv.url("/t287b"))
+    if _pend287:
+        _pend287.pop(0)[1]("ZWEI")
+    H.spin(500)
+    _drain287(5)
+    check("287 a job whose page was left stops there, with no 'Translated'",
+          getattr(_v, "_translate_job", "x") is None
+          and br._ui_str("trDone") not in _said288, (_said288, _pend287))
+    _close_if_open(_v)
+
+    _page288("t287c", "<title>c</title><p>Hello world text</p>")
+    _v = _tab288("/t287c")
+    del _pend287[:]
+    br.translate_in_place(view=_v, lang="de")
+    H.wait_for(lambda: len(_pend287) >= 1, 5000)
+    br.translate_in_place(view=_v, lang="de")
+    H.wait_for(lambda: len(_pend287) >= 2, 5000)
+    if len(_pend287) >= 2:
+        _pend287.pop(1)[1]("NEW")
+        H.spin(400)
+    if _pend287:
+        _pend287.pop(0)[1]("OLD")
+        H.spin(400)
+    _now = jsq(_v, "document.querySelector('p').innerText")
+    br.undo_translation(_v)
+    H.spin(500)
+    _back = jsq(_v, "document.querySelector('p').innerText")
+    check("287 a replaced job's late answer is not written over the page or the undo copy",
+          _now == "NEW" and _back == "Hello world text", (_now, _back))
+    _close_if_open(_v)
+
+    _v = _tab288("/t287a")
+    del _pend287[:]
+    br.translate_in_place(view=_v, lang="de")
+    H.wait_for(lambda: len(_pend287) >= 1, 5000)
+    if _pend287:
+        _pend287.pop(0)[1]("EINS")
+    H.wait_for(lambda: len(_pend287) >= 1, 5000)
+    br.undo_translation(_v)
+    H.spin(400)
+    if _pend287:
+        _pend287.pop(0)[1]("LATE")
+    H.spin(500)
+    _texts = jsq(_v, "[].map.call(document.querySelectorAll('p'), "
+                     "function (p) { return p.innerText; }).join('|')")
+    check("287 Undo stops a running job: nothing is written after it",
+          _texts == "First block of text|Second block of text|Third block of text"
+          and getattr(_v, "_translate_job", "x") is None, (_texts,))
+    del _pend287[:]
+    _close_if_open(_v)
+
+    _page288("t287d", "<title>d</title>" + "".join(
+        "<p style='display:none'>hidden %d</p>" % i for i in range(125))
+        + "<p>Visible block one</p><p>Visible block two</p>")
+    _v = _tab288("/t287d")
+    del _pend287[:], _said288[:]
+    br.translate_in_place(view=_v, lang="de")
+    H.wait_for(lambda: len(_pend287) >= 1, 5000)
+    _first = _pend287[0][0] if _pend287 else ""
+    _n = _drain287()
+    check("287 hidden blocks do not use up the 120-block limit",
+          _first == "Visible block one" and _n == 2, (_first, _n))
+    _close_if_open(_v)
+
+    _page288("t287e", "<title>e</title>" + "".join(
+        "<p>Block number %d here</p>" % i for i in range(125)))
+    _v = _tab288("/t287e")
+    del _pend287[:], _said288[:]
+    br.translate_in_place(view=_v, lang="de")
+    _n = _drain287()
+    H.spin(300)
+    check("287 hitting the 120-block limit says 'partly translated', not 'Translated'",
+          br._ui_str("trPartly") in _said288
+          and br._ui_str("trDone") not in _said288, (_n, _said288[-3:]))
+    _close_if_open(_v)
+    br.__dict__.pop("run_translator", None)
+
+    # 287e: no translator and not a web page
+    br.__dict__["caption_tools"] = lambda: {"captionTranslator": ""}
+    _v = br.new_tab(url=None)
+    _open288.append(_v)
+    H.spin(200)
+    H.load(_v, "data:text/html,<p>hello</p>")
+    del _said288[:]
+    _r = br.translate_page_now(view=_v)
+    _offers = []
+    br.__dict__["page_language"] = lambda view=None, then=None: then({"lang": "fr"})
+    br.__dict__["offer_translation_bar"] = (
+        lambda lang, view=None: _offers.append(view) or True)
+    br.config["translateOffer"] = True
+    br.config["translateRules"] = {}
+    br.config["translateLang"] = "de"
+    br.maybe_offer_translation(_v)
+    _offered_data = list(_offers)
+    _w = _tab288("/t287a")
+    del _offers[:]
+    # its own loadFinished already asked (once per language per tab)
+    _w._offered_lang = ""
+    br.maybe_offer_translation(_w)
+    check("287 no translator and not a web page: no bar, and translate_page_now says so",
+          _r is False and not _offered_data and len(_said288) >= 1
+          and len(_offers) == 1, (_r, _offered_data, _said288, _offers))
+    _close_if_open(_v)
+    _close_if_open(_w)
+    br.__dict__.pop("page_language", None)
+    br.__dict__.pop("offer_translation_bar", None)
+
+    # 287f: an address that is already Google Translate, and a password in it
+    try:
+        _u = B._untranslated_address
+        _a = _u(B.QUrl("https://translate.google.com/translate?sl=auto&tl=de"
+                       "&u=https%3A%2F%2Fexample.com%2Fa%3Fq%3D1%2B2")).toString()
+        _b = _u(B.QUrl("https://my-site.translate.goog/p?x=1&_x_tr_sl=auto"
+                       "&_x_tr_tl=de")).toString()
+        _c = _u(B.QUrl("https://user:pw@example.com/p")).toString()
+        _d = _u(B.QUrl("https://example.com/p?q=1")).toString()
+    except Exception as _e:
+        _a = _b = _c = _d = repr(_e)
+    check("287 the address behind a translation is unwrapped and loses a user:password@",
+          (_a, _b, _c, _d) == ("https://example.com/a?q=1+2",
+                               "https://my.site/p?x=1",
+                               "https://example.com/p",
+                               "https://example.com/p?q=1"), (_a, _b, _c, _d))
+    _loaded = []
+    _fv = type("FV287", (), {"url": lambda self: B.QUrl(
+        "https://example.com/?q=a+b"), "load": lambda self, u: _loaded.append(u),
+        "private": False})()
+    br._translate_page(br.config.get("translateLang", "de"), view=_fv)
+    _enc = _loaded[0].toString(B.QUrl.ComponentFormattingOption.FullyEncoded) \
+        if _loaded else ""
+    check("287 the address sent to Google Translate keeps a '+' as %2B",
+          "%2B" in _enc, _enc)
+
+    # 287g: a stale 'gone' answer does not pop the new page's ask
+    _v = _tab288("/t287a")
+    br.offer_translation_bar("fr", view=_v)
+    H.spin(300)
+    _key = id(_v)
+    _s1 = (getattr(br, "_trbar_serials", None) or {}).get(_key)
+    br.offer_translation_bar("es", view=_v)
+    H.spin(300)
+    try:
+        br._trbar_answer(_key, _v, "fr", "gone", _s1)
+    except TypeError:
+        br._trbar_answer(_key, _v, "fr", "gone")
+    _kept = _key in (getattr(br, "_trbar_asks", None) or {})
+    (getattr(br, "_trbar_asks", None) or {}).pop(_key, None)
+    _tm = getattr(br, "_trbar_timer", None)
+    if _tm is not None:
+        _tm.stop()
+    check("287 an answer to the page before does not take the new page's bar ask away",
+          _kept, _kept)
+    _close_if_open(_v)
+
+    # ---------- 288: the selection, define_word, captions ----------
+    _page288("t288", "<title>t288</title><p>C++ rocks</p>")
+    _sites = []
+    br.__dict__["_panel_or_private"] = (
+        lambda url, view=None: _sites.append(url) or True)
+    _v = _tab288("/t288")
+    _sel288(_v)
+    br.translate_selection(view=_v)
+    H.wait_for(lambda: _sites, 4000)
+    check("288 translate_selection sends '+' as %2B",
+          bool(_sites) and "text=C%2B%2B" in _sites[0], _sites[:1])
+
+    # 288b: a selection the page cannot see (an iframe) comes from the view
+    _page288("t288e", "<title>e</title><p>nothing selected here</p>")
+    H.load(_v, srv.url("/t288e"))
+    H.js(_v, "getSelection().removeAllRanges();1", B.MAIN_WORLD_ID)
+    _v.selectedText = lambda: "frame words"
+    del _sites[:]
+    br.translate_selection(view=_v)
+    H.wait_for(lambda: _sites, 4000)
+    _tr_url = _sites[0] if _sites else ""
+    B.shutil.which = lambda name, *a, **k: None if name == "dict" else _which288(name, *a, **k)
+    del _sites[:]
+    br.define_word(view=_v)
+    H.wait_for(lambda: _sites, 4000)
+    check("288 translate_selection and define_word fall back to the view's selectedText",
+          "frame%20words" in _tr_url and bool(_sites)
+          and "frame%20words" in _sites[0], (_tr_url, _sites[:1]))
+    _v.__dict__.pop("selectedText", None)
+
+    # 288c: dict in the background, a local server only from a private tab
+    B.QProcess = _Proc288
+    B.shutil.which = lambda name, *a, **k: ("/fake/dict" if name == "dict"
+                                            else _which288(name, *a, **k))
+    _boxes = []
+    B.QMessageBox.information = staticmethod(
+        lambda *a, **k: _boxes.append(a[2] if len(a) > 2 else "") or 0)
+    H.load(_v, srv.url("/t288"))
+    H.js(_v, "document.body.innerHTML='<p>serendipity</p>';var r=document."
+             "createRange();r.selectNodeContents(document.body);var s=getSelection();"
+             "s.removeAllRanges();s.addRange(r);1", B.MAIN_WORLD_ID)
+    del _Proc288.made[:], _sites[:]
+    br.define_word(view=_v)
+    H.wait_for(lambda: _Proc288.made, 4000)
+    _p = _Proc288.made[-1] if _Proc288.made else None
+    _args = _p.args if _p else None
+    _async = bool(_p) and not _p.waited and not _boxes
+    if _p:
+        _p.out = b"serendipity: luck"
+        _p.finished.emit(0, _qp288.ExitStatus.NormalExit)
+    H.spin(200)
+    check("288 define_word runs dict in the background and shows its answer when it finishes",
+          _args == ("/fake/dict", ["--", "serendipity"]) and _async
+          and len(_boxes) == 1 and "luck" in _boxes[0] and _p.deleted
+          and not _sites, (_args, _async, _boxes, _sites))
+
+    _pv = br.new_tab(private=True)
+    _open288.append(_pv)
+    H.spin(300)
+    H.load(_pv, srv.url("/t288"))
+    H.js(_pv, "document.body.innerHTML='<p>serendipity</p>';var r=document."
+              "createRange();r.selectNodeContents(document.body);var s=getSelection();"
+              "s.removeAllRanges();s.addRange(r);1", B.MAIN_WORLD_ID)
+    del _Proc288.made[:], _sites[:], _boxes[:]
+    br.define_word(view=_pv)
+    H.wait_for(lambda: _Proc288.made, 4000)
+    _p = _Proc288.made[-1] if _Proc288.made else None
+    _args = _p.args if _p else None
+    if _p:
+        _p.out = b""
+        _p.finished.emit(1, _qp288.ExitStatus.NormalExit)
+    H.spin(200)
+    check("288 a private tab asks dict for a server on this machine only, and an empty answer goes to the site",
+          _args == ("/fake/dict", ["-h", "localhost", "--", "serendipity"])
+          and len(_sites) == 1 and "serendipity" in _sites[0] and not _boxes,
+          (_args, _sites, _boxes))
+
+    br.DICT_WAIT_MS = 100
+    del _Proc288.made[:], _sites[:], _boxes[:]
+    br.define_word(view=_v)
+    H.wait_for(lambda: _Proc288.made, 4000)
+    _p = _Proc288.made[-1] if _Proc288.made else None
+    H.wait_for(lambda: _p is not None and _p.killed, 3000)
+    H.spin(200)
+    check("288 a dict that does not answer is stopped, freed, and the site is used",
+          _p is not None and _p.killed and _p.deleted and len(_sites) == 1
+          and not _boxes, (getattr(_p, "killed", None), _sites, _boxes))
+    br.__dict__.pop("DICT_WAIT_MS", None)
+    B.QProcess = _qp288
+    B.QMessageBox.information = _info288
+    B.shutil.which = _which288
+    _close_if_open(_pv)
+    _close_if_open(_v)
+
+    # 288d: caption translation: the newest line wins, a stuck translator is stopped
+    _lines, _asked = [], []
+    br.__dict__["caption_overlay"] = (
+        lambda line, view=None, clear=False: _lines.append(line))
+
+    def _fake_cap(text, then=None, lang=None, limit=220, timeout=0):
+        _asked.append((text, then, timeout))
+        return True
+    br.__dict__["run_translator"] = _fake_cap
+    br.translate_caption("one")
+    br.translate_caption("two")
+    if len(_asked) == 2:
+        _asked[1][1]("T-two")
+        _asked[0][1]("T-one")
+    br.__dict__.pop("run_translator", None)
+    check("288 a slow caption translation does not replace the newer line",
+          _lines == ["T-two"], _lines)
+    check("288 caption translation asks for a time limit",
+          len(_asked) == 2 and _asked[0][2] == 15000, [a[2] for a in _asked])
+
+    B.QProcess = _Proc288
+    br.__dict__["caption_tools"] = lambda: {"captionTranslator": "/fake/trans"}
+    del _Proc288.made[:]
+    try:
+        br.run_translator("x", then=lambda out: None, timeout=50)
+    except TypeError:
+        pass
+    _p = _Proc288.made[-1] if _Proc288.made else None
+    H.wait_for(lambda: _p is not None and _p.killed, 3000)
+    check("288 a translator still running after its limit is killed",
+          _p is not None and _p.killed, getattr(_p, "killed", None))
+    B.QProcess = _qp288
+    # ---------- the review's folds (fix288b) ----------
+    _page288("t285t", "<title>t</title><nav>menu</nav><article><h1 id=ttl>The title"
+             "</h1><div class=body>" + "".join(
+                 "<p>%s%d</p>" % (_LONG288, i) for i in range(5)) + "</div></article>")
+    _v = _tab288("/t285t")
+    _on = _reader_on288(_v)
+    _h = jsq(_v, "document.getElementById('ttl').classList.contains('__readerhide')",
+             B.MAIN_WORLD_ID)
+    check("285 the reader keeps the title of an article whose text is in one inner block",
+          _on and _h is False, (_on, _h))
+    _close_if_open(_v)
+    _page288("t285u", "<title>u</title><div id=w><h1 id=t2>Wrapped title</h1>"
+             "<div id=a2>" + "".join("<p>%s%d</p>" % (_LONG288, i) for i in range(5))
+             + "</div><div id=c2><p>%s comment</p></div></div>" % _LONG288)
+    _v = _tab288("/t285u")
+    _on = _reader_on288(_v)
+    _st = jsq(_v, "JSON.stringify([document.getElementById('t2').classList"
+                  ".contains('__readerhide'), document.getElementById('c2')"
+                  ".classList.contains('__readerhide')])", B.MAIN_WORLD_ID)
+    check("285 stepping down to the article leaves the comments out and its title in",
+          _on and _st == "[false,true]", (_on, _st))
+    _close_if_open(_v)
+
+    _rr288 = br.config.get("readResume", "__absent__")
+    br.config["readResume"] = True
+    _page288("t286d", "<title>d</title>" + "<p>line of the page</p>" * 200)
+    _v = _tab288("/t286d")
+    br.tabs.setCurrentWidget(_v)
+    H.wait_for(lambda: getattr(_v, "_read_loaded", False), 4000)
+    H.spin(1800)
+    br._forget_history_extras([srv.url("/t286d")])
+    br._sample_reading_place()
+    H.spin(1000)
+    check("286 a page cleared from the history while it is open is not noted again",
+          getattr(_v, "_read_at", None) is None, getattr(_v, "_read_at", None))
+    _close_if_open(_v)
+    if _rr288 == "__absent__":
+        br.config.pop("readResume", None)
+    else:
+        br.config["readResume"] = _rr288
+
+    br.__dict__["caption_tools"] = lambda: {"captionTranslator": "/fake/trans"}
+    br.__dict__["run_translator"] = _fake_tr287
+    _page288("t287f", "<title>f</title>" + "".join(
+        "<p>Real paragraph number %d</p>" % i for i in range(120)) + "<p> </p><p>x</p>")
+    _v = _tab288("/t287f")
+    del _pend287[:], _said288[:]
+    br.translate_in_place(view=_v, lang="de")
+    _drain287()
+    H.spin(300)
+    check("287 120 blocks and an empty footer say 'Translated', not 'partly translated'",
+          br._ui_str("trPartly") not in _said288
+          and br._ui_str("trDone") in _said288, _said288[-3:])
+    _close_if_open(_v)
+    br.__dict__.pop("run_translator", None)
+
+finally:
+    B.QProcess = _qp288
+    B.QMessageBox.information = _info288
+    B.shutil.which = _which288
+    for _k288, _f288 in _real288.items():
+        if _f288 is None:
+            br.__dict__.pop(_k288, None)
+        else:
+            br.__dict__[_k288] = _f288
+    for _k288, _c288 in _cfg288.items():
+        if _c288 == "__absent__":
+            br.config.pop(_k288, None)
+        else:
+            br.config[_k288] = _c288
+    for _k288, _f288 in _trbar288.items():
+        if _f288 is None:
+            br.__dict__.pop(_k288, None)
+    for _k288 in ("_caption_seq", "_caption_shown_seq", "_caption_trans"):
+        br.__dict__.pop(_k288, None)
+    for _v288 in _open288:
+        _close_if_open(_v288)
+    for _n288 in ("t285a", "t285b", "t285c", "t285d", "t285w1", "t285w2",
+                  "t285o", "t286a", "t286b", "t286c", "t287a", "t287b",
+                  "t287c", "t287d", "t287e", "t288", "t288e"):
+        H.Handler.pages.pop("/" + _n288, None)
+    H.spin(300)
+
+# ---- 289-291: windows and fullscreen (the 65th pass) ----
+import inspect as _insp289
+H.Handler.pages["/t289"] = "<title>t289</title><p>window page</p>"
+
+
+class _FsReq289:
+    def __init__(self, on):
+        self.on, self.accepted = on, 0
+
+    def toggleOn(self):
+        return self.on
+
+    def accept(self):
+        self.accepted += 1
+
+    def reject(self):
+        pass
+
+
+_cfg289 = {k: br.config.get(k, "__absent__") for k in ("askFullscreen", "bookmarksBar")}
+_look289 = B.active_look
+_w289 = _app289 = _nw289 = None
+try:
+    br.config["askFullscreen"] = False
+    _w289 = br.new_window()
+    H.spin(700)
+
+    def _tab289(win, path="/t289", **kw):
+        v = win.new_tab(**kw)
+        H.spin(200)
+        H.load(v, srv.url(path))
+        H.spin(400)
+        return v
+
+    # 289a: page fullscreen in a popped-out tab fills that small window
+    _pv289 = _tab289(_w289)
+    _mini289 = _w289.pop_out_tab(_w289.tabs.indexOf(_pv289))
+    H.spin(400)
+    _pv289._fullscreen(_FsReq289(True))
+    H.spin(400)
+    _st289 = (bool(_mini289 and _mini289.isFullScreen()),
+              getattr(_w289, "_fs_view", None) is None, _w289.isFullScreen())
+    _pv289._fullscreen(_FsReq289(False))
+    H.spin(400)
+    check("289 page fullscreen in a popped-out tab fills that window, not the main one",
+          _st289 == (True, True, False) and not _mini289.isFullScreen(),
+          (_st289, _mini289.isFullScreen() if _mini289 else None))
+    if getattr(_w289, "_fs_view", None) is not None or _w289.isFullScreen():
+        _w289._page_fullscreen(None, False)
+    if _mini289 is not None:
+        _mini289.close()
+        H.spin(300)
+
+    # 289b: a video's fullscreen ending leaves F11's fullscreen on
+    _fv289 = _tab289(_w289)
+    _w289.set_fullscreen(True)
+    H.spin(300)
+    _w289._page_fullscreen(_fv289, True)
+    H.spin(200)
+    _w289._page_fullscreen(_fv289, False)
+    H.spin(300)
+    check("289 a video's fullscreen ending leaves F11's fullscreen as it was",
+          _w289.isFullScreen() and not _w289.chrome.isVisible(),
+          (_w289.isFullScreen(), _w289.chrome.isVisible()))
+    _w289.set_fullscreen(False)
+    H.spin(300)
+
+    # 289c/d/e: the window-full video
+    _a289 = _tab289(_w289)
+    _b289 = _tab289(_w289)
+    _w289.tabs.setCurrentWidget(_a289)
+    H.spin(200)
+    _w289.window_fullscreen(_a289)
+    H.spin(200)
+    _hid289 = not _w289.chrome.isVisible()
+    _w289.tabs.setCurrentWidget(_b289)
+    H.spin(300)
+    check("289 leaving the window-full video's tab brings the chrome back",
+          _hid289 and _w289.chrome.isVisible()
+          and getattr(_w289, "_win_full_view", None) is None,
+          (_hid289, _w289.chrome.isVisible()))
+    _w289._drop_win_full() if hasattr(_w289, "_drop_win_full") else None
+    _w289.show_chrome(True)
+    _w289.window_fullscreen(_b289)
+    H.spin(200)
+    _w289.close_tab(_w289.tabs.indexOf(_b289), ask=False)
+    H.spin(300)
+    check("289 closing the window-full video's tab brings the chrome back",
+          _w289.chrome.isVisible()
+          and getattr(_w289, "_win_full_view", None) is None,
+          (_w289.chrome.isVisible(), getattr(_w289, "_win_full_view", None)))
+    _w289.__dict__.pop("_win_full_view", None)
+    _w289._win_full_view = None
+    _w289.show_chrome(True)
+    _w289.tabs.setCurrentWidget(_a289)
+    H.spin(200)
+    _w289.window_fullscreen(_a289)
+    H.spin(200)
+    _w289.set_fullscreen(True)
+    H.spin(200)
+    _w289.set_fullscreen(False)
+    H.spin(300)
+    check("289 a fullscreen ending under a window-full video keeps the chrome hidden",
+          not _w289.chrome.isVisible()
+          and getattr(_w289, "_win_full_view", None) is _a289,
+          _w289.chrome.isVisible())
+    _w289.window_fullscreen(_a289)
+    H.spin(200)
+    _w289.show_chrome(True)
+
+    # 289b fold: leaving a window-full tab inside F11's fullscreen keeps the chrome hidden
+    _w289.set_fullscreen(True)
+    H.spin(300)
+    _w289.tabs.setCurrentWidget(_a289)
+    H.spin(200)
+    _w289.window_fullscreen(_a289)
+    H.spin(200)
+    _c289 = _tab289(_w289)
+    _w289.tabs.setCurrentWidget(_c289)
+    H.spin(300)
+    check("289 leaving a window-full tab inside F11's fullscreen keeps the chrome hidden",
+          _w289.isFullScreen() and not _w289.chrome.isVisible(),
+          (_w289.isFullScreen(), _w289.chrome.isVisible()))
+    if getattr(_w289, "_win_full_view", None) is not None:
+        _w289.window_fullscreen(_w289._win_full_view)
+    _w289.set_fullscreen(False)
+    H.spin(300)
+    _w289.show_chrome(True)
+
+    # 290: app windows -- the harmless checks first, then the merges (on the
+    # old code each merge closes a window: a fresh one stands in for it)
+    def _alive289(win):
+        return (win is not None and win in B.WINDOWS
+                and not B.sip.isdeleted(win))
+
+    _app289 = br.new_window(app_url=srv.url("/t289"))
+    H.spin(900)
+    br.config["bookmarksBar"] = True
+    _app289.save_bookmarks()
+    H.spin(200)
+    check("290 a bookmark saved in an app window puts no bookmarks bar up in it",
+          not _app289.bmbar.isVisible(), _app289.bmbar.isVisible())
+    br.config["bookmarksBar"] = _cfg289["bookmarksBar"] \
+        if _cfg289["bookmarksBar"] != "__absent__" else None
+    B.active_look = lambda: "taskbar"
+    try:
+        _app289._rebuild_furniture()
+        H.spin(100)
+    finally:
+        B.active_look = _look289
+    check("290 an app window gets no taskbar",
+          _app289.taskbar is None or not _app289.taskbar.isVisible(),
+          _app289.taskbar)
+    if _app289.taskbar is not None:
+        _app289.taskbar.hide()
+    _app289.__dict__["windows"] = lambda: [_app289, _w289]
+    _n290 = _app289.merge_windows()
+    H.spin(500)
+    check("290 an app window does not gather the other windows into itself",
+          _n290 == 0 and _alive289(_w289) and _w289.isVisible(),
+          (_n290, _alive289(_w289)))
+    if _alive289(_app289):
+        _app289.__dict__.pop("windows", None)
+    if not _alive289(_w289):
+        _w289 = br.new_window()
+        H.spin(700)
+    if not _alive289(_app289):
+        _app289 = br.new_window(app_url=srv.url("/t289"))
+        H.spin(900)
+    _w289.__dict__["windows"] = lambda: [_w289, _app289]
+    _w289.merge_windows()
+    H.spin(500)
+    check("290 gathering the windows leaves an app window alone",
+          _alive289(_app289) and _app289.isVisible(), (_alive289(_app289),))
+    _w289.__dict__.pop("windows", None)
+
+    # 290c: a start-page tab moved to a window keeps its virtual browser and pin
+    br.sessions.append({"name": "X290", "sid": "x290"})
+    _sv290 = _w289.new_tab(session="x290")
+    H.spin(400)
+    _w289.pin_tab(_w289.tabs.indexOf(_sv290), on=True)
+    H.spin(100)
+    _nw289 = _w289.move_tab_to_window(_w289.tabs.indexOf(_sv290))
+    H.spin(900)
+    _mv290 = _nw289.current() if _nw289 is not None else None
+    check("290 a start-page tab moved to its own window keeps its browser and pin",
+          _nw289 is not None and _nw289.active_session == "x290"
+          and getattr(_mv290, "session", None) == "x290"
+          and getattr(_mv290, "pinned", False),
+          (getattr(_nw289, "active_session", None),
+           getattr(_mv290, "session", None), getattr(_mv290, "pinned", None)))
+
+    # 291: quitting empties the private download folder (when he asked for that)
+    check("291 the exit wipe also empties the private download folder",
+          "clear_private_downloads" in _insp289.getsource(B.Browser._clear_on_exit))
+finally:
+    B.active_look = _look289
+    for _k289, _o289 in _cfg289.items():
+        if _o289 == "__absent__":
+            br.config.pop(_k289, None)
+        else:
+            br.config[_k289] = _o289
+    for _wx289 in (_nw289, _app289, _w289):
+        if _wx289 is not None:
+            try:
+                if not B.sip.isdeleted(_wx289):
+                    _wx289.__dict__.pop("windows", None)
+                    if _wx289.isFullScreen():
+                        _wx289.set_fullscreen(False)
+                    _wx289._closing_anyway = True
+                    _wx289.close()
+            except RuntimeError:
+                pass
+    H.spin(500)
+    if any(e.get("sid") == "x290" for e in br.sessions):
+        try:
+            br._close_session("x290")
+        except RuntimeError:
+            pass
+    H.Handler.pages.pop("/t289", None)
+    H.spin(300)
+
+# ---- 292/293: config.json values of the wrong shape (the 66th pass) ----
+import inspect as _insp292
+_cf292 = B.CONFIG_FILE
+_cf292_was = _cf292.read_bytes() if _cf292.exists() else None
+_lock292 = br.config.get(B.MASTER_LOCK_KEY, "__absent__")
+_lib292 = br.config.get("libUpdateEvery", "__absent__")
+try:
+    _cf292.write_text(json.dumps({"safeFlags": 5, "debugPort": True,
+                                  "debugPortNumber": float("inf")}))
+    try:
+        _fl292 = B._startup_flags()
+    except Exception as _e292:
+        _fl292 = repr(_e292)
+    check("292 a number as safeFlags and infinity as the debug port do not stop the start",
+          isinstance(_fl292, str) and "--remote-debugging-port=9222" in _fl292,
+          _fl292)
+    try:
+        _hp292 = (B._proxy_hostport({"host": "h", "port": float("inf")}),
+                  B._proxy_hostport({"host": "h", "port": 70000}),
+                  B._proxy_hostport({"host": "h", "port": 8080}))
+    except Exception as _e292:
+        _hp292 = repr(_e292)
+    check("292 a proxy port of infinity or out of range is no proxy, not a crash",
+          _hp292 == (None, None, ("h", 8080)), _hp292)
+    try:
+        _ap292 = B._migrate_proxy_config({"proxy": {"mode": ["direct"]}}).get(
+            "activeProxy")
+    except Exception as _e292:
+        _ap292 = repr(_e292)
+    check("292 an old proxy mode that is not text becomes 'system'",
+          _ap292 == "system", _ap292)
+    try:
+        B._privacy_flags(B._sane_proxy_config(
+            {"proxyProfiles": 5, "activeProxy": ["x"]}))
+        _pf292 = "_sane_proxy_config(_launch_config())" in _insp292.getsource(
+            B._install_privacy_flags)
+    except Exception as _e292:
+        _pf292 = repr(_e292)
+    check("292 the privacy flags read the proxy keys in their shapes", _pf292 is True,
+          _pf292)
+    br.config[B.MASTER_LOCK_KEY] = float("inf")
+    br.config["libUpdateEvery"] = float("inf")
+    try:
+        _ml292 = (br.master_lock_minutes(), br._lib_due())
+    except Exception as _e292:
+        _ml292 = repr(_e292)
+    check("293 infinity as the lock minutes or the library interval is the default",
+          _ml292 == (B.MASTER_LOCK_DEFAULT, True) or (
+              isinstance(_ml292, tuple) and _ml292[0] == B.MASTER_LOCK_DEFAULT),
+          _ml292)
+    _bad293 = {
+        "lineWidthSites": ["a.com"], "siteLimits": True, "startPage": "x",
+        "translateLang": None,
+        "minFontSites": {"a.com": "big", "b.com": 14, "c.com": float("inf")},
+        "sessionTabs": {"main": 5, "w": ["https://a.example/"]},
+        "perfLog": {"d1": "x", "d2": {"start": "slow", "mem": 5}},
+        "tabGroups": [None, "x", {"name": "G", "urls": 5, "session": ["s"],
+                                  "gid": [1], "color": "#123456"},
+                      {"name": 3}],
+        "zoom": 1.1}
+    try:
+        _got293 = B._sane_config_shapes(_bad293)
+        _init293 = "_sane_config_shapes(self.config)" in _insp292.getsource(
+            B.Browser.__init__)
+    except Exception as _e293:
+        _got293, _init293 = repr(_e293), False
+    check("293 the window's config keeps only values of the shapes its readers expect",
+          _init293 and _got293 == {
+              "minFontSites": {"b.com": 14},
+              "sessionTabs": {"w": ["https://a.example/"]},
+              "perfLog": {"d2": {"start": 0, "mem": 5}},
+              "tabGroups": [{"name": "G", "urls": [], "session": "main",
+                             "color": "#123456"}],
+              "zoom": 1.1}, (_init293, _got293))
+finally:
+    if _cf292_was is None:
+        try:
+            _cf292.unlink()
+        except OSError:
+            pass
+    else:
+        _cf292.write_bytes(_cf292_was)
+    for _k292, _o292 in ((B.MASTER_LOCK_KEY, _lock292), ("libUpdateEvery", _lib292)):
+        if _o292 == "__absent__":
+            br.config.pop(_k292, None)
+        else:
+            br.config[_k292] = _o292
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
