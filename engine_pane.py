@@ -73,7 +73,17 @@ def toggle(browser):
         pane = browser._engine_pane = EnginePane(browser)
     url = view.url().toString()
 
+    def locked():
+        # the window may lock while the page is being asked: what comes
+        # back then must not be shown over the lock cover
+        try:
+            return bool(browser.locked_now())
+        except (AttributeError, RuntimeError):
+            return False
+
     def measured(depth):
+        if locked():
+            return
         # the engine recurses once per level and overflows its stack on
         # a DOM nested ~15000 deep (a script-built one; no real page
         # gets near). Asked of the live page, which is cheap, rather
@@ -83,7 +93,10 @@ def toggle(browser):
                 "This page nests more than %d elements deep; the engine"
                 " stops there." % MAX_DEPTH, url)
             return
-        view.page().toHtml(lambda html: pane.show_html(_unthemed(html), url))
+        def got(html):
+            if not locked():
+                pane.show_html(_unthemed(html), url)
+        view.page().toHtml(got)
     view.page().runJavaScript(DEPTH_JS, _mod(browser).APP_WORLD_ID, measured)
 
 
@@ -174,6 +187,8 @@ class EnginePane(QWidget):
         self.place()
         self.image.setPixmap(QPixmap())
         self.image.setText(text)
+        # sized to the last render's picture otherwise: the text was cut
+        self.image.adjustSize()
         self.show()
         self.raise_()
         self.setFocus()

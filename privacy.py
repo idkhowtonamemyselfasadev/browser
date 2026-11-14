@@ -49,7 +49,8 @@ DEFAULT_BLOCK = (
 
 def _host_of(url):
     try:
-        return (urlsplit(url).hostname or "").lower()
+        # no root dot: "example.com." is example.com
+        return (urlsplit(url).hostname or "").lower().rstrip(".")
     except ValueError:
         return ""
 
@@ -57,9 +58,11 @@ def _host_of(url):
 def matches(host, domains):
     """A host is matched by a domain in the list, or by any of its
     parents: ads.doubleclick.net is matched by doubleclick.net."""
-    host = (host or "").lower().removeprefix("www.")
+    # "example.com." is the same site as "example.com", and a rule for
+    # one never matched the other
+    host = (host or "").lower().rstrip(".").removeprefix("www.")
     for d in domains:
-        d = (d or "").lower().strip().removeprefix("www.")
+        d = (d or "").lower().strip().rstrip(".").removeprefix("www.")
         if d and (host == d or host.endswith("." + d)):
             return True
     return False
@@ -89,6 +92,9 @@ def strip_tracking(url):
                        "&".join(kept), parts.fragment))
 
 
+_SHARED_NET = ipaddress.ip_network("100.64.0.0/10")
+
+
 def is_local(host):
     """Is this address on this machine or on the home network?
 
@@ -112,6 +118,11 @@ def is_local(host):
         addr = ipaddress.ip_address(host)
     except ValueError:
         return False
+    # 100.64.0.0/10, the shared (carrier-grade NAT) range: not private as
+    # the ipaddress module counts it, and where Tailscale puts its nodes
+    # (100.100.100.200 is its own metadata address)
+    if addr.version == 4 and addr in _SHARED_NET:
+        return True
     return (addr.is_private or addr.is_loopback or addr.is_link_local
             or addr.is_reserved)
 

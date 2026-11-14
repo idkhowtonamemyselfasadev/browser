@@ -4356,8 +4356,19 @@
     if (player) player.onchange = () =>
       saveSetting("externalPlayer", player.value.trim());
     const rules = document.getElementById("urlrewrites");
-    if (rules) rules.onchange = () => saveSetting("urlRewrites",
-      rules.value.split("\n").map((r) => r.trim()).filter(Boolean));
+    if (rules) rules.onchange = () => {
+      saveSetting("urlRewrites",
+        rules.value.split("\n").map((r) => r.trim()).filter(Boolean));
+      // a line without "->" is saved but never applies; read back, the
+      // box holds only the rules that are in force
+      rereadSettings((s) => {
+        const rows = s.urlRewrites || [];
+        if (window._settings) window._settings.urlRewrites = rows;
+        if (document.activeElement === rules) return;   // he is typing again
+        rules.value = rows.map(
+          (r) => Array.isArray(r) ? r[0] + " -> " + r[1] : r).join("\n");
+      });
+    };
   }
 
   function fillA11y(s) {
@@ -4402,15 +4413,7 @@
     setVal("capmodel", s.captionModel || "");
     setVal("captranslator", s.captionTranslator || "");
     setVal("captiontranslate", s.captionTranslate);
-    const found = s.captionTools || {};
-    for (const [id, key] of [["caprecorderfound", "captionRecorder"],
-                             ["captranscriberfound", "captionTranscriber"],
-                             ["captranslatorfound", "captionTranslator"]]) {
-      const out = document.getElementById(id);
-      if (out) out.textContent = found[key]
-        ? (S.a11yCapFound || "Found: %s").replace("%s", found[key])
-        : (S.a11yCapMissing || "not installed");
-    }
+    paintCaptionFound(s);
     const picker = document.getElementById("a11yfont");
     if (picker) {
       picker.innerHTML = "";
@@ -4479,11 +4482,30 @@
                              ["capmodel", "captionModel"],
                              ["captranslator", "captionTranslator"]]) {
       const el = document.getElementById(id);
-      if (el) el.onchange = () => saveSetting(key, el.value.trim());
+      if (el) el.onchange = () => {
+        saveSetting(key, el.value.trim());
+        rereadSettings(paintCaptionFound);
+      };
+    }
+  }
+
+  // "Found: x" or "not installed" under the three caption tools; also
+  // run after a path is saved, or it went on saying what the old path was
+  function paintCaptionFound(s) {
+    const S = window.STR || {};
+    const found = s.captionTools || {};
+    for (const [id, key] of [["caprecorderfound", "captionRecorder"],
+                             ["captranscriberfound", "captionTranscriber"],
+                             ["captranslatorfound", "captionTranslator"]]) {
+      const out = document.getElementById(id);
+      if (out) out.textContent = found[key]
+        ? (S.a11yCapFound || "Found: %s").replace("%s", found[key])
+        : (S.a11yCapMissing || "not installed");
     }
   }
 
   function fillAppearance(s) {
+    const S = window.STR || {};
     for (const [id, key] of LOOK_SWITCHES) setVal(id, s[key]);
     for (const [id, key, fallback] of LOOK_CHOICES)
       setVal(id, s[key] || fallback);
@@ -4491,6 +4513,11 @@
     // never set: the Glass look's own see-through level is in effect (about
     // this far along), and 0 is solid chrome, so 0 must not be shown
     if (typeof s.glassStrength !== "number") setVal("glassstrength", 40);
+    // the radius too: never set, the look's own rounded corners are in
+    // force and 0 means square, so the slider said "0px" for round
+    // chrome. It rests mid-way and says "default" until he moves it.
+    const radiusUnset = typeof s.cornerRadius !== "number";
+    if (radiusUnset) setVal("cornerradius", 10);
     for (const [id, key] of LOOK_TEXTS) setVal(id, s[key] || "");
     const fonts = s.siteFonts || {};
     setVal("sitefontstandard", fonts.standard || "");
@@ -4510,7 +4537,10 @@
                                 ["startquick", "%"]]) {
       const out = document.getElementById(id + "val");
       const el = document.getElementById(id);
-      if (out && el) out.textContent = (el.value || "0") + suffix;
+      if (out && el) out.textContent =
+        (id === "cornerradius" && radiusUnset)
+          ? (S.uiRadiusDefault || "default")
+          : (el.value || "0") + suffix;
     }
     const stars = document.getElementById("themestars");
     if (stars) stars.textContent = (s.favouriteThemes || []).join(", ");
@@ -5304,6 +5334,10 @@
       document.getElementById("pluginfolder").textContent = p.folder;
       window._installed = p.plugins;
     } catch (e) {}
+    // the starter buttons read window._installed too; after Reload or
+    // Add from file they kept saying Install for a plugin that was
+    // there, and Installed for one that was gone
+    if (window._starters) renderStarters(window._starters);
     refreshHay();   // the rail matches on what a section says
   }
 
@@ -6355,22 +6389,38 @@
                 document.getElementById("notesfolder").value.trim());
     const raw = document.getElementById("countdowns").value || "";
     const rows = [];
+    let skipped = 0;
+    // YYYY-MM-DD or DD.MM.YYYY, then an optional HH:MM, all local time -
+    // read by hand the way the browser's own add_countdown reads it.
+    // Date.parse took the first only, and a date alone as UTC midnight;
+    // "Exam = 24.12.2026" was dropped without a word.
+    const whenOf = (text) => {
+      const m = /^(?:(\d{4})-(\d{2})-(\d{2})|(\d{2})\.(\d{2})\.(\d{4}))(?:[ T](\d{1,2}):(\d{2}))?$/.exec(text);
+      if (!m) return NaN;
+      const y = +(m[1] || m[6]), mo = +(m[2] || m[5]), d = +(m[3] || m[4]);
+      const h = +(m[7] || 0), mi = +(m[8] || 0);
+      const at = new Date(y, mo - 1, d, h, mi);
+      if (h > 23 || mi > 59 || at.getFullYear() !== y
+          || at.getMonth() !== mo - 1 || at.getDate() !== d) return NaN;
+      return at.getTime();
+    };
     for (const line of raw.split(/\n+/)) {
+      if (!line.trim()) continue;
       // the date is the last piece: a name may hold an "=" itself
       const cut = line.lastIndexOf("=");
-      if (cut < 0) continue;
-      const name = line.slice(0, cut).trim();
-      // a date alone is read as UTC midnight by Date.parse (01:00 here,
-      // the day before west of London); with a time it is local, the
-      // way the browser's own add_countdown reads it
-      let text = line.slice(cut + 1).trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(text)) text += "T00:00";
-      const when = Date.parse(text);
+      const name = cut < 0 ? "" : line.slice(0, cut).trim();
+      const when = cut < 0 ? NaN : whenOf(line.slice(cut + 1).trim());
       if (name && !isNaN(when)) rows.push({name: name,
                                            t: Math.floor(when / 1000)});
+      else skipped++;
     }
     saveSetting("countdowns", rows);
-    flashMsg("desksavemsg");
+    // say so when a line was not understood, instead of only "Saved"
+    flashMsg("desksavemsg", skipped
+      ? (((window.STR || {}).countdownSkipped
+          || "Saved, but %d lines were not understood")
+         .replace("%d", skipped))
+      : "");
   };
   bindSwitch("guardmedialog", "guardMediaLog");
   bindSwitch("trackerbadge", "trackerBadge");
@@ -6441,13 +6491,14 @@
     saveSetting("groupRules", out);
     flashMsg("grouprulesmsg");
   }
-  function flashMsg(id) {
+  function flashMsg(id, text) {
     const S = window.STR || {};
     const el = document.getElementById(id);
     if (!el) return;
-    el.textContent = S.externalSaved || "Saved";
+    el.textContent = text || S.externalSaved || "Saved";
     el.className = "urlmsg on";
-    setTimeout(() => { el.className = "urlmsg"; el.textContent = ""; }, 1800);
+    setTimeout(() => { el.className = "urlmsg"; el.textContent = ""; },
+               text ? 4500 : 1800);
   }
   document.getElementById("sessionsitessave").onclick = saveSessionSites;
   document.getElementById("grouprulessave").onclick = saveGroupRules;
@@ -6654,17 +6705,37 @@
     if (bridge && bridge.openHistoryPage) bridge.openHistoryPage();
     else location.href = "history.html";
   };
-  document.getElementById("clearhist").onclick = (e) => {
-    if (bridge) bridge.clearHistory();
+  // One click used to wipe all of it, and nothing here can be undone.
+  // The first click only arms the button for a few seconds; the second
+  // one clears. "Cleared" is said only when the slot was really called,
+  // and in his language.
+  function twoStepClear(btn, rest, run) {
     const S = window.STR || {};
-    e.target.textContent = (S.clearAll ? "✓ " : "") + "Cleared ✓";
-    setTimeout(() => { e.target.textContent = S.clearHistory || "Clear history"; }, 1500);
+    if (!bridge) return;
+    clearTimeout(btn._t);
+    if (btn._armed) {
+      btn._armed = false;
+      run();
+      btn.textContent = S.clearedMsg || "Cleared \u2713";
+      btn._t = setTimeout(() => { btn.textContent = rest(); }, 1500);
+      return;
+    }
+    btn._armed = true;
+    btn.textContent = S.pressAgain || "Press again to confirm";
+    btn._t = setTimeout(() => {
+      btn._armed = false;
+      btn.textContent = rest();
+    }, 4000);
+  }
+  document.getElementById("clearhist").onclick = (e) => {
+    twoStepClear(e.currentTarget,
+      () => (window.STR || {}).clearHistory || "Clear history",
+      () => bridge.clearHistory());
   };
   document.getElementById("clearcookies").onclick = (e) => {
-    if (bridge) bridge.clearCookies();
-    const S = window.STR || {};
-    e.target.textContent = "Cleared ✓";
-    setTimeout(() => { e.target.textContent = S.clearCookies || "Clear cookies"; }, 1500);
+    twoStepClear(e.currentTarget,
+      () => (window.STR || {}).clearCookies || "Clear cookies",
+      () => bridge.clearCookies());
   };
   document.getElementById("updatebtn").onclick = (e) => {
     if (!bridge) return;
@@ -6869,7 +6940,7 @@
       .filter((s) => !s.hidden);
   }
 
-  function showCat(i) {
+  function showCat(i, keep) {
     // an index that points at nothing - a section hidden after the
     // rail was built with it in the list - would leave every section
     // down and the page empty. It falls back to the first one.
@@ -6877,6 +6948,10 @@
     if (!secs.length) return;
     if (!(i >= 0 && i < secs.length)) i = 0;
     window._cat = i;
+    // remembered as the element too: the index means another section
+    // once Passwords comes or goes, the element does not
+    const same = secs[i] === window._catSec;
+    window._catSec = secs[i];
     const btns = document.querySelectorAll("#sidebar button");
     secs.forEach((s, k) => s.classList.toggle("active", k === i));
     let group = "";
@@ -6896,14 +6971,18 @@
     const key = sec ? sec.dataset.desc : "";
     document.getElementById("curdesc").textContent = (key && S[key]) || "";
     // the title block arrives with the section under it
+    // a redraw of the section he is already in (keep) is not an arrival:
+    // saving a theme or resetting the look threw him back to the top and
+    // played the title again
     const ph = document.getElementById("pagehead");
-    if (ph) {
+    if (ph && !(keep && same)) {
       ph.classList.remove("in");
       void ph.offsetWidth;              // start the animation over
       ph.classList.add("in");
     }
     const content = document.getElementById("content");
-    if (content) content.scrollTop = 0;   // a section always starts at its top
+    // a section always starts at its top
+    if (content && !(keep && same)) content.scrollTop = 0;
     revealHit();   // ...unless a search sent you here for one setting
   }
 
@@ -6911,6 +6990,11 @@
     const bar = document.getElementById("sidebar");
     const secs = visibleSections();
     const S = window.STR || {};
+    // where he is, found again by the section itself: window._cat is an
+    // index into a list that changes length with the Passwords section
+    let at = window._catSec ? secs.indexOf(window._catSec)
+                            : (window._cat || 0);
+    if (at < 0) at = 0;
     bar.innerHTML = "";
     const seen = new Set();
     const addBtn = (sec, i, group) => {
@@ -6944,7 +7028,7 @@
     // a section with an unknown group still gets a way in
     secs.forEach((sec, i) => { if (!seen.has(i)) addBtn(sec, i, ""); });
     refreshHay();
-    showCat(window._cat || 0);
+    showCat(at, true);
   }
 
   // What a rail button matches on. Read off the section itself, so

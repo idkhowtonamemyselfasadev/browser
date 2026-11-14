@@ -1091,7 +1091,20 @@
     { name: "GitHub", url: "https://github.com" },
     { name: "YouTube", url: "https://www.youtube.com" },
   ];
-  let links = JSON.parse(localStorage.getItem("quicklinks") || "null") || DEFAULTS;
+  // the saved links, whatever the store holds: a hand-edited config put
+  // "{}" or a list of nulls here, and the JSON.parse at the top of the
+  // script stopped the whole page -- for good, as the bad value stayed
+  // in this jar's storage
+  function readLinks(text) {
+    try {
+      const v = JSON.parse(text || "null");
+      if (Array.isArray(v))
+        return v.filter((l) => l && typeof l === "object"
+                               && typeof l.url === "string");
+    } catch (e) {}
+    return null;
+  }
+  let links = readLinks(localStorage.getItem("quicklinks")) || DEFAULTS;
 
   function save() {
     localStorage.setItem("quicklinks", JSON.stringify(links));
@@ -1313,7 +1326,8 @@
     try {
       const list = (typeof j === "string") ? JSON.parse(j) : j;
       if (!Array.isArray(list)) return;
-      links = list;
+      links = list.filter((l) => l && typeof l === "object"
+                                 && typeof l.url === "string");
       localStorage.setItem("quicklinks", JSON.stringify(links));
       render();
       renderWiz();
@@ -1388,14 +1402,17 @@
       };
       return t;
     };
-    box.appendChild(mk("None", "", null));
-    BGS.forEach((b) => box.appendChild(mk("Nature", b, b)));
+    // the wizard's own words for the same thumbs: these were English
+    // in every language
+    box.appendChild(mk(STR.wizNone || "None", "", null));
+    BGS.forEach((b) => box.appendChild(mk(STR.wizNature || "Nature", b, b)));
     const custom = localStorage.getItem("custombg");
-    if (custom) box.appendChild(mk("Your image", custom, custom));
+    if (custom) box.appendChild(mk(STR.wizYourImage || "Your image",
+                                   custom, custom));
     const up = document.createElement("div");
     up.className = "thumb";
-    up.textContent = "+ Add";
-    up.title = "Use your own image";
+    up.textContent = "+";
+    up.title = STR.wizOwnImage || "Use your own image";
     up.onclick = () => document.getElementById("bgfile").click();
     box.appendChild(up);
   }
@@ -1416,7 +1433,8 @@
         localStorage.setItem("custombg", data);
         localStorage.setItem("bg", data);
       } catch (err) {
-        alert("That image is too large, sorry — try a smaller one.");
+        alert(STR.bgTooLarge
+              || "That image is too large, sorry \u2014 try a smaller one.");
         return;
       }
       applyBg();
@@ -2593,12 +2611,15 @@
             // that had run setup kept its old copy, and its next edit
             // wrote that copy back over the pins.
             for (const k of SHARED_KEYS) {
-              if (data[k] !== undefined) localStorage.setItem(k, data[k]);
+              // a value that is not text went in as "[object Object]"
+              if (data[k] !== undefined)
+                localStorage.setItem(k, typeof data[k] === "string"
+                                     ? data[k] : JSON.stringify(data[k]));
               // taken away elsewhere (Center for the search box):
               // kept here, the old value was written back
               else if (k !== "setupDone") localStorage.removeItem(k);
             }
-            links = JSON.parse(localStorage.getItem("quicklinks") || "null") || DEFAULTS;
+            links = readLinks(localStorage.getItem("quicklinks")) || DEFAULTS;
             render();
             applyBg();
             applySearchPos();
@@ -2607,8 +2628,10 @@
           } else if (data.quicklinks !== undefined) {
             // pins added before setup was finished (the taskbar's +):
             // the wizard showed the defaults and its save wiped them
-            localStorage.setItem("quicklinks", data.quicklinks);
-            links = JSON.parse(data.quicklinks || "null") || DEFAULTS;
+            const text = typeof data.quicklinks === "string"
+              ? data.quicklinks : JSON.stringify(data.quicklinks);
+            localStorage.setItem("quicklinks", text);
+            links = readLinks(text) || DEFAULTS;
             render();
           }
         } catch (e) {}
@@ -2946,6 +2969,9 @@
       e.preventDefault();
       return;
     }
+    // Tab moved the focus to a control hidden behind the game, and the
+    // next Enter pressed it (a link, the gear) mid-game
+    if (k === "tab" || k === "enter") { e.preventDefault(); return; }
     if (k === "arrowleft" || k === "a") keys.left = true;
     else if (k === "arrowright" || k === "d") keys.right = true;
     else if (k === " " || k === "spacebar" || k === "arrowup" || k === "w")

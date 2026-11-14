@@ -6044,7 +6044,7 @@ UI_STRINGS = {
 "guardMenu":"What this page may do","guardFingerprint":"Blur what sites can tell about this computer","guardClipboardRead":"Never let a page read the clipboard","guardCopyGuard":"Copy only what is selected","guardLeaveTrap":"Ignore \u201cLeave site?\u201d boxes","guardGpc":"Tell sites not to sell or share","guardNoFrames":"Block frames from other sites","guardLocalFonts":"Use local fonts, not the site\u2019s","guardWsLog":"Note the live connections a page opens","guardNoWebRTC":"Switch WebRTC off","guardBanners":"Answer cookie banners with \u201creject\u201d","guardPopups":"Write down the windows a page tried to open","guardOffHere":"Leave %s alone","guardNoneOn":"Nothing is switched on.","guardApis":"What %s may not use","guardHideElement":"Hide an element here","guardHideHow":"Right-click the thing you want gone and pick \u201cHide this element\u201d.","guardHiddenHere":"%d hidden here","guardHidden":"Hidden: %s","guardNoPick":"Nothing to hide there.","guardPlace":"Give %s a fixed place","guardPlaceT":"A place of your choosing","guardPlaceAsk":"Latitude and longitude, separated by a comma. Empty = the real one.","guardPlaceBad":"That needs two numbers.","guardMissing":"page_guard.py is not next to the browser.","guardHideThis":"Hide this element","apiWebgl":"3D graphics (WebGL)","apiWasm":"WebAssembly","apiWebusb":"USB devices","apiBluetooth":"Bluetooth","apiSerial":"Serial ports","apiHid":"Game controllers and other HID","apiMidi":"MIDI instruments","apiSensors":"Motion sensors","apiIdle":"Whether you are at the computer","apiNfc":"NFC","apiBattery":"The battery","apiSpeech":"Speech recognition","redirectBlocked":"A background tab was stopped from going to %s","popupNone":"Nothing was blocked here.","popupAllow":"Let %s open windows","popupBlocked":"Blocked windows","dlElsewhere":"That download comes from %s, not from this site","linkReally":"%s \u2014 really %s","offlineOn":"Offline \u2014 nothing new is loaded","offlineOff":"Online again","offlineBlocked":"Offline \u2014 that page was not loaded","offlineRestart":"Offline is complete after a restart","privacyRestart":"That privacy setting applies after a restart","privacyNowOn":"Switched on since the last start: %s","privacyNowOff":"Switched off since the last start: %s","privacyNoList":"The phishing list is empty \u2014 put one host a line in phishing-hosts.txt","shotPrivateNo":"A private tab is not captured. Settings has the switch.","privateNotKept":"Not kept: this is a private tab","httpsOnlyName":"Only load sites over https","httpsOnlyHint":"An http address is tried over https first; if that fails you are asked before it loads.","httpsWarnT":"That site has no secure address","httpsWarnB":"%s did not answer over https. Carrying on means anyone between you and it can read and change the page. Go there anyway?","redirectGuardName":"Stop pages redirecting a tab you are not on","redirectGuardHint":"A background tab cannot send itself to another site without a click.","blockPingsName":"Block link tracking pings","blockPingsHint":"The hidden request a link can fire when you click it.","trimReferrerName":"Tell sites where you came from","trimReferrerHint":"Off sends no referrer at all. There is no origin-only setting in this engine.","trimReferrerFull":"As usual","trimReferrerNone":"Never","noSpeculativeName":"No connections before you click","noSpeculativeHint":"Stops DNS prefetching, preconnecting and link preloading.","siteIsolationName":"Every site in its own process","siteIsolationHint":"Safer and slower, and it costs memory.","webrtcGuardName":"Keep WebRTC off the home network","webrtcGuardHint":"A call still works; the page no longer learns this machine\u2019s local address.","dohName":"Encrypted DNS","dohHint":"Your name lookups go to this provider over https instead of to the router.","dohUrlName":"DNS provider","dohUrlHint":"An https:// template. Empty = off.","blockReplayName":"Block session recorders","blockReplayHint":"Hotjar, FullStory and the rest, by name, whatever else is switched on.","phishingListName":"Use my phishing list","phishingListHint":"One host a line in phishing-hosts.txt beside the config. Nothing is downloaded.","blockHostsName":"Domains to refuse","blockHostsHint":"One a line. The engine is told these names are nowhere.","oneLanguageName":"Send only one language","oneLanguageHint":"Accept-Language carries your language and nothing else.","expandShortName":"Resolve short links on hover","expandShortHint":"Asks bit.ly or t.co where the link goes \u2014 which tells them you saw it.","shotPrivateName":"Allow screenshots of private tabs","shotPrivateHint":"Off = the capture tools refuse a private tab.","privateNoMediaName":"Private tabs never appear in the media list","privateNoMediaHint":"Nothing playing in one is announced anywhere.","popupModeName":"An allowed window opens as","popupModeTab":"A tab","popupModeWindow":"A small window","privacyCheckName":"Say at startup when a privacy setting changed","privacyCheckHint":"One line, and only when something is different from the last start.","offlineAction":"Work offline",
 "startCountdowns":"Counting down","startRecent":"Just added","startRecentName":"Show the bookmarks you added last","startRecentHint":"A row on the start page with the newest bookmarks.",
 "histPicked":"%d picked","histForget":"Forget this page","histForgetSite":"Forget this site","histVisits":"%d visits","histPages":"Pages","histMost":"Most visited","histStats":"Statistics","histBySite":"Group by site","histHops":"Show hops","histExport":"Export","histDelRange":"Delete this range","histOpen":"Open","histOpenGroup":"Open as a group","histBookmark":"Bookmark","histCopy":"Copy","histDelete":"Delete","histNone":"Clear","histSite":"site","histAll":"All time","histHour":"Last hour","histWeek":"Last 7 days","histMonth":"Last 30 days","histEveryBrowser":"Every browser","histDeleted":"%d deleted","histUndo":"Undo","histPagesTotal":"%d pages","histDaysName":"Keep history for","histDaysHint":"Days. 0 = for ever. Older entries are deleted at the next start.","cleanTitlesName":"Tidy up page titles","cleanTitlesHint":"Takes the \u201c(3)\u201d and the \u201c- YouTube\u201d off what is written into the history.","bmTags":"Tags","bmTagsAsk":"Tags for this bookmark, separated by commas:","bmNote":"Note","bmNoteAsk":"A note of your own about this bookmark:","bmNick":"Nickname","bmNickAsk":"A short word that opens this bookmark from the address bar:","bmVisits":"Visited %d times, last on %s","bmRunlet":"Run this on the page","bmToBrowser":"Copy to another browser","bmOpenAllGroup":"Open all as a group","bmSort":"Sort this folder","bmSortName":"By name","bmSortAdded":"By when it was added","bmSortUsed":"By when it was last opened","bmSortVisits":"By how often it is opened","bmColour":"Folder colour","bmColourNone":"No colour","bmSeparator":"Add a separator line","bmLock":"Lock this folder","bmUnlock":"Unlock this folder","bmLocked":"That folder is locked.","bmExportFolder":"Export this folder","bmTools":"Bookmark tools","bmImport":"Import bookmarks","bmExport":"Export bookmarks","bmImported":"%d bookmarks imported \u2713","bmExported":"%d bookmarks written \u2713","bmDupes":"Merge %d duplicates","bmDupesT":"Merge the duplicates?","bmDupesB":"%d bookmarks point at a page another one already points at. The oldest of each is kept, with the tags and notes of the others.","bmDupesGone":"%d duplicates merged \u2713","bmUnused":"%d bookmarks you never open","bmUnusedT":"Delete the ones you never open?","bmUnusedB":"%d bookmarks have never been opened, or not in a year:\n\n%s","bmBackups":"Backups","bmNoBackups":"No backup yet.","bmBackupNow":"Make one now","bmBackedUp":"Written to %s","bmRestoreT":"Put this backup back?","bmRestoreB":"The bookmarks from %s replace the ones you have now. What you have now is backed up first.","bmRestored":"%d bookmarks restored \u2713","bmByTag":"By tag","bmNoMatch":"Nothing with that tag.","bmMirrorNow":"Write the copy now","bmMirrorMerge":"Take what the copy has","bmMirrored":"Copied to %s","bmMerged":"%d bookmarks taken from the copy","bmCheckLinks":"Check the links (goes online)","bmCheckT":"Check every bookmark?","bmCheckB":"This asks %d servers whether their page is still there. Each of them learns that you still have it bookmarked. Nothing else is sent and no page is loaded.","bmChecking":"Asking %d servers\u2026","bmChecked":"%d still there, %d dead, %d moved","bmMovedT":"Update the moved ones?","bmMovedB":"%d bookmarks answered with a permanent redirect:\n\n%s","bmHttps":"Move old bookmarks to https (goes online)","bmHttpsT":"Try https for the old bookmarks?","bmHttpsB":"%d bookmarks are still on http://. This asks each site whether it answers on https:// and changes only the ones that do.","bmHttpsDone":"%d bookmarks moved to https \u2713","bmHttpsNone":"Every bookmark is already on https.","bmScrollName":"Bookmarks remember where you had read to","bmScrollHint":"Reopening one goes back to that place on the page.","bmBackupName":"A dated copy of the bookmarks every day","bmBackupHint":"Kept beside the bookmarks file; the last fourteen.","bmMirrorName":"Keep a copy of the bookmarks in","bmMirrorHint":"A folder of yours \u2014 a share, a stick, a synced directory. No account and no cloud.",
-"privateWindowTitle":"Private window \u2014 browser","overviewFilter":"Type to narrow the tabs down\u2026","tabHidden":"folded away","tabOpened":"Opened %s ago","tabLastSeen":"Last looked at %s ago","tabUnread":"%d unread","selMenu":"%d selected tabs","selClose":"Close them","selMute":"Mute them","selReload":"Reload them","selPin":"Pin them","selBookmark":"Bookmark them","selAside":"Set them aside","selGroup":"Put them in a group","selGroupAsk":"Name for the group:","tabPopOut":"Pop out as a small window","tabAsApp":"Open this site as an app","tabPip":"Picture-in-picture","tabPipOff":"This build of the engine has picture-in-picture switched off.","tabPipNone":"No video on this page.","winToNew":"Move tab to a new window","winGroupToNew":"Move this group to a new window","groupSave":"Keep this group and close it","winNew":"New window","winMerge":"Gather every window here","winMergePrivate":"A private window cannot gather the others \u2014 do it from an ordinary window","winMergeApp":"An app window cannot gather the others \u2014 do it from an ordinary window","winMenu":"Windows","tabsAll":"Every tab","tabSetsMenu":"Saved sets of tabs","asideMenu":"Set aside","asidePut":"Put these tabs aside","tabsExport":"Export the open tabs","tabsImport":"Open a list of addresses","tabsExported":"%d tabs written","setOpen":"Open it","setReplace":"Open it instead of these tabs","setDelete":"Forget this set","setSave":"Save these tabs as a set","setSaveAsk":"Name for this set of tabs:","sessionSaved":"\u201c%s\u201d saved \u2014 %d tabs","snapMenu":"Earlier today","closeManyT":"Close this window?","closeManyB":"%d tabs are open in it. They all close.","crashBackT":"Bring tabs back","crashBackB":"The browser did not close properly last time. These tabs were open \u2014 untick what you do not want back.","tabWidthName":"How wide tabs are","tabWidthHint":"Shrinking is the usual way; fixed lets the strip scroll instead.","tabWidthShrink":"Share the room out","tabWidthFixed":"All the same width","tabWidthIcon":"Just the site icon","tabMinWidthName":"Narrowest a tab gets","tabMinWidthHint":"Below this the strip scrolls instead of shrinking further.","closeButtonsName":"Show the close cross","closeButtonsHint":"Which tabs carry a cross, so it is not hit by accident.","closeButtonsWide":"On tabs with room for it","closeButtonsAll":"On every tab","closeButtonsHover":"Under the mouse, and on this tab","closeButtonsActive":"Only on this tab","hideStripName":"Hide the tab strip with one tab","hideStripHint":"A single tab needs no strip \u2014 like an app window.","stripDoubleName":"Double-click on the empty strip","stripDoubleHint":"Beside the tabs, where there is nothing.","tabDoubleName":"Double-click on a tab","tabMiddleName":"Middle-click on a tab","mouseNothing":"Nothing","mouseNewTab":"New tab","mouseClose":"Close it","mousePin":"Pin it","mouseDuplicate":"Duplicate it","mouseMute":"Mute it","autoCollapseName":"Fold the other groups away","autoCollapseHint":"Switching into one group collapses the rest, keeping the strip short.","confirmCloseName":"Ask before closing this many tabs","confirmCloseHint":"0 = never ask. Closing a window with twenty tabs cannot be undone.","tabTintName":"Give each site its own tab colour","tabTintHint":"A faint wash taken from the site\u2019s own icon.","unreadBadgeName":"Show the unread count on tabs","unreadBadgeHint":"The number a page puts in its title, such as Discord\u2019s \u201c(3)\u201d.","childNextName":"Links open next to the tab they came from","childNextHint":"Off = at the end of the strip.","backClosesName":"Back closes a tab that came from a link","backClosesHint":"On a tab with nothing behind it, Back shuts it and returns to the tab that opened it.","closeDownloadTabsName":"Close tabs that only started a download","closeDownloadTabsHint":"The blank tab a download link leaves behind closes itself.","staleDaysName":"Close tabs not looked at for","staleDaysHint":"Days. 0 = never. They go on the recently-closed list, not away.","snapshotsName":"Keep snapshots of the open tabs","snapshotsHint":"Every few minutes, so an older set of tabs can be put back.","sessionSitesName":"Sites that always open in one virtual browser","sessionSitesHint":"One \u201cdomain = browser name\u201d a line.","groupRulesName":"Put new tabs into groups by address","groupRulesHint":"One \u201cMods = modrinth.com, curseforge.com\u201d a line.","crashRecoveryName":"Offer the last tabs back after a crash","crashRecoveryHint":"A list with a box beside each tab, rather than all of them or none.","actNewWindow":"New window","actPrivateWindow":"New private window","actOverview":"All tabs as pictures","actAllTabs":"List every tab","actWindowList":"List the windows","actMergeWindows":"Gather every window here","actTabToWindow":"Move this tab to a new window","actPopOut":"Pop this tab out","actSiteAsApp":"Open this site as an app","actSaveTabSet":"Save these tabs as a set","actSetAside":"Set these tabs aside","actBringBack":"Bring back what was set aside","actExportTabs":"Export the open tabs","actImportTabs":"Open a list of addresses","appEntryWritten":"%s is in your application menu now","appEntryFailed":"That desktop entry could not be written."},
+"privateWindowTitle":"Private window \u2014 browser","overviewFilter":"Type to narrow the tabs down\u2026","tabHidden":"folded away","tabOpened":"Opened %s ago","tabLastSeen":"Last looked at %s ago","tabUnread":"%d unread","selMenu":"%d selected tabs","selClose":"Close them","selMute":"Mute them","selReload":"Reload them","selPin":"Pin them","selBookmark":"Bookmark them","selAside":"Set them aside","selGroup":"Put them in a group","selGroupAsk":"Name for the group:","tabPopOut":"Pop out as a small window","tabAsApp":"Open this site as an app","tabPip":"Picture-in-picture","tabPipOff":"This build of the engine has picture-in-picture switched off.","tabPipNone":"No video on this page.","winToNew":"Move tab to a new window","winGroupToNew":"Move this group to a new window","groupSave":"Keep this group and close it","winNew":"New window","winMerge":"Gather every window here","winMergePrivate":"A private window cannot gather the others \u2014 do it from an ordinary window","winMergeApp":"An app window cannot gather the others \u2014 do it from an ordinary window","bgTooLarge":"That image is too large, sorry \u2014 try a smaller one.","pressAgain":"Press again to confirm","clearedMsg":"Cleared \u2713","uiRadiusDefault":"default","countdownSkipped":"Saved, but %d lines were not understood","winMenu":"Windows","tabsAll":"Every tab","tabSetsMenu":"Saved sets of tabs","asideMenu":"Set aside","asidePut":"Put these tabs aside","tabsExport":"Export the open tabs","tabsImport":"Open a list of addresses","tabsExported":"%d tabs written","setOpen":"Open it","setReplace":"Open it instead of these tabs","setDelete":"Forget this set","setSave":"Save these tabs as a set","setSaveAsk":"Name for this set of tabs:","sessionSaved":"\u201c%s\u201d saved \u2014 %d tabs","snapMenu":"Earlier today","closeManyT":"Close this window?","closeManyB":"%d tabs are open in it. They all close.","crashBackT":"Bring tabs back","crashBackB":"The browser did not close properly last time. These tabs were open \u2014 untick what you do not want back.","tabWidthName":"How wide tabs are","tabWidthHint":"Shrinking is the usual way; fixed lets the strip scroll instead.","tabWidthShrink":"Share the room out","tabWidthFixed":"All the same width","tabWidthIcon":"Just the site icon","tabMinWidthName":"Narrowest a tab gets","tabMinWidthHint":"Below this the strip scrolls instead of shrinking further.","closeButtonsName":"Show the close cross","closeButtonsHint":"Which tabs carry a cross, so it is not hit by accident.","closeButtonsWide":"On tabs with room for it","closeButtonsAll":"On every tab","closeButtonsHover":"Under the mouse, and on this tab","closeButtonsActive":"Only on this tab","hideStripName":"Hide the tab strip with one tab","hideStripHint":"A single tab needs no strip \u2014 like an app window.","stripDoubleName":"Double-click on the empty strip","stripDoubleHint":"Beside the tabs, where there is nothing.","tabDoubleName":"Double-click on a tab","tabMiddleName":"Middle-click on a tab","mouseNothing":"Nothing","mouseNewTab":"New tab","mouseClose":"Close it","mousePin":"Pin it","mouseDuplicate":"Duplicate it","mouseMute":"Mute it","autoCollapseName":"Fold the other groups away","autoCollapseHint":"Switching into one group collapses the rest, keeping the strip short.","confirmCloseName":"Ask before closing this many tabs","confirmCloseHint":"0 = never ask. Closing a window with twenty tabs cannot be undone.","tabTintName":"Give each site its own tab colour","tabTintHint":"A faint wash taken from the site\u2019s own icon.","unreadBadgeName":"Show the unread count on tabs","unreadBadgeHint":"The number a page puts in its title, such as Discord\u2019s \u201c(3)\u201d.","childNextName":"Links open next to the tab they came from","childNextHint":"Off = at the end of the strip.","backClosesName":"Back closes a tab that came from a link","backClosesHint":"On a tab with nothing behind it, Back shuts it and returns to the tab that opened it.","closeDownloadTabsName":"Close tabs that only started a download","closeDownloadTabsHint":"The blank tab a download link leaves behind closes itself.","staleDaysName":"Close tabs not looked at for","staleDaysHint":"Days. 0 = never. They go on the recently-closed list, not away.","snapshotsName":"Keep snapshots of the open tabs","snapshotsHint":"Every few minutes, so an older set of tabs can be put back.","sessionSitesName":"Sites that always open in one virtual browser","sessionSitesHint":"One \u201cdomain = browser name\u201d a line.","groupRulesName":"Put new tabs into groups by address","groupRulesHint":"One \u201cMods = modrinth.com, curseforge.com\u201d a line.","crashRecoveryName":"Offer the last tabs back after a crash","crashRecoveryHint":"A list with a box beside each tab, rather than all of them or none.","actNewWindow":"New window","actPrivateWindow":"New private window","actOverview":"All tabs as pictures","actAllTabs":"List every tab","actWindowList":"List the windows","actMergeWindows":"Gather every window here","actTabToWindow":"Move this tab to a new window","actPopOut":"Pop this tab out","actSiteAsApp":"Open this site as an app","actSaveTabSet":"Save these tabs as a set","actSetAside":"Set these tabs aside","actBringBack":"Bring back what was set aside","actExportTabs":"Export the open tabs","actImportTabs":"Open a list of addresses","appEntryWritten":"%s is in your application menu now","appEntryFailed":"That desktop entry could not be written."},
 "de": {"settings":"Einstellungen","search":"Suche","searchEngine":"Suchmaschine",
 "appearance":"Aussehen","whiteGoogle":"Wei\u00dfes Google",
 "whiteGoogleHint":"Aus = pechschwarzes Google",
@@ -6204,7 +6204,7 @@ UI_STRINGS = {
 "guardMenu":"Was diese Seite darf","guardFingerprint":"Verwischen, was Seiten \u00fcber diesen Rechner erfahren","guardClipboardRead":"Keine Seite darf die Zwischenablage lesen","guardCopyGuard":"Nur kopieren, was ausgew\u00e4hlt ist","guardLeaveTrap":"\u201eSeite verlassen?\u201c-Fenster ignorieren","guardGpc":"Seiten sagen: nicht verkaufen oder weitergeben","guardNoFrames":"Rahmen von anderen Seiten blockieren","guardLocalFonts":"Lokale Schriften nehmen, nicht die der Seite","guardWsLog":"Offene Verbindungen einer Seite notieren","guardNoWebRTC":"WebRTC abschalten","guardBanners":"Cookie-Banner mit \u201eablehnen\u201c beantworten","guardPopups":"Aufschreiben, welche Fenster eine Seite \u00f6ffnen wollte","guardOffHere":"%s in Ruhe lassen","guardNoneOn":"Es ist nichts eingeschaltet.","guardApis":"Was %s nicht benutzen darf","guardHideElement":"Ein Element hier ausblenden","guardHideHow":"Rechtsklick auf das, was weg soll, und \u201eDieses Element ausblenden\u201c w\u00e4hlen.","guardHiddenHere":"%d hier ausgeblendet","guardHidden":"Ausgeblendet: %s","guardNoPick":"Da ist nichts zum Ausblenden.","guardPlace":"%s einen festen Ort geben","guardPlaceT":"Ein Ort deiner Wahl","guardPlaceAsk":"Breite und L\u00e4nge, mit Komma getrennt. Leer = der echte Ort.","guardPlaceBad":"Daf\u00fcr braucht es zwei Zahlen.","guardMissing":"page_guard.py liegt nicht neben dem Browser.","guardHideThis":"Dieses Element ausblenden","apiWebgl":"3D-Grafik (WebGL)","apiWasm":"WebAssembly","apiWebusb":"USB-Ger\u00e4te","apiBluetooth":"Bluetooth","apiSerial":"Serielle Anschl\u00fcsse","apiHid":"Gamepads und andere HID","apiMidi":"MIDI-Instrumente","apiSensors":"Bewegungssensoren","apiIdle":"Ob du am Rechner sitzt","apiNfc":"NFC","apiBattery":"Der Akku","apiSpeech":"Spracherkennung","redirectBlocked":"Ein Hintergrundtab wurde daran gehindert, zu %s zu wechseln","popupNone":"Hier wurde nichts blockiert.","popupAllow":"%s Fenster \u00f6ffnen lassen","popupBlocked":"Blockierte Fenster","dlElsewhere":"Dieser Download kommt von %s, nicht von dieser Seite","linkReally":"%s \u2014 eigentlich %s","offlineOn":"Offline \u2014 es wird nichts Neues geladen","offlineOff":"Wieder online","offlineBlocked":"Offline \u2014 diese Seite wurde nicht geladen","offlineRestart":"Offline gilt vollst\u00e4ndig nach einem Neustart","privacyRestart":"Diese Einstellung gilt nach einem Neustart","privacyNowOn":"Seit dem letzten Start eingeschaltet: %s","privacyNowOff":"Seit dem letzten Start ausgeschaltet: %s","privacyNoList":"Die Phishing-Liste ist leer \u2014 ein Host pro Zeile in phishing-hosts.txt","shotPrivateNo":"Ein privater Tab wird nicht aufgenommen. Der Schalter steht in den Einstellungen.","privateNotKept":"Nicht gespeichert: privater Tab","httpsOnlyName":"Seiten nur \u00fcber https laden","httpsOnlyHint":"Eine http-Adresse wird zuerst \u00fcber https versucht; schl\u00e4gt das fehl, wirst du vorher gefragt.","httpsWarnT":"Diese Seite hat keine sichere Adresse","httpsWarnB":"%s hat \u00fcber https nicht geantwortet. Weitermachen hei\u00dft: jeder zwischen dir und der Seite kann mitlesen und mitschreiben. Trotzdem hingehen?","redirectGuardName":"Seiten d\u00fcrfen keinen Tab umleiten, auf dem du nicht bist","redirectGuardHint":"Ein Hintergrundtab kann sich ohne Klick nicht auf eine andere Seite schicken.","blockPingsName":"Link-Tracking-Pings blockieren","blockPingsHint":"Die versteckte Anfrage, die ein Link beim Klick absetzen kann.","trimReferrerName":"Seiten sagen, woher du kommst","trimReferrerHint":"Aus sendet gar keinen Referrer. Nur-Herkunft gibt es in dieser Engine nicht.","trimReferrerFull":"Wie \u00fcblich","trimReferrerNone":"Nie","noSpeculativeName":"Keine Verbindungen vor dem Klick","noSpeculativeHint":"Kein DNS-Vorabruf, kein Vorverbinden, kein Link-Preload.","siteIsolationName":"Jede Seite in ihrem eigenen Prozess","siteIsolationHint":"Sicherer und langsamer, und es kostet Speicher.","webrtcGuardName":"WebRTC vom Heimnetz fernhalten","webrtcGuardHint":"Ein Anruf funktioniert weiter; die Seite erf\u00e4hrt die lokale Adresse nicht mehr.","dohName":"Verschl\u00fcsseltes DNS","dohHint":"Namensaufl\u00f6sungen gehen \u00fcber https an diesen Anbieter statt an den Router.","dohUrlName":"DNS-Anbieter","dohUrlHint":"Eine https://-Vorlage. Leer = aus.","blockReplayName":"Sitzungsaufzeichner blockieren","blockReplayHint":"Hotjar, FullStory und die anderen, namentlich, unabh\u00e4ngig vom Rest.","phishingListName":"Meine Phishing-Liste benutzen","phishingListHint":"Ein Host pro Zeile in phishing-hosts.txt neben der Konfiguration. Es wird nichts heruntergeladen.","blockHostsName":"Domains, die abgelehnt werden","blockHostsHint":"Eine pro Zeile. Der Engine wird gesagt, diese Namen gibt es nicht.","oneLanguageName":"Nur eine Sprache senden","oneLanguageHint":"Accept-Language tr\u00e4gt deine Sprache und sonst nichts.","expandShortName":"Kurzlinks beim \u00dcberfahren aufl\u00f6sen","expandShortHint":"Fragt bit.ly oder t.co, wohin der Link geht \u2014 und sagt denen damit, dass du ihn gesehen hast.","shotPrivateName":"Bildschirmfotos von privaten Tabs erlauben","shotPrivateHint":"Aus = die Aufnahmewerkzeuge verweigern einen privaten Tab.","privateNoMediaName":"Private Tabs tauchen nie in der Medienliste auf","privateNoMediaHint":"Was darin l\u00e4uft, wird nirgends angek\u00fcndigt.","popupModeName":"Ein erlaubtes Fenster \u00f6ffnet als","popupModeTab":"Tab","popupModeWindow":"Kleines Fenster","privacyCheckName":"Beim Start sagen, wenn sich eine Privatsph\u00e4re-Einstellung ge\u00e4ndert hat","privacyCheckHint":"Eine Zeile, und nur wenn etwas anders ist als beim letzten Start.","offlineAction":"Offline arbeiten",
 "startCountdowns":"Countdown","startRecent":"Gerade hinzugef\u00fcgt","startRecentName":"Die zuletzt hinzugef\u00fcgten Lesezeichen zeigen","startRecentHint":"Eine Zeile auf der Startseite mit den neuesten Lesezeichen.",
 "histPicked":"%d ausgew\u00e4hlt","histForget":"Diese Seite vergessen","histForgetSite":"Diese Website vergessen","histVisits":"%d Besuche","histPages":"Seiten","histMost":"Meistbesucht","histStats":"Statistik","histBySite":"Nach Website gruppieren","histHops":"Zwischenstationen zeigen","histExport":"Exportieren","histDelRange":"Diesen Zeitraum l\u00f6schen","histOpen":"\u00d6ffnen","histOpenGroup":"Als Gruppe \u00f6ffnen","histBookmark":"Als Lesezeichen","histCopy":"Kopieren","histDelete":"L\u00f6schen","histNone":"Auswahl aufheben","histSite":"Website","histAll":"Gesamter Zeitraum","histHour":"Letzte Stunde","histWeek":"Letzte 7 Tage","histMonth":"Letzte 30 Tage","histEveryBrowser":"Alle Browser","histDeleted":"%d gel\u00f6scht","histUndo":"Zur\u00fccknehmen","histPagesTotal":"%d Seiten","histDaysName":"Verlauf behalten f\u00fcr","histDaysHint":"Tage. 0 = f\u00fcr immer. \u00c4lteres wird beim n\u00e4chsten Start gel\u00f6scht.","cleanTitlesName":"Seitentitel aufr\u00e4umen","cleanTitlesHint":"Nimmt das \u201e(3)\u201c und das \u201e- YouTube\u201c aus dem, was in den Verlauf geschrieben wird.","bmTags":"Schlagw\u00f6rter","bmTagsAsk":"Schlagw\u00f6rter f\u00fcr dieses Lesezeichen, mit Komma getrennt:","bmNote":"Notiz","bmNoteAsk":"Eine eigene Notiz zu diesem Lesezeichen:","bmNick":"Kurzname","bmNickAsk":"Ein kurzes Wort, das dieses Lesezeichen aus der Adressleiste \u00f6ffnet:","bmVisits":"%d mal besucht, zuletzt am %s","bmRunlet":"Auf der Seite ausf\u00fchren","bmToBrowser":"In einen anderen Browser kopieren","bmOpenAllGroup":"Alle als Gruppe \u00f6ffnen","bmSort":"Diesen Ordner sortieren","bmSortName":"Nach Name","bmSortAdded":"Nach Hinzugef\u00fcgt","bmSortUsed":"Nach zuletzt ge\u00f6ffnet","bmSortVisits":"Nach H\u00e4ufigkeit","bmColour":"Ordnerfarbe","bmColourNone":"Keine Farbe","bmSeparator":"Trennlinie einf\u00fcgen","bmLock":"Diesen Ordner sperren","bmUnlock":"Diesen Ordner entsperren","bmLocked":"Dieser Ordner ist gesperrt.","bmExportFolder":"Diesen Ordner exportieren","bmTools":"Lesezeichen-Werkzeuge","bmImport":"Lesezeichen importieren","bmExport":"Lesezeichen exportieren","bmImported":"%d Lesezeichen importiert \u2713","bmExported":"%d Lesezeichen geschrieben \u2713","bmDupes":"%d Doppelte zusammenlegen","bmDupesT":"Doppelte zusammenlegen?","bmDupesB":"%d Lesezeichen zeigen auf eine Seite, auf die schon ein anderes zeigt. Das jeweils \u00e4lteste bleibt, mit den Schlagw\u00f6rtern und Notizen der anderen.","bmDupesGone":"%d Doppelte zusammengelegt \u2713","bmUnused":"%d Lesezeichen, die du nie \u00f6ffnest","bmUnusedT":"Die nie ge\u00f6ffneten l\u00f6schen?","bmUnusedB":"%d Lesezeichen wurden nie oder seit einem Jahr nicht ge\u00f6ffnet:\n\n%s","bmBackups":"Sicherungen","bmNoBackups":"Noch keine Sicherung.","bmBackupNow":"Jetzt eine anlegen","bmBackedUp":"Geschrieben nach %s","bmRestoreT":"Diese Sicherung zur\u00fcckholen?","bmRestoreB":"Die Lesezeichen von %s ersetzen die jetzigen. Die jetzigen werden vorher gesichert.","bmRestored":"%d Lesezeichen zur\u00fcckgeholt \u2713","bmByTag":"Nach Schlagwort","bmNoMatch":"Nichts mit diesem Schlagwort.","bmMirrorNow":"Kopie jetzt schreiben","bmMirrorMerge":"Nehmen, was die Kopie hat","bmMirrored":"Kopiert nach %s","bmMerged":"%d Lesezeichen aus der Kopie \u00fcbernommen","bmCheckLinks":"Links pr\u00fcfen (geht online)","bmCheckT":"Alle Lesezeichen pr\u00fcfen?","bmCheckB":"Das fragt %d Server, ob ihre Seite noch da ist. Jeder davon erf\u00e4hrt, dass du sie noch als Lesezeichen hast. Sonst wird nichts gesendet und keine Seite geladen.","bmChecking":"Frage %d Server\u2026","bmChecked":"%d noch da, %d tot, %d umgezogen","bmMovedT":"Die umgezogenen aktualisieren?","bmMovedB":"%d Lesezeichen antworteten mit einer dauerhaften Weiterleitung:\n\n%s","bmHttps":"Alte Lesezeichen auf https umstellen (geht online)","bmHttpsT":"Bei den alten Lesezeichen https versuchen?","bmHttpsB":"%d Lesezeichen stehen noch auf http://. Das fragt jede Seite, ob sie \u00fcber https:// antwortet, und \u00e4ndert nur die, die es tun.","bmHttpsDone":"%d Lesezeichen auf https umgestellt \u2713","bmHttpsNone":"Alle Lesezeichen sind schon auf https.","bmScrollName":"Lesezeichen merken, wo du gelesen hast","bmScrollHint":"Beim erneuten \u00d6ffnen geht es zur\u00fcck an diese Stelle.","bmBackupName":"T\u00e4glich eine datierte Kopie der Lesezeichen","bmBackupHint":"Liegt neben der Lesezeichendatei; die letzten vierzehn.","bmMirrorName":"Eine Kopie der Lesezeichen ablegen in","bmMirrorHint":"Ein Ordner von dir \u2014 eine Freigabe, ein Stick, ein synchronisiertes Verzeichnis. Kein Konto und keine Cloud.",
-"privateWindowTitle":"Privates Fenster \u2014 browser","overviewFilter":"Tippen, um die Tabs einzuschr\u00e4nken\u2026","tabHidden":"eingeklappt","tabOpened":"Vor %s ge\u00f6ffnet","tabLastSeen":"Zuletzt vor %s angesehen","tabUnread":"%d ungelesen","selMenu":"%d ausgew\u00e4hlte Tabs","selClose":"Schlie\u00dfen","selMute":"Stummschalten","selReload":"Neu laden","selPin":"Anheften","selBookmark":"Als Lesezeichen","selAside":"Zur Seite legen","selGroup":"In eine Gruppe","selGroupAsk":"Name der Gruppe:","tabPopOut":"Als kleines Fenster abl\u00f6sen","tabAsApp":"Diese Seite als App \u00f6ffnen","tabPip":"Bild im Bild","tabPipOff":"In dieser Version der Engine ist Bild im Bild abgeschaltet.","tabPipNone":"Auf dieser Seite ist kein Video.","winToNew":"Tab in ein neues Fenster","winGroupToNew":"Diese Gruppe in ein neues Fenster","groupSave":"Gruppe behalten und schlie\u00dfen","winNew":"Neues Fenster","winMerge":"Alle Fenster hier sammeln","winMergePrivate":"Ein privates Fenster kann die anderen nicht sammeln \u2014 mach es aus einem normalen Fenster","winMergeApp":"Ein App-Fenster kann die anderen nicht sammeln \u2014 mach es aus einem normalen Fenster","winMenu":"Fenster","tabsAll":"Alle Tabs","tabSetsMenu":"Gespeicherte Tab-S\u00e4tze","asideMenu":"Zur Seite gelegt","asidePut":"Diese Tabs zur Seite legen","tabsExport":"Offene Tabs exportieren","tabsImport":"Eine Liste von Adressen \u00f6ffnen","tabsExported":"%d Tabs geschrieben","setOpen":"\u00d6ffnen","setReplace":"Statt dieser Tabs \u00f6ffnen","setDelete":"Diesen Satz vergessen","setSave":"Diese Tabs als Satz speichern","setSaveAsk":"Name f\u00fcr diesen Satz Tabs:","sessionSaved":"\u201e%s\u201c gespeichert \u2014 %d Tabs","snapMenu":"Fr\u00fcher heute","closeManyT":"Dieses Fenster schlie\u00dfen?","closeManyB":"Darin sind %d Tabs offen. Die gehen alle zu.","crashBackT":"Tabs zur\u00fcckholen","crashBackB":"Der Browser wurde beim letzten Mal nicht richtig geschlossen. Diese Tabs waren offen \u2014 nimm die H\u00e4kchen weg, die du nicht brauchst.","tabWidthName":"Wie breit Tabs sind","tabWidthHint":"Schrumpfen ist das \u00dcbliche; feste Breite l\u00e4sst die Leiste scrollen.","tabWidthShrink":"Platz aufteilen","tabWidthFixed":"Alle gleich breit","tabWidthIcon":"Nur das Seitensymbol","tabMinWidthName":"Schmalste Tabbreite","tabMinWidthHint":"Darunter scrollt die Leiste, statt weiter zu schrumpfen.","closeButtonsName":"Das Schlie\u00dfkreuz zeigen","closeButtonsHint":"Welche Tabs ein Kreuz tragen \u2014 damit man es nicht versehentlich trifft.","closeButtonsWide":"Auf Tabs, die Platz daf\u00fcr haben","closeButtonsAll":"Auf jedem Tab","closeButtonsHover":"Unter der Maus und auf diesem Tab","closeButtonsActive":"Nur auf diesem Tab","hideStripName":"Tableiste bei einem Tab verbergen","hideStripHint":"Ein einzelner Tab braucht keine Leiste \u2014 wie ein App-Fenster.","stripDoubleName":"Doppelklick auf die leere Leiste","stripDoubleHint":"Neben den Tabs, wo nichts ist.","tabDoubleName":"Doppelklick auf einen Tab","tabMiddleName":"Mittelklick auf einen Tab","mouseNothing":"Nichts","mouseNewTab":"Neuer Tab","mouseClose":"Schlie\u00dfen","mousePin":"Anheften","mouseDuplicate":"Duplizieren","mouseMute":"Stummschalten","autoCollapseName":"Andere Gruppen einklappen","autoCollapseHint":"Wer in eine Gruppe wechselt, klappt die anderen zu \u2014 die Leiste bleibt kurz.","confirmCloseName":"Ab so vielen Tabs vorher fragen","confirmCloseHint":"0 = nie fragen. Ein Fenster mit zwanzig Tabs zu schlie\u00dfen ist nicht r\u00fcckg\u00e4ngig zu machen.","tabTintName":"Jeder Seite ihre eigene Tabfarbe","tabTintHint":"Ein zarter Hauch aus dem Symbol der Seite.","unreadBadgeName":"Ungelesen-Zahl auf Tabs zeigen","unreadBadgeHint":"Die Zahl, die eine Seite in ihren Titel schreibt, etwa Discords \u201e(3)\u201c.","childNextName":"Links \u00f6ffnen neben ihrem Tab","childNextHint":"Aus = am Ende der Leiste.","backClosesName":"Zur\u00fcck schlie\u00dft einen Tab aus einem Link","backClosesHint":"Bei einem Tab ohne Vorgeschichte schlie\u00dft Zur\u00fcck ihn und geht zum Tab zur\u00fcck, aus dem er kam.","closeDownloadTabsName":"Tabs schlie\u00dfen, die nur einen Download gestartet haben","closeDownloadTabsHint":"Der leere Tab, den ein Download-Link hinterl\u00e4sst, schlie\u00dft sich selbst.","staleDaysName":"Tabs schlie\u00dfen, die so lange unangesehen sind","staleDaysHint":"Tage. 0 = nie. Sie landen in der Liste der geschlossenen Tabs, nicht im Nichts.","snapshotsName":"Zwischenst\u00e4nde der offenen Tabs behalten","snapshotsHint":"Alle paar Minuten, damit ein \u00e4lterer Satz Tabs zur\u00fcckkommen kann.","sessionSitesName":"Seiten, die immer in einem virtuellen Browser \u00f6ffnen","sessionSitesHint":"Eine Zeile \u201eDomain = Browsername\u201c pro Regel.","groupRulesName":"Neue Tabs nach Adresse in Gruppen stecken","groupRulesHint":"Eine Zeile \u201eMods = modrinth.com, curseforge.com\u201c pro Regel.","crashRecoveryName":"Nach einem Absturz die letzten Tabs anbieten","crashRecoveryHint":"Eine Liste mit einem K\u00e4stchen pro Tab, statt alle oder keine.","actNewWindow":"Neues Fenster","actPrivateWindow":"Neues privates Fenster","actOverview":"Alle Tabs als Bilder","actAllTabs":"Alle Tabs auflisten","actWindowList":"Fenster auflisten","actMergeWindows":"Alle Fenster hier sammeln","actTabToWindow":"Diesen Tab in ein neues Fenster","actPopOut":"Diesen Tab abl\u00f6sen","actSiteAsApp":"Diese Seite als App \u00f6ffnen","actSaveTabSet":"Diese Tabs als Satz speichern","actSetAside":"Diese Tabs zur Seite legen","actBringBack":"Zur Seite Gelegtes zur\u00fcckholen","actExportTabs":"Offene Tabs exportieren","actImportTabs":"Eine Liste von Adressen \u00f6ffnen","appEntryWritten":"%s steht jetzt im Anwendungsmen\u00fc","appEntryFailed":"Dieser Desktop-Eintrag konnte nicht geschrieben werden."},
+"privateWindowTitle":"Privates Fenster \u2014 browser","overviewFilter":"Tippen, um die Tabs einzuschr\u00e4nken\u2026","tabHidden":"eingeklappt","tabOpened":"Vor %s ge\u00f6ffnet","tabLastSeen":"Zuletzt vor %s angesehen","tabUnread":"%d ungelesen","selMenu":"%d ausgew\u00e4hlte Tabs","selClose":"Schlie\u00dfen","selMute":"Stummschalten","selReload":"Neu laden","selPin":"Anheften","selBookmark":"Als Lesezeichen","selAside":"Zur Seite legen","selGroup":"In eine Gruppe","selGroupAsk":"Name der Gruppe:","tabPopOut":"Als kleines Fenster abl\u00f6sen","tabAsApp":"Diese Seite als App \u00f6ffnen","tabPip":"Bild im Bild","tabPipOff":"In dieser Version der Engine ist Bild im Bild abgeschaltet.","tabPipNone":"Auf dieser Seite ist kein Video.","winToNew":"Tab in ein neues Fenster","winGroupToNew":"Diese Gruppe in ein neues Fenster","groupSave":"Gruppe behalten und schlie\u00dfen","winNew":"Neues Fenster","winMerge":"Alle Fenster hier sammeln","winMergePrivate":"Ein privates Fenster kann die anderen nicht sammeln \u2014 mach es aus einem normalen Fenster","winMergeApp":"Ein App-Fenster kann die anderen nicht sammeln \u2014 mach es aus einem normalen Fenster","bgTooLarge":"Das Bild ist zu gro\u00df, tut mir leid \u2014 versuch ein kleineres.","pressAgain":"Nochmal klicken zum Best\u00e4tigen","clearedMsg":"Gel\u00f6scht \u2713","uiRadiusDefault":"Standard","countdownSkipped":"Gespeichert, aber %d Zeilen wurden nicht verstanden","winMenu":"Fenster","tabsAll":"Alle Tabs","tabSetsMenu":"Gespeicherte Tab-S\u00e4tze","asideMenu":"Zur Seite gelegt","asidePut":"Diese Tabs zur Seite legen","tabsExport":"Offene Tabs exportieren","tabsImport":"Eine Liste von Adressen \u00f6ffnen","tabsExported":"%d Tabs geschrieben","setOpen":"\u00d6ffnen","setReplace":"Statt dieser Tabs \u00f6ffnen","setDelete":"Diesen Satz vergessen","setSave":"Diese Tabs als Satz speichern","setSaveAsk":"Name f\u00fcr diesen Satz Tabs:","sessionSaved":"\u201e%s\u201c gespeichert \u2014 %d Tabs","snapMenu":"Fr\u00fcher heute","closeManyT":"Dieses Fenster schlie\u00dfen?","closeManyB":"Darin sind %d Tabs offen. Die gehen alle zu.","crashBackT":"Tabs zur\u00fcckholen","crashBackB":"Der Browser wurde beim letzten Mal nicht richtig geschlossen. Diese Tabs waren offen \u2014 nimm die H\u00e4kchen weg, die du nicht brauchst.","tabWidthName":"Wie breit Tabs sind","tabWidthHint":"Schrumpfen ist das \u00dcbliche; feste Breite l\u00e4sst die Leiste scrollen.","tabWidthShrink":"Platz aufteilen","tabWidthFixed":"Alle gleich breit","tabWidthIcon":"Nur das Seitensymbol","tabMinWidthName":"Schmalste Tabbreite","tabMinWidthHint":"Darunter scrollt die Leiste, statt weiter zu schrumpfen.","closeButtonsName":"Das Schlie\u00dfkreuz zeigen","closeButtonsHint":"Welche Tabs ein Kreuz tragen \u2014 damit man es nicht versehentlich trifft.","closeButtonsWide":"Auf Tabs, die Platz daf\u00fcr haben","closeButtonsAll":"Auf jedem Tab","closeButtonsHover":"Unter der Maus und auf diesem Tab","closeButtonsActive":"Nur auf diesem Tab","hideStripName":"Tableiste bei einem Tab verbergen","hideStripHint":"Ein einzelner Tab braucht keine Leiste \u2014 wie ein App-Fenster.","stripDoubleName":"Doppelklick auf die leere Leiste","stripDoubleHint":"Neben den Tabs, wo nichts ist.","tabDoubleName":"Doppelklick auf einen Tab","tabMiddleName":"Mittelklick auf einen Tab","mouseNothing":"Nichts","mouseNewTab":"Neuer Tab","mouseClose":"Schlie\u00dfen","mousePin":"Anheften","mouseDuplicate":"Duplizieren","mouseMute":"Stummschalten","autoCollapseName":"Andere Gruppen einklappen","autoCollapseHint":"Wer in eine Gruppe wechselt, klappt die anderen zu \u2014 die Leiste bleibt kurz.","confirmCloseName":"Ab so vielen Tabs vorher fragen","confirmCloseHint":"0 = nie fragen. Ein Fenster mit zwanzig Tabs zu schlie\u00dfen ist nicht r\u00fcckg\u00e4ngig zu machen.","tabTintName":"Jeder Seite ihre eigene Tabfarbe","tabTintHint":"Ein zarter Hauch aus dem Symbol der Seite.","unreadBadgeName":"Ungelesen-Zahl auf Tabs zeigen","unreadBadgeHint":"Die Zahl, die eine Seite in ihren Titel schreibt, etwa Discords \u201e(3)\u201c.","childNextName":"Links \u00f6ffnen neben ihrem Tab","childNextHint":"Aus = am Ende der Leiste.","backClosesName":"Zur\u00fcck schlie\u00dft einen Tab aus einem Link","backClosesHint":"Bei einem Tab ohne Vorgeschichte schlie\u00dft Zur\u00fcck ihn und geht zum Tab zur\u00fcck, aus dem er kam.","closeDownloadTabsName":"Tabs schlie\u00dfen, die nur einen Download gestartet haben","closeDownloadTabsHint":"Der leere Tab, den ein Download-Link hinterl\u00e4sst, schlie\u00dft sich selbst.","staleDaysName":"Tabs schlie\u00dfen, die so lange unangesehen sind","staleDaysHint":"Tage. 0 = nie. Sie landen in der Liste der geschlossenen Tabs, nicht im Nichts.","snapshotsName":"Zwischenst\u00e4nde der offenen Tabs behalten","snapshotsHint":"Alle paar Minuten, damit ein \u00e4lterer Satz Tabs zur\u00fcckkommen kann.","sessionSitesName":"Seiten, die immer in einem virtuellen Browser \u00f6ffnen","sessionSitesHint":"Eine Zeile \u201eDomain = Browsername\u201c pro Regel.","groupRulesName":"Neue Tabs nach Adresse in Gruppen stecken","groupRulesHint":"Eine Zeile \u201eMods = modrinth.com, curseforge.com\u201c pro Regel.","crashRecoveryName":"Nach einem Absturz die letzten Tabs anbieten","crashRecoveryHint":"Eine Liste mit einem K\u00e4stchen pro Tab, statt alle oder keine.","actNewWindow":"Neues Fenster","actPrivateWindow":"Neues privates Fenster","actOverview":"Alle Tabs als Bilder","actAllTabs":"Alle Tabs auflisten","actWindowList":"Fenster auflisten","actMergeWindows":"Alle Fenster hier sammeln","actTabToWindow":"Diesen Tab in ein neues Fenster","actPopOut":"Diesen Tab abl\u00f6sen","actSiteAsApp":"Diese Seite als App \u00f6ffnen","actSaveTabSet":"Diese Tabs als Satz speichern","actSetAside":"Diese Tabs zur Seite legen","actBringBack":"Zur Seite Gelegtes zur\u00fcckholen","actExportTabs":"Offene Tabs exportieren","actImportTabs":"Eine Liste von Adressen \u00f6ffnen","appEntryWritten":"%s steht jetzt im Anwendungsmen\u00fc","appEntryFailed":"Dieser Desktop-Eintrag konnte nicht geschrieben werden."},
 "fr": {"settings":"Param\u00e8tres","search":"Recherche","searchEngine":"Moteur de recherche",
 "appearance":"Apparence","whiteGoogle":"Google blanc",
 "whiteGoogleHint":"D\u00e9sactiv\u00e9 = Google noir",
@@ -13604,9 +13604,37 @@ def _install_capture_redaction():
             config = getattr(win, "config", None)
             if not isinstance(config, dict) and WINDOWS:
                 config = getattr(WINDOWS[0], "config", None)
+            # a capture that already holds the blur on this view (a
+            # recording from start to stop, a stitched page): this one
+            # per grab waited for it again, took it off under the holder
+            # at the end, and on a recording ran twice a frame -- the
+            # recording stalled and the blur flickered on the live page
+            held = getattr(win, "_shot_redacts", None)
+            held = isinstance(held, dict) and bool(held.get(id(view)))
             on = (isinstance(config, dict)
                   and config.get("shotRedact", True)
-                  and not getattr(view, "_redacting_now", False))
+                  and not getattr(view, "_redacting_now", False)
+                  and not held)
+            if held and isinstance(config, dict) \
+                    and config.get("shotRedact", True) \
+                    and hasattr(capture, "keep_redacted"):
+                # ... but the held blur is in the page it was put on: a
+                # recorded tab that went on to another page (a login
+                # link, a form sent, a reload) had its password fields
+                # in every frame after it. Put back where it is missing,
+                # and waited for once, never taken off per grab.
+                try:
+                    covered = capture.keep_redacted(view, APP_WORLD_ID)
+                    if isinstance(covered, (int, float)) and covered > 0:
+                        bare = view.grab().toImage()
+                        for _step in range(6):
+                            wait = QEventLoop()
+                            QTimer.singleShot(100, wait.quit)
+                            wait.exec()
+                            if view.grab().toImage() != bare:
+                                break
+                except RuntimeError:
+                    pass
             if on:
                 try:
                     view._redacting_now = True
@@ -13650,13 +13678,16 @@ class BackgroundCall(QObject):
 
     done = pyqtSignal(object)
 
-    def __init__(self, fn, parent=None):
+    def __init__(self, fn, parent=None, daemon=True):
         super().__init__(parent)
         self._fn = fn
+        # daemon=False: work the process must finish before it exits (a
+        # recording being written: quitting mid-write lost the clip)
+        self._daemon = bool(daemon)
 
     def start(self, then):
         self.done.connect(then)
-        threading.Thread(target=self._run, daemon=True).start()
+        threading.Thread(target=self._run, daemon=self._daemon).start()
 
     def _run(self):
         try:
@@ -31895,13 +31926,19 @@ class Browser(QMainWindow):
         if not self._shot_claim(view):
             self.flash(self._ui_str("shotWorking"))
             return None
+        image = None
         try:
             self._shot_prepare(view)
             self.flash(self._ui_str("shotWorking"))
             try:
                 image = capture.full_page(view, APP_WORLD_ID)
             finally:
-                self._shot_finish(view)
+                try:
+                    self._shot_finish(view)
+                except RuntimeError:
+                    pass     # the tab went first: its blur went with it
+        except RuntimeError:
+            image = None     # closed mid-walk: said as a failed capture
         finally:
             self._shot_release(view)
         return self._shot_done(image, copy, save, view=view)
@@ -31993,14 +32030,23 @@ class Browser(QMainWindow):
         if not self._shot_claim(view):
             self.flash(self._ui_str("shotWorking"))
             return None
+        image = None
         try:
             self._shot_prepare(view)
             try:
                 image = capture.full_page(view, APP_WORLD_ID)
             finally:
-                self._shot_finish(view)
+                try:
+                    self._shot_finish(view)
+                except RuntimeError:
+                    pass     # the tab went first: its blur went with it
+        except RuntimeError:
+            image = None
         finally:
             self._shot_release(view)
+        if image is None or image.isNull():
+            self.flash(self._ui_str("shotFailed"))
+            return None
         raw, shrunk = capture.fit_under(image, limit, "jpeg")
         try:
             title = self._tab_title(self.tabs.indexOf(view))
@@ -32035,7 +32081,7 @@ class Browser(QMainWindow):
             else []
 
     def site_rule_on(self, key, host):
-        host = (host or "").lower().removeprefix("www.")
+        host = (host or "").lower().rstrip(".").removeprefix("www.")
         if privacy is None:
             return host in self.site_rules(key)
         return privacy.matches(host, self.site_rules(key))
@@ -32047,7 +32093,7 @@ class Browser(QMainWindow):
         would land in config.json for every normal tab. Settings names
         no tab, so removing a rule from there works whatever tab is in
         front."""
-        host = (host or "").lower().removeprefix("www.")
+        host = (host or "").lower().rstrip(".").removeprefix("www.")
         if not host:
             return False
         if view is not None and self._private_of(view):
@@ -32095,7 +32141,7 @@ class Browser(QMainWindow):
         if view is None or not hasattr(view, "page"):
             return
         url = url if url is not None else view.url()
-        host = url.host().removeprefix("www.")
+        host = url.host().rstrip(".").removeprefix("www.")
         attr = QWebEngineSettings.WebAttribute
         settings = view.page().settings()
         settings.setAttribute(attr.JavascriptEnabled,
@@ -32922,13 +32968,13 @@ class Browser(QMainWindow):
             {"id": "recstart", "key": "", "str": "recStart",
              "run": lambda: self.start_recording()},
             {"id": "recstop", "key": "", "str": "recStop",
-             "run": lambda: self.stop_recording()},
+             "run": lambda: self.stop_recording(background=True)},
             {"id": "recbuffer", "key": "", "str": "recBufferStart",
              "run": lambda: self.start_recording(
                  seconds=int(self.config.get("recordBufferSeconds")
                              or 60))},
             {"id": "recclip", "key": "", "str": "recSaveClip",
-             "run": lambda: self.save_replay()},
+             "run": lambda: self.save_replay(background=True)},
             {"id": "recregion", "key": "", "str": "recRegion",
              "run": lambda: self.start_recording(
                  region=(0, 0, 640, 480))},
@@ -34831,7 +34877,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def site_min_font(self, host, size=None):
         """A smallest text size for one site, kept per host."""
         sizes = dict(self.config.get("minFontSites") or {})
-        host = (host or "").lower().removeprefix("www.")
+        host = (host or "").lower().rstrip(".").removeprefix("www.")
         if size is None:
             return int(sizes.get(host) or 0)
         if size:
@@ -40163,7 +40209,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not proc.waitForStarted(2000):
             proc.kill()
             return False
-        proc.write(text.encode("utf-8"))
+        # "replace": a lone surrogate from a page's selection raised here,
+        # in the selection's callback, after qrencode had been started
+        proc.write(text.encode("utf-8", "replace"))
         proc.closeWriteChannel()
         if not proc.waitForFinished(4000):
             proc.kill()
@@ -41289,6 +41337,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # private tab, in the private jar, not with his cookies
             tab = self.new_tab(blank=True,
                                private=bool(getattr(view, "private", False)))
+            # its links are judged as the page they came from: about:reader
+            # counts as a public page now, and a link from a router's or a
+            # home wiki's page to another of its own was refused
+            try:
+                tab.page()._opener_url = QUrl(view.url())
+            except (AttributeError, RuntimeError):
+                pass
             tab.setHtml(page, QUrl("about:reader"))
 
         return self.read_page_tool("readerselection", view=view, then=done)
@@ -51570,7 +51625,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def is_local_address(self, host):
         """Whether a host is this machine or the home network."""
-        host = str(host or "").strip().lower().strip("[]")
+        # narrow on purpose: "accept bad certificates on this machine and
+        # the home network" (localhostCerts) asks this, and a name-based
+        # answer (any dotless name, .lan, .internal) is one a rogue router
+        # or a search domain can claim. The wider list is privacy.is_local.
+        host = str(host or "").strip().lower().strip("[]").rstrip(".")
         if not host:
             return False
         if host in ("localhost", "127.0.0.1", "::1") \
@@ -60898,9 +60957,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                   else ui("recBuffer"))
             head.setEnabled(False)
             menu.addAction(ui("recStop")).triggered.connect(
-                lambda: self.stop_recording())
+                lambda: self.stop_recording(background=True))
             menu.addAction(ui("recSaveClip")).triggered.connect(
-                lambda: self.save_replay())
+                lambda: self.save_replay(background=True))
             menu.addAction(ui("recTrim")).triggered.connect(
                 lambda: self.ask_trim())
         else:
@@ -60974,7 +61033,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         except ValueError:
             return False
         end = max(start, rec.length() - cut_end)
-        return self.stop_recording(start=start, end=end)
+        return self.stop_recording(start=start, end=end, background=True)
 
     # ---- the rest of the capture work ----
     def _mobile_give_back(self, view):
@@ -61121,37 +61180,73 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not selector:
                 self.flash(self._ui_str("shotDiffNone"))
                 return None
-        facts = self._inner_facts(view, selector)
-        if not facts:
+        try:
+            facts = self._inner_facts(view, selector)
+            ratio = (view.devicePixelRatioF()
+                     if hasattr(view, "devicePixelRatioF") else 1.0) \
+                * self._zoom_of(view)
+            tall = min(int(facts["scrollHeight"]), int(limit)) \
+                if facts else 0
+            step = max(40, int(facts["clientHeight"])) if facts else 40
+            wide = int(facts["width"] * ratio) if facts else 0
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            facts, tall = None, 0
+        if not facts or tall < 1 or wide < 1:
+            # the tab or the element is gone, or has nothing to scroll
+            self.flash(self._ui_str("shotFailed"))
             return None
-        ratio = (view.devicePixelRatioF()
-                 if hasattr(view, "devicePixelRatioF") else 1.0) \
-            * self._zoom_of(view)
-        tall = min(int(facts["scrollHeight"]), int(limit))
-        step = max(40, int(facts["clientHeight"]))
-        sheet = QImage(int(facts["width"] * ratio), int(tall * ratio),
-                       QImage.Format.Format_RGB32)
+        sheet = QImage(wide, int(tall * ratio), QImage.Format.Format_RGB32)
         sheet.fill(Qt.GlobalColor.black)
         painter = QPainter(sheet)
         at = 0
-        while at < tall:
-            self._scroll_inner(view, selector, at)
-            loop = QEventLoop()
-            QTimer.singleShot(140, loop.quit)
-            loop.exec()
-            box = self._inner_facts(view, selector)
-            if not box:
-                break
-            shot = capture.area(view, (int(box["x"] * ratio),
-                                       int(box["y"] * ratio),
-                                       int(box["width"] * ratio),
-                                       int(min(step, tall - at) * ratio)))
-            if shot.isNull():
-                break
-            painter.drawImage(0, int(at * ratio), shot)
-            at += step
-        painter.end()
-        self._scroll_inner(view, selector, 0)
+        walked = True
+        try:
+            while at < tall:
+                self._scroll_inner(view, selector, at)
+                loop = QEventLoop()
+                QTimer.singleShot(140, loop.quit)
+                loop.exec()
+                box = self._inner_facts(view, selector)
+                if not box:
+                    walked = False      # tab closed, navigated, element gone
+                    break
+                # where the scroller really is: the last band asks for a
+                # scrollTop past its end, the scroller stops at its end,
+                # and the band wanted is then lower in the box -- copied
+                # from the top it pasted the previous band's content again
+                try:
+                    real = int(round(float(box.get("scrollTop", at))))
+                except (TypeError, ValueError):
+                    real = at
+                skip = max(0, at - real)
+                want = min(step, tall - at,
+                           int(box.get("clientHeight", step)) - skip)
+                if want < 1:
+                    walked = False
+                    break
+                shot = capture.area(view, (
+                    int(box["x"] * ratio),
+                    int((box["y"] + skip) * ratio),
+                    int(box["width"] * ratio),
+                    int(want * ratio)))
+                if shot.isNull():
+                    walked = False
+                    break
+                painter.drawImage(0, int(at * ratio), shot)
+                at += want
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            walked = False
+        finally:
+            painter.end()
+            try:
+                self._scroll_inner(view, selector, 0)
+            except RuntimeError:
+                pass
+        if not walked:
+            # a half-black sheet saved and reported as a capture is worse
+            # than none
+            self.flash(self._ui_str("shotFailed"))
+            return None
         path = self._shot_done(sheet, copy=copy, save=save, view=view)
         if path:
             self.note_capture(path)
@@ -61809,6 +61904,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         rec.view = view
         rec.audio_path = ""
         self._recording = rec
+        # the blur once, for the whole recording (see the per-grab one)
+        self._shot_prepare(view)
         timer = getattr(self, "_record_timer", None)
         if timer is None:
             timer = self._record_timer = QTimer(self)
@@ -61905,7 +62002,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return out
 
     def _record_tick(self):
-        """One frame."""
+        """One frame -- one at a time. A tick that waits (the blur put
+        back on a page the tab went to) runs the event loop, and the
+        timer fired again inside it: that frame was grabbed before the
+        blur was painted."""
+        if getattr(self, "_record_ticking", False):
+            return False
+        self._record_ticking = True
+        try:
+            return self._record_frame()
+        finally:
+            self._record_ticking = False
+
+    def _record_frame(self):
+        """One frame (see _record_tick)."""
         rec = self.recording_now()
         if rec is None:
             return False
@@ -62015,17 +62125,25 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             pass
 
     def stop_recording(self, save=True, fmt=None, start=0.0, end=None,
-                       quality=None):
+                       quality=None, background=False):
         """Stop, and write the file.
 
         What it is written as: a GIF here, a WebM or MP4 through ffmpeg.
         `start` and `end` trim the ends -- which is possible at all
-        because a recording is a list of frames and nothing cleverer."""
+        because a recording is a list of frames and nothing cleverer.
+        `background` writes it on a worker thread and flashes the result
+        when it is done (returning "" now); the menus ask for that, the
+        callers that need the path, or that are closing the tab, do not."""
         rec = self.recording_now()
         timer = getattr(self, "_record_timer", None)
         if timer is not None:
             timer.stop()
         self._recording = None
+        if rec is not None:
+            try:
+                self._shot_finish(getattr(rec, "view", None))
+            except RuntimeError:
+                pass     # the tab went first: its blur went with it
         self.mark_recording(False)
         audio = getattr(self, "_audio_proc", None)
         if audio is not None:
@@ -62053,6 +62171,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         kept = rec.trimmed(start, end)
         if self.config.get("recordClicks", False):
             kept = self.draw_input_marks(rec, kept)
+        times = [when for when, _image in kept]
         rows = [image for _when, image in kept]
         if not rows:
             drop_sound()
@@ -62064,57 +62183,121 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         except OSError:
             drop_sound()
             return ""
-        stem = time.strftime("recording-%Y%m%d-%H%M%S")
-        if fmt == "gif":
-            path = where / (stem + ".gif")
-            out = capture.write_gif(str(path), rows,
-                                    delay_ms=int(1000 / max(1, rec.fps)))
-        else:
-            tools = self.record_tools()
-            if not tools["ffmpeg"]:
-                self.flash(self._ui_str("recNoFfmpeg"))
-                # a GIF needs nothing installed, so it is offered
-                # instead of nothing at all
-                path = where / (stem + ".gif")
-                out = capture.write_gif(str(path), rows,
-                                        delay_ms=int(1000
-                                                     / max(1, rec.fps)))
+        stem = self._free_recording_stem(
+            where, time.strftime("recording-%Y%m%d-%H%M%S"))
+        # read here, on the GUI thread: the writer touches no config
+        ffmpeg = "" if fmt == "gif" else self.record_tools()["ffmpeg"]
+        quality = str(quality or self.config.get("recordQuality") or "good")
+
+        def finish(result):
+            out, notes = result if result else ("", [])
+            for note in notes:
+                self.flash(self._ui_str(note))
+            if out:
+                self._last_recording = out
+                self.note_capture(out)
+                self.flash(self._ui_str("recSaved") % Path(out).name)
             else:
-                path = where / ("%s.%s" % (stem,
-                                           "mp4" if fmt == "mp4" else "webm"))
-                out = capture.frames_to_video(
-                    rows, str(path), fps=rec.fps, ffmpeg=tools["ffmpeg"],
-                    quality=str(quality or self.config.get("recordQuality")
-                                or "good"))
-                if not out:
-                    # ffmpeg failed or ran out of time, and the frames
-                    # live only in this list: a GIF needs nothing from
-                    # ffmpeg, so the recording is kept in that form
-                    # rather than thrown away
-                    self.flash(self._ui_str("recGifFallback"))
-                    out = capture.write_gif(
-                        str(where / (stem + ".gif")), rows,
-                        delay_ms=int(1000 / max(1, rec.fps)))
-        if out:
-            self._last_recording = out
-            self.note_capture(out)
-            self.flash(self._ui_str("recSaved") % Path(out).name)
-            # the sound beside the picture, under the same name: the
-            # frames are written at a fixed rate from a timer, so the
-            # two are kept side by side rather than muxed out of step
-            if sound is not None and sound.exists():
+                self.flash(self._ui_str("recFailed"))
+            return out
+
+        def work():
+            try:
+                out, notes = self._write_recording(
+                    rows, times, fmt, quality, where, stem, rec.fps, ffmpeg)
+            finally:
+                self._record_stems.discard(stem)
+            # the sound beside the picture, under the same name (kept
+            # side by side rather than muxed out of step) -- done here,
+            # not in finish: a quit while this ran never reaches finish,
+            # and the .wav was left behind on its own
+            if sound is not None:
                 try:
-                    sound.replace(Path(out).with_suffix(".wav"))
+                    if out and sound.exists():
+                        sound.replace(Path(out).with_suffix(".wav"))
+                    elif not out:
+                        sound.unlink(missing_ok=True)
                 except OSError:
                     pass
-        else:
-            drop_sound()
-            self.flash(self._ui_str("recFailed"))
-        return out
+            return out, notes
+        if background:
+            self._record_write_later(work, finish)
+            return ""
+        return finish(work())
 
-    def save_replay(self, seconds=None, fmt=None):
+    def _write_recording(self, rows, times, fmt, quality, where, stem, fps,
+                         ffmpeg, replay=False):
+        """The slow half of saving a recording: the pixels into a file.
+
+        Touches no widget and no setting, so it can run on a worker
+        thread (a GIF is converted pixel by pixel in Python: minutes for
+        a long 1080p recording). Returns (path or "", the UI strings to
+        flash once it is home)."""
+        notes = []
+        delays = capture.frame_delays(times, fps)
+
+        def gif():
+            return capture.write_gif(
+                str(where / (stem + ".gif")), rows,
+                delay_ms=int(1000 / max(1, fps)), delays_ms=delays)
+        if fmt == "gif":
+            return gif(), notes
+        if not ffmpeg:
+            if not replay:
+                # a GIF needs nothing installed, so it is offered
+                # instead of nothing at all
+                notes.append("recNoFfmpeg")
+            return gif(), notes
+        out = capture.frames_to_video(
+            rows, str(where / ("%s.%s" % (stem, "mp4" if fmt == "mp4"
+                                          else "webm"))),
+            fps=fps, ffmpeg=ffmpeg, quality=quality, times=times)
+        if not out and not replay:
+            # ffmpeg failed or ran out of time, and the frames live only
+            # in this list: a GIF needs nothing from ffmpeg, so the
+            # recording is kept in that form rather than thrown away
+            notes.append("recGifFallback")
+            out = gif()
+        return out, notes
+
+    def _free_recording_stem(self, where, stem):
+        """A name no other clip has, on disk or still being written: two
+        saves in the same second (Save clip twice, a stop and the next
+        stop while the first still writes) wrote one file from two
+        threads."""
+        pending = getattr(self, "_record_stems", None)
+        if pending is None:
+            pending = self._record_stems = set()
+        base, n = stem, 2
+        while stem in pending or any(Path(where).glob(stem + ".*")):
+            stem = "%s-%d" % (base, n)
+            n += 1
+        pending.add(stem)
+        return stem
+
+    def _record_write_later(self, work, finish):
+        """`work` on a worker thread, `finish` with its answer back on
+        this one; the window stays usable meanwhile."""
+        jobs = getattr(self, "_record_jobs", None)
+        if jobs is None:
+            jobs = self._record_jobs = set()
+        # not a daemon: a quit while this writes waits for the file
+        # instead of losing the clip (the window's part, finish, needs
+        # the window and is skipped then -- the file and its sound are
+        # the worker's own business)
+        job = BackgroundCall(work, self, daemon=False)
+        jobs.add(job)
+
+        def home(value, job=job):
+            jobs.discard(job)
+            job.deleteLater()
+            if not sip.isdeleted(self):
+                finish(value)
+        job.start(home)
+
+    def save_replay(self, seconds=None, fmt=None, background=False):
         """The last so many seconds, out of the replay buffer, without
-        stopping the recording."""
+        stopping the recording. `background`: see stop_recording."""
         rec = self.recording_now()
         if rec is None or not rec.frames:
             self.flash(self._ui_str("recNoBuffer"))
@@ -62125,6 +62308,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 if when >= last - seconds]
         if self.config.get("recordClicks", False):
             kept = self.draw_input_marks(rec, kept)
+        times = [when for when, _image in kept]
         rows = [image for _when, image in kept]
         if not rows:
             return ""
@@ -62133,21 +62317,30 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             where.mkdir(parents=True, exist_ok=True)
         except OSError:
             return ""
-        stem = time.strftime("clip-%Y%m%d-%H%M%S")
+        stem = self._free_recording_stem(
+            where, time.strftime("clip-%Y%m%d-%H%M%S"))
         fmt = str(fmt or self.config.get("recordFormat") or "webm").lower()
         tools = self.record_tools()
-        if fmt == "gif" or not tools["ffmpeg"]:
-            out = capture.write_gif(str(where / (stem + ".gif")), rows,
-                                    delay_ms=int(1000 / max(1, rec.fps)))
-        else:
-            out = capture.frames_to_video(
-                rows, str(where / ("%s.%s" % (stem, "mp4" if fmt == "mp4"
-                                              else "webm"))),
-                fps=rec.fps, ffmpeg=tools["ffmpeg"])
-        if out:
-            self.note_capture(out)
-            self.flash(self._ui_str("recClip") % Path(out).name)
-        return out
+        ffmpeg = "" if fmt == "gif" else tools["ffmpeg"]
+
+        def finish(result):
+            out = result[0] if result else ""
+            if out:
+                self.note_capture(out)
+                self.flash(self._ui_str("recClip") % Path(out).name)
+            return out
+
+        def work():
+            try:
+                return self._write_recording(rows, times, fmt, "good", where,
+                                             stem, rec.fps, ffmpeg,
+                                             replay=True)
+            finally:
+                self._record_stems.discard(stem)
+        if background:
+            self._record_write_later(work, finish)
+            return ""
+        return finish(work())
 
     def mark_recording(self, on=True):
         """The marker that says something is being recorded.
@@ -63115,9 +63308,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 page_host = self._host_of(view.url())
             except RuntimeError:
                 page_host = ""
+            # privacy.is_local's list (bare names, .lan, .box, the root
+            # dot): this asked the narrow address test, and a public page's
+            # caption source on the router's NAME was fetched
+            near = (privacy.is_local if privacy is not None
+                    else self.is_local_address)
             if (src.scheme() not in ("http", "https")
-                    or (self.is_local_address(src.host())
-                        and not self.is_local_address(page_host))):
+                    or (near(src.host()) and not near(page_host))):
                 self.flash(self._ui_str("autocapRefused"))
                 if then:
                     then({"refused": True})
@@ -71666,8 +71863,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """What the start page needs to run a slideshow by itself: the
         list and how often to move on."""
         rows = self.wallpaper_list()
+        # a hand-edited "5m" raised here, inside the start page's extras
+        # slot: its recent, countdown and agenda rows never came
         return {"shots": [QUrl.fromLocalFile(f).toString() for f in rows],
-                "every": int(self.config.get("wallpaperEvery") or 0)}
+                "every": _sane_number(self.config.get("wallpaperEvery"),
+                                      100000)}
 
     def refresh_own_pages(self):
         """Tell our own open pages that a setting they draw themselves
@@ -76729,8 +76929,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         opened (window.open needs a click to get past the popup block),
         and not more often than every few seconds for the same thing."""
         try:
-            front = view is self.current() or bool(
-                getattr(view.page(), "_opener_url", None))
+            front = (view is self.current()
+                     or bool(getattr(view.page(), "_opener_url", None))
+                     # on screen and clicked like the tab in front: a
+                     # mailto: in the split view's other half or in a
+                     # popped-out tab was dropped without a word
+                     or view is getattr(self, "_split_view", None)
+                     or any(getattr(mini, "view", None) is view for mini
+                            in (getattr(self, "_popouts", None) or [])))
         except (AttributeError, RuntimeError):
             front = False
         if not front:
@@ -78720,14 +78926,21 @@ REPLAY_HOSTS = (
 )
 
 
-def _block_entry(text):
+def _block_entry(text, pages=False):
     """A block-list line as the bare name the resolver rules need, or
     "". Settings saves what he typed, and "https://tracker.example/",
     "*.tracker.example", "tracker.example." or an international name
     stayed on the list while blocking nothing."""
     host = str(text or "").strip().lower()
     host = re.sub(r"^[a-z][a-z0-9+.-]*://", "", host)
-    host = re.split(r"[/?#]", host, maxsplit=1)[0].rsplit("@", 1)[-1]
+    # pages=True (a downloaded list): a line with a path is about one
+    # page ("sites.google.com/view/scam"), and cut to its host it blocked
+    # every site there, so it is no host entry at all. His own list keeps
+    # the old reading: an address he typed means that site.
+    rest = re.split(r"[/?#]", host, maxsplit=1)
+    if pages and len(rest) > 1 and rest[1].strip("/?#"):
+        return ""
+    host = rest[0].rsplit("@", 1)[-1]
     if host.count(":") == 1:
         host = host.split(":", 1)[0]
     host = host.removeprefix("*.").strip(".").removeprefix("www.")
@@ -78841,7 +79054,7 @@ def _phishing_hosts():
         return []
     out = []
     for line in lines[:20000]:
-        host = _block_entry(line.split("#")[0])
+        host = _block_entry(line.split("#")[0], pages=True)
         if host:
             out.append(host)
     return out

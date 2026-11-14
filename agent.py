@@ -287,9 +287,16 @@ def _wait_for(req, given=None):
     if given:
         return float(given)
     try:
-        server = float(req.get("timeout") or 0) / 1000.0
+        server = float(req.get("timeout") or 0)
     except (TypeError, ValueError):
         server = 0.0
+    # download's timeout is in seconds (the browser waits up to 1800 s
+    # for one); the waiting ops' in ms. Read as ms, a 1800 s download
+    # was given up on after 60 s while the browser went on writing it.
+    if req.get("op") != "download":
+        server /= 1000.0
+    elif not server:
+        server = 120.0    # the browser's own default for a download
     return max(60.0, server + 30.0)
 
 
@@ -494,7 +501,10 @@ def main(argv):
         elif op == "tree":
             req.update(limit=int(args[0]) if args else 200)
         elif op == "download":
-            req.update(url=args[0], path=os.path.abspath(args[1]))
+            # the browser's own patience, sent along: without it the
+            # client stopped at 60 s and the browser kept going to 120
+            req.update(url=args[0], path=os.path.abspath(args[1]),
+                       timeout=a.timeout or 120)
         elif op == "watch":
             req.update(selector=args[0] if args else "body",
                        every=int(args[1]) if len(args) > 1 else 60)

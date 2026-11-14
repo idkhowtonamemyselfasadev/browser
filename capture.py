@@ -149,6 +149,28 @@ def redact(view, world, on=True):
     return _js(view, REDACT_JS % ("true" if on else "false"), world)
 
 
+# the blur a capture holds (a recording, a stitched page) put back on a
+# page that has lost it: the tab went on to another page and the new
+# document has no style. Never taken off here -- the holder does that.
+REDACT_KEEP_JS = """(function () {
+  if (document.getElementById("__shotredact") || !document.documentElement)
+    return 0;
+  var s = document.createElement("style");
+  s.id = "__shotredact";
+  s.textContent = "input[type=password], [data-redact],"
+    + " .__redact { filter: blur(7px) !important; }";
+  document.documentElement.appendChild(s);
+  return document.querySelectorAll(
+    "input[type=password], [data-redact], .__redact").length;
+})()"""
+
+
+def keep_redacted(view, world):
+    """The held blur back on a page that lost it: how many things it
+    had to cover again (0 when it was still there)."""
+    return _js(view, REDACT_KEEP_JS, world)
+
+
 def visible(view):
     """What is on the screen now."""
     return view.grab().toImage()
@@ -178,21 +200,34 @@ def full_page(view, world, settle=160, limit=30000):
 
     limit is there because some pages are endless: a timeline that grows
     as you scroll would otherwise capture until the memory ran out."""
-    metrics = _js(view, METRICS_JS, world)
-    if not metrics:
-        return visible(view)
-    height, width, inner_h, inner_w, was_x, was_y, ratio = metrics
-    height = min(int(height), limit)
-    shot = visible(view)
-    if shot.isNull() or not inner_h:
-        return shot
-    scale = shot.height() / float(inner_h)      # device pixels per CSS pixel
-    out = QImage(shot.width(), int(height * scale),
-                 QImage.Format.Format_ARGB32)
-    out.fill(Qt.GlobalColor.white)
-    painter = QPainter(out)
-    clean(view, world, True)
     try:
+        metrics = _js(view, METRICS_JS, world)
+        if not metrics:
+            return visible(view)
+        height, width, inner_h, inner_w, was_x, was_y, ratio = metrics
+        shot = visible(view)
+        if shot.isNull() or not inner_h:
+            return shot
+    except RuntimeError:
+        return QImage()         # the tab went before the first screen
+    scale = shot.height() / float(inner_h)      # device pixels per CSS pixel
+    out = QImage()
+    painter = None
+    gone = False
+    try:
+        clean(view, world, True)
+        # how tall the page is NOW: a sticky header becomes absolute in
+        # clean() and leaves the flow, so the page is shorter by its
+        # height; measured before, the picture was too tall (white at
+        # the bottom) and every screen but the first sat shifted
+        again = _js(view, METRICS_JS, world)
+        if again:
+            height = again[0]
+        height = max(1, min(int(height), limit))
+        out = QImage(shot.width(), max(1, int(height * scale)),
+                     QImage.Format.Format_ARGB32)
+        out.fill(Qt.GlobalColor.white)
+        painter = QPainter(out)
         y = 0
         while y < height:
             _js(view, "window.scrollTo(0, %d)" % y, world)
@@ -221,11 +256,20 @@ def full_page(view, world, settle=160, limit=30000):
                 break
             painter.drawImage(0, top, screen)
             y += inner_h
+    except RuntimeError:
+        # the tab was closed in the middle of the walk: its waits came
+        # back to a deleted view. No picture, and no exception out of a
+        # slot.
+        gone = True
     finally:
-        painter.end()
-        clean(view, world, False)
-        _js(view, "window.scrollTo(%d, %d)" % (was_x, was_y), world)
-    return out
+        if painter is not None:
+            painter.end()
+        try:
+            clean(view, world, False)
+            _js(view, "window.scrollTo(%d, %d)" % (was_x, was_y), world)
+        except RuntimeError:
+            pass
+    return QImage() if gone else out
 
 
 def element(view, world, selector):
@@ -310,9 +354,34 @@ def name_for(pattern, title="", host="", fmt="png"):
     safe = "".join(c for c in (title or "") if c.isalnum() or c in " -_")[:60]
     stamp = stamp.replace("{title}", safe.strip() or "page")
     stamp = stamp.replace("{site}", host or "page")
-    if not stamp.lower().endswith("." + fmt.lower()):
+    # .jpg and .jpeg are one format: a pattern ending .jpg with JPEG
+    # chosen came out as shot.jpg.jpeg
+    ends = ((".jpg", ".jpeg") if fmt.lower() in ("jpg", "jpeg")
+            else ("." + fmt.lower(),))
+    if not stamp.lower().endswith(ends):
         stamp += "." + fmt.lower()
     return stamp
+
+
+def _write_atomic(path, raw):
+    """Write bytes so that the final name is either the whole file or
+    not there: to a hidden name in the same folder first, then moved
+    into place. A full disk used to leave a truncated picture under the
+    real name, which the next save then skipped over. Raises OSError,
+    with nothing left behind."""
+    path = str(path)
+    part = os.path.join(os.path.dirname(path), ".%s.%d-%d.part" % (
+        os.path.basename(path), os.getpid(), time.time_ns()))
+    try:
+        with open(part, "xb") as handle:
+            handle.write(raw)
+        os.replace(part, path)
+    except BaseException:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        raise
 
 
 def save(image, directory, pattern="shot-%Y%m%d-%H%M%S", title="", host="",
@@ -329,13 +398,17 @@ def save(image, directory, pattern="shot-%Y%m%d-%H%M%S", title="", host="",
     if not raw:
         return None
     path = directory / name_for(pattern, title, host, fmt)
+    # the stem and the extension of the first name, taken once: re-read
+    # from the renamed path each pass, shot.png and shot-2.png made
+    # shot-2-3.png
+    stem, ext = path.stem, path.suffix
     n = 2
     while path.exists():
-        path = directory / ("%s-%d.%s" % (path.stem, n, fmt.lower()))
+        path = directory / ("%s-%d%s" % (stem, n, ext))
         n += 1
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(raw)
+        _write_atomic(path, raw)
     except OSError:
         return None
     return path
@@ -354,13 +427,20 @@ class PinnedShot(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         label = QLabel(self)
         shown = image
-        if image.width() > 900:
+        # 900 of the picture's own (device-independent) pixels: on a 2x
+        # screen the picture is twice as wide in device pixels
+        ratio = image.devicePixelRatio() or 1.0
+        if image.width() > 900 * ratio:
             shown = image.scaledToWidth(
-                900, Qt.TransformationMode.SmoothTransformation)
+                int(900 * ratio), Qt.TransformationMode.SmoothTransformation)
         label.setPixmap(QPixmap.fromImage(shown))
         lay.addWidget(label)
         self.image = image
-        self.resize(shown.width(), shown.height())
+        # the label draws the pixmap at its device-independent size; the
+        # window was sized from device pixels, twice the picture on hi-dpi
+        size = shown.deviceIndependentSize()
+        self.resize(max(1, int(round(size.width()))),
+                    max(1, int(round(size.height()))))
 
     def mouseDoubleClickEvent(self, _event):
         to_clipboard(self.image)
@@ -527,15 +607,54 @@ def _lzw(indices, bits=8):
     return bytes(blocks)
 
 
-def write_gif(path, frames, delay_ms=100, width=0, height=0):
+def frame_delays(times, fps=10):
+    """How long each frame stays on screen, in milliseconds, from when
+    each was taken: the gap to the next one (the last gets the average
+    gap). Grabs run slower than the timer when the page is heavy, and
+    one delay of 1000/fps for every frame played that recording too
+    fast. One gap is capped at ten seconds, so a laptop that slept in
+    the middle is not a ten-minute frame."""
+    n = len(times)
+    base = 1000.0 / max(1, fps)
+    gaps = [min(10000.0, max(0.0, (times[i + 1] - times[i]) * 1000.0))
+            for i in range(n - 1)]
+    last = sum(gaps) / len(gaps) if gaps else base
+    return gaps + [last] if n else []
+
+
+def real_rate(times, fps=10):
+    """The frame rate the recording really ran at, (frames - 1) over
+    the time they span, when that is not the timer's: ffmpeg is told a
+    constant rate, and the timer's was too fast for slow grabs."""
+    if not times or len(times) < 2:
+        return float(fps)
+    # the same capped gaps as frame_delays: a laptop that slept in the
+    # middle made the video's rate crawl while the GIF's did not
+    span = sum(min(10.0, max(0.0, times[i + 1] - times[i]))
+               for i in range(len(times) - 1))
+    if span <= 0:
+        return float(fps)
+    real = (len(times) - 1) / span
+    if abs(real - fps) <= 0.02 * fps:
+        return float(fps)
+    return max(1.0, min(60.0, real))
+
+
+def write_gif(path, frames, delay_ms=100, width=0, height=0,
+              delays_ms=None):
     """An animated GIF of these frames, written with nothing
     installed.
 
     `frames` is a list of QImage. They are scaled to the first one's
     size (or the size asked for), mapped onto one shared palette and
-    LZW-coded. Returns the path, or "" when there was nothing to
-    write."""
-    rows = [one for one in frames if one is not None and not one.isNull()]
+    LZW-coded. `delays_ms` is how long each stays (frame_delays), one
+    per frame; without it every frame stays `delay_ms`. Returns the
+    path, or "" when there was nothing to write."""
+    pairs = [(one, delays_ms[at] if delays_ms is not None
+              and at < len(delays_ms) else delay_ms)
+             for at, one in enumerate(frames)
+             if one is not None and not one.isNull()]
+    rows = [one for one, _ms in pairs]
     if not rows:
         return ""
     width = int(width or rows[0].width())
@@ -550,8 +669,12 @@ def write_gif(path, frames, delay_ms=100, width=0, height=0):
     out += bytes([0, 0, 0]) * (256 - len(_GIF_PALETTE))
     # loop for ever (the Netscape extension, which is how a GIF loops)
     out += b"\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00"
-    delay = max(2, int(delay_ms / 10))  # GIF counts in hundredths
-    for one in rows:
+    owed = 0.0          # what rounding to hundredths took, paid back
+    for one, ms in pairs:
+        # GIF counts in hundredths, and a browser plays under 2 as 10
+        want = float(ms) / 10.0 + owed
+        delay = max(2, min(65535, int(round(want))))
+        owed = max(-10.0, min(10.0, want - delay))
         shot = one
         if shot.width() != width or shot.height() != height:
             shot = shot.scaled(width, height,
@@ -576,24 +699,29 @@ def write_gif(path, frames, delay_ms=100, width=0, height=0):
         out += _lzw(bytes(indices), 8)
     out += b"\x3B"
     try:
-        with open(str(path), "wb") as handle:
-            handle.write(bytes(out))
+        _write_atomic(path, bytes(out))
     except OSError:
         return ""
     return str(path)
 
 
-def frames_to_video(frames, path, fps=10, ffmpeg="ffmpeg", quality="good"):
+def frames_to_video(frames, path, fps=10, ffmpeg="ffmpeg", quality="good",
+                    times=None):
     """These frames as a WebM or MP4, through ffmpeg.
 
     Each frame is handed over as a PNG on ffmpeg's standard input, so
     nothing is written to disk twice and no temporary folder is left
     behind. Returns the path, or "" when ffmpeg is not there or said
-    no."""
+    no. `times` (when each frame was taken, one per frame) gives the
+    rate the recording really ran at."""
     import subprocess
-    rows = [one for one in frames if one is not None and not one.isNull()]
+    keep = [at for at, one in enumerate(frames)
+            if one is not None and not one.isNull()]
+    rows = [frames[at] for at in keep]
     if not rows or not ffmpeg:
         return ""
+    if times is not None and len(times) == len(frames):
+        fps = real_rate([times[at] for at in keep], fps)
     want = str(path).lower()
     if want.endswith(".mp4"):
         codec = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
@@ -604,7 +732,7 @@ def frames_to_video(frames, path, fps=10, ffmpeg="ffmpeg", quality="good"):
     codec = ["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2"] + codec
     rate = {"best": ["-crf", "20"], "good": ["-crf", "32"],
             "small": ["-crf", "42"]}.get(quality, ["-crf", "32"])
-    args = [ffmpeg, "-y", "-f", "image2pipe", "-framerate", str(int(fps)),
+    args = [ffmpeg, "-y", "-f", "image2pipe", "-framerate", "%g" % round(float(fps), 3),
             "-i", "-"] + codec + rate + ["-b:v", "0", str(path)]
     try:
         proc = subprocess.Popen(args, stdin=subprocess.PIPE,

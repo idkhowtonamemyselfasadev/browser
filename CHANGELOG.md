@@ -1,5 +1,75 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part fifty-three: sixty-seventh to seventy-second passes)
+
+Six more searches: a third look at the Settings page, a second look at
+the start page, a second look at the guards the browser puts into every
+page, the small helpers (the agent's command line, the media keys, QR
+codes, the engine pane), the review's own earlier fixes, looked over for
+anything they broke, and a second look at screenshots and recordings.
+46 bugs, fixed here:
+
+- **Settings.** "Clear history" and "Clear cookies" ask for a second
+  click before they wipe anything, and say "Cleared" in your language.
+  The starter plugins show the right Installed/Install state after
+  plugins are reloaded or added from a file. An untouched corner radius
+  reads "default" instead of "0px" (which means square). A caption tool
+  path shows "Found" or "not installed" as soon as it is saved, and a
+  URL rewrite line the browser cannot use disappears from the box
+  instead of looking active. Saving a theme or resetting the appearance
+  no longer jumps the page back to the top, and the section you are in
+  stays open when the Passwords section appears or goes. Countdowns
+  written as 24.12.2026 are kept, and lines that could not be read are
+  counted instead of silently dropped.
+- **Start page.** Quick links of the wrong shape in the settings (a
+  hand-edited file) no longer stop the start page for good, and a
+  wallpaper interval that is not a number no longer keeps its recent
+  pages, countdowns and agenda from loading. The background pictures'
+  labels follow your language, and the little game hidden in the
+  blueprint theme no longer lets Tab and Enter press links behind it.
+- **Page guards.** The guards and your per-site exceptions now reach
+  frames with no address of their own (a blank or srcdoc frame a page
+  makes), so blocking WebGL or WebAssembly on a site cannot be dodged
+  through one. "Ignore Leave site? boxes" holds against every way a page
+  can ask. A site written with a dot at the end (example.com.) is the
+  same site for every per-site rule. Blocking third-party frames starts
+  while the page is still loading; the local font list works on pages
+  with a strict security policy; blocking WebGL also covers off-screen
+  canvases. The camera/microphone indicator stays on while a copy of the
+  stream is live, an unplugged saved microphone no longer breaks every
+  call, and the location, clipboard and camera guards cannot be undone
+  through their prototypes. Cookie-banner auto-reject never clicks
+  "Decline" on a sign-in consent page. Caption sources on the home
+  network are recognised by name (router, nas.lan, Tailscale addresses).
+  (The guards do not reach a page's background workers: that is a limit
+  of the engine, noted rather than papered over.)
+- **Helpers.** The agent's command line waits for a download as long as
+  the browser does. Raising the window from the media keys keeps it
+  maximized or fullscreen. A QR code made from selected text with an odd
+  character in it no longer fails, and the engine pane never shows a
+  page that arrives after the window locked.
+- **What earlier fixes broke.** Recording a tab no longer stutters with
+  the password blur flashing on and off (it is put on once for the whole
+  recording, put back on every page the recorded tab goes to, and no
+  frame slips through unblurred). Links in the
+  reader's "read the selection" tab reach the home network again when
+  the page they came from was on it. A mailto: link in the split view's
+  other half or in a popped-out tab works again. A block-list line about
+  one page no longer blocks the whole site it is on, and a note that
+  cannot be saved no longer traps Back and Esc.
+- **Screenshots and recordings.** A recording saved as a GIF no longer
+  freezes the window while it is written (it is written in the
+  background, and quitting waits for it instead of losing the clip), and
+  it plays at the speed it was recorded at, also when the page was too
+  slow for the frame rate. A whole-page screenshot of a page with a
+  sticky header is no longer shifted or cut, the inner-scroll screenshot
+  pastes the right last strip and says so when its tab went away instead
+  of saving a half-black picture, and closing a tab during a capture
+  ends it quietly. Shots taken in the same second are numbered 2, 3, 4
+  (not 2-3, 2-3-4), a .jpg name is not given .jpeg as well, a full disk
+  leaves no broken half-file behind, and a pinned screenshot opens at its
+  real size on a high-resolution screen.
+
 ## 2026-11-14 — line-by-line review, day 4 (part fifty-two: sixty-fourth to sixty-sixth passes)
 
 Three more searches: a second look at reading and translation, the

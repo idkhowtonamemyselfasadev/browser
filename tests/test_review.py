@@ -2516,6 +2516,9 @@ _close_if_open(_rv)
 class _Desk31:
     body = None
 
+    def due_todos(self):
+        return []
+
     def save_note(self, title="", body="", link="", tags=()):
         _Desk31.body = body
         return {"title": title}
@@ -3316,6 +3319,9 @@ check("maxlength=-1 does not cut a generated password to 8",
       br.password_rules_for({"maxlength": -1})["length"] == 20,
       br.password_rules_for({"maxlength": -1}))
 class _Desk53:
+    def due_todos(self):
+        return []
+
     def notes(self):
         return [{"t": int(B.time.time())}, {"t": 86400}]
 
@@ -3818,6 +3824,9 @@ check("an appearance reset brings a hidden toolbar back", _shown85 is True,
 # a transcript whose cues are all blank makes no empty note
 class _Desk86:
     saved = []
+
+    def due_todos(self):
+        return []
 
     def save_note(self, **k):
         _Desk86.saved.append(k)
@@ -6931,7 +6940,10 @@ check("the capture diff counts the pixels that moved, without holding the "
 _dlh129 = (_Path(B.__file__).parent / "downloads.html").read_text()
 _seth129 = (_Path(B.__file__).parent / "settings.html").read_text()
 check("a queued download reads 'Waiting', and a date-only countdown ends at "
-      "local midnight", "e.queued" in _dlh129 and 'text += "T00:00"' in _seth129)
+      "local midnight", "e.queued" in _dlh129
+      # fix295 parses the date by hand, in local time: a date alone is
+      # its local midnight (h and mi stay 0)
+      and "new Date(y, mo - 1, d, h, mi)" in _seth129)
 # N30 Refresh shows the refreshed list
 _mcm129 = br.mc_menu()
 _ref129 = [a for a in _mcm129.actions() if a.text() == br._ui_str("mcRefresh")]
@@ -8903,13 +8915,14 @@ H.wait_for(lambda: "drafts" in _t177.url().toString(), 8000)
 _w177 = br.new_window(); H.spin(800)
 _v177 = _w177.new_tab(); H.spin(300)
 H.load(_v177, srv.url("/timers"))
-H.wait_for(lambda: "timers" in _v177.url().toString(), 8000)
+_on177 = H.wait_for(lambda: "timers" in _v177.url().toString(), 20000)
 br._save_groups()
 _saved177 = json.dumps(br.config.get("sessionTabs") or {}) \
     + json.dumps(br.config.get("tabGroups") or [])
 check("the tabs of every window are saved, not only the first window's",
       "/drafts" in _saved177 and "/timers" in _saved177,
-      _saved177[-300:])
+      "loaded=%s on=%s %s" % (_on177, _v177.url().toString()[-40:],
+                              _saved177[-300:]))
 try:
     _w177._closing_anyway = True
     _w177.close()
@@ -9401,6 +9414,9 @@ _flashes185 = []
 
 
 class _Desk185:
+    def due_todos(self):
+        return []
+
     def daily_note(self):
         return None
 
@@ -16838,6 +16854,9 @@ try:
         def __init__(self):
             self.calls = []
 
+        def due_todos(self):
+            return []
+
         def daily_note(self):
             self.calls.append("daily_note")
             return {"id": 1}
@@ -17930,22 +17949,41 @@ try:
     _close_if_open(_vb)
 
     _page288("t286c", "<title>c</title><pre id='p'>" + "line\n" * 20004 + "last</pre>")
+    # the site theme off for this one: twenty thousand rows inserted under
+    # its observers kept the page too busy to answer in the full suite
+    # (red twice there, green alone)
+    _tw286 = br.config.get("themeWeb", "__absent__")
+    br.config["themeWeb"] = False
+    B.theme_web.refresh(br)
     _v = _tab288("/t286c")
+    _t286 = _time.time()
     br.render_file("lines", view=_v)
     _more = br._ui_str("fileMoreLines")
     # twenty thousand rows: under the suite's load the table took longer
     # than 8 s (red once in the full run, green alone) -- wait for the
     # summary row itself
     _want0 = _more.split("%d")[-1].strip() if "%d" in _more else _more
-    H.wait_for(lambda: _want0 in (jsq(_v, "var t = document.body.firstElementChild; "
-                                          "t && t.lastElementChild ? "
-                                          "t.lastElementChild.textContent : ''") or ""),
-               30000)
-    _last = jsq(_v, "var t = document.body.firstElementChild; "
-                    "t ? t.lastElementChild.textContent : ''") or ""
+    _seen286 = {"t": ""}
+
+    def _row286():
+        got = jsq(_v, "var t = document.body.firstElementChild; "
+                      "t && t.lastElementChild ? "
+                      "t.lastElementChild.textContent : ''") or ""
+        if got:
+            _seen286["t"] = got
+        return _want0 in got
+    # the text the wait saw: a second read after it timed out (5 s) on a
+    # page still laying out the rows, and jsq made that ''
+    H.wait_for(_row286, 30000)
+    _last = _seen286["t"]
     _want = _more.replace("%d", "5") if "%d" in _more else "\x00"
     check("286 the line view ends with a row that says how many lines are not shown",
-          _want in _last, (_last[:60], _more))
+          _want in _last, (_last[:60], _more, round(_time.time() - _t286, 1)))
+    if _tw286 == "__absent__":
+        br.config.pop("themeWeb", None)
+    else:
+        br.config["themeWeb"] = _tw286
+    B.theme_web.refresh(br)
     _close_if_open(_v)
 
     # ---------- 287: translation ----------
@@ -18634,6 +18672,1134 @@ finally:
             br.config.pop(_k292, None)
         else:
             br.config[_k292] = _o292
+
+# ---- 294/295: the Settings page, driven in its real pane ----
+# Appended to tests/test_review.py just before its last check. Every bridge
+# slot the page could write through is replaced by a recorder for the
+# whole section, so nothing here changes his config, history or cookies;
+# the originals and the page's own settings snapshot are put back at the end.
+_M295 = B.MAIN_WORLD_ID
+_pv295 = None
+br.open_pane("settings")
+try:
+    _pv295 = br._pane.view if br._pane is not None else None
+    H.spin(600)
+
+    def _pj295(code):
+        """Run JS in the page's main world; the answer is JSON text."""
+        got = jsq(_pv295, code, _M295) if _pv295 is not None else None
+        try:
+            return json.loads(got) if isinstance(got, str) else {}
+        except ValueError:
+            return {}
+
+    _ready295 = _pv295 is not None and H.wait_for(
+        lambda: jsq(_pv295, "!!(window.STR && window._settings && "
+                    "window._starters && window._plugins && bridge && "
+                    "JSON.parse(window._starters).length)", _M295) is True,
+        15000)
+    check("295 the settings pane is up for the page checks", _ready295)
+
+    # the prelude: recorders in place of the writing slots, a pristine copy
+    # of what the page was drawn from, and a fake getSettings for re-reads
+    _pj295("""(() => {
+      window.__keep = {s: JSON.stringify(window._settings),
+        set: bridge.setSetting, get: bridge.getSettings,
+        hist: bridge.clearHistory, cook: bridge.clearCookies,
+        pane: window._cat};
+      window.__sets = []; window.__clr = []; window.__fake = {};
+      bridge.setSetting = (k, v) => { window.__sets.push([k, v]); };
+      bridge.getSettings = (cb) => cb(JSON.stringify(
+        Object.assign({}, JSON.parse(window.__keep.s), window.__fake)));
+      bridge.clearHistory = () => { window.__clr.push("h"); return 0; };
+      bridge.clearCookies = () => { window.__clr.push("c"); };
+      return JSON.stringify(1); })()""")
+
+    # 294.1: Clear history / Clear cookies take two clicks, and say so
+    _r1 = _pj295("""(() => {
+      const o = {}, S = window.STR || {};
+      const h = document.getElementById("clearhist");
+      const c = document.getElementById("clearcookies");
+      window.__clr = [];
+      h.click(); o.h1 = window.__clr.length; o.armed = h.textContent;
+      h.click(); o.h2 = window.__clr.length; o.done = h.textContent;
+      c.click(); o.c1 = window.__clr.length;
+      c.click(); o.c2 = window.__clr.length;
+      o.want = [S.pressAgain, S.clearedMsg];
+      return JSON.stringify(o); })()""")
+    check("294 Clear history / cookies: the first click only asks, the second "
+          "clears, and both words come from the string table",
+          _r1.get("h1") == 0 and _r1.get("h2") == 1 and _r1.get("c1") == 1
+          and _r1.get("c2") == 2 and _r1.get("want", [None])[0]
+          and _r1.get("armed") == _r1["want"][0]
+          and _r1.get("done") == _r1["want"][1], _r1)
+    H.spin(1700)
+    # armed and left alone: it reverts after 4 s and the next click asks again
+    _pj295("""(() => {
+      window.__clr = [];
+      document.getElementById("clearhist").click();
+      return JSON.stringify(1); })()""")
+    H.spin(4400)
+    _r1c = _pj295("""(() => {
+      const o = {}, S = window.STR || {};
+      const h = document.getElementById("clearhist");
+      o.text = h.textContent; o.rest = S.clearHistory;
+      h.click(); o.n = window.__clr.length;
+      return JSON.stringify(o); })()""")
+    check("294 an armed Clear history that is left alone reverts after 4 s and "
+          "the next click asks again", _r1c.get("n") == 0
+          and _r1c.get("text") == _r1c.get("rest"), _r1c)
+    H.spin(4400)
+
+    # 294.2: the starters follow the installed list
+    _r2 = _pj295("""(() => {
+      const o = {}, id = JSON.parse(window._starters)[0].id;
+      const dis = () => document.querySelector(
+        "#starterlist .row button").disabled;
+      renderPlugins(JSON.stringify({plugins: [id + ".user.js"], folder: "x"}));
+      o.on = dis();
+      renderPlugins(JSON.stringify({plugins: [], folder: "x"}));
+      o.off = dis();
+      return JSON.stringify(o); })()""")
+    _pj295("(bridge.getPlugins(renderPlugins), JSON.stringify(1))")
+    H.spin(400)
+    check("294 the starter buttons follow Reload plugins / Add from file",
+          _r2.get("on") is True and _r2.get("off") is False, _r2)
+
+    # 294.3: an unset corner radius says "default", a saved 0 says 0px
+    _r3 = _pj295("""(() => {
+      const o = {}, S = window.STR || {};
+      const base = JSON.parse(window.__keep.s);
+      const lab = () => document.getElementById("cornerradiusval").textContent;
+      fillAppearance(Object.assign({}, base, {cornerRadius: null}));
+      o.unset = lab();
+      fillAppearance(Object.assign({}, base, {cornerRadius: 0}));
+      o.zero = lab();
+      fillAppearance(Object.assign({}, base, {cornerRadius: 12}));
+      o.twelve = lab();
+      o.word = S.uiRadiusDefault || "";
+      fillAppearance(base);
+      return JSON.stringify(o); })()""")
+    check("294 an unset corner radius reads 'default' (translated), 0 reads 0px",
+          _r3.get("word") and _r3.get("unset") == _r3.get("word")
+          and _r3.get("zero") == "0px" and _r3.get("twelve") == "12px", _r3)
+
+    # 294.4: a saved caption tool path repaints the Found / not installed text
+    _r4 = _pj295("""(() => {
+      const o = {};
+      window.__fake = {captionTools: {captionRecorder: "/usr/bin/fakeparec"}};
+      const out = document.getElementById("caprecorderfound");
+      const el = document.getElementById("caprecorder");
+      out.textContent = "stale";
+      el.value = "/usr/bin/fakeparec";
+      el.dispatchEvent(new Event("change"));
+      o.text = out.textContent;
+      o.sets = window.__sets.filter((x) => x[0] === "captionRecorder").length;
+      window.__fake = {};
+      return JSON.stringify(o); })()""")
+    check("294 a caption tool path is saved and its Found label is repainted",
+          _r4.get("sets") == 1 and "/usr/bin/fakeparec" in _r4.get("text", ""),
+          _r4)
+
+    # 294.5: the rewrite box holds only the rules that are in force
+    _r5 = _pj295("""(() => {
+      const o = {};
+      window.__fake = {urlRewrites: [["reddit.com", "old.reddit.com"]]};
+      const box = document.getElementById("urlrewrites");
+      box.value = "reddit.com old.reddit.com\\nreddit.com -> old.reddit.com";
+      box.onchange();
+      o.value = box.value;
+      window.__fake = {};
+      return JSON.stringify(o); })()""")
+    check("294 a rewrite line without -> does not stay in the box once saved",
+          _r5.get("value") == "reddit.com -> old.reddit.com", _r5)
+
+    # 295.6: redrawing the page in place keeps the section's scroll and title
+    _r6 = _pj295("""(() => {
+      const o = {};
+      const secs = visibleSections();
+      const content = document.getElementById("content");
+      const ph = document.getElementById("pagehead");
+      showCat(0);
+      const pad = document.createElement("div");
+      pad.style.height = "4000px";
+      secs[0].appendChild(pad);
+      content.scrollTop = 150;
+      o.before = content.scrollTop;
+      const obs = new MutationObserver(() => {});
+      obs.observe(ph, {attributes: true, attributeFilter: ["class"]});
+      load(JSON.parse(window.__keep.s));
+      o.after = content.scrollTop;
+      o.classWrites = obs.takeRecords().length;
+      obs.disconnect();
+      pad.remove();
+      content.scrollTop = 0;
+      return JSON.stringify(o); })()""")
+    check("295 a redraw of the same section keeps its scroll position and does "
+          "not replay the title", (_r6.get("before") or 0) > 0
+          and _r6.get("after") == _r6.get("before")
+          and _r6.get("classWrites") == 0, _r6)
+
+    # 295.7: the section he is in survives Passwords appearing and vanishing
+    _r7 = _pj295("""(() => {
+      const o = {};
+      const pw = document.querySelector('section[data-desc="descPasswords"]');
+      const was = pw.hidden;
+      applyVaultPassword(true);
+      const list = visibleSections();
+      const p = list.indexOf(pw);
+      o.p = p; o.n = list.length;
+      if (p >= 0 && p + 1 < list.length) {
+        const mine = list[p + 1];
+        showCat(p + 1);
+        applyVaultPassword(false);
+        o.afterOff = document.querySelector(".content section.active") === mine;
+        applyVaultPassword(true);
+        o.afterOn = document.querySelector(".content section.active") === mine;
+      }
+      applyVaultPassword(!was);
+      showCat(window.__keep.pane || 0);
+      return JSON.stringify(o); })()""")
+    check("295 the same section stays open when the Passwords section comes "
+          "and goes", _r7.get("afterOff") is True and _r7.get("afterOn") is True,
+          _r7)
+
+    # 295.8: countdowns read day-first dates, and say when a line was not
+    _r8 = _pj295("""(() => {
+      const o = {}, S = window.STR || {};
+      const box = document.getElementById("countdowns");
+      const was = box.value;
+      box.value = "Exam = 24.12.2026\\nParty = 2026-12-31 20:00\\n"
+                + "Oops = tomorrow\\nNo equals sign\\nBad = 31.02.2026";
+      window.__sets = [];
+      document.getElementById("desksave").click();
+      const row = window.__sets.filter((x) => x[0] === "countdowns")[0];
+      o.rows = row ? JSON.parse(row[1]) : null;
+      o.exam = new Date(2026, 11, 24).getTime() / 1000;
+      o.party = new Date(2026, 11, 31, 20, 0).getTime() / 1000;
+      const msg = document.getElementById("desksavemsg");
+      o.msg = msg.textContent;
+      o.want = (S.countdownSkipped || "").replace("%d", 3);
+      box.value = was;
+      msg.className = "urlmsg"; msg.textContent = "";
+      return JSON.stringify(o); })()""")
+    _rows8 = _r8.get("rows") or []
+    check("295 countdowns: 24.12.2026 and a dated time are kept, three bad "
+          "lines are counted in the message",
+          [r.get("name") for r in _rows8] == ["Exam", "Party"]
+          and _rows8[0].get("t") == _r8.get("exam")
+          and _rows8[1].get("t") == _r8.get("party")
+          and _r8.get("want") and _r8.get("msg") == _r8.get("want"), _r8)
+finally:
+    if _pv295 is not None:
+        # the slots, the page's own snapshot and its inputs, as they were
+        _pj295("""(() => {
+          const k = window.__keep;
+          if (!k) return JSON.stringify(0);
+          bridge.setSetting = k.set; bridge.getSettings = k.get;
+          bridge.clearHistory = k.hist; bridge.clearCookies = k.cook;
+          window._settings = JSON.parse(k.s);
+          load(window._settings);
+          return JSON.stringify(1); })()""")
+        H.spin(300)
+    br.close_pane()
+    H.spin(300)
+
+# ---- 296: the start page (the 68th pass) ----
+_wp296 = br.config.get("wallpaperEvery", "__absent__")
+_sv296 = None
+try:
+    # 296a: a hand-edited wallpaperEvery does not break the start page's extras
+    br.config["wallpaperEvery"] = "5m"
+    try:
+        _pay296 = br.wallpaper_payload()
+    except Exception as _e296:
+        _pay296 = repr(_e296)
+    check("296 a wallpaper interval that is not a number is 'every new tab', not a crash",
+          isinstance(_pay296, dict) and _pay296.get("every") == 0, _pay296)
+    # put back before any start page asks for its extras: on the old code
+    # that slot raised, and an exception in a slot ends the suite
+    if _wp296 == "__absent__":
+        br.config.pop("wallpaperEvery", None)
+    else:
+        br.config["wallpaperEvery"] = _wp296
+
+    # 296b: the background thumbs speak his language
+    _sv296 = br.new_tab()
+    H.spin(300)
+    # STR starts with English defaults; the browser's strings arrive with
+    # a "lang" key
+    H.wait_for(lambda: jsq(_sv296, "typeof renderThumbs === 'function' && "
+                                   "!!STR.lang", B.MAIN_WORLD_ID), 10000)
+    _th296 = json.loads(jsq(_sv296, "renderThumbs(); JSON.stringify("
+                                    "[...document.querySelectorAll('#thumbs .thumb')]"
+                                    ".map(t => [t.textContent, t.title]))",
+                            B.MAIN_WORLD_ID) or "[]")
+    _ui296 = br._ui_str
+    check("296 the background thumbs use the page's own words, not English",
+          bool(_th296) and _th296[0][0] == _ui296("wizNone")
+          and _th296[-1][1] == _ui296("wizOwnImage")
+          and all(t != "+ Add" for t, _ in _th296), _th296)
+
+    # 296c: quick links of the wrong shape do not stop the page
+    _ql296 = jsq(_sv296, "localStorage.getItem('quicklinks')", B.MAIN_WORLD_ID)
+    jsq(_sv296, "localStorage.setItem('quicklinks', '{}'); 1", B.MAIN_WORLD_ID)
+    # a second start page reads the same storage as it starts
+    _sv2_296 = br.new_tab()
+    H.spin(300)
+    H.wait_for(lambda: jsq(_sv2_296, "document.readyState === 'complete'",
+                           B.MAIN_WORLD_ID), 8000)
+    H.spin(800)
+    _alive296 = jsq(_sv2_296, "typeof window.__applyPins === 'function' && "
+                              "Array.isArray(links)", B.MAIN_WORLD_ID)
+    check("296 quick links of the wrong shape do not stop the start page's script",
+          _alive296 is True, _alive296)
+    jsq(_sv296, "localStorage.setItem('quicklinks', %s); 1" % json.dumps(
+        _ql296 if isinstance(_ql296, str) else "null"), B.MAIN_WORLD_ID)
+    _close_if_open(_sv2_296)
+
+    # 296d: the game keeps Tab and Enter to itself while it runs
+    _st296 = (B.APP_DIR / "start.html").read_text(encoding="utf-8")
+    _g296 = _st296.find("controls while playing")
+    check("296 the start page's game keeps Tab and Enter while it runs",
+          _g296 > 0 and 'k === "tab" || k === "enter"' in _st296[_g296:_g296 + 900])
+finally:
+    if _wp296 == "__absent__":
+        br.config.pop("wallpaperEvery", None)
+    else:
+        br.config["wallpaperEvery"] = _wp296
+    if _sv296 is not None:
+        _close_if_open(_sv296)
+
+# ---- 297-299: what the page guard covers, root-dot hosts, one idea of "local" ----
+import subprocess as _sp299
+import shutil as _sh299
+
+# -- 299 pure Python: privacy.py, page_guard._host, is_local_address, site_rule_on
+check("299 matches() reads a root-dot host as the same site",
+      B.privacy.matches("example.com.", ["example.com"])
+      and B.privacy.matches("a.example.com.", ["www.example.com."])
+      and B.privacy._host_of("http://example.com./x") == "example.com")
+check("299 page_guard._host drops the root dot",
+      B.page_guard._host("WWW.Example.com.") == "example.com")
+check("299 the shared range 100.64.0.0/10 counts as local",
+      B.privacy.is_local("100.100.100.200") and B.privacy.is_local("100.64.0.1")
+      and not B.privacy.is_local("100.128.0.1")
+      and not B.privacy.is_local("8.8.8.8"))
+import inspect as _insp299
+check("299 is_local_address stays the narrow address test; the caption fetch asks "
+      "privacy.is_local",
+      br.is_local_address("192.168.1.1.") is True
+      and br.is_local_address("localhost") is True
+      and br.is_local_address("router") is False
+      and br.is_local_address("nas.lan") is False
+      and br.is_local_address("example.com") is False
+      and "privacy.is_local" in _insp299.getsource(B.Browser.make_captions),
+      str([br.is_local_address(h) for h in ("192.168.1.1.", "router", "nas.lan")]))
+_nsk299 = br.config.get("noScriptSites", "__absent__")
+try:
+    br.config["noScriptSites"] = ["a299.example"]
+    _dot299 = br.site_rule_on("noScriptSites", "a299.example.")
+    _sub299 = br.site_rule_on("noScriptSites", "www.a299.example.")
+finally:
+    if _nsk299 == "__absent__":
+        br.config.pop("noScriptSites", None)
+    else:
+        br.config["noScriptSites"] = _nsk299
+check("299 a per-site rule applies to the root-dot form of the host",
+      _dot299 is True and _sub299 is True, str((_dot299, _sub299)))
+
+# -- the page checks: config in, guard script rebuilt, config restored -------
+_KEYS299 = ("guardLeaveTrap", "guardNoFrames", "guardLocalFonts",
+            "guardMediaLog", "guardNoWebRTC", "guardClipboardRead",
+            "guardBanners", "blockApis", "fakePlaces", "localFontStack")
+_was299 = {k: br.config.get(k, "__absent__") for k in _KEYS299}
+_tabs299 = []
+
+
+def _set299(**kw):
+    for k in _KEYS299:
+        br.config.pop(k, None)
+    br.config.update(kw)
+    br.refresh_guard_scripts()
+
+
+def _open299(path, html, host="127.0.0.1"):
+    H.Handler.pages[path] = html
+    v = br.new_tab(); H.spin(300)
+    _tabs299.append(v)
+    H.load(v, srv.url(path, host=host)); H.spin(400)
+    return v
+
+
+def _frame299(v, expr):
+    """A value out of a frame of the page, once the frame has a document."""
+    H.wait_for(lambda: jsq(v, "(function(){var f=%s;return !!(f && "
+                              "f.contentDocument && f.contentDocument"
+                              ".readyState==='complete')})()" % expr) is True,
+               5000)
+
+
+try:
+    # ===== group A: frames, leave trap, prototypes, hosts ==================
+    _third299 = srv.url("/t299f", host="localhost")
+    H.Handler.pages["/t299f"] = ("<title>t299f</title><script>parent."
+                                 "postMessage('hit299','*')</script>")
+    _set299(guardLeaveTrap=True, guardNoFrames=True, guardNoWebRTC=True,
+            guardClipboardRead=True,
+            blockApis={"127.0.0.1": ["wasm"]},
+            fakePlaces={"127.0.0.1": {"lat": 12.5, "lon": 34.5}})
+    _va = _open299("/t299a", (
+        "<title>t299a</title><body onbeforeunload=\"window.bodySaw=1;"
+        "return 'x'\"><script>window.hit=0;window.addEventListener("
+        "'message',function(e){if(e.data==='hit299')window.hit=1});"
+        "EventTarget.prototype.addEventListener.call(window,'beforeunload',"
+        "function(){window.protoSaw=1})</script>"
+        "<iframe id=sd srcdoc=\"<p>x</p>\"></iframe>"
+        "<iframe id=third src=\"%s\"></iframe>"
+        "<script>0</script>"
+        "<script>var t=Date.now();while(Date.now()-t<700);</script>"
+        "<p>page</p>" % _third299))
+    H.spin(1500)
+    # 297.1: a srcdoc frame takes its parent's host, so the site's rule holds
+    _frame299(_va, "document.getElementById('sd')")
+    _wasm_sd = jsq(_va, "typeof document.getElementById('sd')"
+                        ".contentWindow.WebAssembly")
+    check("297 a srcdoc frame gets its parent's blockApis rule",
+          _wasm_sd == "undefined", str(_wasm_sd))
+    jsq(_va, "(function(){var f=document.createElement('iframe');"
+             "f.id='blank299';document.body.appendChild(f);return 1})()")
+    _wasm_ab = jsq(_va, "typeof document.getElementById('blank299')"
+                        ".contentWindow.WebAssembly")
+    check("297 an about:blank frame gets its parent's blockApis rule",
+          _wasm_ab == "undefined", str(_wasm_ab))
+    # 297.2: no road to a beforeunload handler survives
+    jsq(_va, "window.dispatchEvent(new Event('beforeunload',"
+             "{cancelable:true})); 1")
+    _saw = jsq(_va, "JSON.stringify([window.protoSaw||0,window.bodySaw||0])")
+    check("297 EventTarget.prototype.addEventListener.call(window, "
+          "'beforeunload') and <body onbeforeunload> never run",
+          _saw == "[0,0]", str(_saw))
+    # 297.4: prototypes
+    jsq(_va, "window.lat=null;Geolocation.prototype.getCurrentPosition.call("
+             "navigator.geolocation,function(p){window.lat=p.coords.latitude}"
+             ");1")
+    H.wait_for(lambda: jsq(_va, "window.lat") == 12.5, 3000)
+    check("297 Geolocation.prototype.getCurrentPosition keeps the fake place",
+          jsq(_va, "window.lat") == 12.5, str(jsq(_va, "window.lat")))
+    jsq(_va, "window.cb=null;Clipboard.prototype.readText.call("
+             "navigator.clipboard).then(function(){window.cb='read'},"
+             "function(e){window.cb=e.message});1")
+    H.wait_for(lambda: jsq(_va, "window.cb") is not None, 3000)
+    check("297 Clipboard.prototype.readText is the guard's refusal",
+          jsq(_va, "window.cb") == "Blocked by the browser",
+          str(jsq(_va, "window.cb")))
+    jsq(_va, "window.gm=null;MediaDevices.prototype.getUserMedia.call("
+             "navigator.mediaDevices,{audio:false,video:false}).then("
+             "function(){window.gm='ok'},function(e){window.gm=e.message});1")
+    H.wait_for(lambda: jsq(_va, "window.gm") is not None, 3000)
+    check("297 MediaDevices.prototype.getUserMedia is the guard's refusal",
+          jsq(_va, "window.gm") == "Blocked", str(jsq(_va, "window.gm")))
+    # 298.5: a frame in the markup never started loading
+    check("298 noFrames drops a parser-inserted third-party frame before it "
+          "loads", jsq(_va, "document.getElementById('third')") is None
+          and jsq(_va, "window.hit") == 0,
+          str((jsq(_va, "!!document.getElementById('third')"),
+               jsq(_va, "window.hit"))))
+    _close_if_open(_va)
+
+    # ===== 297.3: a root-dot host =============================================
+    _set299(blockApis={"localhost": ["wasm"]})
+    _vd = _open299("/t299d", "<title>t299d</title><p>dot</p>",
+                   host="localhost.")
+    _hn = jsq(_vd, "location.hostname")
+    _wd = jsq(_vd, "typeof WebAssembly")
+    check("297 a root-dot host (localhost.) gets the site's blockApis rule",
+          _hn == "localhost." and _wd == "undefined", str((_hn, _wd)))
+    _close_if_open(_vd)
+
+    # ===== group B: fonts under a CSP, OffscreenCanvas ========================
+    _set299(guardLocalFonts=True, localFontStack="Courier299, monospace")
+    _vf = _open299("/t299b", (
+        "<title>t299b</title><meta http-equiv=\"Content-Security-Policy\" "
+        "content=\"style-src 'self'\"><body><p>text</p>"))
+    H.wait_for(lambda: "Courier299" in str(jsq(
+        _vf, "getComputedStyle(document.body).fontFamily")), 3000)
+    _ff = jsq(_vf, "getComputedStyle(document.body).fontFamily")
+    check("298 the local font stack applies under a style-src CSP",
+          "Courier299" in str(_ff), str(_ff))
+    _close_if_open(_vf)
+    # a control first: where this machine cannot make a webgl context at all
+    # there is nothing for the guard to refuse (and nothing to measure)
+    _set299(blockApis={"other299.example": ["webgl"]})
+    _vc = _open299("/t299c", "<title>t299c</title><p>c</p>")
+    _can = jsq(_vc, "!!new OffscreenCanvas(4,4).getContext('webgl')")
+    _close_if_open(_vc)
+    _set299(blockApis={"127.0.0.1": ["webgl"]})
+    _vo = _open299("/t299o", "<title>t299o</title><p>o</p>")
+    _off = jsq(_vo, "new OffscreenCanvas(4,4).getContext('webgl')")
+    check("298 blockApis webgl refuses an OffscreenCanvas too",
+          _off is None and jsq(_vo, "typeof OffscreenCanvas") == "function"
+          or _can is False, str((_off, _can)))
+    _close_if_open(_vo)
+
+    # ===== group C: the in-use indicator and a clone ===========================
+    _set299(guardMediaLog=True)
+    _vm = _open299("/t299m", "<title>t299m</title><p>m</p>")
+    _media = jsq(_vm, """(function () {
+      var c = document.createElement('canvas'); c.width = 8; c.height = 8;
+      c.getContext('2d').fillRect(0, 0, 8, 8);
+      var s = c.captureStream(1);
+      window.__guardStreams.push(s); window.__guardRelist();
+      var t = s.getTracks()[0];
+      window.k = t.clone();
+      t.stop(); window.__guardRelist();
+      var live = window.__guardMedia.slice();
+      window.k.stop(); window.__guardRelist();
+      return JSON.stringify([live, window.__guardMedia]); })()""")
+    check("298 a cloned track keeps the in-use indicator on until it ends",
+          _media == '[["camera"],[]]', str(_media))
+    _media2 = jsq(_vm, """(function () {
+      var c = document.createElement('canvas'); c.width = 8; c.height = 8;
+      c.getContext('2d').fillRect(0, 0, 8, 8);
+      var s = c.captureStream(1);
+      window.__guardStreams.push(s); window.__guardRelist();
+      var t = s.getTracks()[0];
+      window.k2 = new MediaStream([t]).clone();
+      t.stop(); window.__guardRelist();
+      var live = window.__guardMedia.slice();
+      window.k2.getTracks().forEach(function (x) { x.stop(); });
+      window.__guardRelist();
+      return JSON.stringify([live, window.__guardMedia]); })()""")
+    check("298 a clone of a stream built from a watched track keeps the indicator on",
+          _media2 == '[["camera"],[]]', str(_media2))
+    _close_if_open(_vm)
+
+    # ===== group D: banners ===================================================
+    _set299(guardBanners=True)
+    # an OAuth consent page: its Decline is his answer, never clicked
+    _vb = _open299("/oauth/t299g", (
+        "<title>t299g</title><body>"
+        "<div id=consent-screen style=\"margin:20px\">Allow this app?"
+        "<button id=d onclick=\"window.cDecline=1\">Decline</button></div>"))
+    H.spin(2500)
+    _dec = jsq(_vb, "window.cDecline||0")
+    _close_if_open(_vb)
+    # an ordinary cookie bar in the page's flow (no fixed position) still is
+    _vb = _open299("/t299g2", (
+        "<title>t299g2</title><body>"
+        "<div id=cookie-consent-dialog>Cookies <button id=r "
+        "onclick=\"window.cReject=1\">Reject all</button></div>"))
+    H.wait_for(lambda: jsq(_vb, "window.cReject") == 1, 4000)
+    _bn = "[%s,%s]" % (_dec, jsq(_vb, "window.cReject||0"))
+    check("298 an OAuth consent page's Decline is not clicked, a cookie bar's "
+          "Reject all is", _bn == "[0,1]", str(_bn))
+    _close_if_open(_vb)
+finally:
+    for _v299 in _tabs299:
+        _close_if_open(_v299)
+    for _k, _v in _was299.items():
+        if _v == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+    br.refresh_guard_scripts()
+    for _p in ("/t299a", "/t299b", "/t299c", "/t299d", "/t299f", "/t299g",
+               "/t299m", "/t299o"):
+        H.Handler.pages.pop(_p, None)
+    H.spin(300)
+
+# -- 298 the saved microphone: an unplugged one is retried without its id.
+# The retry cannot be driven here (no microphone offscreen, and a node stub
+# never reaches the guard's saved-mic path): a SOURCE check, marked as such.
+_src299 = B.page_guard.source({"micSites": {"a.example": "unplugged"}})
+check("298 (source only) an unplugged saved microphone is retried without its id",
+      "OverconstrainedError" in _src299 and "state.saved" in _src299)
+
+# ---- 300: the small modules (the 70th pass) ----
+import importlib.util as _ilu300
+_spec300 = _ilu300.spec_from_file_location("agent300", str(B.APP_DIR / "agent.py"))
+_ag300 = _ilu300.module_from_spec(_spec300)
+_spec300.loader.exec_module(_ag300)
+_w300 = (_ag300._wait_for({"op": "download", "timeout": 1800}),
+         _ag300._wait_for({"op": "wait", "timeout": 20000}),
+         _ag300._wait_for({"op": "download"}))
+_cli300 = (B.APP_DIR / "agent.py").read_text(encoding="utf-8")
+_dl300 = _cli300.find('elif op == "download":')
+check("300 the agent client waits as long as the browser does for a download",
+      _w300[0] >= 1800 and 45 <= _w300[1] <= 60 and _w300[2] >= 120
+      and "timeout=a.timeout or 120" in _cli300[_dl300:_dl300 + 400], _w300)
+
+# 300b: an MPRIS raise keeps the window maximized
+if B.mpris is not None and getattr(B.mpris, "HAVE_DBUS", False):
+    class _Win300:
+        def __init__(self):
+            self.state = B.Qt.WindowState.WindowMaximized \
+                | B.Qt.WindowState.WindowMinimized
+            self.calls = []
+
+        def windowState(self):
+            return self.state
+
+        def setWindowState(self, s):
+            self.state = s
+            self.calls.append("set")
+
+        def show(self):
+            self.calls.append("show")
+
+        def showNormal(self):
+            self.calls.append("normal")
+            self.state = B.Qt.WindowState.WindowNoState
+
+        def raise_(self):
+            self.calls.append("raise")
+
+        def activateWindow(self):
+            self.calls.append("activate")
+
+    _win300 = _Win300()
+    _holder300 = B.QObject()
+    _holder300.browser = type("Br300", (), {"_live_window": lambda s: _win300})()
+    try:
+        B.mpris.Root(_holder300).Raise()
+    except Exception as _e300:
+        _win300.calls.append(repr(_e300))
+    check("300 an MPRIS raise brings the window up and keeps it maximized",
+          "normal" not in _win300.calls
+          and _win300.state == B.Qt.WindowState.WindowMaximized,
+          (_win300.calls, _win300.state))
+else:
+    check("300 an MPRIS raise brings the window up and keeps it maximized", True,
+          "no QtDBus here")
+
+# 300c: a lone surrogate in the selection does not break QR-from-text
+_which300 = B.shutil.which
+B.shutil.which = lambda name, *a, **k: "/bin/cat" if name == "qrencode" \
+    else _which300(name, *a, **k)
+try:
+    try:
+        br.qr_code("a\ud800b")
+        _qr300 = "ok"
+    except Exception as _e300:
+        _qr300 = repr(_e300)
+finally:
+    B.shutil.which = _which300
+H.spin(500)
+check("300 a lone surrogate in text for a QR code is no crash", _qr300 == "ok", _qr300)
+
+# 300d: the engine pane shows nothing over the window lock
+if getattr(B, "engine_pane", None) is not None:
+    _ev300 = br.new_tab()
+    H.spin(300)
+    H.load(_ev300, srv.url("/twhome"))
+    H.spin(400)
+    br.tabs.setCurrentWidget(_ev300)
+    _lk300 = br.__dict__.get("locked_now")
+    br.__dict__["locked_now"] = lambda *a, **k: True
+    try:
+        _pn300 = getattr(br, "_engine_pane", None)
+        if _pn300 is not None and _pn300.isVisible():
+            _pn300.dismiss()
+        B.engine_pane.toggle(br)
+        H.spin(1500)
+        _pn300 = getattr(br, "_engine_pane", None)
+        _shown300 = bool(_pn300 is not None and _pn300.isVisible())
+    finally:
+        if _lk300 is None:
+            br.__dict__.pop("locked_now", None)
+        else:
+            br.__dict__["locked_now"] = _lk300
+    check("300 the engine pane shows no page that arrives after the window locked",
+          not _shown300, _shown300)
+    if getattr(br, "_engine_pane", None) is not None and br._engine_pane.isVisible():
+        br._engine_pane.dismiss()
+    _close_if_open(_ev300)
+
+# ---- 301-303: regressions the review itself made (the 71st pass) ----
+H.Handler.pages["/t301"] = ("<title>t301</title><p id=p>Some text "
+                            "<a href='/t301b'>a link</a></p>"
+                            "<input type=password id=pw value='x'>")
+H.Handler.pages["/t301b"] = "<title>t301b</title><p>b</p>"
+_redact301 = B.capture.redact if B.capture is not None else None
+_tabs301 = []
+try:
+    # 301: a recording holds the blur once instead of twice per frame
+    if B.capture is not None:
+        _calls301 = []
+        B.capture.redact = lambda view, world, on: (_calls301.append(bool(on)) or 0)
+        _v301 = br.new_tab()
+        _tabs301.append(_v301)
+        H.spin(300)
+        H.load(_v301, srv.url("/t301"))
+        H.spin(400)
+        br.tabs.setCurrentWidget(_v301)
+        H.spin(100)
+        _ok301 = br.start_recording(view=_v301, fps=10)
+        H.spin(900)
+        br.stop_recording(save=False)
+        H.spin(200)
+        check("301 a recording blurs passwords once for the whole recording, not per frame",
+              _calls301.count(True) == 1 and _calls301.count(False) == 1,
+              (_calls301.count(True), _calls301.count(False), _ok301))
+        B.capture.redact = _redact301
+
+    # 302a: the reader's selection tab is judged as the page it came from
+    _v302 = br.new_tab()
+    _tabs301.append(_v302)
+    H.spin(300)
+    H.load(_v302, srv.url("/t301"))
+    H.spin(400)
+    H.js(_v302, "var r=document.createRange();r.selectNodeContents("
+                "document.getElementById('p'));var s=getSelection();"
+                "s.removeAllRanges();s.addRange(r);1")
+    _before302 = set(id(w) for _i, w in br._real_tabs())
+    br.reader_from_selection(_v302)
+    H.wait_for(lambda: any(id(w) not in _before302 for _i, w in br._real_tabs()), 5000)
+    _new302 = [w for _i, w in br._real_tabs() if id(w) not in _before302]
+    _tabs301 += _new302
+    _op302 = getattr(_new302[0].page(), "_opener_url", None) if _new302 else None
+    check("302 the reader's selection tab carries the address of the page it came from",
+          _op302 is not None and _op302.toString() == srv.url("/t301"),
+          _op302.toString() if _op302 is not None else None)
+
+    # 302b: a popped-out tab can still act like the tab in front
+    _v302b = br.new_tab()
+    H.spin(300)
+    H.load(_v302b, srv.url("/t301b"))
+    H.spin(300)
+    _mini302 = br.pop_out_tab(br.tabs.indexOf(_v302b))
+    H.spin(300)
+    br.__dict__.pop("_page_acted", None)
+    try:
+        _act302 = br._page_may_act(_v302b, "t302-mailto")
+    finally:
+        if _mini302 is not None:
+            _mini302.close()
+            H.spin(300)
+        _tabs301.append(_v302b)
+    check("302 a mailto: from a popped-out tab is not dropped", _act302 is True, _act302)
+
+    # 302c: a block-list line with a path blocks no whole host
+    # a downloaded list's per-page line (pages=True) is no host entry; an
+    # address he typed into his own list still means that site (test 240)
+    _be302 = (B._block_entry("sites.google.com/view/scam", pages=True),
+              B._block_entry("https://tracker.example/", pages=True),
+              B._block_entry("tracker.example/", pages=True),
+              B._block_entry("evil.example/?x", pages=True),
+              B._block_entry("https://t302.example/path"))
+    check("302 a downloaded list's line about one page blocks no whole host",
+          _be302 == ("", "tracker.example", "tracker.example", "",
+                     "t302.example"), _be302)
+
+    # 303 (source only): a note that cannot be saved does not trap Back / Esc
+    _nh303 = (B.APP_DIR / "notes.html").read_text(encoding="utf-8")
+    check("303 (source only) a second leave after a failed note save goes through",
+          "leaveFailed" in _nh303 and "persist(() => then(), () => { leaveFailed = true; })"
+          in _nh303)
+finally:
+    if _redact301 is not None:
+        B.capture.redact = _redact301
+    if br.recording_now() is not None:
+        br.stop_recording(save=False)
+    for _t301 in _tabs301:
+        _close_if_open(_t301)
+    for _k301 in ("/t301", "/t301b"):
+        H.Handler.pages.pop(_k301, None)
+    H.spin(200)
+
+# ---- 304-306: capture files and names, recordings, page walks (the 72nd pass) ----
+import os as _os306
+import stat as _stat306
+import shutil as _shutil306
+_cap306 = B.capture
+_dir306 = _Path(_tempfile.mkdtemp())
+_tabs306 = []
+_real_replace306 = _os306.replace
+_real_done306 = getattr(br, "_shot_done", None)
+_had_done306 = "_shot_done" in br.__dict__
+_real_inner306 = {n: br.__dict__.get(n) for n in
+                  ("_inner_facts", "_scroll_inner", "_live_page", "flash")}
+try:
+    if _cap306 is not None:
+        def _img306(w=8, h=8, colour=None):
+            im = B.QImage(w, h, B.QImage.Format.Format_RGB32)
+            im.fill(colour if colour is not None else B.Qt.GlobalColor.red)
+            return im
+
+        def _gif_delays306(path):
+            raw = _Path(path).read_bytes()
+            out, at = [], 0
+            while True:
+                at = raw.find(b"\x21\xF9\x04", at)
+                if at < 0:
+                    return out
+                out.append(raw[at + 4] | (raw[at + 5] << 8))
+                at += 3
+
+        # 304: the name collision numbers the first stem, once
+        _names304 = []
+        for _i in range(4):
+            _p = _cap306.save(_img306(), _dir306, "shot", fmt="png")
+            _names304.append(_p.name if _p else None)
+        check("304 a name taken three times is shot, shot-2, shot-3 -- not shot-2-3",
+              _names304 == ["shot.png", "shot-2.png", "shot-3.png", "shot-4.png"],
+              _names304)
+
+        # 304: .jpg and .jpeg are one format
+        _n304 = (_cap306.name_for("shot.jpg", fmt="jpeg"),
+                 _cap306.name_for("shot.JPEG", fmt="jpg"),
+                 _cap306.name_for("shot", fmt="jpeg"),
+                 _cap306.name_for("shot.png", fmt="jpeg"))
+        check("304 a pattern ending .jpg with JPEG chosen is not given .jpeg too",
+              _n304 == ("shot.jpg", "shot.JPEG", "shot.jpeg", "shot.png.jpeg"),
+              _n304)
+
+        # 304: a failed write leaves no file at the final path, and no temporary one
+        _fail = _Path(_tempfile.mkdtemp())
+
+        def _boom306(*a, **k):
+            raise OSError("disk full")
+        _os306.replace = _boom306
+        try:
+            _got_png = _cap306.save(_img306(), _fail, "x", fmt="png")
+            _got_gif = _cap306.write_gif(str(_fail / "y.gif"), [_img306()])
+        finally:
+            _os306.replace = _real_replace306
+        _left = sorted(_os306.listdir(str(_fail)))
+        check("304 a write that fails leaves nothing behind (no truncated file, no .part)",
+              _got_png is None and _got_gif == "" and _left == [], (_got_png, _got_gif, _left))
+        _shutil306.rmtree(str(_fail), ignore_errors=True)
+        _okdir = _Path(_tempfile.mkdtemp())
+        _okp = _cap306.save(_img306(), _okdir, "ok", fmt="png")
+        _mode = _stat306.S_IMODE(_os306.stat(str(_okp)).st_mode) if _okp else 0
+        check("304 a written file keeps the ordinary permissions and no .part stays",
+              bool(_okp) and _okp.read_bytes()[:4] == b"\x89PNG"
+              and _mode & 0o044 and _os306.listdir(str(_okdir)) == ["ok.png"],
+              (_okp, oct(_mode), _os306.listdir(str(_okdir))))
+        _shutil306.rmtree(str(_okdir), ignore_errors=True)
+
+        # 304: a pinned shot is the picture's size on a hi-dpi screen
+        _hi = _img306(1000, 500)
+        _hi.setDevicePixelRatio(2.0)
+        _pin = _cap306.PinnedShot(_hi, "t306")
+        _size304 = (_pin.width(), _pin.height())
+        _pin.close()
+        H.spin(100)
+        check("304 a pinned 2x picture opens at its device-independent size",
+              _size304 == (500, 250), _size304)
+
+        # 305: each frame stays as long as it really did
+        _frames = [_img306(8, 8, B.Qt.GlobalColor.red),
+                   _img306(8, 8, B.Qt.GlobalColor.green),
+                   _img306(8, 8, B.Qt.GlobalColor.blue),
+                   _img306(8, 8, B.Qt.GlobalColor.white)]
+        _times = [100.0, 100.5, 100.6, 102.6]
+        try:
+            _d305 = _cap306.frame_delays(_times, 10)
+            _gif = _cap306.write_gif(str(_dir306 / "t.gif"), _frames,
+                                     delay_ms=100, delays_ms=_d305)
+            _read305 = _gif_delays306(_gif)
+        except Exception as _e305:
+            _read305 = repr(_e305)
+        check("305 the GIF's frame delays follow the frames' timestamps",
+              _read305 == [50, 10, 200, 87], _read305)
+        _plain = _cap306.write_gif(str(_dir306 / "p.gif"), _frames, delay_ms=100)
+        check("305 a GIF without timestamps keeps one delay for every frame",
+              _gif_delays306(_plain) == [10, 10, 10, 10], _gif_delays306(_plain))
+
+        # 305: the video's frame rate is the real one (a fake ffmpeg records its arguments)
+        _fake = _dir306 / "ffmpeg-fake"
+        _log = _dir306 / "ffmpeg-args.txt"
+        _fake.write_text("#!/bin/sh\necho \"$@\" > '%s'\ncat > /dev/null\nexit 0\n" % _log)
+        _fake.chmod(0o755)
+        _args305 = ""
+        try:
+            _cap306.frames_to_video([_img306() for _ in range(5)],
+                                    str(_dir306 / "v.webm"), fps=10,
+                                    ffmpeg=str(_fake),
+                                    times=[0.0, 1.0, 2.0, 3.0, 4.0])
+            _args305 = _log.read_text() if _log.exists() else ""
+        except Exception as _e305b:
+            _args305 = repr(_e305b)
+        check("305 a recording grabbed at 1 frame a second is encoded at 1 fps, not 10",
+              "-framerate 1 " in _args305, _args305)
+
+        # 305: stopping from a menu writes off the GUI thread
+        _v305 = br.new_tab(); H.spin(300)
+        _tabs306.append(_v305)
+        H.load(_v305, srv.url("/twhome")); H.spin(400)
+        br.tabs.setCurrentWidget(_v305); H.spin(100)
+        _shots = _Path(str(br.shot_dir()))
+        _before305 = set(_os306.listdir(str(_shots))) if _shots.is_dir() else set()
+        _flashes306 = []
+        br.flash = lambda text, ms=2600: _flashes306.append(str(text))
+        try:
+            br.start_recording(view=_v305, fps=5, region=(0, 0, 60, 40))
+            H.spin(700)
+            try:
+                _ret305 = br.stop_recording(save=True, fmt="gif", background=True)
+            except TypeError as _e305c:
+                _ret305 = repr(_e305c)
+            _new305 = []
+            if _ret305 == "":
+                H.wait_for(lambda: bool(_new305.extend(
+                    n for n in _os306.listdir(str(_shots)) if n not in _before305
+                    and n.startswith("recording-") and n.endswith(".gif")) or _new305), 20000)
+                H.wait_for(lambda: any("recording-" in f for f in _flashes306), 5000)
+        finally:
+            br.__dict__.pop("flash", None)
+            for _n in list(_os306.listdir(str(_shots))) if _shots.is_dir() else []:
+                if _n not in _before305:
+                    try:
+                        (_shots / _n).unlink()
+                    except OSError:
+                        pass
+            br.stop_recording(save=False)
+        check("305 a recording stopped from a menu returns at once and is written in the background",
+              _ret305 == "" and len(_new305) == 1
+              and any("recording-" in f for f in _flashes306),
+              (_ret305, _new305, _flashes306[-2:]))
+
+        # 306: a sticky header taller than the window: the stitched page is as tall as the page after clean
+        _W = B.APP_WORLD_ID
+        H.Handler.pages["/t306sticky"] = (
+            "<title>t306</title><body style='margin:0'>"
+            "<header style='position:sticky;top:0;height:1500px;background:#ccc'>nav</header>"
+            "<div style='height:2400px;background:#fff'>content</div></body>")
+        _vs = br.new_tab(); H.spin(300)
+        _tabs306.append(_vs)
+        H.load(_vs, srv.url("/t306sticky")); H.spin(500)
+        br.tabs.setCurrentWidget(_vs); H.spin(150)
+        _inner306 = jsq(_vs, "window.innerHeight", _W) or 0
+        _vis = _cap306.visible(_vs)
+        _scale306 = (_vis.height() / float(_inner306)) if _inner306 and not _vis.isNull() else 0
+        _cap306.clean(_vs, _W, True)
+        _after = _cap306._js(_vs, _cap306.METRICS_JS, _W)
+        _cap306.clean(_vs, _W, False)
+        H.spin(100)
+        _full = _cap306.full_page(_vs, _W, settle=60)
+        _want = int(_after[0] * _scale306) if _after and _scale306 else -1
+        check("306 a page with a tall sticky header is stitched at its height after clean",
+              _scale306 > 0 and not _full.isNull() and abs(_full.height() - _want) <= 2
+              and bool(_after) and _after[0] < 3900,
+              (_full.height(), _want, _after, _inner306))
+
+        # 306: the last band of an inner scroller (the box stops short of the asked scrollTop)
+        H.Handler.pages["/t306inner"] = (
+            "<title>t306i</title><body style='margin:0'>"
+            "<div id=box style='height:300px;width:200px;overflow:auto'>"
+            + "".join("<div style='height:100px;background:%s'></div>" % c
+                      for c in ["#f00", "#0f0", "#00f"] * 3 + ["#f00"])
+            + "</div></body>")
+        _vi = br.new_tab(); H.spin(300)
+        _tabs306.append(_vi)
+        H.load(_vi, srv.url("/t306inner")); H.spin(500)
+        br.tabs.setCurrentWidget(_vi); H.spin(150)
+        _sheets = []
+        br._shot_done = lambda image, *a, **k: _sheets.append(image) or None
+        try:
+            br.shot_inner(selector="#box", view=_vi, copy=False, save=False)
+        finally:
+            br.__dict__.pop("_shot_done", None)
+            if _had_done306:
+                br._shot_done = _real_done306
+        _ok306, _px306 = False, None
+        if _sheets and not _sheets[0].isNull():
+            _r = _sheets[0].height() / 1000.0
+            _c = _sheets[0].pixelColor(5, int(950 * _r))
+            _px306 = _c.name()
+            # band 9 of ten (900-1000) is red: the previous band's green means the box was copied from its top
+            _ok306 = _c.red() > _c.green() + 60 and _c.red() > _c.blue() + 60
+        check("306 the last band of an inner scroller is the content at the bottom of the box",
+              _ok306, (_px306, len(_sheets)))
+
+        # 306: the walk loses its tab: nothing half-black is saved, and it is a failure
+        _done306 = []
+        _calls306 = [0]
+
+        def _facts306(view, selector):
+            _calls306[0] += 1
+            if _calls306[0] == 1:
+                return {"scrollHeight": 900, "clientHeight": 300, "width": 100,
+                        "x": 0, "y": 0, "height": 300, "scrollTop": 0}
+            return {}
+        _flashes306 = []
+        br._inner_facts = _facts306
+        br._scroll_inner = lambda *a: True
+        br._shot_done = lambda *a, **k: _done306.append(a) or None
+        br.flash = lambda text, ms=2600: _flashes306.append(str(text))
+        try:
+            _ret306 = br.shot_inner(selector="#box", view=_vi)
+        finally:
+            for _n in ("_inner_facts", "_scroll_inner", "_shot_done", "flash"):
+                br.__dict__.pop(_n, None)
+            if _had_done306:
+                br._shot_done = _real_done306
+        check("306 an inner walk whose element goes away saves nothing and says it failed",
+              _ret306 is None and not _done306
+              and any(br._ui_str("shotFailed") == f for f in _flashes306),
+              (_ret306, len(_done306), _flashes306[-2:]))
+
+        # 306: a tab that goes mid-walk ends the capture quietly
+        _real_js306 = _cap306._js
+        _n306 = [0]
+
+        def _dying306(view, code, world):
+            _n306[0] += 1
+            if _n306[0] > 4:
+                raise RuntimeError("wrapped C/C++ object has been deleted")
+            return _real_js306(view, code, world)
+        _cap306._js = _dying306
+        try:
+            _fp306 = _cap306.full_page(_vs, _W, settle=30)
+            _err306 = None
+        except RuntimeError as _e306:
+            _fp306, _err306 = None, repr(_e306)
+        finally:
+            _cap306._js = _real_js306
+        _cap306.clean(_vs, _W, False)         # the dying walk could not put the page back
+        H.spin(100)
+        check("306 a tab lost in the middle of the walk gives no picture and no exception",
+              _err306 is None and _fp306 is not None and _fp306.isNull(), (_err306, _fp306))
+        _real_fp306 = _cap306.full_page
+        _real_fin306 = br._shot_finish
+        _out306 = []
+        _cap306.full_page = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("gone"))
+        br._shot_finish = lambda v: (_ for _ in ()).throw(RuntimeError("gone"))
+        br._shot_prepare = lambda v: None
+        br._shot_done = lambda image, *a, **k: _out306.append(image) or None
+        try:
+            try:
+                br.shot_full_page(view=_vs)
+                br.shot_full_page(view=_vs)       # and the view is not left claimed
+                _err306b = None
+            except RuntimeError as _e306b:
+                _err306b = repr(_e306b)
+        finally:
+            _cap306.full_page = _real_fp306
+            br.__dict__.pop("_shot_finish", None)
+            br.__dict__.pop("_shot_prepare", None)
+            br.__dict__.pop("_shot_done", None)
+            if _had_done306:
+                br._shot_done = _real_done306
+        check("306 shot_full_page on a vanishing tab ends with a failure, not an exception, and releases the view",
+              _err306b is None and len(_out306) == 2
+              and all(o is None or o.isNull() for o in _out306), (_err306b, len(_out306)))
+finally:
+    _os306.replace = _real_replace306
+    for _n, _o in _real_inner306.items():
+        if _o is None:
+            br.__dict__.pop(_n, None)
+        else:
+            br.__dict__[_n] = _o
+    for _t in _tabs306:
+        _close_if_open(_t)
+    _shutil306.rmtree(str(_dir306), ignore_errors=True)
+
+# ---- 306b: the review's folds: the recording writer finishes before the process exits,
+# owns its sound file, takes a free name, and paces video like the GIF ----
+import inspect as _insp306b
+_thr306b = B.threading.Thread
+_daemons306b = []
+
+
+class _T306b(_thr306b):
+    def __init__(self, *a, **k):
+        _daemons306b.append(k.get("daemon"))
+        super().__init__(*a, **k)
+
+
+B.threading.Thread = _T306b
+try:
+    _got306b = []
+    br._record_write_later(lambda: ("", []), lambda r: _got306b.append(r))
+    H.wait_for(lambda: _got306b, 3000)
+finally:
+    B.threading.Thread = _thr306b
+check("306 a recording is written on a thread the process waits for at exit",
+      _daemons306b == [False] and _got306b == [("", [])], (_daemons306b, _got306b))
+_dir306b = _Path(_tempfile.mkdtemp())
+try:
+    (_dir306b / "clip-x-2.gif").write_bytes(b"x")
+    _s306b = [br._free_recording_stem(_dir306b, "clip-x") for _ in range(3)]
+    for _st in _s306b:
+        br._record_stems.discard(_st)
+finally:
+    for _p306b in _dir306b.iterdir():
+        _p306b.unlink()
+    _dir306b.rmdir()
+check("306 two clips saved in the same second get two names",
+      _s306b == ["clip-x", "clip-x-3", "clip-x-4"], _s306b)
+_t306b = [i * 0.05 for i in range(101)] + [5.0 + 60.0]
+_rr306b = B.capture.real_rate(_t306b, 10)
+check("306 a long stall counts as at most ten seconds for the video's rate too",
+      6.0 < _rr306b < 7.5, _rr306b)
+_src306b = _insp306b.getsource(B.Browser.stop_recording)
+_w306b = _src306b.find("def work():")
+check("306 (source) the writer itself puts the sound beside the clip or drops it",
+      _w306b > 0 and "sound.replace(" in _src306b[_w306b:]
+      and "sound.unlink(missing_ok=True)" in _src306b[_w306b:])
+
+# ---- 313: a recording keeps the blur when the tab goes to another page ----
+H.Handler.pages["/t313"] = "<title>t313</title><p>nothing secret</p>"
+H.Handler.pages["/t313b"] = ("<title>t313b</title><p>log in</p>"
+                             "<input type=password id=pw value='secret'>")
+_tabs313 = []
+try:
+    if B.capture is not None:
+        _shot313 = br.config.get("shotRedact", "__absent__")
+        br.config["shotRedact"] = True
+        _v313 = br.new_tab()
+        _tabs313.append(_v313)
+        H.spin(300)
+        H.load(_v313, srv.url("/t313"))
+        H.spin(400)
+        br.tabs.setCurrentWidget(_v313)
+        H.spin(100)
+        _ok313 = br.start_recording(view=_v313, fps=10)
+        H.spin(500)
+        _first313 = H.js(_v313, "!!document.getElementById('__shotredact')")
+        H.load(_v313, srv.url("/t313b"))
+        H.wait_for(lambda: H.js(
+            _v313, "!!document.getElementById('__shotredact')") is True, 4000)
+        _after313 = H.js(_v313, "!!document.getElementById('__shotredact')")
+        _blur313 = H.js(_v313, "getComputedStyle(document.getElementById("
+                        "'pw')).filter")
+        br.stop_recording(save=False)
+        H.spin(300)
+        _off313 = H.js(_v313, "!!document.getElementById('__shotredact')")
+        check("313 a recording still blurs passwords after the tab goes to "
+              "another page", _ok313 and _first313 is True
+              and _after313 is True and "blur" in str(_blur313),
+              (_ok313, _first313, _after313, _blur313))
+        check("313 ...and takes the blur off when it stops",
+              _off313 is False, _off313)
+        if _shot313 == "__absent__":
+            br.config.pop("shotRedact", None)
+        else:
+            br.config["shotRedact"] = _shot313
+finally:
+    for _t in _tabs313:
+        _close_if_open(_t)
+
+# 313b: one recording frame at a time
+_rt313 = getattr(br, "_record_ticking", False)
+_frames313 = []
+_real_rf313 = getattr(br, "_record_frame", None)
+br._record_frame = lambda: _frames313.append(1) or True
+try:
+    br._record_ticking = True
+    _inside313 = br._record_tick()
+    br._record_ticking = False
+    _alone313 = br._record_tick()
+    _after313b = getattr(br, "_record_ticking", None)
+finally:
+    br.__dict__.pop("_record_frame", None)
+    br._record_ticking = _rt313
+check("313 a recording tick that fires inside another one grabs nothing",
+      _inside313 is False and _alone313 is True and _frames313 == [1]
+      and _after313b is False, (_inside313, _alone313, _frames313, _after313b))
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

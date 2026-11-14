@@ -230,7 +230,7 @@
       let dirty = false;
       for (const box of [title, text, tags])
         box.addEventListener("input", () => { dirty = true; });
-      const persist = (after) => {
+      const persist = (after, failed) => {
         // with the version it was opened at, so a note changed on disk
         // meanwhile is not written over (see desk_do)
         desk("saveNote", {id: note.id, title: title.value,
@@ -243,6 +243,7 @@
                  // he had typed, without a word
                  save.textContent = STR.readSaveFailed
                    || "That could not be written.";
+                 if (failed) failed();
                  return;
                }
                dirty = false;
@@ -250,7 +251,13 @@
              });
       };
       save.onclick = () => persist((saved) => { open = saved.id; render(); });
-      saveFirst = (then) => { if (dirty) persist(() => then()); else then(); };
+      // a note that cannot be written kept Back, Esc and the tabs dead:
+      // the first try says so on the button, the next one leaves
+      let leaveFailed = false;
+      saveFirst = (then) => {
+        if (!dirty || leaveFailed) { then(); return; }
+        persist(() => then(), () => { leaveFailed = true; });
+      };
       const back = el("button", "act", STR.noteBack || "Back");
       back.onclick = () => leaveNote(() => { open = null; render(); });
       const clip = el("button", "act", STR.noteClipPage || "This page");

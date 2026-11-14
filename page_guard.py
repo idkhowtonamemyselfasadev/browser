@@ -83,7 +83,7 @@ def _host(text):
     """A host as the page's own script sees it. Qt gives the decoded
     form of an international name and location.hostname the xn-- form,
     so a rule written from the menu was never found."""
-    host = str(text or "").strip().lower().removeprefix("www.")
+    host = str(text or "").strip().lower().rstrip(".").removeprefix("www.")
     if host.isascii():
         return host
     ace = ""
@@ -199,7 +199,34 @@ _JS = r"""
   var R = __GUARD_RULES__;
   if (R.own && location.protocol === "file:"
       && location.pathname.indexOf(R.own) === 0) return;
-  var host = location.hostname.toLowerCase().replace(/^www\./, "");
+  /* the host as a rule is written: no "www.", no root dot
+     ("example.com." is the same site and matched no rule). A frame
+     with no name of its own (about:blank, srcdoc, blob:, data:) takes
+     its creator's, so a site's rules cover its own empty frames too:
+     the parent when it is the same origin, else the browser's own
+     list of ancestors, else whoever sent the visitor here. */
+  var cleanHost = function (name) {
+    return String(name || "").toLowerCase().replace(/\.+$/, "")
+      .replace(/^www\./, "");
+  };
+  var host = (function () {
+    var own = cleanHost(location.hostname);
+    if (own) return own;
+    var from;
+    try {
+      from = cleanHost(parent.location.hostname);
+      if (from) return from;
+    } catch (e) {}
+    try {
+      from = cleanHost(new URL(location.ancestorOrigins[0]).hostname);
+      if (from) return from;
+    } catch (e) {}
+    try {
+      from = cleanHost(new URL(document.referrer).hostname);
+      if (from) return from;
+    } catch (e) {}
+    return "";
+  })();
   /* an exception for example.com covers login.example.com, as the
      browser's own menu says it does: looked up by the exact host only,
      the guards still ran on every subdomain */
@@ -229,6 +256,20 @@ _JS = r"""
     try {
       Object.defineProperty(obj, name, {get: function () { return value; },
                                         configurable: true});
+    } catch (e) {}
+  }
+  /* A function put on the one object the page uses (navigator.
+     geolocation, navigator.mediaDevices) is undone by
+     Geolocation.prototype.getCurrentPosition.call(navigator.
+     geolocation, ...). So it goes on the prototype as well, and the
+     prototype's copy runs it on the instance. What `fn` calls for the
+     real thing was taken before either was replaced. */
+  function pin(obj, proto, name, fn) {
+    try { obj[name] = fn; } catch (e) {}
+    try {
+      if (proto && typeof proto[name] === "function") {
+        proto[name] = function () { return fn.apply(obj, arguments); };
+      }
     } catch (e) {}
   }
 
@@ -320,10 +361,9 @@ _JS = r"""
       return Promise.reject(new DOMException("Blocked by the browser",
                                              "NotAllowedError"));
     };
-    try {
-      navigator.clipboard.readText = deny;
-      navigator.clipboard.read = deny;
-    } catch (e) {}
+    var clip = window.Clipboard && Clipboard.prototype;
+    pin(navigator.clipboard, clip, "readText", deny);
+    pin(navigator.clipboard, clip, "read", deny);
   }
   if (on("copyGuard")) {
     /* The site's own copy handler never runs: this one answers first,
@@ -342,6 +382,16 @@ _JS = r"""
 
   /* ---- the "Leave site?" box -------------------------------------- */
   if (on("leaveTrap") && !under(R.keep)) {
+    /* First on the window's list, in the capture phase, so it runs
+       before any handler the page adds by any road -- the wrapped
+       addEventListener below, EventTarget.prototype.addEventListener.
+       call(window, ...), a <body onbeforeunload> -- and ends the event
+       there. It sets nothing itself, so nothing raises the box. */
+    try {
+      window.addEventListener("beforeunload", function (e) {
+        try { e.stopImmediatePropagation(); } catch (err) {}
+      }, true);
+    } catch (e) {}
     try {
       Object.defineProperty(window, "onbeforeunload",
                             {get: function () { return null; },
@@ -370,9 +420,12 @@ _JS = r"""
                    heading: null, speed: null},
           timestamp: Date.now()});
     };
-    navigator.geolocation.getCurrentPosition = function (ok) { answer(ok); };
-    navigator.geolocation.watchPosition = function (ok) { answer(ok); return 1; };
-    navigator.geolocation.clearWatch = function () {};
+    var geo = window.Geolocation && Geolocation.prototype;
+    pin(navigator.geolocation, geo, "getCurrentPosition",
+        function (ok) { answer(ok); });
+    pin(navigator.geolocation, geo, "watchPosition",
+        function (ok) { answer(ok); return 1; });
+    pin(navigator.geolocation, geo, "clearWatch", function () {});
   }
 
   /* ---- what the page may not use at all --------------------------- */
@@ -387,6 +440,15 @@ _JS = r"""
       if (/webgl/i.test(String(kind))) return null;
       return realCtx.apply(this, arguments);
     };
+    /* the same door on a canvas with no element: a script (or a
+       worker's transferred canvas) asks it for "webgl" just as well */
+    if (window.OffscreenCanvas && OffscreenCanvas.prototype.getContext) {
+      var realOffCtx = OffscreenCanvas.prototype.getContext;
+      OffscreenCanvas.prototype.getContext = function (kind) {
+        if (/webgl/i.test(String(kind))) return null;
+        return realOffCtx.apply(this, arguments);
+      };
+    }
   }
   if (on("noWebRTC")) {
     var names = ["RTCPeerConnection", "webkitRTCPeerConnection",
@@ -395,9 +457,10 @@ _JS = r"""
       try { window[names[n]] = undefined; } catch (e) {}
     }
     if (navigator.mediaDevices) {
-      try { navigator.mediaDevices.getUserMedia = function () {
+      pin(navigator.mediaDevices, window.MediaDevices
+          && MediaDevices.prototype, "getUserMedia", function () {
         return Promise.reject(new DOMException("Blocked", "NotAllowedError"));
-      }; } catch (e) {}
+      });
     }
   }
 
@@ -427,10 +490,17 @@ _JS = r"""
   var call = R.calls[host] || null;
   if ((mic || call) && navigator.mediaDevices
       && navigator.mediaDevices.getUserMedia) {
-    var fixWant = function (want) {
+    var fixWant = function (want, state) {
       if (!want || typeof want !== "object" || !want.audio) return want;
-      var audio = want.audio === true ? {} : want.audio;
-      if (mic && !audio.deviceId) audio.deviceId = {exact: mic};
+      /* on copies: the page's own object is not ours to write into, and
+         a second call with it would find our id there and take it for
+         the page's own choice */
+      want = Object.assign({}, want);
+      var audio = want.audio === true ? {} : Object.assign({}, want.audio);
+      if (mic && !audio.deviceId) {
+        audio.deviceId = {exact: mic};
+        if (state) state.saved = true;
+      }
       if (call) {
         if (call.gain !== undefined) audio.autoGainControl = call.gain;
         if (call.noise !== undefined) audio.noiseSuppression = call.noise;
@@ -441,9 +511,24 @@ _JS = r"""
     };
     var realAsk = navigator.mediaDevices.getUserMedia.bind(
       navigator.mediaDevices);
-    navigator.mediaDevices.getUserMedia = function (want) {
-      return realAsk(fixWant(want));
-    };
+    pin(navigator.mediaDevices, window.MediaDevices
+        && MediaDevices.prototype, "getUserMedia", function (want) {
+      var state = {};
+      var fixed = fixWant(want, state);
+      var first = realAsk(fixed);
+      if (!state.saved) return first;
+      /* his saved microphone is not plugged in: {exact} is a promise no
+         device keeps, and every call failed with OverconstrainedError.
+         Once more without it, so the call gets whatever is there. */
+      return first.catch(function (err) {
+        if (!err || err.name !== "OverconstrainedError"
+            || (err.constraint && err.constraint !== "deviceId")) throw err;
+        var plain = Object.assign({}, fixed);
+        plain.audio = Object.assign({}, fixed.audio);
+        delete plain.audio.deviceId;
+        return realAsk(plain);
+      });
+    });
   }
 
   /* ---- the microphone, the camera and the screen ------------------
@@ -492,17 +577,57 @@ _JS = r"""
       } catch (e) {}
       return stream;
     };
+    var MDp = window.MediaDevices && MediaDevices.prototype;
+    /* a clone is a second live track on the same device: the page can
+       stop the original and keep the microphone open through the copy,
+       and the indicator went dark. A clone of anything watched is
+       watched too, until it ends like the rest. */
+    var watchedIn = function (track) {
+      for (var i = 0; i < window.__guardStreams.length; i++) {
+        var s = window.__guardStreams[i];
+        if (s.getTracks().indexOf(track) >= 0) return s;
+      }
+      return null;
+    };
+    try {
+      var realTrackClone = MediaStreamTrack.prototype.clone;
+      MediaStreamTrack.prototype.clone = function () {
+        var copy = realTrackClone.apply(this, arguments);
+        try {
+          var from = watchedIn(this);
+          if (from) watch(new MediaStream([copy]), !!from.__guardScreen);
+        } catch (e) {}
+        return copy;
+      };
+      var realStreamClone = MediaStream.prototype.clone;
+      MediaStream.prototype.clone = function () {
+        var copy = realStreamClone.apply(this, arguments);
+        try {
+          /* a stream the page built from a watched track is not itself
+             on the list: its clone kept the device open unseen */
+          var screen = !!this.__guardScreen;
+          var watched = window.__guardStreams.indexOf(this) >= 0;
+          var own = watched ? [] : this.getTracks();
+          for (var i = 0; i < own.length && !watched; i++) {
+            var from = watchedIn(own[i]);
+            if (from) { watched = true; screen = !!from.__guardScreen; }
+          }
+          if (watched) watch(copy, screen);
+        } catch (e) {}
+        return copy;
+      };
+    } catch (e) {}
     if (md.getUserMedia) {
       var realGum = md.getUserMedia.bind(md);
-      md.getUserMedia = function (want) {
+      pin(md, MDp, "getUserMedia", function (want) {
         return realGum(want).then(function (s) { return watch(s, false); });
-      };
+      });
     }
     if (md.getDisplayMedia) {
       var realGdm = md.getDisplayMedia.bind(md);
-      md.getDisplayMedia = function (want) {
+      pin(md, MDp, "getDisplayMedia", function (want) {
         return realGdm(want).then(function (s) { return watch(s, true); });
-      };
+      });
     }
   }
 
@@ -560,70 +685,113 @@ _JS = r"""
 
   if (on("localFonts")) {
     onReady(function () {
-      var style = document.createElement("style");
-      style.id = "guard-fonts";
-      style.textContent =
+      var css =
         "body, p, li, td, th, h1, h2, h3, h4, h5, h6, blockquote, dd, dt" +
         "{font-family:" + R.fonts + " !important}";
+      /* a constructed sheet first: a page whose CSP has no
+         'unsafe-inline' for styles refuses the <style> below, and the
+         site's own fonts stayed. Constructed sheets are not asked. */
+      try {
+        var sheet = new CSSStyleSheet();
+        sheet.replaceSync(css);
+        document.adoptedStyleSheets =
+          Array.from(document.adoptedStyleSheets).concat([sheet]);
+        try {
+          /* the element is how the guard is seen to be on: kept, empty
+             (nothing in it for a page's CSP to refuse) */
+          var mark = document.createElement("style");
+          mark.id = "guard-fonts";
+          (document.head || document.documentElement).appendChild(mark);
+        } catch (e) {}
+        return;
+      } catch (e) {}
+      var style = document.createElement("style");
+      style.id = "guard-fonts";
+      style.textContent = css;
       (document.head || document.documentElement).appendChild(style);
     });
   }
 
   if (on("noFrames")) {
-    var dropFrames = function () {
-      var frames = document.querySelectorAll("iframe[src]");
-      for (var i = 0; i < frames.length; i++) {
-        var src = frames[i].getAttribute("src") || "";
+    var SHARED = ["github.io", "gitlab.io", "blogspot.com", "pages.dev",
+      "netlify.app", "vercel.app", "herokuapp.com", "appspot.com",
+      "web.app", "firebaseapp.com", "azurewebsites.net",
+      "cloudfront.net", "workers.dev", "glitch.me", "neocities.org",
+      "wordpress.com", "tumblr.com", "s3.amazonaws.com"];
+    var siteOf = function (name) {
+      if (/^[0-9.]+$/.test(name) || name.indexOf(":") >= 0) return name;
+      var parts = name.split(".");
+      if (parts.length <= 2) return name;
+      if (parts.length >= 4
+          && SHARED.indexOf(parts.slice(-3).join(".")) >= 0) {
+        return parts.slice(-4).join(".");
+      }
+      if (SHARED.indexOf(parts.slice(-2).join(".")) >= 0) {
+        return parts.slice(-3).join(".");
+      }
+      var take = parts[parts.length - 1].length === 2
+        && /^(co|com|org|net|gov|edu|ac|ne|or|go)$/.test(
+          parts[parts.length - 2]) ? 3 : 2;
+      return parts.slice(-take).join(".");
+    };
+    var dropFrame = function (frame) {
+      {
+        var src = frame.getAttribute("src") || "";
         /* resolved first: "//ads.tracker.net/frame", the usual way a
            third-party embed is written, failed the http(s) test and was
            kept */
         var at = null;
         try { at = new URL(src, location.href); } catch (e) {}
-        if (!at || !/^https?:$/i.test(at.protocol)) continue;
-        var other = at.hostname.toLowerCase().replace(/^www\./, "");
-        /* the registrable name: the last two labels, three under a
-           country's own second level (co.uk), one more under a host
-           whose subdomains belong to different people (github.io: the
-           same list as adblock._SHARED_HOSTS), and an address as it is */
-        var SHARED = ["github.io", "gitlab.io", "blogspot.com", "pages.dev",
-          "netlify.app", "vercel.app", "herokuapp.com", "appspot.com",
-          "web.app", "firebaseapp.com", "azurewebsites.net",
-          "cloudfront.net", "workers.dev", "glitch.me", "neocities.org",
-          "wordpress.com", "tumblr.com", "s3.amazonaws.com"];
-        var siteOf = function (name) {
-          if (/^[0-9.]+$/.test(name) || name.indexOf(":") >= 0) return name;
-          var parts = name.split(".");
-          if (parts.length <= 2) return name;
-          if (parts.length >= 4
-              && SHARED.indexOf(parts.slice(-3).join(".")) >= 0) {
-            return parts.slice(-4).join(".");
-          }
-          if (SHARED.indexOf(parts.slice(-2).join(".")) >= 0) {
-            return parts.slice(-3).join(".");
-          }
-          var take = parts[parts.length - 1].length === 2
-            && /^(co|com|org|net|gov|edu|ac|ne|or|go)$/.test(
-              parts[parts.length - 2]) ? 3 : 2;
-          return parts.slice(-take).join(".");
-        };
+        if (!at || !/^https?:$/i.test(at.protocol)) return;
+        var other = cleanHost(at.hostname);
+        /* (siteOf, above: the registrable name -- the last two labels,
+           three under a country's own second level (co.uk), one more
+           under a host whose subdomains belong to different people
+           (github.io: the same list as adblock._SHARED_HOSTS), and an
+           address as it is) */
         /* the same site or a part of it, by the END of the name:
            indexOf found ".example.com" inside ads.example.com.evil.net
            and kept that frame on example.com */
         if (other && other !== host && siteOf(other) !== siteOf(host)
             && other.slice(-(host.length + 1)) !== "." + host
             && host.slice(-(other.length + 1)) !== "." + other) {
-          frames[i].remove();
+          frame.remove();
         }
       }
     };
-    onReady(function () {
-      dropFrames();
-      /* a frame whose address is set after it was put in, too */
-      new MutationObserver(dropFrames).observe(
-        document.documentElement, {childList: true, subtree: true,
-                                   attributes: true,
-                                   attributeFilter: ["src"]});
-    });
+    var dropFrames = function () {
+      var frames = document.querySelectorAll("iframe[src]");
+      for (var i = 0; i < frames.length; i++) dropFrame(frames[i]);
+    };
+    /* From the first node the parser hands over, not from
+       DOMContentLoaded: by then every third-party frame in the markup
+       was already loading. The records say what is new, so a long
+       page is not searched again for every node. A frame whose address
+       is set after it was put in is caught by the attribute. */
+    try {
+      new MutationObserver(function (records) {
+        try {
+          for (var r = 0; r < records.length; r++) {
+            var rec = records[r];
+            if (rec.type === "attributes") {
+              if (rec.target.nodeName === "IFRAME") dropFrame(rec.target);
+              continue;
+            }
+            for (var a = 0; a < rec.addedNodes.length; a++) {
+              var node = rec.addedNodes[a];
+              if (node.nodeType !== 1) continue;
+              if (node.nodeName === "IFRAME") dropFrame(node);
+              else if (node.querySelectorAll) {
+                var inner = node.querySelectorAll("iframe[src]");
+                for (var k = 0; k < inner.length; k++) dropFrame(inner[k]);
+              }
+            }
+          }
+        } catch (e) {}
+      }).observe(document, {childList: true, subtree: true,
+                            attributes: true, attributeFilter: ["src"]});
+    } catch (e) {}
+    onReady(dropFrames);
   }
 
   if (on("banners")) {
@@ -633,6 +801,20 @@ _JS = r"""
        something, and clicking it would be the browser speaking for
        him. Tried a few times, because these things arrive late. */
     var tries = 0;
+    /* ...but never on a page that is asking for his decision: an OAuth
+       or sign-in consent screen's "Decline" sits in a container called
+       "consent" too, and is somebody's actual answer. Those pages say so
+       in their address, or post the answer from a form. (Requiring the
+       banner to float over the page missed the many that do not.) */
+    var decisionPage = /oauth|authori[sz]e|\/consent|signin|login/i.test(
+      String(location.pathname || ""));
+    var decisionForm = function (el) {
+      try {
+        var form = el.closest ? el.closest("form") : null;
+        return !!form && /oauth|authori[sz]e|consent|grant|approve/i.test(
+          String(form.getAttribute("action") || ""));
+      } catch (e) { return false; }
+    };
     var looksLikeBanner = function (el) {
       for (var node = el; node && node !== document.body; node = node.parentElement) {
         /* an SVG node's className is an object, not a string */
@@ -640,7 +822,8 @@ _JS = r"""
                   ? node.className.baseVal : node.className;
         var text = (String(node.id || "") + " " + String(cls || "")).toLowerCase();
         for (var m = 0; m < R.marks.length; m++) {
-          if (text.indexOf(R.marks[m]) >= 0) return true;
+          if (text.indexOf(R.marks[m]) >= 0)
+            return !decisionPage && !decisionForm(el);
         }
       }
       return false;

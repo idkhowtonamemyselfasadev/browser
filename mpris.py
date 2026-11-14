@@ -25,7 +25,7 @@ try:
                               QDBusAbstractAdaptor, QDBusArgument,
                               QDBusObjectPath)
     from PyQt6.QtCore import (QObject, pyqtSlot, pyqtProperty, QVariant,
-                              pyqtClassInfo, QMetaType)
+                              pyqtClassInfo, QMetaType, Qt)
     HAVE_DBUS = True
 except ImportError:  # pragma: no cover - Qt built without QtDBus
     HAVE_DBUS = False
@@ -87,7 +87,15 @@ class Root(QDBusAbstractAdaptor):
             except RuntimeError:
                 pass
         if getattr(target, "showNormal", None) is not None:
-            target.showNormal()
+            # as a taskbar click does: out of minimized, and maximized or
+            # fullscreen kept -- showNormal() threw both away and the
+            # window shrank (or left the video's fullscreen) on a raise
+            try:
+                target.setWindowState(target.windowState()
+                                      & ~Qt.WindowState.WindowMinimized)
+                target.show()
+            except (AttributeError, TypeError):
+                target.showNormal()
             target.raise_()
             target.activateWindow()
 
