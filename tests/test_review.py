@@ -15490,6 +15490,876 @@ finally:
 check("259b a clash cleared and made again is said again",
       len(_fl259b) == 2, str(_fl259b))
 
+
+# ---- 262/263: own pages, the 51st pass: lost clicks, dead store button, TOTP after an edit, notes ----
+_dir262 = _Path(B.__file__).parent
+_dl262 = (_dir262 / "downloads.html").read_text()
+_pw262 = (_dir262 / "passwords.html").read_text()
+_nt263 = (_dir262 / "notes.html").read_text()
+
+# page-level source checks: these pages only run inside a bridge, so the exact guards are checked
+check("262 downloads: no redraw under a held pointer button, none for an unchanged answer",
+      'document.addEventListener("pointerdown"' in _dl262
+      and "if (held) { deferred = true; return; }" in _dl262
+      and "if (j === lastJson) return;" in _dl262
+      and "if (deferred) { deferred = false; refresh(); }" in _dl262)
+check("262 passwords: a lock, a denial or a timeout frees the store button",
+      "function pickerReset()" in _pw262
+      and "setTimeout(pickerReset, 30000)" in _pw262
+      and _pw262.count("pickerReset();") >= 3
+      and "function renderLocked() {\n  pickerReset();" in _pw262
+      and "function renderDenied() {\n  pickerReset();" in _pw262)
+check("263 notes: adding a snippet with no text is not a delete",
+      "if (!key.value.trim() || !text.value) return;" in _nt263)
+check("263 notes: Back, a tab, a new note and Esc save a typed-in note first",
+      "function leaveNote(then)" in _nt263
+      and "back.onclick = () => leaveNote(" in _nt263
+      and "function setView(which) {\n    leaveNote(" in _nt263
+      and "leaveNote(() => bridge.closePane())" in _nt263
+      and "leaveNote(() => desk(\"daily\"" in _nt263
+      and 'addEventListener("input", () => { dirty = true; })' in _nt263)
+
+# TOTP: a save or delete forgets the cached code and a fetch from before it lands nowhere
+if br.vault is not None and not br.vault_locked():
+    _jobs262 = []
+    _real_job262 = br.vault_job
+    br.vault.provider.eager = False      # shadows the class's True
+    br.vault_job = lambda work, done: _jobs262.append((work, done))
+    _old262 = {"code": "111111", "period": 30, "left": 20.0}
+    try:
+        _k262 = br._page_key
+        # a code cached, then the item saved: the next ask goes to the store again
+        json.loads(br.bridge.totpFor(_k262, "it262a"))
+        _jobs262[0][1](_old262)
+        _hit262 = json.loads(br.bridge.totpFor(_k262, "it262a"))
+        br.bridge.saveItem(_k262, json.dumps({"id": "it262a", "title": "t"}))
+        _after262 = json.loads(br.bridge.totpFor(_k262, "it262a"))
+        # a fetch out when the save lands must not write its old answer
+        del _jobs262[:]
+        json.loads(br.bridge.totpFor(_k262, "it262b"))
+        _stale = _jobs262[0]
+        br.bridge.saveItem(_k262, json.dumps({"id": "it262b", "title": "t"}))
+        _stale[1](_old262)
+        _late262 = json.loads(br.bridge.totpFor(_k262, "it262b"))
+        # delete forgets too
+        json.loads(br.bridge.totpFor(_k262, "it262c"))
+        _jobs262[-1][1](_old262)
+        br.bridge.deleteItem(_k262, "it262c")
+        _del262 = json.loads(br.bridge.totpFor(_k262, "it262c"))
+    finally:
+        br.vault_job = _real_job262
+        del br.vault.provider.eager
+        for _n262 in ("_totp_cache", "_totp_flight"):
+            br.bridge.__dict__.get(_n262, {}).clear()
+    check("262 a saved item's cached TOTP code is dropped, not shown for 30 s",
+          _hit262.get("code") == "111111" and "pending" in _after262
+          and "code" not in _after262, str((_hit262, _after262)))
+    check("262 a TOTP fetch from before a save does not land in the cache",
+          "pending" in _late262 and "code" not in _late262, str(_late262))
+    check("262 a deleted item's cached TOTP code is dropped",
+          "pending" in _del262 and "code" not in _del262, str(_del262))
+else:
+    check("262 TOTP forget on save and delete", False, "vault not open in this run")
+
+# ---- 264: the inspector over the debug port attaches to this tab or to none ----
+class _Reply264:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def readAll(self):
+        return json.dumps(self._rows).encode()
+
+    def deleteLater(self):
+        pass
+
+
+_port_was264 = B.REMOTE_DEBUG_PORT
+B.REMOTE_DEBUG_PORT = 9 if not _port_was264 else _port_was264
+_loaded264 = []
+_v264 = br.new_tab(url=srv.url("/twhome?i264"), switch=False)
+H.wait_for(lambda: "i264" in _v264.url().toString(), 8000)
+_u264 = _v264.url().toString()
+try:
+    for _rows264 in (
+            [{"type": "page", "url": "https://other264.example/",
+              "devtoolsFrontendUrl": "/devtools/inspector.html?ws=OTHER"},
+             {"type": "page", "url": _u264,
+              "devtoolsFrontendUrl": "/devtools/inspector.html?ws=MINE"}],
+            [{"type": "page", "url": _u264,
+              "devtoolsFrontendUrl": "/devtools/inspector.html?ws=A"},
+             {"type": "page", "url": _u264,
+              "devtoolsFrontendUrl": "/devtools/inspector.html?ws=B"}],
+            [{"type": "page", "url": "https://private264.example/",
+              "devtoolsFrontendUrl": "/devtools/inspector.html?ws=PRIV"}]):
+        br._open_inspector(_Reply264(_rows264), _v264, _u264)
+        _dt264 = getattr(_v264, "_devtools", None)
+        _loaded264.append(_dt264.page().requestedUrl().toString() if _dt264 is not None
+                          else "")
+        if _dt264 is not None:
+            _dt264.close()
+            _v264._devtools = None
+        H.spin(100)
+finally:
+    B.REMOTE_DEBUG_PORT = _port_was264
+    _close_if_open(_v264)
+check("264 the port inspector picks this tab, and the list when it cannot tell",
+      len(_loaded264) == 3 and "ws=MINE" in _loaded264[0]
+      and "ws=" not in _loaded264[1] and "ws=" not in _loaded264[2],
+      str(_loaded264))
+
+
+# ---- 265/266: the 53rd pass: session file, crash recovery, closing a browser ----
+def _mk266():
+    w = br.new_window()
+    H.spin(300)
+    w.show()
+    return w
+
+
+def _end266(win):
+    try:
+        win._closing_anyway = True
+        win.close()
+    except RuntimeError:
+        pass
+
+
+# 265 the crash offer lists every tab, not the first sixty
+_cs265 = br.__dict__.get("_crash_state", "__absent__")
+_box265 = None
+try:
+    br._crash_state = [{"u": "http://127.0.0.1/t265-%d" % i, "t": "T%d" % i,
+                        "s": "main"} for i in range(100)]
+    _box265 = br.crash_recovery_dialog()
+    _got265 = []
+    br.open_tab_state = lambda entries, **k: _got265.append(len(entries)) or []
+    try:
+        _box265._bring_back()
+    finally:
+        br.__dict__.pop("open_tab_state", None)
+    check("265 the crash offer has a box for every one of 100 tabs and "
+          "brings them all back",
+          len(_box265._boxes) == 100 and _got265 == [100],
+          str((len(_box265._boxes), _got265)))
+finally:
+    if _cs265 == "__absent__":
+        br.__dict__.pop("_crash_state", None)
+    else:
+        br._crash_state = _cs265
+    if _box265 is not None:
+        _box265.deleteLater()
+
+# 265 a crashed run forgets the Downloads list when main was set to
+_coe265 = br.config.get("clearOnExit", "__absent__")
+_dl265 = br.downloads
+try:
+    br.config["clearOnExit"] = {"work265": ["downloads"]}
+    br.downloads = [{"state": "done", "name": "f265", "url": "http://x/f265"}]
+    try:
+        br._forget_crashed_downloads()
+    except AttributeError:
+        pass
+    _other265 = len(br.downloads) == 1       # another browser's: kept
+    br.config["clearOnExit"] = {"main": ["downloads"]}
+    try:
+        br._forget_crashed_downloads()
+    except AttributeError:
+        pass
+    check("265 a crash honours forgetting the Downloads list on exit",
+          _other265 and br.downloads == [], str((_other265, br.downloads)))
+finally:
+    br.downloads = _dl265
+    if _coe265 == "__absent__":
+        br.config.pop("clearOnExit", None)
+    else:
+        br.config["clearOnExit"] = _coe265
+    br.save_downloads()
+
+# 265 a pinned tab restored first does not write a half-restored session
+_w265 = None
+_st265 = br.config.get("sessionTabs", "__absent__")
+_tg265 = br.config.get("tabGroups", "__absent__")
+_w265 = _mk266()
+try:
+    _writes265 = []
+    _w265._write_session_state = lambda data, tabs, quiet=False: \
+        _writes265.append(sum(len(v) for v in tabs.values())
+                          + sum(len(g.get("urls", [])) for g in data))
+    br.config["tabGroups"] = []
+    br.config["sessionTabs"] = {"main": [
+        {"u": srv.url("/twhome?p265"), "t": "a", "p": 1},
+        {"u": srv.url("/twhome?q265"), "t": "b"},
+        {"u": srv.url("/twother?r265"), "t": "c"}]}
+    if hasattr(_w265, "_restore_all_tabs"):
+        _w265._restore_all_tabs()
+    else:
+        _w265._restore_groups()
+        _w265._restore_session_tabs()
+    _rows265 = (lambda d, t: sum(len(v) for v in t.values())
+                + sum(len(g.get("urls", [])) for g in d))
+    _full265 = _rows265(*_w265._session_rows())
+    # the writer adds the other windows' tabs to this one's (the suite's
+    # own window has tabs of its own by now): those are counted too
+    _others265 = 0
+    for _ow265 in _w265.windows():
+        if _ow265 is _w265 or getattr(_ow265, "_app_url", None) \
+                or getattr(_ow265, "_all_private", False):
+            continue
+        try:
+            _others265 += _rows265(*_ow265._session_rows())
+        except RuntimeError:
+            pass
+    check("265 no session write while a restore is half done",
+          _full265 >= 3 and _writes265 and all(
+              n == _full265 + _others265 for n in _writes265),
+          str((_full265, _others265, _writes265)))
+finally:
+    _w265.__dict__.pop("_write_session_state", None)
+    _end266(_w265)
+    for _k, _v in (("sessionTabs", _st265), ("tabGroups", _tg265)):
+        if _v == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+H.spin(200)
+
+# 265 a saved tab of a browser that is gone opens in main, not the active one
+_w265b = _mk266()
+try:
+    _w265b.sessions.append({"name": "O265", "sid": "other265"})
+    _w265b.active_session = "other265"
+    _v265 = _w265b.open_tab_state(
+        [{"u": srv.url("/twhome?g265"), "t": "g", "s": "gone265"}],
+        lazy=True)
+    _sid265 = getattr(_v265[0], "session", None) if _v265 else None
+    check("265 a tab of a deleted browser opens in main, not the active "
+          "browser's jar", _sid265 == "main", str(_sid265))
+finally:
+    _w265b.active_session = "main"
+    _w265b.sessions = [e for e in _w265b.sessions if e["sid"] != "other265"]
+    _end266(_w265b)
+H.spin(200)
+
+# 266 closing a virtual browser closes its split half and its mini windows
+_w266 = _mk266()
+_mini266 = None
+try:
+    if not any(e["sid"] == "s266" for e in br.sessions):
+        br.sessions.append({"name": "S266", "sid": "s266"})
+    if not any(e["sid"] == "s266" for e in _w266.sessions):
+        _w266.sessions.append({"name": "S266", "sid": "s266"})
+    _a266 = _w266.new_tab(url=srv.url("/twhome?a266"), switch=False,
+                          session="s266")
+    _b266 = _w266.new_tab(url=srv.url("/twother?b266"), switch=False,
+                          session="s266")
+    H.spin(300)
+    _w266.split_view(index=_w266.tabs.indexOf(_b266), on=True)
+    H.spin(200)
+    _mini266 = _w266.pop_out_tab(_w266.tabs.indexOf(_a266))
+    H.spin(200)
+    _before266 = (_w266._split_view is _b266 and _mini266 is not None
+                  and len(_w266._popouts) == 1)
+    _w266._close_session("s266")
+    H.spin(300)
+    _split266 = getattr(_w266, "_split_view", None)
+    _minis266 = [m for m in _w266._popouts
+                 if (getattr(m, "_state", None) or {}).get("session")
+                 == "s266"]
+    _rows266 = _w266._session_rows()[1].get("s266")
+    check("266 closing a virtual browser closes its split half and its "
+          "popped-out tabs",
+          _before266 and _split266 is None and not _minis266
+          and not _rows266,
+          str((_before266, _split266, len(_minis266), _rows266)))
+finally:
+    br.sessions = [e for e in br.sessions if e["sid"] != "s266"]
+    _end266(_w266)
+H.spin(200)
+
+# 266 the last window, after the writer hand-off, writes its own session
+_w266b = _mk266()
+_saved266 = list(B.WINDOWS)
+_app266 = B.QApplication.instance()
+_calls266 = []
+try:
+    _w266b._session_timer.start()           # it holds the writer role
+    _w266b._save_groups = lambda quiet=False: _calls266.append("save")
+    _w266b._clear_on_exit = lambda: _calls266.append("clear")
+    _app266.quit = lambda: _calls266.append("quit")
+    B.WINDOWS[:] = [_w266b]                 # the only window left
+    _w266b._closing_anyway = True
+    _w266b.close()
+finally:
+    _app266.__dict__.pop("quit", None)
+    B.WINDOWS[:] = _saved266
+    try:
+        _w266b._session_timer.stop()
+    except RuntimeError:
+        pass
+check("266 the last window saves its session before it quits",
+      _calls266[:1] == ["save"] and "quit" in _calls266,
+      str(_calls266))
+H.spin(200)
+
+# ---- 267: a mirror folder two machines share keeps both sides for "merge" ----
+_mdir267 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(_mdir267 / "bookmarks-other267.json").write_text(json.dumps([
+    {"id": 9001, "type": "link", "title": "from the other machine",
+     "url": "https://other267.example/", "parent": 0}]), encoding="utf-8")
+_bm_was267 = json.loads(json.dumps(br.bookmarks))
+try:
+    br.mirror_bookmarks(folder=str(_mdir267))       # this machine's save
+    _added267 = br.merge_bookmark_mirror(folder=str(_mdir267))
+    _have267 = any(e.get("url") == "https://other267.example/"
+                   for e in br.bookmarks)
+    _again267 = br.merge_bookmark_mirror(folder=str(_mdir267))
+finally:
+    br.bookmarks = _bm_was267
+    br.save_bookmarks()
+    import shutil as _sh267
+    _sh267.rmtree(str(_mdir267), ignore_errors=True)
+check("267 merge takes back the other machine's bookmarks after this one saved",
+      _added267 == 1 and _have267 and _again267 == 0,
+      str((_added267, _have267, _again267)))
+
+# ---- 268: an OBS refusal is said as one; Discord links stay out of private tabs ----
+class _Link268:
+    def __init__(self, browser, url, password):
+        pass
+
+    def send(self, request, data, then):
+        then({"ok": False, "what": request, "why": "already recording",
+              "data": {}})
+        return True
+
+    def deleteLater(self):
+        pass
+
+
+_real_link268 = B.ObsLink
+_flash268 = []
+B.ObsLink = _Link268
+br.obs_ready = lambda: True
+br.flash = lambda text, *a, **k: _flash268.append(str(text))
+try:
+    br.obs_send("StartRecord")
+finally:
+    B.ObsLink = _real_link268
+    br.__dict__.pop("obs_ready", None)
+    br.__dict__.pop("flash", None)
+check("268 an OBS request it refuses is said as refused, not as done",
+      _flash268 and "already recording" in _flash268[0]
+      and _flash268[0] != br._ui_str("obsDid") % "StartRecord",
+      str(_flash268))
+_w268 = br.new_window()
+H.spin(500)
+try:
+    _p268 = _w268.new_tab(url=srv.url("/twhome?p268"), private=True)
+    _n268 = _w268.new_tab(url=srv.url("/twother?n268"))
+    H.wait_for(lambda: "p268" in _p268.url().toString()
+               and "n268" in _n268.url().toString(), 8000)
+    _got268 = _w268.discord_tab(host="127.0.0.1")
+    _priv268 = getattr(_got268, "private", None)
+    _is_n268 = _got268 is _n268
+finally:
+    _w268._confirm_many_tabs = lambda *a, **k: True
+    _w268.close()
+    H.spin(500)
+check("268 a link from a normal tab is routed to a normal Discord tab, not a "
+      "private one before it", _is_n268 and not _priv268,
+      str((_is_n268, _priv268)))
+
+
+# ---- 269-271: agent bridge correctness (fill/box/markdown, bookmarks, close, dialog, events,
+# watch, rest timeout, pointer, ask, viewport, mine, upload). Insert before the final
+# "the suite's own window stayed" check. ----
+import agent_bridge as _AB57
+import socket as _sock57
+
+_ab57 = _AB57.AgentBridge(br)
+_ab57._next_id = 1 + max([10 ** 6] + [
+    int(getattr(br.tabs.widget(_i), "_agent_id", 0) or 0)
+    for _i in range(br.tabs.count())])
+_out57 = []
+_ab57._reply = lambda conn, payload: _out57.append(payload)
+_keys57 = ("bridgeLevel", "bridgeSites", "bridgeOps", "bridgeAudit",
+           "agentTabIdle")
+_save57 = {k: br.config.get(k, "__absent__") for k in _keys57}
+for _k57 in ("bridgeLevel", "bridgeSites", "bridgeOps"):
+    br.config.pop(_k57, None)
+_bm57 = list(br.bookmarks)
+H.Handler.pages["/t269"] = (
+    "<title>t269</title><input id=a><input id=c>"
+    "<iframe id=f srcdoc='<input id=i><button id=b>hi there</button>'>"
+    "</iframe>")
+
+
+def _tid57(v):
+    _ab57._views()
+    return v._agent_id
+
+
+def _ask57(req, wait=True):
+    del _out57[:]
+    _ab57._dispatch(None, json.dumps(req).encode())
+    if wait:
+        H.wait_for(lambda: bool(_out57), 6000)
+    return _out57[-1] if _out57 else None
+
+
+class _Sig57:
+    def __init__(self):
+        self.fns = []
+
+    def connect(self, fn):
+        self.fns.append(fn)
+
+
+class _Conn57:
+    def __init__(self, connected=True, data=b""):
+        self.connected = connected
+        self.data = data
+        self.disconnected = _Sig57()
+        self.readyRead = _Sig57()
+        self.log = []
+
+    def state(self):
+        S = _AB57.QLocalSocket.LocalSocketState
+        return S.ConnectedState if self.connected else S.UnconnectedState
+
+    def readAll(self):
+        d, self.data = self.data, b""
+        return d
+
+    def write(self, b):
+        self.log.append(("write", b))
+
+    def flush(self):
+        pass
+
+    def deleteLater(self):
+        pass
+
+    def abort(self):
+        self.log.append(("abort",))
+
+    def disconnectFromServer(self):
+        self.log.append(("disconnect",))
+
+
+_v57 = br.new_tab(url=srv.url("/t269"), switch=True)
+try:
+    H.wait_for(lambda: "/t269" in _v57.url().toString(), 8000)
+    H.wait_for(lambda: jsq(_v57, "!!(document.querySelector('#f') && "
+               "document.querySelector('#f').contentDocument && "
+               "document.querySelector('#f').contentDocument"
+               ".querySelector('#b'))") is True, 8000)
+    _t57 = _tid57(_v57)
+
+    # 269: a bad selector in fill is named and the rest of the form is still filled
+    _r = _ask57({"op": "fill", "tab": _t57,
+                 "fields": {"#a": "x", "input[": "y", "#c": "z"}})
+    _vals = (H.js(_v57, "document.querySelector('#a').value"),
+             H.js(_v57, "document.querySelector('#c').value"))
+    check("269 fill names a bad selector and still fills the other fields",
+          bool(_r) and _r.get("ok") is False
+          and _r.get("error") == "bad-selector"
+          and isinstance(_r.get("result"), dict)
+          and _r["result"].get("bad") == ["input["]
+          and _r["result"].get("filled") == ["#a", "#c"]
+          and _vals == ("x", "z"), str((_r, _vals)))
+
+    # 269: box, markdown and fill take "a >>> b" like click does
+    _rb = _ask57({"op": "box", "tab": _t57, "selector": "iframe#f >>> #b"})
+    _rm = _ask57({"op": "markdown", "tab": _t57,
+                  "selector": "iframe#f >>> #b"})
+    _rf = _ask57({"op": "fill", "tab": _t57,
+                  "fields": {"iframe#f >>> #i": "inside"}})
+    _iv = H.js(_v57, "document.querySelector('#f').contentDocument"
+                     ".querySelector('#i').value")
+    check("269 box, markdown and fill reach into an iframe with >>>",
+          bool(_rb) and (_rb.get("box") or {}).get("tag") == "button"
+          and bool(_rm) and "hi there" in (_rm.get("text") or "")
+          and bool(_rf) and (_rf.get("result") or {}).get("filled")
+          == ["iframe#f >>> #i"] and _iv == "inside",
+          str((_rb, _rm, _rf, _iv)))
+
+    # 269: a selector that does not parse is a named error in box and markdown
+    _rb2 = _ask57({"op": "box", "tab": _t57, "selector": "input["})
+    _rm2 = _ask57({"op": "markdown", "tab": _t57, "selector": "input["})
+    check("269 box and markdown answer bad-selector for a selector that "
+          "does not parse",
+          bool(_rb2) and _rb2.get("error") == "bad-selector"
+          and bool(_rm2) and _rm2.get("error") == "bad-selector",
+          str((_rb2, _rm2)))
+
+    # 270: bookmarks add with a stale tab id is refused; a lazy tab's address is read
+    _n = len(br.bookmarks)
+    _rs = _ask57({"op": "bookmarks", "action": "add", "tab": 999999})
+    _stale_n = len(br.bookmarks)
+
+    class _LazyUrl57:
+        def toString(self):
+            return ""
+
+    class _LazyView57:
+        _pending = "https://lazy270.example/page"
+
+        def url(self):
+            return _LazyUrl57()
+    _lazy = _LazyView57()
+    _ab57._find = lambda tab: _lazy
+    del _out57[:]
+    _ab57.op_bookmarks(None, {"action": "add", "tab": 5})
+    _ab57.__dict__.pop("_find", None)
+    check("270 bookmarks add: a stale tab id is no-such-tab, and a tab never "
+          "loaded is bookmarked by its pending address",
+          bool(_rs) and _rs.get("error") == "no-such-tab"
+          and _stale_n == _n
+          and _out57[-1:] and _out57[-1].get("url")
+          == "https://lazy270.example/page", str((_rs, _out57[-1:])))
+    br.bookmarks[:] = _bm57
+
+    # 270: close never asks a question on the socket handler, and says ok only when closed
+    _asked = []
+    _real_q = B.QMessageBox.question
+    B.QMessageBox.question = lambda *a, **k: (
+        _asked.append(1) or B.QMessageBox.StandardButton.No)
+    _lk = br.new_tab(url=srv.url("/twhome?t270=1"), switch=False)
+    try:
+        _lk.locked = True
+        _rc = _ask57({"op": "close", "tab": _tid57(_lk)})
+        _still = br.tabs.indexOf(_lk) >= 0
+        _lk.locked = False
+        _rc2 = _ask57({"op": "close", "tab": _tid57(_lk)})
+        _gone = br.tabs.indexOf(_lk) < 0
+    finally:
+        B.QMessageBox.question = _real_q
+        _close_if_open(_lk)
+    check("270 close refuses a locked tab without a dialog, and ok means "
+          "the tab is gone",
+          bool(_rc) and _rc.get("ok") is False and _still and not _asked
+          and bool(_rc2) and _rc2.get("ok") is True and _gone,
+          str((_rc, _still, _asked, _rc2, _gone)))
+
+    # 270: dialog answer null clears it
+    _pg = _v57.page()
+    _was_ans = getattr(_pg, "dialog_answer", None)
+    try:
+        _ask57({"op": "dialog", "tab": _t57, "answer": "yes"})
+        _rd = _ask57({"op": "dialog", "tab": _t57, "answer": None})
+        _after = getattr(_pg, "dialog_answer", "unset")
+    finally:
+        _pg.dialog_answer = _was_ans
+    check("270 dialog answer null clears the stored answer",
+          _after is None and bool(_rd) and _rd.get("answer") is None,
+          str((_after, _rd)))
+
+    # 270: events kinds as a string is one kind; a non-list is an error
+    _c1 = _Conn57()
+    _ab57.op_events(_c1, {"kinds": "changed"})
+    _rows = [r for r in _ab57.listeners if r["conn"] is _c1]
+    _kinds = _rows[0]["kinds"] if _rows else None
+    for r in _rows:
+        _ab57.listeners.remove(r)
+    del _out57[:]
+    _c2 = _Conn57()
+    _ab57.op_events(_c2, {"kinds": {"a": 1}})
+    _bad = [r for r in _ab57.listeners if r["conn"] is _c2]
+    for r in _bad:
+        _ab57.listeners.remove(r)
+    check("270 events: a string kinds is one kind, a dict is refused",
+          _kinds == ["changed"] and not _bad and _out57[-1:]
+          and _out57[-1].get("ok") is False, str((_kinds, _bad, _out57[-1:])))
+
+    # 270: watch every is clamped, and a watch is only registered once its timer runs
+    del _out57[:]
+    _err = None
+    try:
+        _ab57.op_watch(None, {"tab": _t57, "selector": "body",
+                              "every": 10 ** 12})
+    except Exception as e:
+        _err = e
+    _rows = list(_ab57.watches.values())
+    _ok270 = (_err is None and bool(_out57) and _out57[-1].get("ok") is True
+              and _out57[-1].get("every") == 86400
+              and all(r.get("timer") is not None and r["timer"].isActive()
+                      for r in _rows))
+    _zombie = [r for r in _rows if r.get("timer") is None
+               or not r["timer"].isActive()]
+    for k in list(_ab57.watches):
+        _ab57.stop_watch(k)
+    check("270 watch clamps every to a day and leaves no zombie row",
+          _ok270 and not _zombie, str((_err, _out57[-1:], len(_zombie))))
+
+    # 270: a failed read in a watch tick is not a change
+    _ab57.watches[900] = {"id": 900, "tab": _t57, "selector": "body",
+                          "every": 60, "was": "abc", "changes": 0}
+    _ab57._run = lambda v, code, done, world=None: done(None)
+    try:
+        _ab57._watch_tick(900)
+    finally:
+        _ab57.__dict__.pop("_run", None)
+    _row = _ab57.watches.pop(900)
+    check("270 a failed watch evaluation is ignored, not a change to empty",
+          _row["was"] == "abc" and _row["changes"] == 0, str(_row))
+
+    # 270: a request over 8 MB is answered before the hang-up
+    class _FakeServer57:
+        def __init__(self, conn):
+            self.conn = conn
+            self.n = 1
+
+        def hasPendingConnections(self):
+            self.n -= 1
+            return self.n >= 0
+
+        def nextPendingConnection(self):
+            return self.conn
+    _big = _Conn57(data=b"x" * (8 * 1024 * 1024 + 1))
+    _ab57.__dict__.pop("_reply")
+    _ab57.server = _FakeServer57(_big)
+    try:
+        _ab57._accept()
+        _big.readyRead.fns[0]()
+    finally:
+        _ab57.__dict__.pop("server", None)
+        _ab57._reply = lambda conn, payload: _out57.append(payload)
+    _wrote = b"".join(e[1] for e in _big.log if e[0] == "write")
+    check("270 a request over 8 MB gets request-too-large before the "
+          "disconnect",
+          b"request-too-large" in _wrote
+          and ("disconnect",) in _big.log
+          and _big.log.index(("write", _wrote)) < _big.log.index(
+              ("disconnect",)) if _wrote else False, str(_big.log)[:200])
+
+    # 270: idle stops polling for a client that has gone
+    _runs = []
+    _ab57._run = lambda v, code, done, world=None: _runs.append(1)
+    try:
+        _ab57.op_idle(_Conn57(connected=False), {"tab": _t57})
+        H.spin(300)
+    finally:
+        _ab57.__dict__.pop("_run", None)
+    check("270 idle does not poll for a client that hung up", not _runs,
+          str(_runs))
+
+    # 271: the REST mirror waits as long as the op's own timeout
+    class _FakeSock57:
+        stamps = []
+
+        def __init__(self, *a, **k):
+            pass
+
+        def settimeout(self, t):
+            _FakeSock57.stamps.append(t)
+
+        def connect(self, p):
+            pass
+
+        def sendall(self, b):
+            pass
+
+        def recv(self, n):
+            raise _sock57.timeout("timed out")
+
+        def close(self):
+            pass
+    _real_sock = _sock57.socket
+    _sock57.socket = _FakeSock57
+    try:
+        _rest = _AB57.RestMirror(_ab57, port=0, token="x" * 16)
+        _rr = _rest.run({"op": "wait", "selector": "#x", "timeout": 60000})
+        # 271c: the documented timeout_ms, and ask's own minute
+        _rest.run({"op": "wait", "selector": "#x", "timeout_ms": 60000})
+        _rest.run({"op": "ask", "text": "hi"})
+    finally:
+        _sock57.socket = _real_sock
+    check("271c the REST mirror waits for timeout_ms and for ask's minute",
+          len(_FakeSock57.stamps) >= 3 and _FakeSock57.stamps[1] >= 60
+          and _FakeSock57.stamps[2] >= 75, str(_FakeSock57.stamps))
+    check("271 the REST socket waits past the op's timeout and a timeout "
+          "is reported as its own error",
+          bool(_FakeSock57.stamps) and _FakeSock57.stamps[0] >= 60
+          and _rr.get("error") == "rest-timeout",
+          str((_FakeSock57.stamps, _rr)))
+
+    # 271: pointer reads every number before posting; toy 0 is a place
+    _posted = []
+
+    class _FakeApp57:
+        @staticmethod
+        def postEvent(target, ev):
+            _posted.append(ev)
+    _real_app = _AB57.QApplication
+    _AB57.QApplication = _FakeApp57
+    try:
+        del _out57[:]
+        _e1 = None
+        try:
+            _ab57.op_pointer(None, {"tab": _t57, "kind": "drag", "x": 5,
+                                    "y": 5, "tox": "abc", "toy": 3})
+        except Exception as e:
+            _e1 = e
+        _bad_posted = len(_posted)
+        _bad_reply = _out57[-1:] and _out57[-1].get("error")
+        del _posted[:]
+        _ab57.op_pointer(None, {"tab": _t57, "kind": "drag", "x": 5,
+                                "y": 5, "tox": 10, "toy": 0})
+        _end = _posted[-1].position() if _posted else None
+    finally:
+        _AB57.QApplication = _real_app
+    check("271 pointer: a bad coordinate posts nothing, and toy 0 is the "
+          "top edge not 'missing'",
+          _e1 is None and _bad_posted == 0 and _bad_reply == "bad-argument"
+          and _end is not None and int(_end.x()) == 10 and int(_end.y()) == 0,
+          str((_e1, _bad_posted, _bad_reply, _end)))
+
+    # 271: ask replies when the page never loads, and when the view is gone
+    class _FakeTimer57:
+        calls = []
+
+        @staticmethod
+        def singleShot(ms, fn):
+            _FakeTimer57.calls.append((ms, fn))
+    _real_timer = _AB57.QTimer
+    _real_views = _ab57._views
+    _ab57._views = lambda: []
+    br.__dict__["new_tab"] = lambda url=None, switch=True, **k: _v57
+    _AB57.QTimer = _FakeTimer57
+    _was_owned = getattr(_v57, "_agent_owned", None)
+    try:
+        del _out57[:]
+        _ab57.op_ask(None, {"which": "claude", "text": "hi"})
+        _long = [fn for ms, fn in _FakeTimer57.calls if ms >= 30000]
+        for fn in _long:
+            fn()
+        _ask_to = _out57[-1:]
+    finally:
+        _AB57.QTimer = _real_timer
+        br.__dict__.pop("new_tab", None)
+        _ab57._views = _real_views
+        if _was_owned is None:
+            _v57.__dict__.pop("_agent_owned", None)
+        _ab57.__dict__.pop("_views", None)
+    check("271 ask answers with a timeout error when its tab never loads",
+          bool(_ask_to) and _ask_to[0].get("ok") is False
+          and _ask_to[0].get("error") == "timeout", str(_ask_to))
+
+    _runs = []
+    _ab57._views = lambda: [(0, _v57)]
+    _ab57._view_url = lambda v: "https://claude.ai/x"
+    _ab57._gone = lambda v: True
+    _ab57._run = lambda v, code, done, world=None: _runs.append(1)
+    try:
+        del _out57[:]
+        _e2 = None
+        try:
+            _ab57.op_ask(None, {"which": "claude", "text": "hi"})
+        except Exception as e:
+            _e2 = e
+        _gone_reply = _out57[-1:]
+    finally:
+        for _n in ("_views", "_view_url", "_gone", "_run"):
+            _ab57.__dict__.pop(_n, None)
+    check("271 ask on a deleted view answers no-such-tab and runs nothing",
+          _e2 is None and not _runs and bool(_gone_reply)
+          and _gone_reply[0].get("error") == "no-such-tab",
+          str((_e2, _runs, _gone_reply)))
+
+    # 271: viewport needs both sides, and clamps
+    class _FakeView57:
+        sizes = []
+
+        def setFixedSize(self, w, h):
+            _FakeView57.sizes.append((w, h))
+
+        def width(self):
+            return 1
+
+        def height(self):
+            return 1
+    _fv57 = _FakeView57()
+    _resets = []
+    br.__dict__["responsive_preview"] = (
+        lambda size="", view=None: _resets.append(size) or "")
+    _ab57._find = lambda tab: _fv57
+    try:
+        del _out57[:]
+        _ab57.op_viewport(None, {"width": 500})
+        _one = _out57[-1:]
+        _ab57.op_viewport(None, {"width": 10 ** 7, "height": 300})
+    finally:
+        br.__dict__.pop("responsive_preview", None)
+        _ab57.__dict__.pop("_find", None)
+    check("271 viewport with one side is refused and does not reset; sizes "
+          "are clamped",
+          bool(_one) and _one[0].get("error") == "width-and-height-required"
+          and not _resets and _FakeView57.sizes == [(10000, 300)],
+          str((_one, _resets, _FakeView57.sizes)))
+
+    # 271: mine idle stores and echoes one clamped value
+    del _out57[:]
+    _ab57.op_mine(None, {"do": "idle", "after": -5})
+    _neg = _out57[-1:]
+    _stored = br.config.get("agentTabIdle")
+    del _out57[:]
+    _e3 = None
+    try:
+        _ab57.op_mine(None, {"do": "idle", "after": "abc"})
+    except Exception as e:
+        _e3 = e
+    _nan = _out57[-1:]
+    check("271 mine idle echoes the clamped value and refuses a non-number",
+          bool(_neg) and _neg[0].get("after") == 0 and _stored == 0
+          and _e3 is None and bool(_nan) and _nan[0].get("error")
+          == "bad-argument", str((_neg, _stored, _e3, _nan)))
+
+    # 271: upload takes a string path as one path and refuses a non-list
+    del _out57[:]
+    _ab57.op_upload(None, {"tab": _t57, "paths": "/etc/hostname"})
+    _up = _out57[-1:]
+    del _out57[:]
+    _e4 = None
+    try:
+        _ab57.op_upload(None, {"tab": _t57, "paths": 5})
+    except Exception as e:
+        _e4 = e
+    _up2 = _out57[-1:]
+    for _n in ("_agent_files", "_agent_files_for"):
+        _v57.page().__dict__.pop(_n, None)
+    check("271 upload: a string path is one path, a non-list is an error",
+          bool(_up) and _up[0].get("ok") is True
+          and _up[0].get("files") == ["/etc/hostname"]
+          and _e4 is None and bool(_up2) and _up2[0].get("ok") is False,
+          str((_up, _e4, _up2)))
+    # 271b: wait reads timeout_ms, the name the op list gives it
+    # (a connection that is still there: wait polls only for a live client)
+    del _out57[:]
+    _tw0 = _time.time()
+    _ab57._dispatch(_Conn57(), json.dumps(
+        {"op": "wait", "tab": _t57, "selector": "#never271b",
+         "timeout_ms": 600}).encode())
+    H.wait_for(lambda: bool(_out57), 6000)
+    _took = _time.time() - _tw0
+    _rw = _out57[-1] if _out57 else None
+    check("271b wait honours timeout_ms, the name the op list gives it",
+          bool(_rw) and _rw.get("ok") is False
+          and "Error" not in str(_rw.get("error", "")) and 0.4 < _took < 5,
+          str((_rw, round(_took, 1))))
+finally:
+    for _k57, _x57 in _save57.items():
+        if _x57 == "__absent__":
+            br.config.pop(_k57, None)
+        else:
+            br.config[_k57] = _x57
+    br.bookmarks[:] = _bm57
+    for _k in list(_ab57.watches):
+        _ab57.stop_watch(_k)
+    del _ab57.listeners[:]
+    H.Handler.pages.pop("/t269", None)
+    _close_if_open(_v57)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

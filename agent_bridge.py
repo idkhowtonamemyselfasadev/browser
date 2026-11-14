@@ -280,10 +280,20 @@ _SCROLL_JS = """
 # ---- the scripts the newer ops run -----------------------------------
 # All of them answer with JSON so the bridge can hand the reply straight
 # on without a second round trip.
+# They look elements up with the same finder as click and text, so "a >>> b"
+# works here too, and a selector the page cannot parse is answered by name:
+# it used to throw out of the script, which came back as a bare null that
+# looked like "nothing matched" (and for fill left the form half written).
+
+# what markdown answers with when the selector does not parse (a plain
+# string is all that always comes back from the page)
+_BAD_SELECTOR = "\x01bad-selector"
 
 _MARKDOWN_JS = """
 (function (sel) {
-  var root = sel ? document.querySelector(sel) : document.body;
+  var root;
+  try { root = sel ? FIND(sel, 0) : document.body; }
+  catch (e) { return "\u0001bad-selector"; }
   if (!root) return null;
   // the readable part of the page, not its furniture
   var drop = "nav, header, footer, aside, script, style, noscript, form,"
@@ -319,13 +329,16 @@ _MARKDOWN_JS = """
   }
   walk(clone);
   return out.join("").replace(/\\n{3,}/g, "\\n\\n").trim();
-})(%s)"""
+})(%s)""".replace("FIND", _FIND)
 
 _BOX_JS = """
 (function (sel) {
-  var el = document.querySelector(sel);
+  var el;
+  try { el = FIND(sel, 0); }
+  catch (e) { return JSON.stringify({error: "bad-selector"}); }
   if (!el) return null;
-  var r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+  var r = el.getBoundingClientRect();
+  var cs = (el.ownerDocument.defaultView || window).getComputedStyle(el);
   return JSON.stringify({
     x: Math.round(r.left), y: Math.round(r.top),
     width: Math.round(r.width), height: Math.round(r.height),
@@ -339,23 +352,29 @@ _BOX_JS = """
     tag: el.tagName.toLowerCase(), id: el.id || "",
     classes: typeof el.className === "string" ? el.className : ""
   });
-})(%s)"""
+})(%s)""".replace("FIND", _FIND)
 
 _FILL_JS = """
 (function (pairs) {
-  var done = [], missed = [];
+  var done = [], missed = [], bad = [];
   Object.keys(pairs).forEach(function (sel) {
-    var el = document.querySelector(sel);
+    /* one field that throws (a selector that does not parse, a page that
+       refuses the write) is named and skipped; it used to end the loop
+       with the fields before it written and nothing said about any */
+    try {
+    var el = FIND(sel, 0);
     if (!el) { missed.push(sel); return; }
     var value = pairs[sel];
     var tag = el.tagName.toLowerCase();
+    /* an element inside an iframe has that frame's own prototypes */
+    var win = el.ownerDocument.defaultView || window;
     /* the instance setter updates the framework's own value tracker, so
        the input event that follows looked like no change and a React
        form kept its old state; the prototype's setter does not */
     var setValue = function (v) {
-      var proto = tag === "select" ? HTMLSelectElement.prototype
-        : tag === "textarea" ? HTMLTextAreaElement.prototype
-        : tag === "input" ? HTMLInputElement.prototype : null;
+      var proto = tag === "select" ? win.HTMLSelectElement.prototype
+        : tag === "textarea" ? win.HTMLTextAreaElement.prototype
+        : tag === "input" ? win.HTMLInputElement.prototype : null;
       var d = proto && Object.getOwnPropertyDescriptor(proto, "value");
       if (d && d.set) d.set.call(el, v); else el.value = v;
     };
@@ -367,12 +386,13 @@ _FILL_JS = """
       el.focus();
       setValue(value);
     }
-    el.dispatchEvent(new Event("input", {bubbles: true}));
-    el.dispatchEvent(new Event("change", {bubbles: true}));
+    el.dispatchEvent(new win.Event("input", {bubbles: true}));
+    el.dispatchEvent(new win.Event("change", {bubbles: true}));
     done.push(sel);
+    } catch (e) { bad.push(sel); }
   });
-  return JSON.stringify({filled: done, missing: missed});
-})(%s)"""
+  return JSON.stringify({filled: done, missing: missed, bad: bad});
+})(%s)""".replace("FIND", _FIND)
 
 _IDLE_COUNT_JS = """
 (function () {
@@ -622,9 +642,13 @@ class AgentBridge:
                     del buf[:len(line) + 1]
                     self._dispatch(conn, line)
                 if len(buf) > 8 * 1024 * 1024:
-                    # a line with no end in sight is not a request
+                    # a line with no end in sight is not a request. It
+                    # is answered before the hang-up: the client was
+                    # dropped with no reply and could only guess why
                     del buf[:]
-                    conn.abort()
+                    self._reply(conn, {"ok": False,
+                                       "error": "request-too-large"})
+                    conn.disconnectFromServer()
             conn.readyRead.connect(read)
             # every call is a connection of its own: kept after it
             # closed, each one (and its buffer and closure) stayed until
@@ -1071,8 +1095,18 @@ class AgentBridge:
         v = self._need_view(conn, req)
         if v is None:
             return
-        self.win.close_tab(self.win.tabs.indexOf(v))
-        self._reply(conn, {"ok": True})
+        # close_tab asks (a modal question) about a locked or game tab,
+        # which stopped the bridge's own handler until he answered, and a
+        # "No" came back as ok:true with the tab still open. The agent is
+        # refused a protected tab instead, and never asks
+        if getattr(v, "locked", False) or getattr(v, "_game", False):
+            self._reply(conn, {"ok": False, "error": "tab-locked"})
+            return
+        self.win.close_tab(self.win.tabs.indexOf(v), ask=False)
+        # ok only if the tab is really out of the strip
+        gone = self.win.tabs.indexOf(v) < 0
+        self._reply(conn, {"ok": gone} if gone
+                    else {"ok": False, "error": "not-closed"})
 
     def op_select(self, conn, req):
         v = self._need_view(conn, req)
@@ -1148,7 +1182,10 @@ class AgentBridge:
         if not sel:
             raise ValueError("selector required")
         gone = bool(req.get("gone", False))
-        timeout = int(req.get("timeout", 15000))
+        # "timeout_ms" is the name the op list above gives it; only
+        # "timeout" was read, and a client that went by the list waited
+        # the default 15 s whatever it asked for
+        timeout = int(req.get("timeout", req.get("timeout_ms", 15000)))
         code = _EXISTS_JS % _js_string(sel)
         waited = [0]
         step = 200
@@ -1300,9 +1337,13 @@ class AgentBridge:
         v = self._need_view(conn, req)
         if v is None:
             return
-        self._run(v, _MARKDOWN_JS % _js_string(req.get("selector")),
-                  lambda r: self._reply(conn, {"ok": r is not None,
-                                               "text": r or ""}))
+        def done(r):
+            if r == _BAD_SELECTOR:
+                self._reply(conn, {"ok": False, "error": "bad-selector",
+                                   "text": ""})
+            else:
+                self._reply(conn, {"ok": r is not None, "text": r or ""})
+        self._run(v, _MARKDOWN_JS % _js_string(req.get("selector")), done)
 
     def op_box(self, conn, req):
         """Where an element is, whether it can be seen, and what it
@@ -1310,8 +1351,13 @@ class AgentBridge:
         v = self._need_view(conn, req)
         if v is None:
             return
-        self._run(v, _BOX_JS % _js_string(req.get("selector")),
-                  lambda r: self._reply(conn, self._json_reply(r, "box")))
+        def done(r):
+            out = self._json_reply(r, "box")
+            box = out.get("box")
+            if isinstance(box, dict) and box.get("error"):
+                out = {"ok": False, "error": box["error"], "box": None}
+            self._reply(conn, out)
+        self._run(v, _BOX_JS % _js_string(req.get("selector")), done)
 
     def op_fill(self, conn, req):
         """A whole form from one selector-to-value map, with the input
@@ -1322,8 +1368,17 @@ class AgentBridge:
         fields = req.get("fields")
         if not isinstance(fields, dict) or not fields:
             raise ValueError("fields required")
-        self._run(v, _FILL_JS % json.dumps(fields),
-                  lambda r: self._reply(conn, self._json_reply(r, "result")))
+        def done(r):
+            out = self._json_reply(r, "result")
+            res = out.get("result")
+            if isinstance(res, dict) and res.get("bad"):
+                # the rest of the form was still filled: say which
+                # selectors were not understood, and that this was not
+                # a clean fill
+                out["ok"] = False
+                out["error"] = "bad-selector"
+            self._reply(conn, out)
+        self._run(v, _FILL_JS % json.dumps(fields), done)
 
     def op_idle(self, conn, req):
         """Waits until the page has made no request for a while — the
@@ -1337,12 +1392,21 @@ class AgentBridge:
         v = self._need_view(conn, req)
         if v is None:
             return
-        quiet = max(50, int(req.get("quiet") or 700))
-        cap = max(quiet, int(req.get("timeout") or 15000))
+        quiet = max(50, min(60000, int(req.get("quiet") or 700)))
+        cap = max(quiet, min(600000, int(req.get("timeout") or 15000)))
         state = {"last": 0, "seen": -1, "waited": 0, "done": False}
 
         def tick():
             if state["done"]:
+                return
+            try:
+                gave_up = (conn.state()
+                           != QLocalSocket.LocalSocketState.ConnectedState)
+            except RuntimeError:
+                gave_up = True    # its socket is deleted once it hangs up
+            if gave_up:
+                # polled on for the full timeout after the caller left
+                state["done"] = True
                 return
             if self._gone(v):
                 state["done"] = True
@@ -1420,7 +1484,9 @@ class AgentBridge:
         page = v.page()
         if "answer" in req:
             answer = req.get("answer")
-            page.dialog_answer = (answer if isinstance(answer, bool)
+            # null clears it (it was stored as the text "None")
+            page.dialog_answer = (answer if answer is None
+                                  or isinstance(answer, bool)
                                   else str(answer))
         self._reply(conn, {"ok": True,
                            "last": list(getattr(page, "dialog_log", []))[-10:],
@@ -1476,12 +1542,21 @@ class AgentBridge:
         if action == "add":
             url = str(req.get("url") or "")
             if not url:
-                v = self._find(req.get("tab")) or self.win.current()
+                tab = req.get("tab")
+                v = self._find(tab)
+                if v is None and tab not in (None, "", "current"):
+                    # a stale id bookmarked whatever tab was in front
+                    self._reply(conn, {"ok": False, "error": "no-such-tab"})
+                    return
+                if v is None:
+                    v = self.win.current()
                 if v is not None and getattr(v, "private", False):
                     # a private tab's address is never written down
                     self._reply(conn, {"ok": False, "error": "private-tab"})
                     return
-                url = v.url().toString() if v is not None else ""
+                # a tab never loaded has its address in _pending
+                url = (self._view_url(v)
+                       if v is not None and hasattr(v, "url") else "")
                 if url and not self.site_ok(url):
                     # the tab in front, off his list: neither saved nor
                     # read back to the client
@@ -1736,8 +1811,17 @@ class AgentBridge:
         on it: a load finished, a title changed, a download done, a
         dialog shown, a watch that fired. The client reads lines until
         it hangs up."""
+        kinds = req.get("kinds")
+        if kinds in (None, ""):
+            kinds = []
+        elif isinstance(kinds, str):
+            # a string was split into its letters: no event matched
+            kinds = [kinds]
+        elif not isinstance(kinds, (list, tuple)):
+            self._reply(conn, {"ok": False, "error": "kinds-must-be-a-list"})
+            return
         rows = {"conn": conn, "tab": req.get("tab"),
-                "kinds": [str(one) for one in (req.get("kinds") or [])]}
+                "kinds": [str(one) for one in kinds]}
         self.listeners.append(rows)
         self._reply(conn, {"ok": True, "listening": True})
         conn.disconnected.connect(
@@ -1809,17 +1893,19 @@ class AgentBridge:
             self._reply(conn, {"ok": False, "error": "private-tab"})
             return
         selector = str(req.get("selector") or "body")
-        every = max(2, int(req.get("every") or 60))
+        # a day at most: a huge period overflowed the timer's interval
+        # after the row was registered, leaving a watch that never ran
+        every = max(2, min(86400, int(req.get("every") or 60)))
         which = self._watch_id
         self._watch_id += 1
         row = {"id": which, "tab": getattr(v, "_agent_id", None),
                "selector": selector, "every": every, "was": None,
                "changes": 0}
-        self.watches[which] = row
         timer = QTimer(self.win)
-        row["timer"] = timer
         timer.timeout.connect(lambda w=which: self._watch_tick(w))
         timer.start(every * 1000)
+        row["timer"] = timer
+        self.watches[which] = row
         self._watch_tick(which)
         self._reply(conn, {"ok": True, "watch": which,
                            "selector": selector, "every": every})
@@ -1844,7 +1930,12 @@ class AgentBridge:
                 " : '';})(%s)" % _js_string(row["selector"]))
 
         def got(raw):
-            text = str(raw or "")
+            if raw is None:
+                # the script did not run (a bad selector, a page
+                # mid-navigation): it read as the text becoming "" and
+                # fired a change, then another when the text came back
+                return
+            text = str(raw)
             was = row["was"]
             row["was"] = text
             if was is None or text == was:
@@ -2158,9 +2249,16 @@ class AgentBridge:
             self._reply(conn, {"ok": True, "closed": closed})
             return
         if what == "idle":
-            after = int(req.get("after") or 0)
+            try:
+                after = int(req.get("after") or 0)
+            except (TypeError, ValueError, OverflowError):
+                self._reply(conn, {"ok": False, "error": "bad-argument"})
+                return
+            # clamped once, and that is what is stored and echoed: a
+            # negative stored as 0 was echoed back as the negative
+            after = max(0, min(30 * 86400, after))
             if self.config is not None:
-                self.config["agentTabIdle"] = max(0, after)
+                self.config["agentTabIdle"] = after
             self._reply(conn, {"ok": True, "after": after})
             return
         self._reply(conn, {"ok": True,
@@ -2354,6 +2452,13 @@ class AgentBridge:
         else:
             fresh = False
         v._agent_touched = time.time()
+        sent = [False]
+
+        def reply(payload):
+            # once: the overall timeout and a late answer both land here
+            if not sent[0]:
+                sent[0] = True
+                self._reply(conn, payload)
         code = """(function (box, text) {
           var el = document.querySelector(box);
           if (!el) return "no-box";
@@ -2364,15 +2469,31 @@ class AgentBridge:
           return "typed";
         })(%s, %s)""" % (_js_string(plan["box"]), _js_string(text))
         def go():
-            self._run(v, code, lambda raw: self._reply(conn, {
-                "ok": str(raw or "") == "typed", "state": str(raw or ""),
-                "tab": self._tab_info(self.win.tabs.indexOf(v), v),
-                "note": "the answer is read with the text op once it has "
-                        "finished streaming"}))
+            if sent[0]:
+                return
+            if self._gone(v):
+                # closed while it loaded (or in the 1.5 s after)
+                reply({"ok": False, "error": "no-such-tab"})
+                return
+
+            def typed(raw):
+                if self._gone(v):
+                    reply({"ok": False, "error": "no-such-tab"})
+                    return
+                reply({
+                    "ok": str(raw or "") == "typed", "state": str(raw or ""),
+                    "tab": self._tab_info(self.win.tabs.indexOf(v), v),
+                    "note": "the answer is read with the text op once it has "
+                            "finished streaming"})
+            self._run(v, code, typed)
 
         if not fresh:
             go()
             return
+        # a page that never finishes loading (offline, a stuck sign-in)
+        # left the client waiting for ever
+        QTimer.singleShot(60000, lambda: reply(
+            {"ok": False, "error": "timeout", "state": "not-loaded"}))
         # a tab it has just opened is still loading: typing into it at
         # once found no box, every time, and said so ("no-box")
         def loaded(_ok=True):
@@ -2393,10 +2514,23 @@ class AgentBridge:
             out = self.win.responsive_preview(size=want, view=v)
             self._reply(conn, {"ok": bool(out), "size": out or want})
             return
-        wide = int(req.get("width") or 0)
-        tall = int(req.get("height") or 0)
+        try:
+            wide = int(req.get("width") or 0)
+            tall = int(req.get("height") or 0)
+        except (TypeError, ValueError, OverflowError):
+            self._reply(conn, {"ok": False, "error": "bad-argument"})
+            return
+        if bool(wide) != bool(tall):
+            # one side given reset the viewport as if none were
+            self._reply(conn, {"ok": False,
+                               "error": "width-and-height-required"})
+            return
+        if wide < 0 or tall < 0:
+            self._reply(conn, {"ok": False, "error": "bad-argument"})
+            return
         if wide and tall:
-            v.setFixedSize(max(120, wide), max(120, tall))
+            v.setFixedSize(max(120, min(10000, wide)),
+                           max(120, min(10000, tall)))
             self._reply(conn, {"ok": True, "width": v.width(),
                                "height": v.height()})
             return
@@ -2495,6 +2629,12 @@ class AgentBridge:
             return
         rows = req.get("paths") or ([req.get("path")]
                                     if req.get("path") else [])
+        if isinstance(rows, str):
+            # a string was walked letter by letter: every one "no such file"
+            rows = [rows]
+        elif not isinstance(rows, (list, tuple)):
+            self._reply(conn, {"ok": False, "error": "paths-must-be-a-list"})
+            return
         rows = [str(one) for one in rows if str(one or "")]
         missing = [one for one in rows if not os.path.isfile(one)]
         if missing:
@@ -2531,8 +2671,29 @@ class AgentBridge:
         if v is None:
             return
         kind = str(req.get("kind") or "click")
-        x = int(req.get("x") or 0)
-        y = int(req.get("y") or 0)
+
+        def coord(name, default):
+            raw = req.get(name)
+            if raw is None or raw == "":
+                return default
+            if isinstance(raw, bool):
+                raise ValueError(name)
+            n = int(raw)
+            if not -32768 <= n <= 32767:
+                raise ValueError(name)
+            return n
+        # all four read before anything is posted: a bad "tox" raised
+        # after the press had gone out and left the button held down
+        try:
+            x = coord("x", 0)
+            y = coord("y", 0)
+            to_x = coord("tox", x)
+            to_y = coord("toy", y)
+        except (TypeError, ValueError, OverflowError) as e:
+            self._reply(conn, {"ok": False, "error": "bad-argument",
+                               "detail": "x, y, tox, toy must be integers "
+                                         "within +-32767 (%s)" % e})
+            return
         target = v.focusProxy() or v
         from PyQt6.QtCore import QPoint, QPointF
         from PyQt6.QtGui import QMouseEvent
@@ -2551,8 +2712,7 @@ class AgentBridge:
         if kind in ("move", "hover"):
             post(_QEvent.Type.MouseMove, Qt.MouseButton.NoButton)
         elif kind == "drag":
-            to_x = int(req.get("tox") or x)
-            to_y = int(req.get("toy") or y)
+            # a target of 0 is a place (the top edge), not "missing"
             post(_QEvent.Type.MouseButtonPress, button)
             for step in range(1, 6):
                 mid = QPointF(QPoint(x + (to_x - x) * step // 5,
@@ -2678,9 +2838,27 @@ class RestMirror:
         other client uses and the op runs where everything else does.
         No cross-thread calls, no collector standing in for a socket."""
         import socket as _socket
+        # an op that waits (wait, idle, download) is allowed to take as
+        # long as its own timeout says: a flat 30 s gave up on a wait
+        # of 60 s while the op carried on and answered nobody
+        # ask waits up to a minute for a tab that is still loading: the
+        # mirror gave up at 30 s and its own answer reached nobody
+        patience = 75.0 if req.get("op") == "ask" else 30.0
+        try:
+            # timeout_ms too, the name the op list gives wait's: only
+            # "timeout" was read, and a wait asked for 60 s was cut at 30
+            raw = float(req.get("timeout") or req.get("timeout_ms") or 0)
+            if req.get("op") == "download":
+                # seconds there (two minutes unless said), milliseconds
+                # in wait and idle
+                raw = (raw or 120.0) * 1000.0
+            if raw > 0:
+                patience = max(patience, min(3700.0, raw / 1000.0 + 15.0))
+        except (TypeError, ValueError, OverflowError):
+            pass
         try:
             sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
-            sock.settimeout(30)
+            sock.settimeout(patience)
             sock.connect(socket_path())
             sock.sendall((json.dumps(req) + "\n").encode())
             buf = b""
@@ -2690,6 +2868,12 @@ class RestMirror:
                     break
                 buf += chunk
             sock.close()
+        except _socket.timeout:
+            # the bridge did not answer in time: not the op's own
+            # "timeout" answer, which says the page never did something
+            return {"ok": False, "error": "rest-timeout",
+                    "note": "the bridge did not answer within %d s; the op "
+                            "may still be running" % int(patience)}
         except OSError as e:
             return {"ok": False, "error": "socket: %s" % e}
         if not buf:

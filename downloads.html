@@ -239,6 +239,7 @@
         top.appendChild(btn(STR.dlRemove, "danger", () => {
           bridge.removeDownload(KEY, e.id);
           entries = entries.filter(x => x.id !== e.id);
+          lastJson = null;
           render();
         }));
       }
@@ -266,9 +267,30 @@
     }
   }
 
+  // The poll rebuilt every row and button each 600 ms, so a click whose
+  // mouse-down and mouse-up straddled a rebuild landed on a button that
+  // was gone and Pause/Cancel did nothing. Nothing is redrawn while a
+  // pointer button is held (the next poll or the release does it), and
+  // an answer that changed nothing is not drawn at all.
+  let lastJson = null, held = false, deferred = false;
+  function release() {
+    held = false;
+    if (deferred) { deferred = false; refresh(); }
+  }
+  document.addEventListener("pointerdown", () => { held = true; }, true);
+  document.addEventListener("pointerup", release, true);
+  document.addEventListener("pointercancel", release, true);
+  window.addEventListener("blur", release);
+
   function refresh() {
     if (bridge)
-      bridge.getDownloads(KEY, (j) => { entries = JSON.parse(j); render(); });
+      bridge.getDownloads(KEY, (j) => {
+        if (j === lastJson) return;
+        if (held) { deferred = true; return; }
+        lastJson = j;
+        entries = JSON.parse(j);
+        render();
+      });
   }
 
   // Esc: the way out. The browser decides what that means for this
@@ -286,6 +308,7 @@
   document.getElementById("clear").onclick = () => {
     if (bridge) bridge.clearDownloads(KEY);
     entries = entries.filter(e => e.state === "active");
+    lastJson = null;
     render();
   };
 

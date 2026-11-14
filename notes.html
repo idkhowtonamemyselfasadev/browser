@@ -161,7 +161,16 @@
     return box;
   }
 
+  // Set by the open note: saves it if it was typed in, then goes on.
+  // Back, a tab, a new note and Esc threw the typed text away.
+  let saveFirst = null;
+  function leaveNote(then) {
+    if (open === null || !saveFirst) { then(); return; }
+    saveFirst(then);
+  }
+
   function render() {
+    saveFirst = null;
     const body = document.getElementById("body");
     body.innerHTML = "";
     const q = document.getElementById("q").value;
@@ -218,7 +227,10 @@
       tags.placeholder = STR.noteTags || "Tags";
       const bar = el("div", "row wrap");
       const save = el("button", "act", STR.noteSave || "Save");
-      save.onclick = () => {
+      let dirty = false;
+      for (const box of [title, text, tags])
+        box.addEventListener("input", () => { dirty = true; });
+      const persist = (after) => {
         // with the version it was opened at, so a note changed on disk
         // meanwhile is not written over (see desk_do)
         desk("saveNote", {id: note.id, title: title.value,
@@ -233,14 +245,18 @@
                    || "That could not be written.";
                  return;
                }
-               open = saved.id; render();
+               dirty = false;
+               after(saved);
              });
       };
+      save.onclick = () => persist((saved) => { open = saved.id; render(); });
+      saveFirst = (then) => { if (dirty) persist(() => then()); else then(); };
       const back = el("button", "act", STR.noteBack || "Back");
-      back.onclick = () => { open = null; render(); };
+      back.onclick = () => leaveNote(() => { open = null; render(); });
       const clip = el("button", "act", STR.noteClipPage || "This page");
       clip.onclick = () => desk("pageLink", {}, (info) => {
         if (!info) return;
+        dirty = true;
         text.value += (text.value ? "\n\n" : "") +
           "[" + (info.title || info.url) + "](" + info.url + ")";
         // set from here, not typed: no input event, and the preview kept
@@ -471,7 +487,9 @@
       keep(text, "snipText");
       const go = el("button", "act", "+");
       go.onclick = () => {
-        if (!key.value.trim()) return;
+        // empty text is how setSnippet deletes: adding a key that
+        // exists with the box empty silently removed that snippet
+        if (!key.value.trim() || !text.value) return;
         desk("setSnippet", {key: key.value, text: text.value}, (res) => {
           if (res === false) { failMsg = true; render(); return; }
           key.value = ""; text.value = "";
@@ -484,13 +502,15 @@
   }
 
   function setView(which) {
-    view = which;
-    open = null;
-    for (const name of ["notes", "todo", "clips", "coll", "snip"]) {
-      document.getElementById("v_" + name)
-        .classList.toggle("on", name === which);
-    }
-    render();
+    leaveNote(() => {
+      view = which;
+      open = null;
+      for (const name of ["notes", "todo", "clips", "coll", "snip"]) {
+        document.getElementById("v_" + name)
+          .classList.toggle("on", name === which);
+      }
+      render();
+    });
   }
 
   // not while a note is open: render() rebuilt the editor from disk
@@ -501,7 +521,9 @@
   };
   document.getElementById("newnote").onclick = () => {
     if (view === "notes") {
-      desk("daily", {}, (note) => { open = note ? note.id : null; render(); });
+      leaveNote(() => desk("daily", {}, (note) => {
+        open = note ? note.id : null; render();
+      }));
     } else {
       render();
     }
@@ -510,7 +532,8 @@
     document.getElementById("v_" + name).onclick = () => setView(name);
   }
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && bridge && bridge.closePane) bridge.closePane();
+    if (e.key === "Escape" && bridge && bridge.closePane)
+      leaveNote(() => bridge.closePane());
   });
 
   if (typeof qt !== "undefined") {

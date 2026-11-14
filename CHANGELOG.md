@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part forty-nine: fifty-first to fifty-seventh passes)
+
+Seven more searches: the browser's own pages, the developer tools, the
+session file and crash recovery, the vault's back-ends (nothing found),
+saved pages and archives, the gaming and streaming helpers, and the agent
+bridge's answers. 33 bugs, fixed here:
+
+- **The browser's own pages.** The downloads page no longer rebuilds
+  every row twice a second while something downloads, so Pause and
+  Cancel are not lost between press and release. The store picker on the
+  Passwords page works again after the vault locked during its probe.
+  Adding a snippet with an empty text no longer deletes the snippet of
+  that name. A note being typed is saved before Back, another tab, a new
+  note or Esc. A 2FA code is not shown or copied from the old seed after
+  the item was edited.
+- **Developer tools.** With the debugging port on, the inspector opens on
+  this tab, or on the list to pick from -- never on another tab that
+  happens to share the address (a private one included).
+- **Session and crash recovery.** The crash offer lists every tab, not
+  the first 60. A crash honours "forget the downloads list on exit".
+  Closing a virtual browser closes its split half and its popped-out
+  tabs. The last window closed after another one has its tabs saved.
+  Pinning a tab while the session is still being restored no longer
+  writes a half-restored session file,
+  and a tab of a virtual browser that is gone opens in the main one, not
+  in whichever is in front.
+- **Bookmark mirror.** Two machines sharing a mirror folder each keep a
+  file of their own, so "merge" really takes back the other side.
+- **Streaming and games.** An OBS request OBS refuses is said as refused,
+  not as done. Discord links from a normal tab never land in a private
+  Discord tab.
+- **The agent bridge.** fill names a bad selector and still fills the
+  rest; box, markdown and fill take "a >>> b" like click does. close
+  never hangs on a dialog and says ok only when the tab is gone; a stale
+  tab id is an error, not the tab in front. A string where a list was
+  meant (events, upload), null answers, huge timers, bad coordinates and
+  requests over 8 MB all get a clear answer instead of a hang, a stuck
+  button or a dropped connection. wait reads timeout_ms as documented,
+  and the REST mirror waits as long as the operation it forwards.
+
 ## 2026-11-14 — line-by-line review, day 4 (part forty-eight: forty-fourth to forty-ninth passes)
 
 Six more searches with one subject each: password autofill, the theme
