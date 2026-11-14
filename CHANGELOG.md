@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part forty-six: twenty-eighth to thirty-sixth passes)
+
+Nine searches with one subject each: callbacks in loops (none found),
+downloads, the password vault, the life of a tab, bookmarks, the address
+bar, the virtual browsers, media, and reading/translating/PDFs. 57 bugs,
+fixed here:
+
+- **Passwords.** A login tied to one virtual browser is filled, offered,
+  copied and listed only there -- it was autofilled into every other one.
+  Saving a named login no longer deletes the nameless one before the save
+  is known to have worked (with 1Password a failed save lost the
+  password). Turning on the master password over a vault its key file
+  cannot open no longer replaces it with an empty one and deletes the
+  key. The Passwords page's import keeps notes and 2FA seeds, reads
+  Bitwarden's columns, merges instead of adding twice, and no longer
+  trims or rewrites real passwords. A 1Password item's own one-time code
+  field is recognised. A save the vault refused says so.
+- **Tabs asleep and awake.** Under a memory budget, frozen tabs can be
+  unloaded and a protected tab no longer stops the budget; a tab Chromium
+  refused to put to sleep is not marked asleep; agent tabs and the music
+  tab kept playing are never put to sleep; game mode wakes only the tabs
+  it slept; a tab that never loaded loads when it becomes the right half
+  of a split, is popped out or is sent somewhere by the agent; closing a
+  window with a split keeps the right half for "reopen window"; a tab's
+  mute, and the split half's pin, lock and name, are kept in sessions.
+- **The address bar.** [::1] opens instead of being searched; searching
+  typed or selected text in a private tab uses the private search engine
+  (and language and own engines) everywhere; names on your own network
+  (fritz.box, nas.lan, printer.home.arpa ...) are never sent for
+  suggestions; the address shown for a look-alike international domain
+  can no longer be rewritten in the wrong place; the bright part of the
+  address is the real site for com.pt-style countries and not for names
+  bought under com.io; text that is not an address is not highlighted as
+  one; a form sent to a site with a URL rule stays a form.
+- **Bookmarks.** A lock covers everything under the folder for moves and
+  merges too, not only for delete and rename; "close unused tabs" keeps a
+  tab whose bookmark could not be made.
+- **Downloads.** Emptying the private folder waits for a private yt-dlp
+  download, and the private jar is dropped once its last download ends;
+  two agent downloads on one tab no longer swap their files.
+- **Virtual browsers after a crash** forget the cookies and history they
+  were told to forget on exit.
+- **Media.** The keystroke overlay (for streams and recordings) never
+  shows what is typed into a password box, even inside a web component,
+  and lets go of the page when switched off; skip-silence can be switched
+  on again, and it and the equaliser leave a video from another site
+  audible instead of muting it; "no autoplay next", zoom, turn, filters,
+  Twitch ad muting and theatre mode undo exactly what they did; turning
+  captions off leaves a page's own chapter tracks alone; closing a window
+  stops its live captions; the media keys reach what is playing in any
+  window; a video paused by hand is not resumed by "resume all"; an
+  online translator is never picked for captions without being asked.
+- **Reading, translating, PDFs.** "Open long pages where I stopped" now
+  remembers the place when a tab is closed or the browser quits (and
+  not after "clear history on exit" ran); read-aloud reads the page, not
+  a leftover reader block; Undo after translating no longer overwrites a
+  page's own content; Traditional Chinese stays Traditional; reader view
+  of a selection keeps its pictures and links and drops frames; "copy
+  code without line numbers" touches only code; remembered PDF pages are
+  capped and go with the history.
+
 ## 2026-11-14 — line-by-line review, day 4 (part forty-five: twenty-sixth and twenty-seventh passes)
 
 The twenty-sixth search followed every per-site table (zoom, mute, focus,

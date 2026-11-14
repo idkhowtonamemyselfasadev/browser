@@ -361,19 +361,19 @@ H.load(view, srv.url("/en"))
 H.spin(800)
 check("with one, the page is translated in place",
       win.translate_in_place(view=view, lang="de") is True)
-H.wait_for(lambda: js("document.querySelectorAll('[data-was]').length"),
-           9000)
+# the originals are kept in a Map in this (the app) world, not as data-was
+H.wait_for(lambda: js("window.__trWas ? window.__trWas.size : 0"), 9000)
 H.spin(600)
-done = js("document.querySelectorAll('[data-was]').length")
+done = js("window.__trWas ? window.__trWas.size : 0")
 check("...and the blocks really changed", done and int(done) >= 1, done)
 check("...by his own program",
       "THE PAGE IS IN ENGLISH" in (js("document.body.innerText") or ""),
       (js("document.body.innerText") or "")[:60])
 check("...and the page's own words are kept",
       "The page is in English" in (js(
-          "document.querySelector('[data-was]')"
-          ".getAttribute('data-was')") or ""),
-      js("document.querySelector('[data-was]').getAttribute('data-was')"))
+          "window.__trWas ? Array.from(window.__trWas.values())"
+          ".join(' ') : ''") or ""),
+      js("window.__trWas ? window.__trWas.size : 0"))
 check("...and “translate now” prefers it to Google",
       win.translate_page_now(view=view) is True)
 H.spin(1200)
@@ -388,8 +388,8 @@ check("...so the tab stayed on the page",
 win.undo_translation(view)
 H.spin(700)
 check("it can be undone",
-      js("document.querySelectorAll('[data-was]').length") == 0,
-      js("document.querySelectorAll('[data-was]').length"))
+      not js("window.__trWas ? window.__trWas.size : 0"),
+      js("window.__trWas ? window.__trWas.size : 0"))
 check("...and the page reads as it did",
       "The page is in English" in (js("document.body.innerText") or ""),
       (js("document.body.innerText") or "")[:60])

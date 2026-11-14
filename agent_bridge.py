@@ -1090,6 +1090,9 @@ class AgentBridge:
             raise ValueError("url required")
         v._agent_loading = True
         v.loadFinished.connect(lambda ok, v=v: setattr(v, "_agent_loading", False))
+        # a tab that was never loaded would load its old address over
+        # this one at the first visit
+        v._pending = None
         v.load(QUrl(url))
         self._reply(conn, {"ok": True})
 
@@ -1654,21 +1657,27 @@ class AgentBridge:
         if real is None:
             self._reply(conn, {"ok": False, "error": "path-not-allowed"})
             return
-        code = """(async function (url) {
+        # its own slot: with one per tab, a download that had timed out
+        # finished into the next one's slot, and the next one wrote those
+        # bytes to its own path and called them good
+        key = "__agentFile_" + os.urandom(6).hex()
+        code = """(async function (url, KEY) {
           try {
             var r = await fetch(url, {credentials: "include"});
             var buf = await r.arrayBuffer();
             var bytes = new Uint8Array(buf), out = "";
             for (var i = 0; i < bytes.length; i++)
               out += String.fromCharCode(bytes[i]);
-            window.__agentFile = JSON.stringify(
-              {ok: r.ok, status: r.status, data: btoa(out)});
+            if (!window[KEY + "_dead"])
+              window[KEY] = JSON.stringify(
+                {ok: r.ok, status: r.status, data: btoa(out)});
           } catch (e) {
-            window.__agentFile = JSON.stringify(
-              {ok: false, status: 0, error: String(e)});
+            if (!window[KEY + "_dead"])
+              window[KEY] = JSON.stringify(
+                {ok: false, status: 0, error: String(e)});
           }
           return "started";
-        })(%s)""" % _js_string(url)
+        })(%s, %s)""" % (_js_string(url), _js_string(key))
 
         def finish(raw):
             found = _json_or(raw, {}) or {}
@@ -1700,17 +1709,24 @@ class AgentBridge:
             if self._gone(v):
                 self._reply(conn, {"ok": False, "error": "tab-gone"})
                 return
-            self._run(v, "(function () { var f = window.__agentFile || '';"
-                         " if (f) window.__agentFile = ''; return f; })()",
+            self._run(v, "(function (k) { var f = window[k] || '';"
+                         " if (f) delete window[k]; return f; })(%s)"
+                         % _js_string(key),
                       lambda raw: (
                 finish(raw) if raw else
                 (QTimer.singleShot(150, lambda: wait_for_file(tries - 1))
                  if tries > 0 else
-                 self._reply(conn, {"ok": False, "error": "timeout"}))))
+                 given_up())))
 
-        self._run(v, "window.__agentFile = ''; 1",
-                  lambda _r: self._run(v, code,
-                                       lambda _r2: wait_for_file()))
+        def given_up():
+            # a fetch still running finds its slot closed, and writes
+            # nowhere (its base64 used to sit in the page)
+            self._run(v, "(function (k) { window[k + '_dead'] = 1;"
+                         " delete window[k]; return 1; })(%s)"
+                         % _js_string(key), lambda _r: None)
+            self._reply(conn, {"ok": False, "error": "timeout"})
+
+        self._run(v, code, lambda _r2: wait_for_file())
 
     # ---- things that happen on their own -----------------------------
     def op_events(self, conn, req):

@@ -7426,14 +7426,15 @@ br.run_translator = lambda text, then=None, lang="de", limit=0: (
 br.caption_tools = lambda: {"captionTranslator": "/bin/true"}
 try:
     br.translate_in_place(view=_tc134, lang="de")
-    H.wait_for(lambda: jsq(_tc134, "document.querySelectorAll('[data-was]')"
-                                   ".length") == 3, 6000)
+    # the originals are kept in the app world now, not as data-was
+    H.wait_for(lambda: jsq(_tc134, "window.__trWas ? window.__trWas.size"
+                                   " : 0", B.APP_WORLD_ID) == 3, 6000)
     _inner134 = jsq(_tc134, "document.querySelectorAll('#li134 ul li').length")
     _own134 = jsq(_tc134, "document.getElementById('li134').firstChild"
                           ".nodeValue")
     br.undo_translation(view=_tc134)
-    H.wait_for(lambda: jsq(_tc134, "document.querySelectorAll('[data-was]')"
-                                   ".length") == 0, 4000)
+    H.wait_for(lambda: jsq(_tc134, "window.__trWas ? window.__trWas.size"
+                                   " : 0", B.APP_WORLD_ID) == 0, 4000)
 finally:
     br.run_translator = _real_rt134
     br.caption_tools = _real_ct134
@@ -12489,6 +12490,669 @@ finally:
     br.close_tab(br.tabs.indexOf(_v221), ask=False)
     import shutil as _sh221
     _sh221.rmtree(_tmp221, ignore_errors=True)
+
+# ---- 222: private yt-dlp jobs hold the private folder; one slot per agent download ----
+class _Proc222:
+    def __init__(self, running):
+        self.running = running
+    def poll(self):
+        return None if self.running else 0
+
+_live222 = _Proc222(True)
+_done222 = _Proc222(False)
+B._PRIVATE_YTDLP.update({_live222, _done222})
+try:
+    _run222 = br._private_downloads_running()
+    check("222 a running private yt-dlp job counts as a private download",
+          _live222 in _run222 and _done222 not in _run222, str(_run222))
+finally:
+    B._PRIVATE_YTDLP.discard(_live222)
+    B._PRIVATE_YTDLP.discard(_done222)
+
+# a download ending retries the private drop (it checks for open private
+# tabs itself, so calling it with private tabs open changes nothing)
+_drops222 = []
+br._drop_private_profile = lambda: _drops222.append(1)
+_had222 = B.PRIVATE_SESSION in br.session_profiles
+try:
+    if not _had222:
+        br.session_profiles[B.PRIVATE_SESSION] = object()
+
+    class _Req222:
+        class DownloadState:
+            DownloadInProgress, DownloadCompleted, DownloadCancelled = 0, 1, 2
+        def state(self):
+            return 2
+        def downloadFileName(self):
+            return "x222.bin"
+        def downloadDirectory(self):
+            return "/tmp"
+        def receivedBytes(self):
+            return 0
+        def totalBytes(self):
+            return 0
+    _entry222 = {"id": "x222", "state": "active", "received": 0}
+    br._download_state(_Req222(), _entry222)
+    check("222 a download that ends tries the private drop again",
+          _drops222 == [1] and _entry222["state"] == "cancelled",
+          str((_drops222, _entry222.get("state"))))
+finally:
+    br.__dict__.pop("_drop_private_profile", None)
+    if not _had222:
+        br.session_profiles.pop(B.PRIVATE_SESSION, None)
+    br.downloads[:] = [d for d in br.downloads if d.get("id") != "x222"]
+
+import inspect as _insp222
+import agent_bridge as _AB222
+_srcdl222 = _insp222.getsource(_AB222.AgentBridge.op_download)
+check("222 each agent download has its own result slot",
+      '"__agentFile_" + os.urandom(6).hex()' in _srcdl222
+      and "window.__agentFile =" not in _srcdl222
+      and "_dead" in _srcdl222)
+
+# ===== thirtieth pass: the password vault (fix 223) =======================
+import csv as _csv223
+import io as _io223
+import inspect as _inspect223
+_TOTP223 = "JBSWY3DPEHPK3PXP"
+
+
+def _vault223(provider=None):
+    d = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+    return (B.PasswordVault(d, provider=provider) if provider
+            else B.PasswordVault(d))
+
+
+# PV0: a wrong key file must not let the master password wipe the vault
+try:
+    _d223 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+    _lk223 = B.VaultLock(_d223)
+    _lk223.write({"entries": [{"id": "1"}]})
+    _lk223.key_file.write_bytes(os.urandom(32))
+    _lk223 = B.VaultLock(_d223)
+    _before223 = _lk223.file.read_bytes()
+    _res223 = _lk223.enable("a long enough pass phrase 223")
+    _ok223 = (_res223 is False and _lk223.file.read_bytes() == _before223
+              and _lk223.key_file.exists())
+except Exception as _e223:
+    _ok223 = repr(_e223)
+check("PV0 a master password is not sealed over a vault the key cannot open",
+      _ok223 is True, str(_ok223))
+
+# PV1: a 1Password OTP field is found by its type and written into
+try:
+    _op223 = B.OnePasswordProvider.__new__(B.OnePasswordProvider)
+    _entry223 = {"id": "a" * 26, "title": "t", "category": "LOGIN",
+                 "fields": [{"id": "username", "value": "u"},
+                            {"id": "password", "value": "p"},
+                            {"id": "TOTP_9f3a", "type": "OTP",
+                             "label": "one-time password",
+                             "value": "otpauth://totp/x?secret=" + _TOTP223}]}
+    _got223 = _op223._from_op_item(_entry223).get("totp")
+    _doc223 = B.OnePasswordProvider._merged(
+        _entry223, {"type": "login"},
+        [{"id": "totp", "type": "OTP", "label": "totp", "value": _TOTP223}])
+    _otps223 = [f for f in _doc223["fields"] if f.get("type") == "OTP"]
+    _ok223 = bool(_got223) and len(_otps223) == 1
+except Exception as _e223:
+    _ok223, _got223 = repr(_e223), None
+check("PV1 an OTP field made by the 1Password app is read and not doubled",
+      _ok223 is True, str((_ok223, _got223)))
+
+
+# PV2: the nameless login stays when the named save is refused
+class _Lazy223:
+    eager = False
+    locked = False
+
+    def __init__(self):
+        self.deleted = []
+
+    def load(self):
+        return {"items": [{"id": "n1", "type": "login", "host": "a223.example",
+                           "username": "", "password": "pw223",
+                           "remote": True}]}
+
+    def put(self, item):
+        return None
+
+    def delete(self, item_id):
+        self.deleted.append(item_id)
+        return True
+
+
+try:
+    _lp223 = _Lazy223()
+    _pv223 = _vault223(_lp223)
+    _r223 = _pv223.set_entry("a223.example", "https", "bob", "pw223")
+    _ok223 = (_r223 is None and not _lp223.deleted
+              and [i["id"] for i in _pv223.items()] == ["n1"])
+except Exception as _e223:
+    _ok223 = repr(_e223)
+check("PV2 a lazy store keeps the nameless login when the named save fails",
+      _ok223 is True, str(_ok223))
+try:
+    _pv223 = _vault223()
+    _pv223.set_entry("b223.example", "https", "", "pw223")
+    _fp223 = _pv223.provider
+    _fp223.save = lambda data: False
+    try:
+        _r223 = _pv223.set_entry("b223.example", "https", "bob", "pw223")
+    finally:
+        _fp223.__dict__.pop("save", None)
+    _ok223 = (_r223 is None and len(_pv223.items()) == 1
+              and _pv223.items()[0]["username"] == "")
+except Exception as _e223:
+    _ok223 = repr(_e223)
+check("PV2 an eager store gets the nameless login back after a refused save",
+      _ok223 is True, str(_ok223))
+
+# PV3/6/9: the page's import keeps note and 2FA, reads Bitwarden columns
+try:
+    _src223 = _vault223()
+    _src223.add_item({"type": "login", "host": "c223.example",
+                      "username": "me", "password": "=pw1",
+                      "note": "my note", "totp": _TOTP223})
+    _buf223 = _io223.StringIO()
+    _csv223.writer(_buf223).writerows(_src223.export_rows())
+    _dst223 = _vault223()
+    _cnt223 = _dst223.import_csv(_buf223.getvalue())
+    _row223 = _dst223.get("c223.example", "me") or {}
+    _ok223 = (_cnt223 == (1, 0, 0) and _row223.get("note") == "my note"
+              and _row223.get("totp") == _TOTP223
+              and _row223.get("password") == "=pw1")
+    # an existing login with the same password gets its missing 2FA filled in
+    _dst223.get("c223.example", "me")["totp"] = ""
+    _cnt2223 = _dst223.import_csv(_buf223.getvalue())
+    _ok2223 = (_cnt2223 == (0, 1, 0) and
+               _dst223.get("c223.example", "me")["totp"] == _TOTP223)
+    # Bitwarden's CSV columns
+    _bw223 = ("folder,favorite,type,name,notes,fields,reprompt,login_uri,"
+              "login_username,login_password,login_totp\n"
+              ",0,login,n,bw note,,0,https://d223.example/,me,bwpw,%s\n"
+              % _TOTP223)
+    _cnt3223 = _vault223().import_csv(_bw223)
+    _v3223 = _vault223()
+    _v3223.import_csv(_bw223)
+    _b223 = _v3223.get("d223.example", "me") or {}
+    _ok3223 = (_cnt3223 == (1, 0, 0) and _b223.get("password") == "bwpw"
+               and _b223.get("note") == "bw note"
+               and _b223.get("totp") == _TOTP223)
+except Exception as _e223:
+    _ok223 = _ok2223 = _ok3223 = repr(_e223)
+check("PV3/9 the page import keeps note and 2FA from this browser's CSV",
+      _ok223 is True, str(_ok223))
+check("PV3/9 a same-password row still fills a missing 2FA secret",
+      _ok2223 is True, str(_ok2223))
+check("PV6 the page import reads Bitwarden's login_password columns",
+      _ok3223 is True, str(_ok3223))
+
+# PV4: the same Bitwarden JSON twice adds nothing
+try:
+    _bj223 = json.dumps({"items": [
+        {"type": 1, "name": "x", "login": {"username": "u", "password": "p",
+                                           "uris": [{"uri": "https://e223.example"}]}},
+        {"type": 2, "name": "sn", "notes": "body"}]})
+    _v4223 = _vault223()
+    _v4223.import_bitwarden(_bj223)
+    _v4223.import_bitwarden(_bj223)
+    _ok223 = len(_v4223.items()) == 2
+except Exception as _e223:
+    _ok223 = repr(_e223)
+check("PV4 a second Bitwarden import does not double anything",
+      _ok223 is True, str(_ok223))
+
+# PV5/8: a password is not stripped; the apostrophe goes only in our own file
+try:
+    _v5223 = _vault223()
+    _v5223.import_rows("name,url,username,password\n"
+                       "a,https://f223.example,u, pw ' \n"
+                       "b,https://g223.example,u,'-abc\n")
+    _f223 = _v5223.get("f223.example", "u") or {}
+    _g223 = _v5223.get("g223.example", "u") or {}
+    _v6223 = _vault223()
+    _v6223.import_csv("name,url,username,password\n"
+                      "a,https://f223.example,u, pw \n"
+                      "b,https://g223.example,u,'-abc\n")
+    _ok223 = (_f223.get("password") == " pw ' " and
+              _g223.get("password") == "'-abc" and
+              _v6223.get("f223.example", "u")["password"] == " pw " and
+              _v6223.get("g223.example", "u")["password"] == "'-abc")
+    _own223 = _vault223()
+    _own223.import_rows("name,url,username,password,note,totp\n"
+                        "b,https://h223.example,u,'-abc,,\n")
+    _ok2223 = _own223.get("h223.example", "u")["password"] == "-abc"
+except Exception as _e223:
+    _ok223 = _ok2223 = repr(_e223)
+check("PV5/8 a foreign CSV's password keeps its spaces and apostrophe",
+      _ok223 is True, str(_ok223))
+check("PV8 this browser's own export format still loses its apostrophe",
+      _ok2223 is True, str(_ok2223))
+
+# PV7: a refused save from the toast is reported
+_saved223 = br._pw_pending
+_flashes223 = []
+try:
+    if br.vault is not None and br.vault.provider.eager:
+        br._pw_pending = {"host": "t223.example", "scheme": "https",
+                          "username": "u", "password": "p"}
+        br.vault.set_entry = lambda *a, **k: None
+        br.flash = lambda text, ms=0: _flashes223.append(text)
+        br._pw_save_pending()
+finally:
+    br.vault.__dict__.pop("set_entry", None)
+    br.__dict__.pop("flash", None)
+    br._pw_pending = _saved223
+check("PV7 a refused toast save says so",
+      len(_flashes223) == 1 and _flashes223[0] == br._ui_str("pwSaveFailed"),
+      str(_flashes223))
+
+# fix224: an empty imported password is not newer; rollback newest first
+_src224 = __import__("inspect").getsource(B.PasswordVault)
+check("224 an empty imported password does not count as a newer one",
+      'newer = (bool(fresh.get("password"))' in _src224)
+check("224 a refused import rolls back newest first",
+      "for item, was in reversed(rollback):" in _src224)
+# ---- thirty-first pass, tab lifecycle (225) ----
+import inspect as _insp225
+
+# sleep_oldest: skips only discarded tabs, goes on past protected ones
+_src225 = _insp225.getsource(B.Browser.sleep_oldest)
+check("TL0 sleep_oldest no longer skips frozen tabs",
+      "sleeping_tabs()" not in _src225 and "Discarded" in _src225)
+_tabs225 = []
+_orig_sleep225 = br.sleep_tab
+try:
+    for _n225 in range(3):
+        _tabs225.append(br.new_tab(url=B.as_qurl(srv.url("/twhome")),
+                                   switch=False))
+    for _i225, _v225 in enumerate(_tabs225):
+        # below every other tab in the suite's window (an untouched one
+        # counts as 0), so these three really are the oldest
+        _v225._last_seen = -3.0 + _i225
+    _tried225 = []
+
+    def _fake_sleep225(view, on=True):
+        _tried225.append(view)
+        return view is not _tabs225[0]      # the oldest is protected
+    br.sleep_tab = _fake_sleep225
+    _got225 = br.sleep_oldest(1)
+    check("TL10 sleep_oldest goes past a protected oldest tab",
+          len(_got225) == 1 and _got225[0] is _tabs225[1]
+          and _tried225[0] is _tabs225[0],
+          str(len(_got225)))
+finally:
+    br.sleep_tab = _orig_sleep225
+    br.__dict__.pop("sleep_tab", None)
+    for _v225 in _tabs225:
+        _close_if_open(_v225)
+
+# sleep_tab / freeze_tab: protected and read back
+_s225 = _insp225.getsource(B.Browser.sleep_tab)
+_f225 = _insp225.getsource(B.Browser.freeze_tab)
+check("TLS0/TLS3 sleep_tab and freeze_tab refuse music and agent tabs",
+      "_keep_playing" in _s225 and "_agent_owned" in _s225
+      and "_keep_playing" in _f225 and "_agent_owned" in _f225)
+check("TL5 sleep_tab reads the lifecycle state back",
+      _s225.count("lifecycleState()") >= 2)
+check("TL1 game_mode records only tabs that were awake",
+      "was_up" in _insp225.getsource(B.Browser.game_mode))
+_v225 = br.new_tab(url=B.as_qurl(srv.url("/twhome")), switch=False)
+try:
+    _v225._keep_playing = True
+    check("TLS3 a music tab is not slept", br.sleep_tab(_v225, True) is False
+          and br.freeze_tab(_v225, True) is False)
+    _v225._keep_playing = False
+    _v225._agent_owned = True
+    check("TLS0 an agent tab is not slept", br.sleep_tab(_v225, True) is False
+          and br.freeze_tab(_v225, True) is False)
+finally:
+    _close_if_open(_v225)
+
+# lazy tabs: split half, pop-out, explicit load
+_p225 = br.new_tab(url=B.as_qurl(srv.url("/twhome")), switch=False,
+                   lazy=True)
+try:
+    check("TL4 setup: tab is pending", bool(getattr(_p225, "_pending", None)))
+    br.split_view(index=br.tabs.indexOf(_p225))
+    check("TL4 split_view loads a pending tab",
+          getattr(_p225, "_pending", None) is None)
+finally:
+    br.close_split()
+    _close_if_open(_p225)
+_p225 = br.new_tab(url=B.as_qurl(srv.url("/twhome")), switch=False,
+                   lazy=True)
+_mini225 = None
+try:
+    _mini225 = br.pop_out_tab(br.tabs.indexOf(_p225))
+    check("TL7 pop_out_tab loads a pending tab",
+          getattr(_p225, "_pending", None) is None)
+finally:
+    if _mini225 is not None:
+        _mini225.close()
+    _close_if_open(_p225)
+_p225 = br.new_tab(url=B.as_qurl(srv.url("/twhome")), switch=False,
+                   lazy=True)
+try:
+    _p225.load(B.as_qurl(srv.url("/timers")))
+    H.wait_for(lambda: getattr(_p225, "_pending", None) is None, 4000)
+    check("TL3 an explicit load clears the pending address",
+          getattr(_p225, "_pending", None) is None)
+finally:
+    _close_if_open(_p225)
+
+# window close / merge keep the split half, session row keeps its marks
+check("TL6 closeEvent and merge_windows close the split first",
+      "close_split()" in _insp225.getsource(B.Browser.closeEvent)
+      and "close_split()" in _insp225.getsource(B.Browser.merge_windows))
+_ss225 = _insp225.getsource(B.Browser)
+check("TL9 split row saved with p/l/n/w",
+      'row["n"] = split.tab_name' in _ss225
+      and 'row["w"] = int(split._seen_wall)' in _ss225)
+
+# mute travels with the tab state
+_m225 = br.new_tab(url=B.as_qurl(srv.url("/twhome")), switch=False)
+try:
+    H.wait_for(lambda: "twhome" in _m225.url().toString(), 8000)
+    br.mute_tab(br.tabs.indexOf(_m225), on=True)
+    _st225 = br.tab_state(indices={br.tabs.indexOf(_m225)})
+    check("TL8 tab_state carries the mute",
+          bool(_st225) and _st225[0].get("m") == 1, str(_st225))
+    _o225 = br.open_tab_state(_st225, lazy=True)
+    try:
+        check("TL8 open_tab_state applies the mute",
+              bool(_o225) and _o225[0].page().isAudioMuted())
+    finally:
+        for _w225 in _o225:
+            _close_if_open(_w225)
+finally:
+    _close_if_open(_m225)
+# ---- 226: a bookmark lock covers its whole tree for moves and merges ----
+_bm226 = list(br.bookmarks)
+try:
+    _a226 = br.add_bookmark_folder("A226")
+    _aid226 = _a226 if isinstance(_a226, int) else (_a226 or {}).get("id")
+    _b226 = br.add_bookmark_folder("B226", parent=_aid226)
+    _bid226 = _b226 if isinstance(_b226, int) else (_b226 or {}).get("id")
+    _l226 = br._add_link("https://lock226.example/", "L226", parent=_bid226)
+    _dup226 = br._add_link("https://lock226.example/", "D226", parent=0)
+    br._bookmark_by_id(_aid226)["locked"] = True
+    br.move_bookmark(_l226["id"], 0, 0)
+    check("226 a bookmark under a locked folder's subfolder is not moved out",
+          br._bookmark_by_id(_l226["id"])["parent"] == _bid226)
+    br.move_bookmark(_bid226, 0, 0)
+    check("226 an unlocked folder inside a locked one is not moved out",
+          br._bookmark_by_id(_bid226)["parent"] == _aid226)
+    br.merge_duplicate_bookmarks()
+    check("226 merging duplicates keeps the copy under the locked tree",
+          br._bookmark_by_id(_l226["id"]) is not None)
+finally:
+    br.bookmarks[:] = _bm226
+    br.save_bookmarks()
+
+import inspect as _insp226
+check("226 close unused tabs keeps a tab whose bookmark could not be made",
+      "if not self.add_bookmark_url(url, row[\"title\"]):" in
+      _insp226.getsource(B.Browser.close_unused_tabs))
+# ---- thirty-third pass: address bar (fix227) ----
+_ok_a0 = (B._strip_pasted("[::1]") == "[::1]"
+          and B._strip_pasted("[2001:db8::1]") == "[2001:db8::1]"
+          and B._strip_pasted("[abc]") == "abc"
+          and br._resolve_typed("[::1]") == "http://[::1]")
+check("AD0 a bracketed IPv6 literal is opened, not searched", _ok_a0,
+      br._resolve_typed("[::1]"))
+
+check("AD2 names on his own network are not sent for suggestions",
+      not any(B.looks_like_search(t) for t in
+              ("fritz.box", "nas.corp", "router.localdomain",
+               "printer.home.arpa"))
+      and B.looks_like_search("how to cook pasta"))
+
+_u_a3 = B.pretty_url("https://%D0%B0pple.com@%D0%B0pple.com/")
+check("AD3 the host after the @ is the one made punycode",
+      _u_a3.endswith("@xn--pple-43d.com/"), _u_a3)
+
+_p_a4 = B.bar_domain_parts("data:text/html,//paypal.com/login")
+_q_a4 = B.bar_domain_parts("evil.ru/r?u=https://paypal.com/x")
+check("AD4 only a real scheme splits on //",
+      _p_a4[1] == "" and _q_a4[1] == "evil.ru"
+      and B.bar_domain_parts("foo //paypal.com/x")[1] == "",
+      str((_p_a4, _q_a4)))
+
+check("AD5 com.io is not a public suffix, co.uk is",
+      B.bar_domain_parts("https://paypal.com.io/x")[:2]
+      == ("https://paypal.", "com.io")
+      and B.bar_domain_parts("https://a.paypal.co.uk/x")[1] == "paypal.co.uk")
+
+check("ADS0 an IPv6 host is highlighted whole",
+      B.bar_domain_parts("http://[::1]:8080/")
+      == ("http://", "[::1]", ":8080/"))
+
+_cfg_a6 = {k: br.config.get(k) for k in ("privateEngine", "searchEngine")}
+_pv_a6 = br.new_tab(url=srv.url("/twhome"), private=True)
+try:
+    H.wait_for(lambda: "/twhome" in _pv_a6.url().toString(), 8000)
+    br.config["searchEngine"] = "google"
+    br.config["privateEngine"] = "duckduckgo"
+    _want_a6 = br.engine_url("duckduckgo", "javascript:x")
+    br.tabs.setCurrentWidget(_pv_a6)
+    _js_a6 = br._resolve_typed("javascript:x")
+    _got_a6 = br.search_url_for("two words", view=_pv_a6)
+    check("AD1/AD6/AD7 every search follows the private engine",
+          bool(_want_a6) and _js_a6 == _want_a6
+          and _got_a6 == br.engine_url("duckduckgo", "two words"),
+          f"{_js_a6} {_got_a6}")
+finally:
+    for _k_a6, _v_a6 in _cfg_a6.items():
+        if _v_a6 is None:
+            br.config.pop(_k_a6, None)
+        else:
+            br.config[_k_a6] = _v_a6
+    _close_if_open(_pv_a6)
+
+import inspect as _insp_a8
+check("ADS1 a submitted form is not rewritten into a GET",
+      "NavigationTypeFormSubmitted" in _insp_a8.getsource(
+          B.WebPage.acceptNavigationRequest)
+      .split("rewrite_url(url)")[0][-400:])
+
+# fix228: every two-letter country's second level, except the ones that sell names directly
+check("228 com.pt keeps its owner bright, com.io stays an ordinary name",
+      B.bar_domain_parts("https://paypal.evil.com.pt/login")[1] == "evil.com.pt"
+      and B.bar_domain_parts("https://paypal.com.io/x")[1] == "com.io"
+      and B.bar_domain_parts("https://news.bbc.co.uk/a")[1] == "bbc.co.uk",
+      str([B.bar_domain_parts(u)[1] for u in (
+          "https://paypal.evil.com.pt/login", "https://paypal.com.io/x",
+          "https://news.bbc.co.uk/a")]))
+# ---- 229: session-tied logins and per-session clear-on-exit after a crash ----
+import inspect as _insp229
+try:
+    _v229 = br.current()
+    _old_sess229 = getattr(_v229, "session", "main")
+    _ent229 = {"host": "example.test", "scheme": "https", "username": "w",
+               "password": "p", "session": "work", "used": 5}
+    _free229 = {"host": "example.test", "scheme": "https", "username": "f",
+                "password": "q", "used": 1}
+
+    class _Vault229:
+        def entries_for(self, host, scheme):
+            return [_ent229, _free229]
+
+    try:
+        _v229.session = "main"
+        _rows229 = br._logins_in(_Vault229().entries_for("x", "https"), _v229)
+        check("229a tied login dropped in another session",
+              _rows229 == [_free229], str(_rows229))
+        _v229.session = "work"
+        _rows229 = br._logins_in(_Vault229().entries_for("x", "https"), _v229)
+        check("229b tied login kept in its session", len(_rows229) == 2)
+        check("229c no view keeps only untied",
+              br._logins_in([_ent229, _free229], None) == [_free229])
+    finally:
+        _v229.session = _old_sess229
+    for _fn229 in ("_pw_entry_for", "_saved_account_names", "logins_here",
+                   "_autofill", "_login_form_seen", "_account_chosen"):
+        _src229 = _insp229.getsource(getattr(B.Browser, _fn229))
+        check("229d %s filters by session" % _fn229,
+              "_in(" in _src229 or "_logins_in" in _src229, _fn229)
+    check("229e crash path reads per-session clear",
+          "_crash_clear_sessions" in _insp229.getsource(B.Browser.__init__))
+    _old_cfg229 = br.config.get("clearOnExit")
+    try:
+        br.config["clearOnExit"] = {"bank": ["cookies", "history"],
+                                    "x": "bad"}
+        _t229 = br._crash_clear_sessions()
+        check("229f crash clear table",
+              _t229 == {"bank": ["cookies", "history"]}, str(_t229))
+    finally:
+        if _old_cfg229 is None:
+            br.config.pop("clearOnExit", None)
+        else:
+            br.config["clearOnExit"] = _old_cfg229
+except Exception as _e229:
+    check("229 tests ran", False, repr(_e229))
+# ---- thirty-fifth pass, media (230) ----
+import inspect as _insp230
+_m230 = B.MEDIA_TOOLS2
+_p230 = B.PLAY_TOOLS
+_k230 = B.MEDIA_TOOLS
+_keys = _p230["keystrokes"]
+check("MD7 keystrokes overlay skips password fields",
+      "password" in _keys and "secret(e)" in _keys)
+check("MD7 keystrokes off removes its listeners",
+      _keys.count("removeEventListener") == 2 and "__keyHandlers" in _keys)
+check("MD0 skip-silence reuses the element's source node",
+      "m.__mediaSrc" in _m230["skipsilence"]
+      and "m.__mediaSrc" in _m230["audiochain"])
+check("MD0 skip-silence off disconnects its tap",
+      "tap.from.disconnect" in _m230["skipsilence"])
+check("MD1 audio chain and skip-silence check the origin and resume",
+      all("location.origin" in _m230[n] and "ctx.resume()" in _m230[n]
+          for n in ("skipsilence", "audiochain")))
+check("MD2 noautonext off removes its listener and flag",
+      "removeEventListener" in _k230["noautonext"]
+      and "noAutoNext" in _k230["noautonext"])
+check("MD3 captions touch only subtitle and caption tracks",
+      '"subtitles"' in _m230["captions"] and '"subtitles"' in _m230["cues"])
+check("MD4 zoom reset removes the inline overrides",
+      'removeProperty("object-fit")' in _m230["zoom"])
+check("MD5 twitch ads off only restores during an ad",
+      "window.__twInAd" in _p230["twitchads"].split("return \"off\"")[0])
+check("MD6 twitch theatre is not clicked when already on",
+      "already" in _p230["theater"].split("twitch.tv")[1])
+check("MD8 closeEvent stops captions",
+      "live_captions(False)" in _insp230.getsource(B.Browser.closeEvent))
+check("MD9 stale paused tab does not shadow a playing one",
+      "recentlyAudible" in _insp230.getsource(B.Browser._audible_anywhere))
+check("MDS0 pause mark is cleared on play",
+      '"play"' in _k230["pauseall"])
+check("MDS2 failed recorder is cleaned up",
+      "errorOccurred" in _insp230.getsource(B.Browser._caption_tick))
+check("MDS3 no online translator is guessed",
+      "translate-shell" not in _insp230.getsource(B.Browser.caption_tools))
+
+# fix231: a closed shadow root counts as secret; the autonav switch is put back without a player
+_src231 = (_Path(B.__file__)).read_text()
+check("231 keystrokes treat focus in a closed shadow root as a secret",
+      'focus.tagName.indexOf("-") > 0' in _src231 and "!focus.shadowRoot) return true;" in _src231)
+check("231 noautonext remembers the switch it turned off even with no player",
+      "window.__noAutoNext = (kept.el || kept.toggled) ? kept : null;" in _src231)
+# ---- review 232: reader mark, reading place on close, translator language, undo, pdf places, selection reader, line numbers ----
+import inspect as _insp232
+
+_rs232 = B.READER_TOOLS["reader"]
+check("232 reader clears the article mark off and on",
+      _rs232.index('".__readerbody"') < _rs232.index('getElementById("__readercss")')
+      and "classList.remove(\"__readerbody\")" in _rs232)
+
+# reading place written from the last look, at close
+_cfg232 = br.config.get("readResume", False)
+_places232 = dict(br.config.get("readPlaces") or {})
+try:
+    br.config["readResume"] = True
+    _v232 = br.new_tab()
+    H.load(_v232, srv.url("/twhome"))
+    H.wait_for(lambda: "/twhome" in _v232.url().toString(), 8000)
+    H.wait_for(lambda: getattr(_v232, "_read_loaded", False), 8000)
+    _u232 = getattr(_v232, "_read_url", "") or _v232.url().toString()
+    _v232._read_at = (_u232, 5000)
+    br._flush_reading_place(_v232)
+    check("232 reading place filed from the cached look",
+          br.reading_places().get(_u232[:500]) == 5000)
+    _v232._read_at = (_u232, 5000)
+    _v232.private = True
+    br.config["readPlaces"] = {}
+    br._flush_reading_place(_v232)
+    check("232 private tab keeps no reading place", not br.config["readPlaces"])
+    _v232.private = False
+    check("232 close_tab flushes the place",
+          "_flush_reading_place" in _insp232.getsource(B.Browser.close_tab))
+finally:
+    br.config["readResume"] = _cfg232
+    br.config["readPlaces"] = _places232
+    try:
+        br.close_tab(br.tabs.indexOf(_v232), ask=False)
+    except Exception:
+        pass
+
+# translator language
+_seen232 = {}
+_orig232 = B.Browser.caption_tools
+try:
+    br.caption_tools = lambda: {"captionTranslator": "/bin/true"}
+    _src232 = _insp232.getsource(B.Browser.run_translator)
+    check("232 translator keeps zh-TW", '"zh-TW" if traditional' in _src232
+          and "[:5]" in _src232)
+finally:
+    br.__dict__.pop("caption_tools", None)
+
+# undo only touches what the translator wrote
+_u232src = _insp232.getsource(B.Browser.undo_translation)
+check("232 undo no longer reads data-was", "data-was" not in _u232src
+      and "__trWas" in _u232src)
+
+# pdf places
+_pp232 = br.config.get("pdfPlace")
+_pr232 = br.config.get("pdfRemember", True)
+try:
+    br.config["pdfRemember"] = True
+    br.config["pdfPlace"] = {}
+    for _i232 in range(230):
+        br.pdf_place(url="https://x.test/%d.pdf" % _i232, page_number=3)
+    check("232 pdfPlace capped", len(br.config["pdfPlace"]) == 200)
+    br._forget_history_extras(None)
+    check("232 clear history empties pdfPlace", not br.config.get("pdfPlace"))
+    br.config["pdfPlace"] = {"https://x.test/a.pdf": 4}
+    br.config["pdfRemember"] = False
+    _off232 = br.pdf_place(url="https://x.test/a.pdf")
+    # fix236: off pauses -- nothing read or kept, the rows wait for "on"
+    check("232 pdfRemember off pauses: rows kept, none read",
+          _off232 == 0
+          and br.config.get("pdfPlace") == {"https://x.test/a.pdf": 4},
+          str((_off232, br.config.get("pdfPlace"))))
+finally:
+    br.config["pdfRemember"] = _pr232
+    if _pp232 is None:
+        br.config.pop("pdfPlace", None)
+    else:
+        br.config["pdfPlace"] = _pp232
+
+# selection reader and line numbers: source checks
+_sel232 = B.READ_TOOLS["readerselection"]
+check("232 selection html made absolute", "document.baseURI" in _sel232
+      and "iframe" in _sel232)
+_nl232 = B.READ_TOOLS["nolinenumbers"]
+check("232 line numbers: code only, counting, no stopImmediatePropagation",
+      "inCode" in _nl232 and "counting" in _nl232
+      and "stopImmediatePropagation" not in _nl232)
+
+# fix233: places flushed before the exit wipe, never after; a sample waits for the resume scroll
+import inspect as _insp233
+check("233 the exit wipe flushes every window first and later flushes stop",
+      "win._flush_reading_places()" in _insp233.getsource(B.Browser._clear_on_exit)
+      and '_exit_cleared", False)' in _insp233.getsource(B.Browser._flush_reading_places))
+check("233 a reading sample waits 1.5 s after the load",
+      "time.monotonic() - float(loaded) < 1.5" in _insp233.getsource(B.Browser._sample_reading_place))
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

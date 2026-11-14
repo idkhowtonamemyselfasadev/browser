@@ -159,9 +159,11 @@ check("and the element really has it",
                                   ".style.filter") or ""),
       js(view, "document.getElementById('v').style.filter"))
 ask("filters", view, {"brightness": 1, "contrast": 1, "saturate": 1})
-check("back to normal is a filter too",
-      "brightness(1)" in str(js(view, "document.getElementById('v')"
-                                ".style.filter") or ""))
+# at neutral the filter comes off altogether (no !important override
+# left behind on the element), or reads as the neutral one
+_f_m2 = str(js(view, "document.getElementById('v').style.filter") or "")
+check("back to normal leaves no filter in force",
+      _f_m2 in ("", "none") or "brightness(1)" in _f_m2, _f_m2)
 answer = ask("turn", view, {"by": 90})
 check("a quarter turn is remembered as 90", answer and '"deg": 90' in
       answer.replace('"deg":90', '"deg": 90'), answer)
@@ -175,9 +177,10 @@ check("mirroring is on top of the turn",
                              ".style.transform") or ""),
       js(view, "document.getElementById('v').style.transform"))
 ask("turn", view, {"reset": True})
+_t_m2 = str(js(view, "document.getElementById('v').style.transform") or "")
 check("straightening clears both",
-      "rotate(0deg)" in str(js(view, "document.getElementById('v')"
-                               ".style.transform") or ""))
+      ("scaleX(-1)" not in _t_m2 and "rotate(90deg)" not in _t_m2)
+      and (_t_m2 in ("", "none") or "rotate(0deg)" in _t_m2), _t_m2)
 answer = ask("zoom", view, {"by": 0.5})
 check("zooming scales it", "scale(1.5)" in str(
     js(view, "document.getElementById('v').style.transform") or ""),

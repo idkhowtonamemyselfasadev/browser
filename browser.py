@@ -2818,7 +2818,11 @@ def _strip_pasted(text):
         changed = False
         for left, right in pairs:
             if text.startswith(left) and text.endswith(right):
-                text = text[len(left):-len(right)].strip()
+                inner = text[len(left):-len(right)].strip()
+                if left == "[" and ":" in inner and re.fullmatch(
+                        r"[0-9A-Fa-f:.]+", inner):
+                    continue   # [::1] is an address, not a pasted bracket
+                text = inner
                 changed = True
     # the punctuation a sentence leaves behind -- but only on
     # something that is one word: "Look at example.com." is a sentence
@@ -2889,25 +2893,47 @@ def bar_domain_parts(text):
     if not text:
         return ("", "", "")
     head, slash, rest = text.partition("/")
-    if "//" in text:
+    lead = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:(//)?", text)
+    if lead and lead.group(1):
         scheme, _, after = text.partition("//")
         head, slash, rest = after.partition("/")
         before = scheme + "//"
+    elif lead and not re.match(r"[A-Za-z0-9.-]+:\d+(/|$)", text):
+        # data:, javascript:, about: ...: a "//" further in is part of
+        # the text, not an authority, and no host is made bright
+        return (text, "", "")
     else:
+        # no scheme (it may be hidden): the first "//" is in the path
         before = ""
-    host = head.split("@")[-1].split(":")[0]
+    host = head.split("@")[-1]
+    if host.startswith("[") and "]" in host:
+        host = host[:host.index("]") + 1]    # an IPv6 literal, whole
+    else:
+        host = host.split(":")[0]
     if not host or not re.fullmatch(r"[A-Za-z0-9.\-\[\]:]+", host):
         return (text, "", "")
     parts = host.split(".")
-    if len(parts) < 2 or re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", host):
+    if (len(parts) < 2 or host.startswith("[")
+            or re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", host)):
         domain = host
     else:
         # two labels, or three where the middle one is one of the
-        # second-level names a country registry uses
+        # second-level names a country registry uses (co.uk, com.pt,
+        # com.au...) -- but not under the countries that sell names
+        # straight off the top: com.io is an ordinary name anybody can
+        # buy, and treating it as a suffix made the whole of
+        # paypal.com.io bright. (A list of the countries that DO have
+        # second levels left com.pt, com.cy and many more out, and
+        # dimmed the part a spoof hides in.)
         domain = ".".join(parts[-2:])
         if (len(parts) >= 3 and parts[-2] in ("co", "com", "org", "net",
                                               "ac", "gov", "edu")
-                and len(parts[-1]) == 2):
+                and len(parts[-1]) == 2
+                and parts[-1].lower() not in (
+                    "io", "ai", "tv", "me", "cc", "ly", "gl", "to", "sh",
+                    "fm", "gg", "so", "sx", "ws", "la", "im", "ms", "vc",
+                    "nu", "am", "ag", "bz", "gs", "st", "tk", "ml", "ga",
+                    "cf", "gq", "cx", "ac", "is", "re", "pw", "cd")):
             domain = ".".join(parts[-3:])
     at = head.rfind(domain)
     before = before + head[:at]
@@ -2946,10 +2972,26 @@ def pretty_url(text, hide_scheme=False, decode=True):
             # should.
             host = url.host()
             if host and not idn_safe_to_show(host):
-                shown = shown.replace(
-                    host,
-                    url.host(QUrl.ComponentFormattingOption
-                             .EncodeUnicode), 1)
+                # the host as it stands after the last "@" of the
+                # authority: the first copy of it in the string can be
+                # in the user name, which left the real host in its
+                # look-alike letters
+                safe_host = url.host(QUrl.ComponentFormattingOption
+                                     .EncodeUnicode)
+                start = shown.find("//") + 2 if "//" in shown else 0
+                end = len(shown)
+                for stop in "/?#":
+                    at_stop = shown.find(stop, start)
+                    if at_stop != -1:
+                        end = min(end, at_stop)
+                at_sign = shown.rfind("@", start, end)
+                lo = (at_sign + 1) if at_sign != -1 else start
+                where = shown.find(host, lo, end)
+                if where != -1:
+                    shown = (shown[:where] + safe_host
+                             + shown[where + len(host):])
+                else:
+                    shown = text   # unsure where it is: show the raw URL
             out = shown
         else:
             out = QUrl.fromPercentEncoding(text.encode())
@@ -3247,6 +3289,13 @@ def looks_like_search(text):
         ending = bare.rsplit(".", 1)[-1].lower()
         if ending in KNOWN_TLDS:
             return False           # a host he is going to
+        if ending in ("box", "corp", "localdomain", "arpa", "intranet",
+                      "private", "lan", "local", "home", "internal",
+                      "localhost", "fritz", "router", "gateway"):
+            # the router, the NAS, the printer: a name that only
+            # means something on his own network was sent to Google
+            # as q= because the ending was not in the list above
+            return False
     if re.fullmatch(r"[A-Za-z0-9+/=_\-]{24,}", text):
         return False               # a token, a hash, a key
     if sum(c.isdigit() for c in text) > len(text) * 0.6 and len(text) > 10:
@@ -3577,6 +3626,16 @@ MEDIA_PICK = r"""
 #: wiped the first while both still said they were on
 MEDIA_XFORM = r"""
   function xform(m) {
+    /* a page that swapped its player left the old one turned for good */
+    var old = window.__mediaTarget;
+    if (old && old !== m) {
+      try {
+        old.style.removeProperty("transform");
+        old.style.removeProperty("transform-origin");
+        old.style.removeProperty("object-fit");
+      } catch (e) {}
+    }
+    window.__mediaTarget = m;
     var t = window.__mediaTurn || {deg: 0, flip: false};
     var z = window.__mediaZoom || {scale: 1, x: 0, y: 0, crop: false};
     var css = "scale(" + z.scale + ") translate(" + z.x + "px," + z.y
@@ -3636,7 +3695,14 @@ MEDIA_TOOLS = {
 "pauseall": r"""(function () {
   var n = 0;
   document.querySelectorAll("video, audio").forEach(function (m) {
-    if (!m.paused) { m.pause(); m.dataset.pausedByBrowser = "1"; n++; }
+    if (!m.paused) {
+      m.pause(); m.dataset.pausedByBrowser = "1"; n++;
+      /* played by hand afterwards, the mark was stale: pausing it again
+         by hand and pressing resume started a video he had paused */
+      m.addEventListener("play", function () {
+        delete m.dataset.pausedByBrowser;
+      }, {once: true});
+    }
   });
   return n;
 })()""",
@@ -3816,23 +3882,42 @@ MEDIA_TOOLS = {
 })()""",
 
 # YouTube and Twitch: no next video, no end cards.
-"noautonext": r"""(function () {
+"noautonext": MEDIA_PICK + r"""(function () {
   var s = document.getElementById("__noautonext");
-  if (s) { s.remove(); return "off"; }
+  if (s) {
+    s.remove();
+    var kept = window.__noAutoNext;
+    if (kept) {
+      if (kept.el) {
+        kept.el.removeEventListener("ended", kept.fn, true);
+        delete kept.el.dataset.noAutoNext;
+      }
+      if (kept.toggled) {
+        var back = document.querySelector(
+          ".ytp-autonav-toggle-button[aria-checked=false]");
+        if (back) back.click();
+      }
+    }
+    window.__noAutoNext = null;
+    return "off";
+  }
   s = document.createElement("style");
   s.id = "__noautonext";
   s.textContent = ".ytp-ce-element, .ytp-endscreen-content,"
     + " .ytp-autonav-endscreen-countdown-overlay { display: none !important; }";
   document.documentElement.appendChild(s);
-  var v = document.querySelector("video");
+  var v = pick();
+  var kept = {el: null, fn: null, toggled: false};
   if (v && !v.dataset.noAutoNext) {
     v.dataset.noAutoNext = "1";
-    v.addEventListener("ended", function (e) {
-      e.stopImmediatePropagation();
-    }, true);
+    kept.el = v;
+    kept.fn = function (e) { e.stopImmediatePropagation(); };
+    v.addEventListener("ended", kept.fn, true);
   }
   var toggle = document.querySelector(".ytp-autonav-toggle-button[aria-checked=true]");
-  if (toggle) toggle.click();
+  if (toggle) { toggle.click(); kept.toggled = true; }
+  // the autonav switch it turned off is remembered too, player or not
+  window.__noAutoNext = (kept.el || kept.toggled) ? kept : null;
   return "on";
 })()""",
 
@@ -4155,6 +4240,12 @@ DEV_TOOLS = {
 READER_TOOLS = {
 
 "reader": r"""(function (css) {
+  // the mark on the old article goes with the reader, off or on again:
+  // left behind, read-aloud (which looks for it) spoke only that element
+  // with the reader off, and a second article was marked beside it
+  document.querySelectorAll(".__readerbody").forEach(function (e) {
+    e.classList.remove("__readerbody");
+  });
   var old = document.getElementById("__readercss");
   if (old) {
     old.remove();
@@ -13053,6 +13144,16 @@ class VaultLock:
         data = self.read()
         if self._blind:
             return False       # never seal {} over a vault it could not read
+        raw = self._raw()
+        if raw.startswith(VAULT_MAGIC) and len(raw) >= 20:
+            # a wrong key file (restored from another backup) reads as an
+            # empty vault: sealing that would replace the real one and then
+            # delete the key file that could still open it
+            plain_key = self._plain_key()
+            if plain_key is None or not any(
+                    self._plain_opens(c, plain_key)
+                    for c in (raw, _undo_text_mode(raw))):
+                return False
         token = self._token_plain()
         key = self._install(data, passphrase)
         if key is None:
@@ -13864,17 +13965,22 @@ class OnePasswordProvider(VaultProvider):
     def _from_op_item(self, entry):
         item = self._from_op_summary(entry) or {}
         fields = {}
+        otp = ""
         for field in (entry.get("fields") or []):
             if not isinstance(field, dict):
                 continue
             key = str(field.get("id") or field.get("label") or "").lower()
             if field.get("value") is not None:
                 fields[key] = str(field["value"])
+                # 1Password's own app names an OTP field TOTP_<random>;
+                # only its type says what it is
+                if str(field.get("type") or "").upper() == "OTP" and not otp:
+                    otp = str(field["value"])
         kind = item.get("type", "login")
         if kind == "login":
             item["username"] = fields.get("username", item.get("username", ""))
             item["password"] = fields.get("password", "")
-            item["totp"] = fields.get("totp", "")
+            item["totp"] = fields.get("totp") or otp
             item["hasPassword"] = bool(item["password"])
             item["hasTotp"] = bool(item["totp"])
         elif kind == "card":
@@ -14036,6 +14142,12 @@ class OnePasswordProvider(VaultProvider):
         index = {str(f.get("id", "")).lower(): f for f in existing}
         for field in fields:
             found = index.get(field["id"].lower())
+            if found is None and field.get("type") == "OTP":
+                # an OTP field the 1Password app made has another id: it
+                # is written into, not shadowed by a second one
+                found = next((f for f in existing
+                              if str(f.get("type") or "").upper() == "OTP"),
+                             None)
             if found is None:
                 if field["value"] == "":
                     continue        # nothing there, nothing to clear
@@ -14280,14 +14392,31 @@ class PasswordVault:
         line in the password list for ever. Runs on every named save,
         not just the first — the named row may already exist."""
         rows = self.rows()
+        taken = []
         for e in [x for x in rows
                   if x.get("type", "login") == "login"
                   and x.get("host") == host and not x.get("username")
                   and x.get("password") == password]:
+            taken.append((rows.index(e), e))
             rows.remove(e)
-            # a lazy store keeps its own copy: dropping our row is not
-            # enough, it would come straight back on the next reload
-            if not self.provider.eager and e.get("id"):
+        return taken
+
+    def _absorb_undo(self, taken):
+        """The named save did not land: the nameless rows come back where
+        they were, so a refused write loses no login."""
+        rows = self.rows()
+        for index, e in sorted(taken, key=lambda pair: pair[0]):
+            rows.insert(min(index, len(rows)), e)
+
+    def _absorb_finish(self, taken):
+        """The named login is saved. A lazy store keeps its own copy of
+        the nameless one, and dropping our row is not enough, it would
+        come straight back on the next reload; it goes last, once the
+        named one is safely in the store."""
+        if self.provider.eager:
+            return
+        for _index, e in taken:
+            if e.get("id"):
                 try:
                     self.provider.delete(e["id"])
                 except Exception:
@@ -14524,8 +14653,8 @@ class PasswordVault:
         host = self.normalize_host(host)
         if not host or not password:
             return None
-        if username:
-            self._absorb_blank(host, username, password)
+        absorbed = (self._absorb_blank(host, username, password)
+                    if username else [])
         e = self.get(host, username)
         now = int(time.time())
         fresh = e is None
@@ -14551,7 +14680,9 @@ class PasswordVault:
                 # password and history it never took
                 e.clear()
                 e.update(before)
+            self._absorb_undo(absorbed)
             return None
+        self._absorb_finish(absorbed)
         return e
 
     def add_item(self, fields):
@@ -15156,6 +15287,7 @@ class PasswordVault:
         if not isinstance(rows, list):
             return 0
         taken = 0
+        changed, appended, kept_as = [], [], {}
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -15198,9 +15330,69 @@ class PasswordVault:
                                   "secret": field.get("type") == 1})
             if extra:
                 item["custom"] = extra
-            self.items().append(self._normalize(item))
+            fresh = self._normalize(item)
+            # the same login or note already here is updated or left, not
+            # added again: a second import doubled every item
+            if kind == "login":
+                if fresh.get("host") and self._merge_login(
+                        fresh, changed, kept_as):
+                    continue
+            elif self._same_item(fresh):
+                continue
+            self.items().append(fresh)
+            changed.append(fresh)
+            appended.append(fresh)
             taken += 1
-        return self._store_imported(self.items()[-taken:] if taken else [])
+        return self._store_imported(changed, appended=appended,
+                                    kept_as=kept_as)
+
+    #: what makes a note, card or identity "the same one" on import
+    SAME_KEYS = {"note": ("title", "body"),
+                 "card": ("number", "cardholder"),
+                 "identity": ("title", "fullname", "email")}
+
+    def _same_item(self, fresh):
+        keys = self.SAME_KEYS.get(fresh.get("type"))
+        if not keys or not any(fresh.get(k) for k in keys):
+            return False
+        return any(one.get("type") == fresh.get("type")
+                   and all(one.get(k) == fresh.get(k) for k in keys)
+                   for one in self.items())
+
+    def _merge_login(self, fresh, changed, kept_as):
+        """True when this site and account is already here. A different
+        password brings the stored one up to date (the old one kept in
+        its history); an empty note or two-factor secret is filled in
+        from the file either way, so a restore never leaves one behind."""
+        same = next((one for one in self.items()
+                     if one.get("type", "login") == "login"
+                     and one.get("host") == fresh.get("host")
+                     and one.get("username") == fresh.get("username")),
+                    None)
+        if same is None:
+            return False
+        # an empty one (a TOTP-only or passkey row) changes nothing: it
+        # pushed the live password into its own history as if replaced
+        newer = (bool(fresh.get("password"))
+                 and same.get("password") != fresh.get("password"))
+        fill = [k for k in ("note", "totp")
+                if fresh.get(k) and not same.get(k)]
+        if not newer and not fill:
+            return True
+        # as it was, for when the store will not take the update
+        kept_as.setdefault(id(same), dict(
+            same, history=list(same.get("history") or [])))
+        if newer:
+            self._remember_password(same, same.get("password"))
+            for key in ("password", "note", "totp", "title"):
+                if fresh.get(key):
+                    same[key] = fresh[key]
+        else:
+            for key in fill:
+                same[key] = fresh[key]
+        if not any(one is same for one in changed):
+            changed.append(same)
+        return True
 
     def import_rows(self, text, shape="chrome"):
         """A CSV from Chrome, Firefox or this browser.
@@ -15219,16 +15411,11 @@ class PasswordVault:
         if not rows:
             return 0
         header = [str(c).strip().lower().lstrip("\ufeff") for c in rows[0]]
-        want = {
-            "url": ("url", "login_uri", "website", "web site", "site",
-                    "hostname"),
-            "username": ("username", "login_username", "user", "login",
-                         "login name", "email"),
-            "password": ("password", "login_password"),
-            "note": ("note", "notes", "comment", "extra"),
-            "totp": ("totp", "otpauth", "two-factor", "login_totp"),
-            "title": ("name", "title"),
-        }
+        want = self.IMPORT_COLUMNS
+        # only a file this browser wrote has had an apostrophe put in
+        # front of its cells; in Chrome's or Bitwarden's, a leading
+        # apostrophe is part of the password
+        plain = self._csv_plain if header == self.EXPORT_HEADER else str
         where = {}
         for field, names in want.items():
             for name in names:
@@ -15246,12 +15433,17 @@ class PasswordVault:
 
             def cell(field):
                 index = where.get(field)
-                # _csv_plain: this browser's own export puts an
-                # apostrophe in front of a cell a spreadsheet would run
-                # (=, +, -, @), and read back without taking it off, a
-                # password "=abc" came home as "'=abc"
-                return (self._csv_plain(str(row[index]).strip())
-                        if index is not None and index < len(row) else "")
+                if index is None or index >= len(row):
+                    return ""
+                # plain: this browser's own export puts an apostrophe in
+                # front of a cell a spreadsheet would run (=, +, -, @),
+                # and read back without taking it off, a password "=abc"
+                # came home as "'=abc". Only the site, name, account and
+                # two-factor cells are trimmed: a password or note with
+                # a space at its edge is exactly what it was.
+                value = plain(str(row[index]))
+                return (value if field in ("password", "note")
+                        else value.strip())
 
             site = cell("url") or cell("title")
             password = cell("password")
@@ -15265,22 +15457,7 @@ class PasswordVault:
             # the same site and account already here: brought up to date,
             # not added again (a second import doubled every login, and
             # get() only ever found the first)
-            same = next((one for one in self.items()
-                         if one.get("type", "login") == "login"
-                         and one.get("host") == fresh.get("host")
-                         and one.get("username") == fresh.get("username")),
-                        None)
-            if same is not None:
-                if same.get("password") == fresh.get("password"):
-                    continue
-                # as it was, for when the store will not take the update
-                kept_as[id(same)] = dict(
-                    same, history=list(same.get("history") or []))
-                self._remember_password(same, same.get("password"))
-                for key in ("password", "note", "totp", "title"):
-                    if fresh.get(key):
-                        same[key] = fresh[key]
-                changed.append(same)
+            if self._merge_login(fresh, changed, kept_as):
                 continue
             self.items().append(fresh)
             changed.append(fresh)
@@ -15460,6 +15637,18 @@ class PasswordVault:
 
     # ---- import / export ----
     EXPORT_HEADER = ["name", "url", "username", "password", "note", "totp"]
+    #: the column names of this browser, Chrome, Firefox, Bitwarden and
+    #: 1Password, by what they hold; both importers read the same ones
+    IMPORT_COLUMNS = {
+        "url": ("url", "login_uri", "website", "web site", "site",
+                "hostname"),
+        "username": ("username", "login_username", "user", "login",
+                     "login name", "email"),
+        "password": ("password", "login_password"),
+        "note": ("note", "notes", "comment", "extra"),
+        "totp": ("totp", "otpauth", "two-factor", "login_totp"),
+        "title": ("name", "title"),
+    }
     #: the characters Excel and LibreOffice read as "this cell is a
     #: formula, run it" when a CSV is opened
     FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
@@ -15516,9 +15705,15 @@ class PasswordVault:
 
         Blocks for as long as the file is long: worker thread only."""
         try:
-            rows = list(csv.DictReader(io.StringIO(text)))
+            reader = csv.DictReader(io.StringIO(text))
+            rows = list(reader)
+            names = [(n or "").strip().lower().lstrip("\ufeff")
+                     for n in (reader.fieldnames or [])]
         except (csv.Error, ValueError):
             return (0, 0, 0)
+        # only a file this browser wrote has had an apostrophe put in
+        # front of its cells; in anyone else's it is part of the value
+        plain = self._csv_plain if names == self.EXPORT_HEADER else str
         eager = self.provider.eager
         now = int(time.time())
         # what to put back if the one write at the end does not land
@@ -15529,16 +15724,20 @@ class PasswordVault:
                 by_login.setdefault((e.get("host"), e.get("username")), e)
         added = updated = skipped = 0
         for row in rows:
-            low = {(k or "").strip().lower(): (v or "")
+            low = {(k or "").strip().lower().lstrip("\ufeff"):
+                   (v if isinstance(v, str) else "")
                    for k, v in row.items() if k}
-            url = self._csv_plain(low.get("url") or low.get("login_uri")
-                                  or low.get("web site")
-                                  or low.get("hostname") or "")
-            username = self._csv_plain(
-                low.get("username") or low.get("login_username")
-                or low.get("login name") or low.get("user") or "")
-            password = self._csv_plain(low.get("password") or "")
-            name = self._csv_plain(low.get("name") or low.get("title") or "")
+
+            def pick(field):
+                for column in self.IMPORT_COLUMNS[field]:
+                    if low.get(column):
+                        return plain(low[column])
+                return ""
+            url, username = pick("url"), pick("username")
+            password, name = pick("password"), pick("title")
+            note, totp = pick("note"), pick("totp").strip()
+            if totp and parse_otpauth(totp) is None:
+                totp = ""      # not base32: it could never work
             host, scheme = self.parse_site(url)
             if not host or not password:
                 skipped += 1
@@ -15549,7 +15748,7 @@ class PasswordVault:
                 fresh = self._normalize({
                     "type": "login", "host": host, "username": username,
                     "password": password, "scheme": scheme, "title": name,
-                    "created": now})
+                    "note": note, "totp": totp, "created": now})
                 self.items().append(fresh)
                 if eager:
                     by_login[(host, username)] = fresh
@@ -15559,34 +15758,45 @@ class PasswordVault:
                 else:
                     self.items().remove(fresh)
                     skipped += 1
-            elif existing.get("password") != password:
-                was = (existing.get("password", ""), existing.get("changed"),
-                       [dict(h) for h in (existing.get("history") or [])])
-                # the one it replaces is kept, as every other change of
-                # password keeps it: a stale export used to overwrite a
-                # working password with no way back
-                self._remember_password(existing, was[0])
-                existing["password"] = password
-                existing["changed"] = now
+            else:
+                newer = existing.get("password") != password
+                # an empty note or two-factor secret is filled in from the
+                # file, also when the password is the same
+                fill = {k: v for k, v in (("note", note), ("totp", totp))
+                        if v and not existing.get(k)}
+                if not newer and not fill:
+                    skipped += 1
+                    continue
+                was = dict(existing, history=[
+                    dict(h) for h in (existing.get("history") or [])])
+                if newer:
+                    # the one it replaces is kept, as every other change
+                    # of password keeps it: a stale export used to
+                    # overwrite a working password with no way back
+                    self._remember_password(existing,
+                                            existing.get("password", ""))
+                    existing["password"] = password
+                    existing["changed"] = now
+                existing.update(fill)
                 if eager:
                     rollback.append((existing, was))
                     updated += 1
                 elif self._save(existing):
                     updated += 1
                 else:
-                    existing["password"], existing["changed"] = was[:2]
-                    existing["history"] = was[2]
+                    existing.clear()
+                    existing.update(was)
                     skipped += 1
-            else:
-                skipped += 1
         if eager and (added or updated) and not self._save():
             # nothing reached the file, so nothing may be left behind in
             # memory pretending it did — the page would show rows that
             # vanish at the next start
             self.data["items"] = was_items
-            for item, (password, changed, history) in rollback:
-                item["password"], item["changed"] = password, changed
-                item["history"] = history
+            # newest first: a login two rows touched was snapshotted
+            # twice, and oldest first left it at the middle state
+            for item, was in reversed(rollback):
+                item.clear()
+                item.update(was)
             return (0, 0, added + updated + skipped)
         return (added, updated, skipped)
 
@@ -15895,6 +16105,9 @@ _PRIVATE_NOTES = {}
 #: certificates he trusted from a private tab: host -> fingerprint, for
 #: as long as the private tabs are open (config.json kept the host)
 _PRIVATE_CERTS = {}
+#: yt-dlp jobs started from a private tab, still running: the private
+#: folder is not emptied (nor the jar dropped) under them
+_PRIVATE_YTDLP = set()
 
 
 def _git_env():
@@ -19045,7 +19258,11 @@ class WebPage(QWebEnginePage):
             # "reddit.com -> old.reddit.com", applied before the load
             # rather than after it, so the page he did not want is
             # never fetched at all
-            if self.browser.url_rewrites():
+            if self.browser.url_rewrites() and nav_type != \
+                    QWebEnginePage.NavigationType.NavigationTypeFormSubmitted:
+                # a form sent again from here went as a bare GET and
+                # lost every field, so a submitted one goes where it
+                # was aimed
                 wanted = self.browser.rewrite_url(url)
                 if wanted.toString() != url.toString():
                     QTimer.singleShot(
@@ -24610,6 +24827,19 @@ class Browser(QMainWindow):
             self._wipe_cookies_at_start = frozenset(str(n) for n in pending)
         else:
             self._wipe_cookies_at_start = False
+        if crashed:
+            # what each virtual browser was told to forget on exit: a run
+            # that was killed never got to, and only the global settings
+            # were honoured, so a browser set to forget its logins kept
+            # them
+            told = self._crash_clear_sessions()
+            jars = frozenset(("browser" if sid == "main"
+                              else "browser-s-" + sid)
+                             for sid, what in told.items()
+                             if "cookies" in what)
+            if jars and self._wipe_cookies_at_start is not True:
+                self._wipe_cookies_at_start = (
+                    jars | (self._wipe_cookies_at_start or frozenset()))
         # the tabs the dead run had open, kept before anything restores
         # or overwrites them: this is the only record a crash leaves,
         # and crash_recovery_dialog shows it rather than guessing
@@ -24642,6 +24872,10 @@ class Browser(QMainWindow):
             # sealed file stayed on disk, to come back at unlock: the
             # same wipe as a clean exit
             self.clear_history(undoable=False)
+        elif crashed:
+            for sid, what in self._crash_clear_sessions().items():
+                if "history" in what:
+                    self._forget_session_history(sid)
         self._exit_cleared = False
         # ...and the engine gets its Python back before the interpreter
         # goes (see _release_engine_hooks)
@@ -25218,6 +25452,10 @@ class Browser(QMainWindow):
             QApplication.instance().aboutToQuit.connect(self._save_groups)
         # ...and every 30 s, because a crash, a kill or a power cut never
         # reaches aboutToQuit and used to lose every open tab
+        self._read_timer = QTimer(self)
+        self._read_timer.setInterval(4000)
+        self._read_timer.timeout.connect(self._sample_reading_place)
+        self._read_timer.start()
         self._session_timer = QTimer(self)
         self._session_timer.setInterval(30000)
         self._session_timer.timeout.connect(
@@ -25236,6 +25474,10 @@ class Browser(QMainWindow):
             self._restore_as_writer = True
         # every way out, not just the window's close button: quit from
         # the menu, a restart after an update, a Ctrl+Q
+        # the places in long pages are written before a clear-on-exit
+        # can wipe them (and not after it, which would bring them back)
+        QApplication.instance().aboutToQuit.connect(
+            self._flush_reading_places)
         if share is None:
             QApplication.instance().aboutToQuit.connect(self._clear_on_exit)
         saved_sessions = [e for e in self.config.get("sessions", [])
@@ -25558,6 +25800,15 @@ class Browser(QMainWindow):
             if (u and not fresh and not _is_pane_url(u)
                     and not self.restore_excluded(u)):
                 row = {"u": u, "t": getattr(split, "_last_title", "") or ""}
+                # with what he set on it, as a tab in the strip is saved
+                if getattr(split, "pinned", False):
+                    row["p"] = 1
+                if getattr(split, "locked", False):
+                    row["l"] = 1
+                if getattr(split, "tab_name", None):
+                    row["n"] = split.tab_name
+                if getattr(split, "_seen_wall", None):
+                    row["w"] = int(split._seen_wall)
                 g = getattr(split, "group", None)
                 home = next((d for d in data if d.get("name") == g),
                             None) if g else None
@@ -26530,6 +26781,17 @@ class Browser(QMainWindow):
             lambda u, v=view: setattr(v, "_read_url", u.toString()))
         view.loadStarted.connect(
             lambda v=view: self.note_reading_place(v))
+        # the scroll position cannot be read at close, so a timer keeps
+        # the last one seen; a new load starts it again from nothing, and
+        # it is only trusted once the page has finished
+        view.loadStarted.connect(
+            lambda v=view: (setattr(v, "_read_at", None),
+                            setattr(v, "_read_loaded", False)))
+        # when it finished, not just that it did: a sample in the first
+        # moment read 0 before resume_reading scrolled (600 ms later)
+        view.loadFinished.connect(
+            lambda _ok, v=view: setattr(v, "_read_loaded",
+                                        time.monotonic()))
         # a sign-in that changed the address without loading anything:
         # the moment to ask the page what was in the login boxes, since
         # there was no form submit for the watcher to see
@@ -26627,6 +26889,10 @@ class Browser(QMainWindow):
                 # session save after a workspace was opened)
                 view._pending = _url_text(url)
                 view._requested = view._pending
+                # any load of its own (the agent, a typed address) wins:
+                # the old address was loaded over it at the first visit
+                view.loadStarted.connect(
+                    lambda v=view: setattr(v, "_pending", None))
             else:
                 # fallback for saving before the load commits
                 view._requested = _url_text(url)
@@ -27023,6 +27289,8 @@ class Browser(QMainWindow):
         private = getattr(w, "private", False)
         if w is getattr(self, "_fs_view", None):
             self._exit_page_fullscreen()
+        # where he had read to, from the last look at the page
+        self._flush_reading_place(w)
         # first of all, while the tab is still whole
         self._drop_share(w)
         self._drop_permission_asks(w)
@@ -29445,6 +29713,16 @@ class Browser(QMainWindow):
                 entry["l"] = 1
             if getattr(view, "tab_name", None):
                 entry["n"] = view.tab_name
+            # a tab he muted comes up muted in its new window; the mute
+            # game mode put on every tab is not his and is not carried
+            try:
+                if view.page().isAudioMuted() and not (
+                        self.config.get("gameMode", False)
+                        and id(view) not in getattr(
+                            self, "_game_muted", set())):
+                    entry["m"] = 1
+            except RuntimeError:
+                pass
             out.append(entry)
         return out
 
@@ -29482,9 +29760,11 @@ class Browser(QMainWindow):
                 view.tab_name = entry["n"]
             if entry.get("l"):
                 view.locked = True
+            if entry.get("m"):
+                view.page().setAudioMuted(True)
             if entry.get("p"):
                 self.pin_tab(self.tabs.indexOf(view), True)
-            elif entry.get("n"):
+            elif entry.get("n") or entry.get("m"):
                 self._refresh_tab_label(view)
             opened.append(view)
         if opened and switch:
@@ -30140,6 +30420,8 @@ class Browser(QMainWindow):
                 # were left out and lost with it
                 for mini in list(win._popouts):
                     mini.close()
+                # its split half is out of the strip too, and was lost
+                win.close_split()
                 state = win.tab_state()
                 colours = dict(win.group_colors)
                 folded = dict(win.collapsed)
@@ -30188,6 +30470,8 @@ class Browser(QMainWindow):
         mini._state = state
         self._popouts.append(mini)
         mini.show()
+        # a never-loaded tab came out blank and nothing woke it
+        self._load_pending(view)
         self._ensure_tab_or_quit()
         return mini
 
@@ -31448,7 +31732,8 @@ class Browser(QMainWindow):
                 ("fullscreenSites", lambda k: k),
                 ("handoffSites", lambda k: str(k).partition("@")[2]),
                 ("readPlaces", lambda k: QUrl(str(k)).host()),
-                ("mediaPlaces", lambda k: QUrl(str(k)).host())):
+                ("mediaPlaces", lambda k: QUrl(str(k)).host()),
+                ("pdfPlace", lambda k: QUrl(str(k)).host())):
             rows = self.config.get(name)
             if isinstance(rows, dict):
                 self.config[name] = {k: v for k, v in rows.items()
@@ -34288,10 +34573,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if getattr(view, "pinned", False) and on \
                 and not self.config.get("sleepPinned", False):
             return False
+        if on and (getattr(view, "_keep_playing", False)
+                   or getattr(view, "_agent_owned", False)):
+            # the music tab kept playing and a tab the agent is driving
+            # are never put to sleep from behind their backs
+            return False
         state = QWebEnginePage.LifecycleState
         try:
-            view.page().setLifecycleState(state.Discarded if on
-                                          else state.Active)
+            page = view.page()
+            if on and page.lifecycleState() == state.Discarded:
+                return False      # already asleep: nothing was slept
+            page.setLifecycleState(state.Discarded if on
+                                   else state.Active)
+            # Chromium refuses some changes (a page that is visible
+            # cannot be discarded) without a word: the tab was marked
+            # asleep, counted as slept and drawn with the veil while it
+            # was still running
+            if on and page.lifecycleState() != state.Discarded:
+                return False
         except (RuntimeError, ValueError):
             return False
         view._asleep = bool(on)
@@ -34377,7 +34676,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 except RuntimeError:
                     pass
             for _, view in self._real_tabs():
-                if self.sleep_tab(view, True):
+                # a tab that was already asleep or frozen is not one game
+                # mode slept: waking it at the end reloaded it for nothing
+                try:
+                    was_up = (view.page().lifecycleState()
+                              == QWebEnginePage.LifecycleState.Active)
+                except RuntimeError:
+                    continue
+                if self.sleep_tab(view, True) and was_up:
                     self._game_woke.append(view)
             self.mute_all_tabs(on=True)
             # once per run: a process can lower its own priority but
@@ -37429,6 +37735,26 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.save_config()
         return done
 
+    def _crash_clear_sessions(self):
+        """What each virtual browser is set to wipe on exit, as
+        {session: [what, ...]}, for the start after a crash."""
+        wanted = self.config.get("clearOnExit")
+        if not isinstance(wanted, dict):
+            return {}
+        return {str(sid): [x for x in what if isinstance(x, str)]
+                for sid, what in wanted.items() if isinstance(what, list)}
+
+    def _forget_session_history(self, sid):
+        """One virtual browser's history dropped, as on a clean exit."""
+        before, old = len(self.history), self.history
+        self._drop_from_sealed(lambda e, sid=sid: e.get("s", "main") == sid)
+        self.history = [e for e in self.history
+                        if e.get("s", "main") != sid]
+        if len(self.history) != before:
+            self.save_history()
+            self._history_dropped(old)
+        return before - len(self.history)
+
     def clear_on_exit_for(self, sid, what=None):
         """Read or set what one virtual browser wipes on the way out."""
         table = self.config.setdefault("clearOnExit", {})
@@ -39481,18 +39807,79 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 at = int(raw or 0)
             except (TypeError, ValueError):
                 return
-            table = self.reading_places()
-            if at > 400:
-                table[url[:500]] = at
-                # the last fifty pages, newest kept
-                if len(table) > 50:
-                    for key in list(table)[:-50]:
-                        table.pop(key, None)
-            else:
-                table.pop(url[:500], None)
-            self.save_config(quiet=True)
+            self._file_reading_place(url, at)
 
         return self.read_page_tool("readplace", view=view, then=done)
+
+    def _file_reading_place(self, url, at):
+        table = self.reading_places()
+        if at > 400:
+            table.pop(url[:500], None)
+            table[url[:500]] = at
+            # the last fifty pages, newest kept
+            if len(table) > 50:
+                for key in list(table)[:-50]:
+                    table.pop(key, None)
+        else:
+            table.pop(url[:500], None)
+        self.save_config(quiet=True)
+
+    def _reading_url(self, view):
+        if view is None or self._is_header(view):
+            return ""
+        if getattr(view, "private", False):
+            return ""
+        if not self.config.get("readResume", False):
+            return ""
+        try:
+            url = getattr(view, "_read_url", "") or view.url().toString()
+        except RuntimeError:
+            return ""
+        if not url or is_internal_page(QUrl(url)):
+            return ""
+        return url
+
+    def _sample_reading_place(self):
+        """Every few seconds: how far down the page in front is, kept on
+        the tab. Closing a tab or quitting cannot ask the page, so the
+        place was only ever written when the next load started."""
+        view = self.current()
+        url = self._reading_url(view)
+        loaded = getattr(view, "_read_loaded", False)
+        if not url or not loaded \
+                or time.monotonic() - float(loaded) < 1.5:
+            return
+
+        def got(raw, v=view, u=url):
+            try:
+                at = int(raw or 0)
+                if (getattr(v, "_read_url", "") or v.url().toString()) != u:
+                    return        # the tab went on to another page
+                v._read_at = (u, at)
+            except (TypeError, ValueError, RuntimeError):
+                return
+
+        self.read_page_tool("readplace", view=view, then=got)
+
+    def _flush_reading_place(self, view):
+        """Write what the last look saw, for a tab that is closing."""
+        seen = getattr(view, "_read_at", None)
+        try:
+            view._read_at = None
+        except RuntimeError:
+            return
+        if not seen or seen[0] != self._reading_url(view):
+            return
+        self._file_reading_place(seen[0], seen[1])
+
+    def _flush_reading_places(self):
+        # once the exit wipe has run, a later window's own quit hook put
+        # the places it cleared back on disk
+        root = self._root_window()
+        if getattr(root, "_exit_cleared", False):
+            return
+        for i in range(self.tabs.count()):
+            self._flush_reading_place(self.tabs.widget(i))
 
     def resume_reading(self, view=None):
         """Back to where he stopped, if this page has a place."""
@@ -39900,6 +40287,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             pal = theme_palette()
             page = (
                 "<!doctype html><meta charset=utf-8>" + NO_SCRIPT_META +
+                # a selected frame, form or base tag does nothing here
+                "<meta http-equiv=\"Content-Security-Policy\" content=\""
+                "frame-src 'none'; form-action 'none'; base-uri 'none'\">"
                 "<title>%s</title>"
                 "<style>body{background:%s;color:%s;"
                 "font:%s %dpx/1.7 %s;max-width:%dch;margin:0 auto;"
@@ -43944,10 +44334,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         rows = [r for r in here if self.login_in_session(r, view)]
         if entry is None:
             entry = rows[0] if rows else None
-        elif entry.get("id") not in {r.get("id") for r in here}:
+        elif entry.get("id") not in {r.get("id") for r in rows}:
             # chosen from a menu built for the site the tab was on; the
             # page has gone somewhere else since, and that site's
-            # password is not for this one
+            # password is not for this one. A login tied to another
+            # virtual browser is not in `rows` either, so it cannot be
+            # filled here by handing it in.
             entry = None
         if entry is None:
             self.flash(self._ui_str("fillNone"))
@@ -44071,6 +44463,46 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         view = self.current() if view is None else view
         here = str(getattr(view, "session", "main") or "main")
         return wanted == here
+
+    @staticmethod
+    def _view_of_page(page):
+        """The tab a page is shown in, or None when it has none."""
+        try:
+            return page.view() if page is not None else None
+        except (AttributeError, RuntimeError):
+            return None
+
+    def _logins_in(self, entries, view):
+        """These logins, less the ones tied to another virtual browser.
+
+        Every lookup that offers, fills or lists a login goes through
+        here. Only fill_login_now used to ask, so a work login tied to
+        its own browser was filled and offered on the same site in every
+        other one. With no tab to ask, only logins tied to nothing are
+        kept."""
+        out = []
+        for entry in entries:
+            if not (entry or {}).get("session"):
+                out.append(entry)
+            elif view is not None and self.login_in_session(entry, view):
+                out.append(entry)
+        return out
+
+    def _entries_in(self, host, scheme, view):
+        return self._logins_in(self.vault.entries_for(host, scheme), view)
+
+    def _best_in(self, host, scheme, view):
+        rows = self._entries_in(host, scheme, view)
+        return rows[0] if rows else None
+
+    def _named_in(self, host, scheme, username, view):
+        want = (username or "").strip().casefold()
+        if not want:
+            return None
+        for entry in self._entries_in(host, scheme, view):
+            if entry.get("username", "").strip().casefold() == want:
+                return entry
+        return None
 
     def tie_login_to_session(self, item_id, session=None, view=None):
         """Tie a login to the virtual browser he is in (or untie it)."""
@@ -44420,7 +44852,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     host or "login", found.split(":", 1)[1])
             target = item_id
             if target is None:
-                entry = self.vault.best_for(host, view.url().scheme())
+                entry = self._best_in(host, view.url().scheme(), view)
                 target = entry.get("id") if entry else None
             if target is None:
                 self.flash(self._ui_str("otpNoLogin"))
@@ -44444,7 +44876,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         host = PasswordVault.normalize_host(view.url().host())
         if item_id is None:
-            entry = self.vault.best_for(host, view.url().scheme())
+            entry = self._best_in(host, view.url().scheme(), view)
             item_id = entry.get("id") if entry else None
         if item_id is None:
             self.flash(self._ui_str("otpNoLogin"))
@@ -44551,7 +44983,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         entry = None
         if (not asked_before and not private and self.vault is not None
                 and not self.vault_locked() and self.vault_password_on()):
-            entry = self.vault.best_for(host, QUrl(url).scheme())
+            entry = self._best_in(host, QUrl(url).scheme(), view)
         if entry is not None and entry.get("username"):
             password = self.vault.reveal(entry.get("id"), "password") \
                 or entry.get("password", "")
@@ -46919,6 +47351,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.flash(self._ui_str("dlNoYtdlp"))
             return False
         self._ytdlp = proc
+        if private:
+            _PRIVATE_YTDLP.add(proc)
         # a private tab's video is saved, but not written down
         entry = self._add_download_entry(
             {"name": self._ui_str("dlYtdlpRow"), "dir": str(folder),
@@ -46934,6 +47368,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             entry["state"] = "done" if proc.returncode == 0 else "failed"
             self.save_downloads()
             self._push_all("downloadsChanged")
+            if proc in _PRIVATE_YTDLP:
+                _PRIVATE_YTDLP.discard(proc)
+                # the last private tab may have closed while it ran: the
+                # jar and the folder it waited for go now
+                self._drop_private_profile()
             if then:
                 then(entry["state"])
 
@@ -48570,7 +49009,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not host:
             return []
         try:
-            return list(vault.entries_for(host, scheme))
+            return self._logins_in(vault.entries_for(host, scheme), view)
         except (AttributeError, TypeError, RuntimeError):
             return []
 
@@ -48912,6 +49351,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if want:
                 return want
         return str(self.config.get("searchEngine", "google"))
+
+    def search_url_for(self, text, view=None):
+        """The address that searches for text: the engine
+        engine_for_text names, and only when that one cannot make an
+        address, the built-in default. Every search made from words he
+        typed or selected asks here."""
+        picked = self.engine_url(self.engine_for_text(text, view=view), text)
+        if picked:
+            return picked
+        engine = SEARCH_ENGINES.get(self.config.get("searchEngine", "google"),
+                                    SEARCH_ENGINES["google"])
+        return engine[1].format(QUrl.toPercentEncoding(text).data().decode())
 
     def guess_language(self, text):
         """de or en, out of the letters.
@@ -52341,11 +52792,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # is never run as script in the page he is on. It is
             # searched for like any other words. (A bookmarklet still
             # runs: it comes through the bookmark, not through here.)
-            engine = SEARCH_ENGINES.get(
-                self.config.get("searchEngine", "google"),
-                SEARCH_ENGINES["google"])
-            return engine[1].format(
-                QUrl.toPercentEncoding(text).data().decode())
+            return self.search_url_for(text)
         if text.startswith(("~/", "/", "./")) or re.match(
                 r"^[A-Za-z]:[\\/]", text):
             local = Path(text).expanduser()
@@ -52355,14 +52802,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # this", however much it looks like an address
         if text.startswith("?"):
             rest = text[1:].strip()
-            picked = self.engine_url(self.engine_for_text(rest), rest)
-            if picked:
-                return picked
-            engine = SEARCH_ENGINES.get(
-                self.config.get("searchEngine", "google"),
-                SEARCH_ENGINES["google"])
-            return engine[1].format(
-                QUrl.toPercentEncoding(rest).data().decode())
+            return self.search_url_for(rest)
         # `k` on its own: the bookmark that keyword was set on
         marked = self.bookmark_keyword_url(text)
         if marked:
@@ -52397,12 +52837,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if colon and port.isdigit() and "." in host:
                 return "http://" + text
         if " " in text or "." not in text:
-            picked = self.engine_url(self.engine_for_text(text), text)
-            if picked:
-                return picked
-            engine = SEARCH_ENGINES.get(self.config.get("searchEngine", "google"),
-                                        SEARCH_ENGINES["google"])
-            return engine[1].format(QUrl.toPercentEncoding(text).data().decode())
+            return self.search_url_for(text)
         if "://" in text:
             return text
         return "https://" + text
@@ -52730,10 +53165,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             url = (self.search_keywords().get(engine) or "%s").replace(
                 "%s", QUrl.toPercentEncoding(text).data().decode())
         else:
-            entry = SEARCH_ENGINES.get(self.config.get("searchEngine",
-                                                       "google"),
-                                       SEARCH_ENGINES["google"])
-            url = entry[1].format(QUrl.toPercentEncoding(text).data().decode())
+            url = self.search_url_for(text)
         if new_tab:
             self.new_tab(url=url, private=self._private_of())
         else:
@@ -53758,7 +54190,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     and not self.vault_locked():
                 url = view.url()
                 host = PasswordVault.normalize_host(url.host())
-                saved = self.vault.entries_for(host, url.scheme())
+                saved = self._entries_in(host, url.scheme(), view)
                 if saved:
                     self.flash(self._ui_str("formKnown")
                                % (saved[0].get("username") or host), ms=6000)
@@ -55365,7 +55797,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         url = view.url()
         if url.scheme() not in ("http", "https"):
             return
-        if self.vault.best_for(url.host(), url.scheme()) is None:
+        if self._best_in(url.host(), url.scheme(), view) is None:
             return
         view.page().runJavaScript(
             "window.__bpw && window.__bpw.rescan();", PW_WORLD_ID)
@@ -55605,12 +56037,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         domain went out under the name he had typed. Asking it more
         widely than the site would be the mirror of that bug, since the
         name is only ever what some page put in a box."""
+        view = self._view_of_page(page)
         if seen_user:
-            return self.vault.for_username(host, scheme, seen_user)
+            return self._named_in(host, scheme, seen_user, view)
         step = self._pw_step_for(page, host, scheme)
         if step is not None:
-            return self._pw_step_entry(host, scheme, step)
-        if len(self._saved_account_names(host, scheme)) > 1:
+            return self._pw_step_entry(host, scheme, step, view)
+        if len(self._saved_account_names(host, scheme, view)) > 1:
             # More than one account is saved here and nobody has said
             # which. There is no answer to guess at, so nothing is
             # handed over: the chooser asks, and the fill follows the
@@ -55618,9 +56051,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # a password box on a site with two accounts stays empty
             # until he has pointed at one.
             return None
-        return self.vault.best_for(host, scheme)
+        return self._best_in(host, scheme, view)
 
-    def _pw_step_entry(self, host, scheme, step):
+    def _pw_step_entry(self, host, scheme, step, view=None):
         """The saved login a half-finished login is for, or None.
 
         None means none. A tab that is halfway through a login is
@@ -55631,7 +56064,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         saved and nobody had been watched typing it, which is exactly
         how the second Microsoft account, the one never saved, got the
         first one's password."""
-        return self.vault.for_username(host, scheme, step["username"])
+        return self._named_in(host, scheme, step["username"], view)
 
     # ---- the account chooser ----
     #
@@ -55653,14 +56086,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     # stands in for the touch on the page that PASSWORD_WATCH_JS
     # otherwise waits for. Dismissing is an answer too: no account, no
     # fill, and the form is left exactly as the site drew it.
-    def _saved_account_names(self, host, scheme):
+    def _saved_account_names(self, host, scheme, view=None):
         """The accounts saved for this host, freshest first, one line
         per account. Two rows that fill the same page under the same
         name — example.com and www.example.com — are one account and
         not a choice, which matters: this count is what decides whether
         anything fills on its own."""
         out, seen = [], set()
-        for entry in self.vault.entries_for(host, scheme):
+        for entry in self._entries_in(host, scheme, view):
             name = entry.get("username", "")
             key = name.strip().casefold()
             if key in seen:
@@ -55695,7 +56128,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         host = PasswordVault.normalize_host(url.host())
         if not host:
             return []
-        return self._saved_account_names(host, url.scheme())
+        return self._saved_account_names(host, url.scheme(), view)
 
     def _place_acct(self):
         btn = getattr(self, "acctbtn", None)
@@ -55918,7 +56351,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if (url.scheme() not in ("http", "https") or url.scheme() != scheme
                 or PasswordVault.normalize_host(url.host()) != host):
             return
-        entry = self.vault.for_username(host, scheme, name)
+        entry = self._named_in(host, scheme, name, self._view_of_page(page))
         if entry is None:
             return
         username = entry.get("username", "")
@@ -56016,7 +56449,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return
         scheme = url.scheme()
         self._pw_step_prune()             # drop half-logins that timed out
-        saved = self.vault.best_for(host, scheme)
+        saved = self._best_in(host, scheme, self._view_of_page(page))
         stage = str(data.get("stage", ""))
         seen_user = str(data.get("username", ""))[:200]
         typed = bool(data.get("typed"))
@@ -56041,7 +56474,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 # leave the note on the last account he chose himself.
                 self._pw_push(page, "", "")
             elif (not seen_user and saved is not None
-                    and len(self._saved_account_names(host, scheme)) <= 1):
+                    and len(self._saved_account_names(
+                        host, scheme, self._view_of_page(page))) <= 1):
                 seen_user, typed = saved.get("username", ""), False
                 self._pw_push(page, seen_user, "")
             else:
@@ -56257,8 +56691,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return
         vault = self.vault
         if vault.provider.eager:
-            vault.set_entry(p["host"], p["scheme"], p["username"],
-                            p["password"])
+            if vault.set_entry(p["host"], p["scheme"], p["username"],
+                               p["password"]) is None:
+                # the store refused it: the toast is gone as if it had
+                # worked, so say that nothing was kept
+                self.flash(self._ui_str("pwSaveFailed"), 5000)
             # the cached Passwords pane is told, as the other branch is
             self._push_all("vaultChanged")
             return
@@ -56267,7 +56704,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.vault_job(
             lambda: vault.set_entry(p["host"], p["scheme"], p["username"],
                                     p["password"]),
-            lambda _saved: self._push_all("vaultChanged"))
+            lambda _saved: self._pw_saved(_saved))
+
+    def _pw_saved(self, saved):
+        if saved is None:
+            self.flash(self._ui_str("pwSaveFailed"), 5000)
+        self._push_all("vaultChanged")
 
     def _pw_never_pending(self):
         p = self._pw_pending
@@ -57469,21 +57911,29 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """(window, view) of what is playing: this window's first, and
         for the window that is the desktop's player, the browser's other
         windows after it."""
+        found = []
         view = self._audible_view()
         if view is not None:
-            return self, view
-        if getattr(self, "_mpris", None) is None:
-            return None, None
-        for win in self.windows():
-            if win is self:
-                continue
+            found.append((self, view))
+        if getattr(self, "_mpris", None) is not None:
+            for win in self.windows():
+                if win is self:
+                    continue
+                try:
+                    other = win._audible_view()
+                except RuntimeError:
+                    continue
+                if other is not None:
+                    found.append((win, other))
+        # a tab kept after it paused came first, and shadowed the video
+        # playing in another window: one that is making sound wins
+        for win, one in found:
             try:
-                other = win._audible_view()
-            except RuntimeError:
+                if one.page().recentlyAudible():
+                    return win, one
+            except (RuntimeError, AttributeError):
                 continue
-            if other is not None:
-                return win, other
-        return None, None
+        return found[0] if found else (None, None)
 
     def media_now(self, callback):
         _win, view = self._audible_anywhere()
@@ -58665,7 +59115,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 # set to 0 in Settings: the command did nothing, silently
                 self.flash(self._ui_str("unusedOff"))
                 return 0
-        kept = 0
+        kept = closed = 0
         for row in sorted(rows, key=lambda r: -r["index"]):
             view = row["view"]
             # a private tab is closed like the rest but never kept: a
@@ -58676,11 +59126,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 except RuntimeError:
                     url = ""
                 if url.startswith(("http://", "https://")):
-                    self.add_bookmark_url(url, row["title"])
+                    if not self.add_bookmark_url(url, row["title"]):
+                        # the list is full: closed anyway, it was lost
+                        # while the toast counted it as kept
+                        continue
                     kept += 1
             self.close_tab(row["index"], ask=False)
+            closed += 1
         if rows:
-            self.flash(self._ui_str("perfClosedUnused") % (len(rows), kept))
+            self.flash(self._ui_str("perfClosedUnused") % (closed, kept))
         return rows
 
     def note_scroll(self, view=None):
@@ -63718,6 +64172,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not key.lower().endswith(".pdf"):
             return 0
         if not self.config.get("pdfRemember", True):
+            # switched off: nothing is read or kept while it is off; what
+            # was kept comes back when it is on again (clearing history
+            # and forgetting a site are what empty it)
             return 0
         rows = dict(self.config.get("pdfPlace") or {})
         if page_number is None:
@@ -63726,9 +64183,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             except (TypeError, ValueError):
                 return 0
         try:
-            rows[key] = max(1, int(page_number))
+            number = max(1, int(page_number))
         except (TypeError, ValueError):
             return 0
+        rows.pop(key, None)
+        rows[key] = number
+        # the last two hundred files, newest kept
+        for old in list(rows)[:-200]:
+            rows.pop(old, None)
         self.config["pdfPlace"] = rows
         self.save_config(quiet=True)
         return rows[key]
@@ -64559,7 +65021,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 " var nodes = window[key] = [];"
                 " for (var i = 0; i < rows.length && out.length < limit;"
                 "      i++) {"
-                "  if (rows[i].hasAttribute('data-was')) continue;"
+                "  if (window.__trWas && window.__trWas.has(rows[i]))"
+                "   continue;"
                 # a block holding other blocks gives only its own words:
                 # written over whole, a list item lost its inner list and
                 # the inner items were translated again, detached
@@ -64621,7 +65084,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     " if (!el) return 'gone';"
                     # the page's own markup kept for Undo: kept as text,
                     # Undo brought the words back without their links
-                    " el.setAttribute('data-was', el.innerHTML);"
+                    # kept in the isolated world, not as an attribute:
+                    # a page with its own data-was had that written over
+                    # its content by Undo
+                    " if (!window.__trWas) window.__trWas = new Map();"
+                    " window.__trWas.set(el, el.innerHTML);"
                     # a block holding blocks: its own text nodes only
                     " if (el.querySelector("
                     "     'p, li, h1, h2, h3, h4, td, dd, blockquote')) {"
@@ -64665,13 +65132,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if page is None:
             return False
         code = ("(function () {"
-                " var rows = document.querySelectorAll('[data-was]');"
-                " for (var i = 0; i < rows.length; i++) {"
-                "  rows[i].innerHTML = rows[i].getAttribute('data-was');"
-                "  rows[i].removeAttribute('data-was'); }"
+                " var kept = window.__trWas, n = 0;"
+                " if (kept) kept.forEach(function (html, el) {"
+                "  el.innerHTML = html; n++; });"
+                " window.__trWas = null;"
                 " var bar = document.getElementById('__trbar');"
                 " if (bar) bar.remove();"
-                " return rows.length; })()")
+                " return n; })()")
         try:
             page.runJavaScript(code, APP_WORLD_ID, lambda raw: self.flash(
                 self._ui_str("trUndone") % int(raw or 0)))
@@ -64716,6 +65183,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return True
 
     # ---- two pages at once ----
+    def _load_pending(self, view):
+        """A tab that was never loaded, loaded now: for a tab that is
+        shown or handed somewhere without ever becoming the current one."""
+        pending = getattr(view, "_pending", None)
+        if pending:
+            view._pending = None
+            view.load(QUrl(pending))
+
     def split_view(self, index=None, on=None, url=None):
         """Two tabs side by side in one window.
 
@@ -64770,6 +65245,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._split_view = view
         holder.layout().addWidget(view)
         view.show()
+        # a restored tab that was never opened stayed blank in the half
+        self._load_pending(view)
         holder.show()
         # by widget: with the favourites dock in front of the page the
         # old [half, half, 0] gave half the window to the dock
@@ -65222,12 +65699,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if getattr(view, "pinned", False) and on \
                 and not self.config.get("sleepPinned", False):
             return False
+        if on and (getattr(view, "_keep_playing", False)
+                   or getattr(view, "_agent_owned", False)):
+            return False          # the music tab and the agent's tab
         try:
             if view.page().recentlyAudible() and on:
                 return False
             state = QWebEnginePage.LifecycleState
             view.page().setLifecycleState(state.Frozen if on
                                           else state.Active)
+            # refused by Chromium, the tab was still marked frozen
+            if on and view.page().lifecycleState() == state.Active:
+                return False
         except (RuntimeError, ValueError, AttributeError):
             return False
         view._frozen = bool(on)
@@ -65626,15 +66109,28 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         to go, and the thing to lose is the tab he has not touched
         longest."""
         rows = []
+        discarded = QWebEnginePage.LifecycleState.Discarded
         for index, view in self._real_tabs():
             if view is self.current() or self.is_kept_awake(view):
                 continue
-            if view in self.sleeping_tabs():
+            # only a discarded tab has given its renderer back: a frozen
+            # one still holds all of it, and skipped here the budget found
+            # nothing to free once the idle tabs had been frozen
+            try:
+                if view.page().lifecycleState() == discarded:
+                    continue
+            except RuntimeError:
                 continue
             rows.append((float(getattr(view, "_last_seen", 0) or 0), view))
         rows.sort(key=lambda row: row[0])
         out = []
-        for _seen, view in rows[:max(1, int(count))]:
+        want = max(1, int(count))
+        # on to the next one when a tab is protected (pinned, playing,
+        # in a call...): the oldest being one of those ended the budget
+        # with newer tabs untouched
+        for _seen, view in rows:
+            if len(out) >= want:
+                break
             if self.sleep_tab(view, True):
                 out.append(view)
         return out
@@ -67867,8 +68363,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             "captionRecorder": ("parec", "ffmpeg", "arecord"),
             "captionTranscriber": ("whisper-cli", "whisper.cpp", "whisper",
                                    "whisper-ctranslate2"),
-            "captionTranslator": ("argos-translate", "trans",
-                                  "translate-shell"),
+            # offline only: "trans" asks an online service, so it is used
+            # when he names it and never found by itself
+            "captionTranslator": ("argos-translate",),
         }
         for key in self.CAPTION_KEYS:
             named = str(self.config.get(key) or "")
@@ -68087,6 +68584,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             lambda _code=0, _st=None, f=chunk, s=started:
             self._caption_transcribe(f, s))
         proc.finished.connect(proc.deleteLater)   # one per chunk, for ever
+
+        def failed(err):
+            # finished is never emitted for a process that did not start:
+            # one object was left per tick, and nothing said why
+            if err == QProcess.ProcessError.FailedToStart:
+                proc.deleteLater()
+                self.live_captions(False)
+                self.flash(self._ui_str("a11yCapNoTool"))
+
+        proc.errorOccurred.connect(failed)
         proc.start(args[0], args[1:])
         return True
 
@@ -68153,6 +68660,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
         def failed(err):
             if err == QProcess.ProcessError.FailedToStart:
+                proc.deleteLater()         # finished never comes for this
                 try:
                     Path(path).unlink()    # it stayed until captions stopped
                 except OSError:
@@ -68171,7 +68679,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         page's blocks and a single word all want the same translation
         and different things done with it."""
         translator = self.caption_tools()["captionTranslator"]
-        lang = str(lang or self.config.get("translateLang", "de"))[:2]
+        lang = str(lang or self.config.get("translateLang", "de"))[:5]
+        short = lang[:2]
+        traditional = lang.lower() == "zh-tw"
+        simplified = lang.lower() == "zh-cn"
         if not translator:
             if then:
                 then("")
@@ -68188,11 +68699,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             text = " " + text.lstrip()
         name = Path(translator.split()[0]).name
         if name.startswith("trans"):
-            args = translator.split() + ["-b", ":" + lang, text]
+            # the two Chinese scripts are different languages to the
+            # tool: "zh" alone gave Simplified to someone who asked for
+            # Traditional
+            args = translator.split() + [
+                "-b", ":" + ("zh-TW" if traditional else
+                             "zh-CN" if simplified else short), text]
         elif name.startswith("argos"):
-            args = translator.split() + ["--to-lang", lang, text]
+            args = translator.split() + [
+                "--to-lang", "zt" if traditional else short, text]
         else:
-            args = translator.split() + [lang, text]
+            args = translator.split() + [short, text]
         # the path he typed may start with ~: caption_tools accepts it
         # (it expands it to check), QProcess does not
         args[0] = str(Path(args[0]).expanduser())
@@ -70543,6 +71060,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     out.append(w.req)
             except RuntimeError:
                 pass
+        # a yt-dlp job writes into the private folder too, and the wipe
+        # deleted its half-written file under it
+        out.extend(proc for proc in list(_PRIVATE_YTDLP)
+                   if proc.poll() is None)
         return out
 
     def _session_profile(self, sid):
@@ -70892,6 +71413,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         finally:
             # whatever the follow-up work does, the queue goes on
             self.start_next_download()
+            # the jar waited for its downloads when the last private tab
+            # closed ("tried again as each one ends"), but nothing tried
+            # again: it and the private folder stayed until the next
+            # private tab closed. It checks for open private tabs itself.
+            if PRIVATE_SESSION in self.session_profiles:
+                self._drop_private_profile()
 
     def _download_landed(self, entry):
         """A file is on disk. Everything that happens then, and each of
@@ -71134,7 +71661,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             changed = True
         # where he stopped in an article and in a video is a list of the
         # addresses and titles he has been to as well
-        for name in ("readPlaces", "mediaPlaces"):
+        for name in ("readPlaces", "mediaPlaces", "pdfPlace"):
             places = self.config.get(name)
             if not isinstance(places, dict) or not places:
                 continue
@@ -71143,7 +71670,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 changed = True
             else:
                 for url in urls:
-                    for key in (str(url)[:500], clean_url(str(url))):
+                    for key in (str(url)[:500], clean_url(str(url)),
+                                str(url).split("#")[0]):
                         if places.pop(key, None) is not None:
                             changed = True
         if isinstance(index, dict) and index:
@@ -71718,7 +72246,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             rows.sort(key=lambda e: _sane_number(e.get("t")))
             # a copy in a folder he locked is the one kept, and none in a
             # locked folder is ever the one deleted
-            held = [e for e in rows if self.folder_locked(e.get("parent"))]
+            # locked itself or anywhere under a locked folder, not only
+            # straight inside one: a copy two folders down was deleted
+            held = [e for e in rows if self._under_lock(e)]
             keeper = held[0] if held else rows[0]
             for other in rows:
                 if other is keeper or other in held:
@@ -72845,8 +73375,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # neither out of a locked folder nor into one -- and the pages
         # are told, or the folder box kept showing a move that did not
         # happen
-        if entry.get("locked") or self.folder_locked(entry.get("parent")) \
-                or self.folder_locked(_sane_number(parent)):
+        # the whole chain above, as delete and rename have it: an
+        # unlocked folder inside a locked one let its bookmarks be moved
+        # out (and others in), and a folder holding a locked one could
+        # be carried off with it
+        target = self._bookmark_by_id(_sane_number(parent)) \
+            if _sane_number(parent) else None
+        if (self._under_lock(entry)
+                or (target is not None and self._under_lock(target))
+                or (entry.get("type") == "folder"
+                    and any(e.get("locked") for e in self.bookmarks
+                            if e["id"] in self._bookmark_subtree(
+                                entry["id"])))):
             self.flash(self._ui_str("bmLocked"))
             self.bridge.bookmarksChanged.emit()
             return
@@ -74766,6 +75306,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         quit from the menu go through), so it runs once and only once."""
         if self._exit_cleared:
             return
+        # every window's reading places first: only this (the first)
+        # window's quit hook is connected before the wipe
+        for win in self._all_windows():
+            try:
+                win._flush_reading_places()
+            except RuntimeError:
+                pass
         self._exit_cleared = True
         # the sites whose cookies were only meant to last the session
         self.clear_until_close()
@@ -74812,6 +75359,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.stop_recording()
             except Exception:
                 self._end_audio_recorder()
+        # captions on: the recorder, the transcriber and the folder of
+        # chunks (the machine's sound) were left behind by a closed window
+        if (getattr(self, "_caption_timer", None) is not None
+                or getattr(self, "_caption_dir", None)
+                or getattr(self, "_caption_proc", None) is not None
+                or getattr(self, "_caption_words", None) is not None):
+            try:
+                self.live_captions(False)
+            except RuntimeError:
+                pass
         # the popped-out tabs come home first: remembered before them,
         # "reopen closed window" brought the window back without them
         for mini in list(self._popouts):
@@ -74819,6 +75376,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 mini.close()
             except RuntimeError:
                 pass
+        # the right half of a split is out of the strip: remembered with
+        # it still there, "reopen closed window" lost that tab
+        self.close_split()
+        self._flush_reading_places()
         self._remember_window()
         if self in WINDOWS:
             WINDOWS.remove(self)
@@ -76641,18 +77202,40 @@ READ_TOOLS = {
     if (!window.__noLineNums) return;
     var text = String(window.getSelection());
     if (!text || text.indexOf("\n") < 0) return;
-    var lines = text.split("\n");
-    var numbered = 0;
-    for (var i = 0; i < lines.length; i++) {
-      if (/^\s*\d+[\s|:.]/.test(lines[i])) numbered++;
+    // only inside code, a table or a line-numbered listing: a numbered
+    // list or a column of years in an article was stripped as well
+    var sel = window.getSelection();
+    var node = sel.rangeCount ? sel.getRangeAt(0).commonAncestorContainer : null;
+    if (node && node.nodeType === 3) node = node.parentElement;
+    var inCode = false;
+    for (var el = node; el && el.nodeType === 1; el = el.parentElement) {
+      var cls = el.className && el.className.baseVal !== undefined
+        ? el.className.baseVal : el.className;
+      if (/^(PRE|CODE|TABLE|TEXTAREA)$/.test(el.tagName) ||
+          /(^|[\s_-])(line|lines|linenums?|linenumbers?|code|highlight|log|paste|snippet|gutter|listing)s?($|[\s_-])/i
+            .test(String(cls || "") + " " + (el.id || ""))) {
+        inCode = true;
+        break;
+      }
     }
+    if (!inCode) return;
+    var lines = text.split("\n");
+    var numbered = 0, prev = null, counting = true;
+    for (var i = 0; i < lines.length; i++) {
+      var m = /^\s*(\d+)[\s|:.]/.exec(lines[i]);
+      if (!m) continue;
+      numbered++;
+      // line numbers count up by one; 2024, 2023 do not
+      if (prev !== null && +m[1] !== prev + 1) counting = false;
+      prev = +m[1];
+    }
+    if (!counting) return;
     if (numbered < Math.max(2, lines.length * 0.6)) return;
     var out = lines.map(function (l) {
       return l.replace(/^\s*\d+[\s|:.]\s?/, "");
     }).join("\n");
     e.clipboardData.setData("text/plain", out);
     e.preventDefault();
-    e.stopImmediatePropagation();
   }, true);
   return "on";
 })(ARG)""",
@@ -76856,6 +77439,40 @@ READ_TOOLS = {
   if (!sel || sel.isCollapsed) return "";
   var box = document.createElement("div");
   box.appendChild(sel.getRangeAt(0).cloneContents());
+  // the reader tab has no address of the page's: a relative picture or
+  // link would resolve against about:reader and go nowhere
+  var abs = function (v) {
+    try { return new URL(v, document.baseURI).href; } catch (e) { return ""; }
+  };
+  box.querySelectorAll("iframe, frame, object, embed, meta, link, base")
+    .forEach(function (e) { e.remove(); });
+  box.querySelectorAll("[src], [href], [poster], [srcset]").forEach(function (e) {
+    ["src", "href", "poster"].forEach(function (a) {
+      if (e.hasAttribute(a)) e.setAttribute(a, abs(e.getAttribute(a)));
+    });
+    if (e.hasAttribute("srcset")) {
+      /* a candidate's URL may hold commas (w_300,c_fill/...): read it to
+         its whitespace, then the descriptor to the next comma */
+      var s = e.getAttribute("srcset"), out = [], i = 0, n = s.length;
+      while (i < n) {
+        while (i < n && /[\s,]/.test(s[i])) i++;
+        var j = i;
+        while (j < n && !/\s/.test(s[j])) j++;
+        var url = s.slice(i, j), desc = "";
+        i = j;
+        if (/,$/.test(url)) {
+          url = url.replace(/,+$/, "");
+        } else {
+          var k = s.indexOf(",", i);
+          if (k < 0) k = n;
+          desc = s.slice(i, k).trim();
+          i = k + 1;
+        }
+        if (url) out.push(abs(url) + (desc ? " " + desc : ""));
+      }
+      e.setAttribute("srcset", out.join(", "));
+    }
+  });
   return JSON.stringify({title: document.title,
                          html: box.innerHTML.slice(0, 400000)});
 })()""",
@@ -78381,6 +78998,15 @@ MEDIA_TOOLS2 = {
     for (var k in want) { if (want[k] !== null) now[k] = want[k]; }
   }
   window.__mediaFilters = now;
+  var oldf = window.__mediaFilterTarget;
+  if (oldf && oldf !== m) {
+    try { oldf.style.removeProperty("filter"); } catch (e) {}
+  }
+  window.__mediaFilterTarget = m;
+  if (now.brightness === 1 && now.contrast === 1 && now.saturate === 1) {
+    m.style.removeProperty("filter");     /* back to what the page had */
+    return JSON.stringify(now);
+  }
   var css = "brightness(" + now.brightness + ") contrast(" + now.contrast
           + ") saturate(" + now.saturate + ")";
   m.style.setProperty("filter", css, "important");
@@ -78396,6 +79022,11 @@ MEDIA_TOOLS2 = {
   if (want && want.reset) now = {deg: 0, flip: false};
   window.__mediaTurn = now;
   xform(m);
+  var zoomed = window.__mediaZoom;
+  if (now.deg === 0 && !now.flip && (!zoomed || (zoomed.scale === 1
+      && !zoomed.x && !zoomed.y))) {
+    m.style.removeProperty("transform");
+  }
   return JSON.stringify(now);
 })(ARG)""",
 
@@ -78413,6 +79044,17 @@ MEDIA_TOOLS2 = {
   window.__mediaZoom = now;
   m.style.setProperty("transform-origin", "center center");
   xform(m);
+  if (want && want.reset) {
+    /* reset gives the page its own fit and transform back instead of
+       leaving "contain !important" on a site that uses cover */
+    m.style.removeProperty("object-fit");
+    m.style.removeProperty("transform-origin");
+    var turned = window.__mediaTurn;
+    if (!turned || (turned.deg === 0 && !turned.flip)) {
+      m.style.removeProperty("transform");
+    }
+    return JSON.stringify(now);
+  }
   m.style.setProperty("object-fit", now.crop ? "cover" : "contain",
                       "important");
   return JSON.stringify(now);
@@ -78505,7 +79147,15 @@ MEDIA_TOOLS2 = {
 "captions": MEDIA_PICK + r"""(function (want) {
   var m = pick();
   if (!m || !m.textTracks) return "none";
-  var tracks = m.textTracks;
+  /* only the words: the page keeps chapter, thumbnail and metadata
+     tracks hidden for itself, and disabling them stopped its handlers */
+  var tracks = [];
+  for (var t = 0; t < m.textTracks.length; t++) {
+    var kind = m.textTracks[t].kind;
+    if (kind === "subtitles" || kind === "captions") {
+      tracks.push(m.textTracks[t]);
+    }
+  }
   if (!tracks.length) return "notracks";
   var on = -1;
   for (var i = 0; i < tracks.length; i++) {
@@ -78580,7 +79230,16 @@ MEDIA_TOOLS2 = {
     if (m.textTracks[i].mode === "showing") track = m.textTracks[i];
   }
   if (!track) {
-    track = m.textTracks[0];
+    /* a subtitle or caption track, not a chapter or metadata one the
+       page keeps for itself */
+    for (var j = 0; j < m.textTracks.length; j++) {
+      var kd = m.textTracks[j].kind;
+      if (kd === "subtitles" || kd === "captions") {
+        track = m.textTracks[j];
+        break;
+      }
+    }
+    if (!track) return "[]";
     track.mode = "hidden";          /* loads the cues without showing */
   }
   var cues = track.cues;
@@ -78640,13 +79299,33 @@ MEDIA_TOOLS2 = {
   if (!window.__audioChain) {
     var Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return "noaudio";
-    var ctx = new Ctx();
-    var source;
-    try {
-      source = ctx.createMediaElementSource(m);
-    } catch (e) {
-      return "taken";     /* another script already has this element */
+    /* an element gets ONE source node for ever: the one skip-silence
+       made is reused here, and the other way round */
+    var ctx, source, wired = m.__mediaSrc;
+    if (wired) {
+      ctx = wired.ctx;
+      source = wired.node;
+      try { source.disconnect(ctx.destination); } catch (e) {}
+    } else {
+      var csrc = m.currentSrc || m.src || "";
+      var shared = true;
+      try {
+        var cwhere = new URL(csrc, location.href);
+        shared = !csrc || cwhere.origin === location.origin
+          || /^(blob|data|mediastream):$/.test(cwhere.protocol)
+          || !!m.crossOrigin;
+      } catch (e) {}
+      if (!shared) return "taken";   /* no CORS: Web Audio would play silence */
+      ctx = new Ctx();
+      try {
+        source = ctx.createMediaElementSource(m);
+      } catch (e) {
+        try { ctx.close(); } catch (e2) {}
+        return "taken";     /* another script already has this element */
+      }
+      m.__mediaSrc = {ctx: ctx, node: source};
     }
+    if (ctx.state === "suspended") ctx.resume();
     var comp = ctx.createDynamicsCompressor();
     var pan = ctx.createStereoPanner();
     var gain = ctx.createGain();
@@ -78733,27 +79412,60 @@ MEDIA_TOOLS2 = {
   if (want === false) {
     if (window.__silenceTimer) clearInterval(window.__silenceTimer);
     window.__silenceTimer = null;
-    m.playbackRate = window.__silenceRate || 1;
+    /* the player it sped up, not whichever one is in front now */
+    var fast0 = window.__silenceEl || m;
+    fast0.playbackRate = window.__silenceRate || 1;
+    var tap = window.__silenceTap;
+    if (tap) { try { tap.from.disconnect(tap.node); } catch (e) {} }
+    window.__silenceTap = null;
+    window.__silenceEl = null;
     return "off";
   }
   if (window.__silenceTimer) return "already";
   var Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return "noaudio";
   var chain = window.__audioChain;
-  var ctx = chain ? chain.ctx : new Ctx();
-  var analyser = ctx.createAnalyser();
-  analyser.fftSize = 512;
+  var wired = m.__mediaSrc;
+  var ctx, from, analyser;
   try {
     if (chain) {
-      chain.gain.connect(analyser);
+      ctx = chain.ctx;
+      from = chain.gain;
+    } else if (wired) {
+      /* an element has one source node for ever: wired by an earlier
+         "on", it is reused, not made again (that threw, and the tool
+         stayed dead until a reload) */
+      ctx = wired.ctx;
+      from = wired.node;
     } else {
-      var src = ctx.createMediaElementSource(m);
-      src.connect(analyser);
-      src.connect(ctx.destination);
+      var csrc = m.currentSrc || m.src || "";
+      var shared = true;
+      try {
+        var cwhere = new URL(csrc, location.href);
+        shared = !csrc || cwhere.origin === location.origin
+          || /^(blob|data|mediastream):$/.test(cwhere.protocol)
+          || !!m.crossOrigin;
+      } catch (e) {}
+      if (!shared) return "taken";   /* no CORS: Web Audio would play silence */
+      ctx = new Ctx();
+      try {
+        from = ctx.createMediaElementSource(m);
+      } catch (e) {
+        try { ctx.close(); } catch (e2) {}
+        throw e;
+      }
+      from.connect(ctx.destination);
+      m.__mediaSrc = {ctx: ctx, node: from};
     }
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    from.connect(analyser);
   } catch (e) {
     return "taken";
   }
+  if (ctx.state === "suspended") ctx.resume();
+  window.__silenceTap = {from: from, node: analyser};
+  window.__silenceEl = m;
   var data = new Uint8Array(analyser.frequencyBinCount);
   window.__silenceRate = m.playbackRate;
   window.__silenceTimer = setInterval(function () {
@@ -79138,6 +79850,14 @@ PLAY_TOOLS = {
   if (!on) {
     if (window.__keyShow) window.__keyShow.remove();
     window.__keyShow = null;
+    /* the listeners went on running (and each off and on added a pair)
+       after the overlay was gone */
+    var held = window.__keyHandlers;
+    if (held) {
+      document.removeEventListener("keydown", held.key, true);
+      document.removeEventListener("mousedown", held.mouse, true);
+    }
+    window.__keyHandlers = null;
     return "off";
   }
   if (window.__keyShow) return "already";
@@ -79156,16 +79876,42 @@ PLAY_TOOLS = {
     setTimeout(function () { key.remove(); }, 1200);
     while (box.childNodes.length > 8) box.removeChild(box.firstChild);
   };
-  document.addEventListener("keydown", function (e) {
+  var secret = function (e) {
+    /* a key typed into a password field is never shown: the overlay is
+       for a stream or a recording */
+    var at = (e.composedPath && e.composedPath()[0]) || e.target;
+    var focus = document.activeElement;
+    var kinds = [at, focus];
+    while (focus && focus.shadowRoot && focus.shadowRoot.activeElement) {
+      focus = focus.shadowRoot.activeElement;
+      kinds.push(focus);
+    }
+    for (var s = 0; s < kinds.length; s++) {
+      var el = kinds[s];
+      if (el && el.tagName === "INPUT"
+          && String(el.type).toLowerCase() === "password") return true;
+    }
+    /* focus inside a CLOSED shadow root (a login web component): only
+       the host can be seen, and what it holds cannot be told from a
+       password box -- not shown */
+    if (focus && focus.tagName && focus.tagName.indexOf("-") > 0
+        && !focus.shadowRoot) return true;
+    return false;
+  };
+  var keyHandler = function (e) {
+    if (secret(e)) return;
     var name = e.key === " " ? "Space" : e.key;
     if (name.length === 1) name = name.toUpperCase();
     var mods = (e.ctrlKey ? "Ctrl+" : "") + (e.altKey ? "Alt+" : "")
              + (e.shiftKey && name.length > 1 ? "Shift+" : "");
     show(mods + name);
-  }, true);
-  document.addEventListener("mousedown", function (e) {
+  };
+  var mouseHandler = function (e) {
     show(["L", "M", "R"][e.button] || "M" + e.button);
-  }, true);
+  };
+  document.addEventListener("keydown", keyHandler, true);
+  document.addEventListener("mousedown", mouseHandler, true);
+  window.__keyHandlers = {key: keyHandler, mouse: mouseHandler};
   return "on";
 })(ARG)""",
 
@@ -79229,9 +79975,15 @@ PLAY_TOOLS = {
   if (!on) {
     if (window.__twAds) clearInterval(window.__twAds);
     window.__twAds = null;
+    /* only an ad this tool is holding quiet is given back: a stream he
+       muted by hand was unmuted in every Twitch tab */
     var v = document.querySelector("video");
-    if (v) { v.muted = window.__twWasMuted || false;
-             v.style.removeProperty("filter"); }
+    if (v && window.__twInAd) {
+      v.muted = window.__twWasMuted || false;
+      v.style.removeProperty("filter");
+    }
+    window.__twInAd = false;
+    delete window.__twWasMuted;
     return "off";
   }
   if (window.__twAds) return "already";
@@ -79308,6 +80060,11 @@ PLAY_TOOLS = {
   if (host.indexOf("twitch.tv") >= 0) {
     var full = document.querySelector("[data-a-target='player-theatre-mode-button']");
     if (!full) return "nothing";
+    /* Twitch keeps theatre mode itself: clicking again left it */
+    if (/exit/i.test(full.getAttribute("aria-label") || "")
+        || document.querySelector(".persistent-player--theatre, .theatre-mode")) {
+      return "already";
+    }
     full.click();
     return "on";
   }
