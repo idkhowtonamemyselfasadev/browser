@@ -16360,6 +16360,694 @@ finally:
     H.Handler.pages.pop("/t269", None)
     _close_if_open(_v57)
 
+# ---- 272: the bar's answers (units, hex, zones, dates) ----
+import datetime as _dt272
+import time as _t272
+
+_m272 = B._metric_answer("it is 1,000 ft tall")
+check("272 page text '1,000 ft' is a thousand feet, not 1.0 ft",
+      _m272 and _m272[1] == "304.8", str(_m272))
+_m272b = B._metric_answer("a 3-5 ft range")
+check("272 a range's hyphen is no minus sign",
+      not _m272b or not _m272b[1].startswith("-"), str(_m272b))
+check("272 '1.234.567 ft' is not read from '234.567 ft'",
+      not (B._metric_answer("about 1.234.567 ft") or ("",))[0]
+      .startswith("234.567"),
+      str(B._metric_answer("about 1.234.567 ft")))
+check("272 a typed decimal comma and a real minus still read",
+      B._metric_answer("2,5 ft")[1] == "0.762"
+      and B._metric_answer("a -5 ft drop")[1] == "-1.524"
+      and B._unit_answer("1,5 ft to m")[1] == "0.4572",
+      str((B._metric_answer("2,5 ft"), B._metric_answer("a -5 ft drop"))))
+
+check("272 '0bah' and '0b1fh' are hex with an h suffix",
+      B._base_answer("0bah") and B._base_answer("0bah")[1] == "186"
+      and B._base_answer("0b1fh")[1] == "2847"
+      and B._base_answer("0b101")[1] == "5"
+      and B._base_answer("1fh")[1] == "31",
+      str((B._base_answer("0bah"), B._base_answer("0b1fh"))))
+
+getattr(getattr(B, "_zone_table", None), "cache_clear", lambda: None)()
+_z272 = B._zone_for("europe/berlin")
+_t0272 = _t272.time()
+for _i272 in range(5):
+    B._zone_for("xyz%d" % _i272)
+_el272 = _t272.time() - _t0272
+check("272 a lower-case 'europe/berlin' resolves, and misses are cached",
+      _z272 == "Europe/Berlin" and B._zone_for("berlin") == "Europe/Berlin"
+      and _el272 < 0.2, str((_z272, round(_el272, 3))))
+
+_t272d = _dt272.date.today()
+_want272 = next(_dt272.date(y, 2, 29) for y in range(_t272d.year, _t272d.year + 9)
+                if y % 4 == 0 and (y % 100 or y % 400 == 0)
+                and _dt272.date(y, 2, 29) >= _t272d)
+check("272 'days until 29.2.' waits for the next leap year",
+      B._parse_date("29.2.", _t272d) == _want272,
+      str(B._parse_date("29.2.", _t272d)))
+
+check("272 'in' before a digit, comma or hyphen is no inch",
+      B._metric_answer("rated 5 in 2019") is None
+      and B._metric_answer("5 in-depth review") is None
+      and B._metric_answer("I got 3 in, 4 out") is None
+      and B._metric_answer("a 5 in long nail")[1] == "127",
+      str((B._metric_answer("rated 5 in 2019"),
+           B._metric_answer("5 in-depth review"))))
+
+check("272 a malformed full date is no day.month of this year",
+      B._parse_date("24.12.202", _t272d) is None
+      and B._parse_date("24.12.20267", _t272d) is None
+      and B._parse_date("1.1.2030 12:00", _t272d) is None
+      and B._parse_date("24.12.", _t272d) is not None
+      and B._parse_date("24.12", _t272d) is not None
+      and B._parse_date("24.12.2030", _t272d) == _dt272.date(2030, 12, 24),
+      str((B._parse_date("24.12.202", _t272d),
+           B._parse_date("1.1.2030 12:00", _t272d))))
+
+# ---- 273: the bar's drop-down rows ----
+_hist273, _act273 = list(br.history), getattr(br, "_suggest_actions", None)
+_long273 = "https://zz273.example/" + "a" * 70
+_now273 = int(_time.time())
+br.history = [
+    {"url": _long273 + "/new", "title": "zz273 same title", "t": _now273 - 5},
+    {"url": _long273 + "/old", "title": "zz273 same title", "t": _now273 - 50}]
+try:
+    _rows273 = [r for r in br._own_suggestions("zz273") if "zz273" in r]
+    _acts273 = dict(br._suggest_actions)
+    _urls273 = sorted(_acts273[r][1] for r in _rows273 if r in _acts273)
+finally:
+    br.history = _hist273
+    br._suggest_actions = _act273 or {}
+check("273 two rows with one truncated label each keep their own address",
+      len(_rows273) == 2 and len(set(_rows273)) == 2
+      and _urls273 == [_long273 + "/new", _long273 + "/old"],
+      str((_rows273, _urls273)))
+
+
+class _V273:
+    def __init__(self, url):
+        self._u = url
+
+    def url(self):
+        return self
+
+    def toString(self):
+        return self._u
+
+
+def _never_rows273(want_never):
+    host = "never273.example"
+    _tab = _V273("https://%s/a" % host)
+    _short_was = dict(br._short_links)
+    _shown = []
+    br.__dict__["_real_tabs"] = lambda *a, **k: [(0, _tab)]
+    br.__dict__["_tab_title"] = lambda i: "never273 tab"
+    # the stand-in tab is no widget: the strip's own indexOf refuses it
+    br.tabs.__dict__["indexOf"] = lambda w: 0
+    br.__dict__["other_window_tabs"] = lambda t: [
+        {"window": br, "view": _tab, "title": "never273 elsewhere",
+         "url": "https://%s/b" % host}] if "never273" in t else []
+    br._short_links["https://zz273s.example/x"] = "https://%s/land" % host
+    br.never_suggest(host, on=want_never)
+    try:
+        rows = br._own_suggestions("never273")
+        rows += br._own_suggestions("zz273s.example/x")
+    finally:
+        br.never_suggest(host, on=False)
+        for k in ("_real_tabs", "_tab_title", "other_window_tabs"):
+            br.__dict__.pop(k, None)
+        br.tabs.__dict__.pop("indexOf", None)
+        br._short_links.clear()
+        br._short_links.update(_short_was)
+        br._suggest_actions = {}
+    return rows
+
+
+_open273 = _never_rows273(False)
+_shut273 = _never_rows273(True)
+check("273 never-suggest also keeps out open tabs, other windows' tabs "
+      "and short-link rows",
+      len([r for r in _open273 if "never273" in r]) == 3
+      and any("never273.example/land" in r for r in _open273)
+      and not [r for r in _shut273 if "never273" in r], str((_open273, _shut273)))
+
+
+# ---- 274/275: tab sets, stale tabs, restore_day and workspaces ----------
+def _open274(win, view):
+    try:
+        return win.tabs.indexOf(view) >= 0
+    except RuntimeError:
+        return False
+
+
+def _find275(win, mark):
+    return [v for _i, v in win._real_tabs() if mark in win._tab_url(v)]
+
+
+_cfg274 = {k: br.config.get(k, "__absent__")
+           for k in ("tabSets", "staleDays", "workspaces", "workspaceNow",
+                     "noRestoreSites")}
+_tw274 = list(br.throwaway_sessions())
+_w274 = br.new_window()
+try:
+    H.spin(600)
+    # 274: "open it instead of these tabs" leaves the locked, pinned, game
+    # and audible tabs open and closes the plain one
+    _L = _w274.new_tab(url=srv.url("/twhome?l274"), switch=False)
+    _P = _w274.new_tab(url=srv.url("/twhome?p274"), switch=False)
+    _G = _w274.new_tab(url=srv.url("/twhome?g274"), switch=False)
+    _A = _w274.new_tab(url=srv.url("/twhome?a274"), switch=False)
+    _N = _w274.new_tab(url=srv.url("/twhome?n274"), switch=False)
+    H.spin(600)
+    _L.locked = True
+    _w274.pin_tab(_w274.tabs.indexOf(_P), True)
+    _G._game = True
+    _A.page().recentlyAudible = lambda: True
+    br.config["tabSets"] = {"s274": {"t": 1, "tabs": [
+        {"u": srv.url("/twother?set274"), "t": "set"}]}}
+    _opened274 = _w274.restore_tabset("s274", replace=True)
+    H.spin(300)
+    _kept274 = [_open274(_w274, v) for v in (_L, _P, _G, _A)]
+    check("274 replacing a set keeps locked, pinned, game and audible tabs "
+          "and closes the plain one",
+          bool(_opened274) and all(_kept274) and not _open274(_w274, _N),
+          str((_kept274, _open274(_w274, _N))))
+    # 274b: the stale closer spares a game and a sound, not a plain tab
+    _S = _w274.new_tab(url=srv.url("/twhome?s274"), switch=False)
+    _G2 = _w274.new_tab(url=srv.url("/twhome?g2274"), switch=False)
+    _A2 = _w274.new_tab(url=srv.url("/twhome?a2274"), switch=False)
+    H.spin(500)
+    _G2._game = True
+    _A2.page().recentlyAudible = lambda: True
+    for _v in (_S, _G2, _A2):
+        _v._seen_wall = _time.time() - 9 * 86400
+    _w274.tabs.setCurrentWidget(_opened274[0])
+    br.config["staleDays"] = 1
+    _w274.close_stale_tabs()
+    H.spin(200)
+    check("274 the stale closer leaves a game tab and an audible tab",
+          not _open274(_w274, _S) and _open274(_w274, _G2)
+          and _open274(_w274, _A2),
+          str((_open274(_w274, _S), _open274(_w274, _G2),
+               _open274(_w274, _A2))))
+    # 274c: restore_day keeps a page read in two browsers and groups each
+    _w274.sessions.append({"name": "X274", "sid": "x274"})
+    _cap274 = []
+    _w274.history_rows = lambda **k: [
+        {"url": "http://same274.example/", "title": "a", "s": "x274",
+         "t": 5},
+        {"url": "http://same274.example/", "title": "a", "s": "main",
+         "t": 4}]
+    _w274.open_tab_state = lambda entries, lazy=True, **k: (
+        _cap274.extend(entries) or [])
+    _w274.restore_day(0, as_group="G274")
+    _gs274 = {(e["s"], e.get("g")) for e in _cap274}
+    check("274 restore_day opens a page read in two browsers in both, "
+          "each in a group of its own browser",
+          len(_cap274) == 2 and {s for s, _g in _gs274} == {"main", "x274"}
+          and all(g and _w274.group_sessions.get(g) == s
+                  for s, g in _gs274), str(_cap274))
+finally:
+    _w274.__dict__.pop("history_rows", None)
+    _w274.__dict__.pop("open_tab_state", None)
+    for _k, _o in _cfg274.items():
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+    _w274._confirm_many_tabs = lambda *a, **k: True
+    _w274.close()
+    H.spin(500)
+
+_w275 = br.new_window()
+try:
+    H.spin(600)
+    # 275d: nothing to save (the start page) is not written over a set
+    _w275.flash = lambda *a, **k: None
+    br.config["workspaces"] = {"e275": [{"u": "http://old275.example/",
+                                         "t": "old", "s": "main"}]}
+    _r275d = _w275.save_workspace("e275")
+    check("275 an empty save does not replace a set of the same name",
+          _r275d is False and len(br.workspaces()["e275"]) == 1
+          and br.workspaces()["e275"][0]["u"] == "http://old275.example/",
+          str((_r275d, br.workspaces())))
+    # one tab in each of: main, a virtual browser, a throwaway, a site
+    # that is never restored
+    _w275.sessions.append({"name": "X275", "sid": "x275"})
+    _w275.sessions.append({"name": "T275", "sid": "tmp-t275"})
+    br.throwaway_sessions().append("tmp-t275")
+    _w275.restore_excluded = lambda u: "r275" in str(u)
+    _m = _w275.new_tab(url=srv.url("/twhome?m275"), switch=False)
+    _x = _w275.new_tab(url=srv.url("/twother?x275"), switch=False,
+                       session="x275")
+    _t = _w275.new_tab(url=srv.url("/twhome?t275"), switch=False,
+                       session="tmp-t275")
+    _r = _w275.new_tab(url=srv.url("/twhome?r275"), switch=False)
+    H.spin(700)
+    _rows275 = _w275.save_workspace("w275") or []
+    _by275 = {r["u"].split("?")[-1]: r.get("s") for r in _rows275}
+    check("275 a saved workspace keeps each tab's browser and leaves out "
+          "throwaway and never-restore tabs",
+          _by275 == {"m275": "main", "x275": "x275"}, str(_by275))
+    # 275b: opening it puts each tab back in its browser; a browser that
+    # is gone gets "main"; the throwaway and excluded tabs stay open
+    br.config["workspaces"]["o275"] = [
+        {"u": srv.url("/twhome?om275"), "t": "", "s": "main"},
+        {"u": srv.url("/twother?ox275"), "t": "", "s": "x275"},
+        {"u": srv.url("/twother?og275"), "t": "", "s": "gone275"}]
+    _w275.open_workspace("o275", keep=True)
+    H.spin(400)
+    _sess275 = {m: [getattr(v, "session", "main")
+                    for v in _find275(_w275, m)]
+                for m in ("om275", "ox275", "og275")}
+    check("275 opening a workspace reopens each tab in its own browser "
+          "(a gone one in main)",
+          _sess275 == {"om275": ["main"], "ox275": ["x275"],
+                       "og275": ["main"]}, str(_sess275))
+    check("275 opening a workspace leaves throwaway and never-restore "
+          "tabs open",
+          _open274(_w275, _t) and _open274(_w275, _r)
+          and not _open274(_w275, _m) and not _open274(_w275, _x),
+          str((_open274(_w275, _t), _open274(_w275, _r),
+               _open274(_w275, _m), _open274(_w275, _x))))
+    # 275c: a set that covers only "main" does not close the other browser
+    _y = _w275.new_tab(url=srv.url("/twother?y275"), switch=False,
+                       session="x275")
+    _mm = _w275.new_tab(url=srv.url("/twhome?mm275"), switch=False)
+    H.spin(500)
+    br.config["workspaces"]["c275"] = [
+        {"u": srv.url("/twhome?cm275"), "t": "", "s": "main"}]
+    _w275.open_workspace("c275", keep=True)
+    H.spin(300)
+    check("275 a workspace of one browser closes only that browser's tabs",
+          _open274(_w275, _y) and not _open274(_w275, _mm),
+          str((_open274(_w275, _y), _open274(_w275, _mm))))
+    # 275e: the automatic save of the open tabs never takes a name he gave
+    _keep275 = _w275.new_tab(url=srv.url("/twhome?k275"), switch=False)
+    H.spin(400)
+    br.config["workspaces"] = {
+        "previous tabs": [{"u": "http://mine275.example/", "t": "mine",
+                           "s": "main"}],
+        "t275": [{"u": srv.url("/twother?tt275"), "t": "", "s": "main"}]}
+    br.config["workspaceNow"] = ""
+    _w275.open_workspace("t275")
+    H.spin(300)
+    _ws275 = br.workspaces()
+    check("275 switching sets does not overwrite a set named 'previous tabs'",
+          _ws275["previous tabs"][0]["u"] == "http://mine275.example/"
+          and any("k275" in r["u"] for n, rows in _ws275.items()
+                  if n.startswith("previous tabs") and n != "previous tabs"
+                  for r in rows), str(_ws275)[:300])
+    # 275b: a second such switch writes over its own slot, no new set
+    br.config["workspaceNow"] = ""
+    _w275.open_workspace("t275")
+    H.spin(300)
+    _autos275 = sorted(n for n in br.workspaces()
+                       if n.startswith("previous tabs"))
+    check("275b the automatic save keeps one slot of its own",
+          len(_autos275) == 2 and "previous tabs" in _autos275,
+          str(_autos275))
+    # 275c: getting the automatic slot back keeps what it holds
+    br.config["workspaces"]["slot275"] = [
+        {"u": srv.url("/twhome?slot275"), "t": "", "s": "main"}]
+    br.config["workspaceAuto"] = "slot275"
+    br.config["workspaceNow"] = ""
+    _w275.open_workspace("slot275")
+    H.spin(300)
+    _slot275 = br.workspaces().get("slot275") or []
+    check("275c opening the automatic slot does not write the left tabs over it",
+          len(_slot275) == 1 and "slot275" in _slot275[0]["u"],
+          str(_slot275)[:200])
+finally:
+    br.config.pop("workspaceAuto", None)
+    for _k, _o in _cfg274.items():
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+    br.throwaway_sessions()[:] = _tw274
+    _w275.__dict__.pop("restore_excluded", None)
+    _w275._confirm_many_tabs = lambda *a, **k: True
+    _w275.close()
+    H.spin(500)
+
+# ---- 276-278: nothing from a private tab is written to disk (the 60th pass). Insert before the
+# final "the suite's own window stayed" check. ----
+import copy as _copy60
+
+H.Handler.pages["/t276"] = ("<title>t276</title><p id=p>Meeting on "
+                            "2026-12-24 at 10:00 sharp</p>")
+_cfg60 = _copy60.deepcopy(br.config)
+_saves60 = []
+_said60 = []
+_snap60 = lambda: json.dumps(br.config, sort_keys=True, default=str)
+_real_save60 = br.save_config
+br.__dict__["save_config"] = lambda *a, **k: _saves60.append(1)
+br.__dict__["flash"] = lambda text, *a, **k: _said60.append(str(text))
+_rg60 = B.QInputDialog.getText
+_rm60 = B.QInputDialog.getMultiLineText
+_words60 = B.CONFIG_FILE.parent / "my-words.txt"
+_words60_was = _words60.read_bytes() if _words60.exists() else None
+
+
+def _priv60(path="/t276"):
+    v = br.new_tab(private=True)
+    H.spin(300)
+    H.load(v, srv.url(path))
+    H.spin(500)
+    br.tabs.setCurrentWidget(v)
+    H.spin(100)
+    return v
+
+
+def _norm60(path="/t276"):
+    v = br.new_tab()
+    H.spin(300)
+    H.load(v, srv.url(path))
+    H.spin(500)
+    return v
+
+
+_open60 = []
+try:
+    # ---- 276: per-site settings chosen in a private tab ----
+    _p = _priv60(); _open60.append(_p)
+    _n = _norm60(); _open60.append(_n)
+    _host60 = br._host_of(_p.url())
+    _keys60 = ("siteStyles", "audioSinks", "cloudSites", "autoSubmitSites",
+               "fillOnLoadSites", "pasteSites", "autocompleteSites",
+               "translateRules")
+    _was60 = {k: json.dumps(br.config.get(k), sort_keys=True)
+              for k in _keys60}
+    _same60 = lambda: all(json.dumps(br.config.get(k), sort_keys=True)
+                          == _was60[k] for k in _keys60)
+
+    # the site style editor: kept in memory, shown in the private tab only
+    B.QInputDialog.getMultiLineText = staticmethod(
+        lambda *a, **k: ("body { outline: 3px solid red }", True))
+    br.tabs.setCurrentWidget(_p)
+    br.edit_site_style()
+    H.spin(300)
+    _mem = getattr(B, "_PRIVATE_STYLES", {})
+    _on = H.wait_for(lambda: jsq(_p, "!!document.getElementById('__mycss')")
+                     is True, 4000)
+    br.apply_site_style(_n)
+    H.spin(300)
+    _leak = jsq(_n, "!!document.getElementById('__mycss')")
+    check("276 a site style written in a private tab is not saved, and still "
+          "styles that tab only",
+          _same60() and not br.site_styles() and _host60 in _mem and _on
+          and not _leak, str((_same60(), _mem, _on, _leak)))
+    B.QInputDialog.getMultiLineText = _rm60
+
+    # the audio output: the choice reaches that tab's page, not config.json
+    _calls = []
+    br.__dict__["media_tool2"] = lambda *a, **k: _calls.append(
+        (a, k)) or True
+    br.audio_output("zq-sink", view=_p)
+    del _calls[:]
+    _got_p = br.apply_audio_output(_p)
+    _arg_p = _calls[-1][1].get("arg") if _calls else None
+    del _calls[:]
+    _got_n = br.apply_audio_output(_n)
+    br.__dict__.pop("media_tool2", None)
+    check("276 an audio output picked in a private tab is not saved, and "
+          "still applies to that tab",
+          _same60() and not (br.config.get("audioSinks") or {})
+          and _arg_p == "zq-sink" and not _got_n,
+          str((_same60(), _arg_p, _got_n)))
+
+    # cloud gaming, remember paste / autocomplete, auto-submit, fill-on-load
+    br.__dict__["gamepad"] = lambda *a, **k: None
+    br.__dict__["keyboard_lock"] = lambda *a, **k: None
+    _forms = []
+    br.__dict__["form_tool"] = lambda name, view=None, then=None, arg=None: (
+        _forms.append(name) or True)
+    br.cloud_gaming(on=True, view=_p)
+    _game = getattr(_p, "_game", False)
+    br.allow_paste(view=_p, remember=True)
+    br.override_autocomplete(view=_p, remember=True)
+    _a = br.auto_submit_here(on=True, view=_p)
+    _f = br.fill_on_load_here(on=True, view=_p)
+    for _k in ("gamepad", "keyboard_lock", "form_tool"):
+        br.__dict__.pop(_k, None)
+    check("276 cloud gaming / paste / autocomplete / auto-submit / "
+          "fill-on-load from a private tab save no host",
+          _same60() and _game and "paste" in _forms
+          and "autocompleteoff" in _forms and _a is False and _f is False
+          and not _saves60, str((_same60(), _game, _forms, _a, _f,
+                                 len(_saves60))))
+
+    # the translation bar: this page is translated, no rule is written
+    _tr = []
+    br.__dict__["translate_page_now"] = lambda view=None, **k: _tr.append(
+        view) or True
+    br._trbar_act("always", "fr", _p)
+    br._trbar_act("never", "nl", _p)
+    _kept_p = _same60()
+    br._trbar_act("never", "nl", _n)
+    _kept_n = br.config.get("translateRules")
+    br.__dict__.pop("translate_page_now", None)
+    check("276 the translation bar's always / never from a private tab "
+          "writes no rule, and always still translates the page",
+          _kept_p and _tr == [_p] and (_kept_n or {}).get("nl") == "never",
+          str((_kept_p, len(_tr), _kept_n)))
+    br.config.pop("translateRules", None) if _was60["translateRules"] == \
+        "null" else br.config.update(
+            {"translateRules": json.loads(_was60["translateRules"])})
+
+    # ---- 277: explicit "keep this" actions refused in a private tab ----
+    br.config.clear(); br.config.update(_copy60.deepcopy(_cfg60))
+    del _saves60[:]
+    del _said60[:]
+
+    class _Drawer60:
+        def __init__(self):
+            self.calls = []
+
+        def daily_note(self):
+            self.calls.append("daily_note")
+            return {"id": 1}
+
+        def append_note(self, nid, body):
+            self.calls.append(("append_note", body))
+            return 1
+
+        def save_note(self, *a, **k):
+            self.calls.append(("save_note", k))
+            return {"id": 2}
+
+        def add_todo(self, text, link="", due=0):
+            self.calls.append(("add_todo", link))
+            return []
+
+        def add_to_collection(self, *a, **k):
+            self.calls.append(("collection", a))
+            return "x"
+
+    _dr = _Drawer60()
+    br.__dict__["desk"] = lambda: _dr
+    _p2 = _priv60(); _open60.append(_p2)
+    _n2 = _norm60(); _open60.append(_n2)
+    _before = _snap60()
+    _real_url = br._tab_url
+    br.__dict__["media_state"] = lambda view=None, then=None: then(
+        {"time": 12.0}) or True
+    br.__dict__["desk_tool"] = lambda *a, **k: True
+    br.__dict__["_tab_url"] = lambda v: (
+        "https://www.twitch.tv/zqchannel" if v is _p2 else _real_url(v))
+
+    # the word typed in a private tab
+    B.QInputDialog.getText = staticmethod(lambda *a, **k: ("zqword", True))
+    try:
+        _w = br.add_to_dictionary("zqwordzq", view=_p2)
+    except TypeError:      # no view= before the fix: the old call
+        _w = br.add_to_dictionary("zqwordzq")
+    _w_file = _words60.read_bytes() if _words60.exists() else None
+    check("277 add to dictionary from a private tab keeps no word",
+          _w is False and "zqwordzq" not in (br.config.get("myWords") or [])
+          and _w_file == _words60_was and not _saves60,
+          str((_w, _w_file, len(_saves60))))
+
+    # the desk verbs
+    br.tabs.setCurrentWidget(_p2)
+    _r = [br.clip_selection(_p2), br.page_to_note(_p2),
+          br.tab_to_todo(view=_p2, close=False), br.checklist_from_page(_p2),
+          br.collect_page("zq", _p2), br.video_time_note(_p2),
+          br.article_to_note(_p2) if hasattr(br, "article_to_note") else 0]
+    B.QInputDialog.getMultiLineText = staticmethod(
+        lambda *a, **k: ("a thought", True))
+    br.quick_capture()
+    B.QInputDialog.getMultiLineText = _rm60
+    _link_in = [c for c in _dr.calls if isinstance(c, tuple)
+                and c[0] == "append_note" and "http" in c[1]]
+    _wrote = [c for c in _dr.calls if c not in ("daily_note",)
+              and not (isinstance(c, tuple) and c[0] == "append_note"
+                       and c[1] == "a thought")]
+    # the same verb on a normal tab does write: the spy works
+    br.page_to_note(_n2)
+    _ctrl = [c for c in _dr.calls if isinstance(c, tuple)
+             and c[0] == "save_note"]
+    check("277 the desk verbs refuse a private tab (and quick capture leaves "
+          "its address out); a normal tab still writes",
+          not _wrote and not _link_in and len(_ctrl) == 1
+          and _said60.count(br._ui_str("privateNotKept")) >= 6,
+          str((_wrote, _link_in, len(_ctrl), len(_said60))))
+
+    # clips, moments, watch later, live watch, keyword, all config
+    br.tabs.setCurrentWidget(_p2)
+    _r2 = [br.clip_mark(view=_p2), br.moment_add(view=_p2, note="n"),
+           br.watch_later_add(view=_p2), br.live_add(view=_p2)]
+    B.QInputDialog.getText = staticmethod(lambda *a, **k: ("zqk", True))
+    _bm = json.dumps(br.bookmarks, sort_keys=True, default=str)
+    _r2.append(br.ask_keyword())
+    check("277 clip mark / video moment / watch later / live watch / "
+          "bookmark keyword from a private tab write nothing",
+          _snap60() == _before and not _saves60
+          and json.dumps(br.bookmarks, sort_keys=True, default=str) == _bm
+          and not any(_r2), str((_r2, len(_saves60))))
+
+    # selection to calendar: no title and no URL line
+    _ics = []
+    br.__dict__["save_ics"] = lambda text="", title="", url="", path=None: (
+        _ics.append((title, url, path)) or "")
+    for _v in (_p2, _n2):
+        br.__dict__["_tab_url"] = _real_url
+        jsq(_v, "window.getSelection().selectAllChildren("
+                "document.getElementById('p')); 1")
+        br.selection_to_calendar(view=_v)
+        H.wait_for(lambda: len(_ics) >= (1 if _v is _p2 else 2), 5000)
+    br.__dict__.pop("save_ics", None)
+    check("277 a calendar file made from a private tab carries no URL or "
+          "page title; a normal one still does",
+          len(_ics) == 2 and not _ics[0][0] and not _ics[0][1]
+          and _ics[1][1].startswith("http"), str(_ics))
+
+    # the bookmark-moved offer does not run for a private tab
+    br.__dict__["_bookmark_by_id"] = lambda i: {"url": "http://old.invalid/"}
+    for _v in (_p2, _n2):
+        _v._from_bookmark = 7
+    _mv_p = br.bookmark_moved(view=_p2)
+    _mv_n = br.bookmark_moved(view=_n2)
+    br.__dict__.pop("_bookmark_by_id", None)
+    check("277 the bookmark-moved offer is not made for a private tab",
+          _mv_p is False and bool(_mv_n), str((_mv_p, _mv_n)))
+    for _k in ("desk", "media_state", "desk_tool", "_tab_url"):
+        br.__dict__.pop(_k, None)
+
+    # ---- 278: not user actions ----
+    _p3 = _priv60(); _open60.append(_p3)
+    _pg = _p3.page()
+    _probed = []
+    _real_js = _pg.runJavaScript
+    _pg.runJavaScript = lambda code, *a, **k: (
+        _probed.append(1) if code in (B.GPU_PROBE_JS, B.MEDIA_PROBE_JS)
+        else None, _real_js(code, *a, **k))[1]
+    _reports = []
+    _real_gr = B.gpu_report
+    B.gpu_report = lambda *a, **k: _reports.append(k) or None
+    br._gpu_said = None
+    br.tabs.setCurrentWidget(_p3)
+    br._gpu_record()
+    H.wait_for(lambda: bool(_reports), 6000)
+    H.spin(300)
+    B.gpu_report = _real_gr
+    _pg.__dict__.pop("runJavaScript", None)
+    check("278 the GPU report probes no private tab (front or not)",
+          not _probed and bool(_reports), str((_probed, len(_reports))))
+
+    class _FV60:
+        def __init__(self):
+            self.rows = []
+
+        def items(self):
+            return [{"id": "i1", "type": "identity"},
+                    {"id": "c1", "type": "card"}]
+
+        def reveal(self, *a):
+            return "x"
+
+        def custom_value(self, *a):
+            return "x"
+
+        def totp_view(self, *a):
+            return {"code": "123456"}
+
+        def note_access(self, item_id, field, what="revealed"):
+            self.rows.append((item_id, field, what))
+
+    _fv = _FV60()
+    _real_vault = br.vault
+    br.vault = _fv
+    br.__dict__["vault_locked"] = lambda: False
+    br.__dict__["form_tool"] = lambda name, view=None, then=None, arg=None: (
+        then and then('{"filled": 1}' if name == "fillcard" else
+                      "ok" if name == "otpfield" else "1"), True)[1]
+    try:
+        _p3b = _p3
+        for _v in (_p3b, _n2):
+            br.fill_identity("i1", view=_v)
+            br.fill_card("c1", view=_v, cvv="123")
+            br.fill_totp(view=_v, item_id="t1")
+            br.fill_any_field("i1", "email", view=_v)
+            if _v is _p3b:
+                _priv_rows = list(_fv.rows)
+        _all_rows = list(_fv.rows)
+    finally:
+        br.vault = _real_vault
+        br.__dict__.pop("vault_locked", None)
+        br.__dict__.pop("form_tool", None)
+    check("278 a form fill in a private tab leaves no vault access-log "
+          "row; a normal tab's still does",
+          _priv_rows == [] and len(_all_rows) >= 4,
+          str((_priv_rows, _all_rows)))
+finally:
+    for _k in ("save_config", "flash", "desk", "media_state", "desk_tool",
+               "_tab_url", "media_tool2", "gamepad", "keyboard_lock",
+               "form_tool", "translate_page_now", "save_ics",
+               "_bookmark_by_id", "vault_locked"):
+        br.__dict__.pop(_k, None)
+    B.QInputDialog.getText = _rg60
+    B.QInputDialog.getMultiLineText = _rm60
+    br.config.clear(); br.config.update(_cfg60)
+    for _t in ("_PRIVATE_STYLES", "_PRIVATE_SINKS"):
+        getattr(B, _t, {}).clear()
+    if _words60_was is None:
+        if _words60.exists():
+            _words60.unlink()
+    else:
+        _words60.write_bytes(_words60_was)
+    for _v in _open60:
+        _close_if_open(_v)
+
+# ---- 278b: a private tab's cloud gaming box shows its own state; the GPU
+# probe looks past a group header ----
+_pv278b = br.new_tab(url=srv.url("/twhome?pc278b"), private=True, switch=True)
+H.wait_for(lambda: "pc278b" in _pv278b.url().toString(), 8000)
+_cs_was278b = list(br.config.get("cloudSites") or [])
+try:
+    br.cloud_gaming(on=True, view=_pv278b)
+    br.tabs.setCurrentWidget(_pv278b)
+    _m278b = br.play_menu(B.QMenu())
+    def _acts278b(menu):
+        for a in menu.actions():
+            yield a
+            if a.menu() is not None:
+                yield from _acts278b(a.menu())
+    _box278b = [a for a in _acts278b(_m278b)
+                if a.text() == br._ui_str("cloudGame")]
+    _on278b = bool(_box278b) and _box278b[0].isChecked()
+    br.cloud_gaming(on=False, view=_pv278b)
+finally:
+    br.config["cloudSites"] = _cs_was278b
+    _close_if_open(_pv278b)
+check("278b a private tab's cloud-gaming box is ticked while it is on",
+      _on278b, str((bool(_box278b), _on278b)))
+import inspect as _insp278b
+_g278b = _insp278b.getsource(B.Browser._gpu_record)
+check("278b the GPU probe's search for a normal tab survives a group header",
+      "except (AttributeError, RuntimeError):\n                        continue"
+      in _g278b)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

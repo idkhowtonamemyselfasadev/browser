@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part fifty: fifty-eighth to sixtieth passes)
+
+Three more searches: the address bar's quick answers and suggestions, tab
+collections (tab sets, workspaces, restore a day, close stale tabs), and
+one question asked of every line of browser.py: does anything from a
+private tab end up on disk? 32 bugs, fixed here:
+
+- **Quick answers in the bar.** "1,000 ft" on a page is a thousand feet,
+  not one; "3-5 ft" is no longer minus five, and "1.234.567" is not cut
+  to its last group. Hex with an h at the end works when it starts with
+  0b. Time zones are found from a cached table (the old way scanned every
+  zone on each key press) and in lower case too. "in", "pt" and "st" are
+  units only where they can be, "days until 29.2." skips to the next leap
+  year, and a malformed date no longer falls back to a guess.
+- **Suggestions.** Two rows with the same label no longer get mixed up,
+  so Enter opens and Shift+Delete removes the one you picked. "Never
+  suggest" also hides open-tab, other-window and short-link rows.
+- **Tab sets and workspaces.** Restoring a tab set with "replace" and
+  closing stale tabs both spare locked, pinned, game and playing tabs.
+  A workspace remembers which virtual browser each tab belongs to, so
+  logins come back with it and opening it leaves the other browsers'
+  tabs alone; throwaway and never-restore tabs are not saved into it,
+  and an empty set never overwrites a saved one. Switching workspaces
+  keeps one "previous tabs" slot instead of a new one every time.
+  Restore a day keeps tabs of different browsers apart.
+- **Nothing from a private tab is kept.** Per-site choices made in a
+  private tab are not written down: a site style or audio output lasts
+  only as long as the private session; cloud gaming, allow paste and the
+  autocomplete override work on the tab without remembering the site;
+  auto-submit and fill on load say they are not kept there; translate
+  always or never applies to that page only. Saving actions that would keep the private page (add to dictionary,
+  desk clip, note, to-do, list, clip mark, live watch, watch later, video
+  moments and time notes, bookmark keyword, tab to to-do) now say "not in
+  a private tab" instead of writing it down. Adding a date to the
+  calendar from a private tab leaves out the title and address, the
+  bookmark-moved offer does not appear, the GPU report never probes a
+  private tab, and filling a login there writes no access-log row.
+
 ## 2026-11-14 — line-by-line review, day 4 (part forty-nine: fifty-first to fifty-seventh passes)
 
 Seven more searches: the browser's own pages, the developer tools, the
