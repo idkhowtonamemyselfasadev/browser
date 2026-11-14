@@ -2833,7 +2833,13 @@
       document.body.style.backgroundImage = 'url("' + shots[at % shots.length] + '")';
       document.body.classList.add("hasbg");
     }
-    window.__wallTimer = setInterval(pick, Math.max(60, every * 60) * 1000);
+    // the timer's change is a change too: without its time written
+    // down, the next refresh or Settings change compared against the
+    // page-load stamp and moved the picture on again at once
+    window.__wallTimer = setInterval(() => {
+      try { localStorage.setItem("wallwhen", String(Date.now())); } catch (e) {}
+      pick();
+    }, Math.max(60, every * 60) * 1000);
   }
 
   function tick() {

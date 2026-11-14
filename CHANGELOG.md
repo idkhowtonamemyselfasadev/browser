@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part fifty-one: sixty-first to sixty-third passes)
+
+Three more searches: userscripts, the side panel, the tab rail, screen
+sharing, read aloud and wallpapers; everything the browser sends to
+outside services by itself (nothing found); and the right-click menus.
+22 bugs, fixed here:
+
+- **Userscripts.** `@exclude` works: a script kept away from a site no
+  longer runs there, and the "which scripts ran here" list agrees. A
+  rule written as `/a regular expression/` and a `@match` with capital
+  letters in the host now match. Only the script's own header counts:
+  an `@include` line in a comment further down no longer stops a script
+  meant to run everywhere. The script cost list names only scripts that
+  actually ran on the page.
+- **Side panel.** A private window shows no website in the side panel
+  (it was the normal, signed-in jar there, and its address was saved).
+  A popup from the panel (a sign-in, a link) opens in front even while
+  another virtual browser is showing. Moving the panel's page into a tab
+  stops it in the panel, so a stream is not heard twice.
+- **Tab rail.** The fold key pressed with the tabs on top no longer
+  shrinks the saved rail width to 80. A width in config.json that is
+  not a number no longer stops the tabs being moved.
+- **Read aloud, wallpapers, screen sharing.** Stopping read aloud is no
+  longer reported as "the speech program did not speak", and each
+  reader process is freed. The timed wallpaper slideshow remembers its
+  last change, so a refresh does not jump to the next picture. An
+  answered screen-share picker no longer blocks the next share request
+  in its window.
+- **Right-click menus.** The page menu acts on the page that was
+  right-clicked -- the other half of the split view, a popped-out tab
+  -- not on the tab in front: text tools, special characters, Open
+  with, search, search this site, copy page address, link to selection,
+  feeds and the timed screenshot. Words searched from a private page
+  are searched in a private tab. Big editor from the page menu opens
+  again (it crashed). The real link behind a redirect opens in that
+  tab's virtual browser and group, and "Open as app" keeps the tab's
+  virtual browser. "Sound only here" and "Close other tabs" do nothing
+  when the tab has closed while its menu was open (they muted, or
+  closed, every tab).
+- **Behind the scenes.** Opening a site in the panel of a window not yet
+  on screen no longer loops forever, and closing a side-by-side
+  translation before it starts no longer raises an error.
+
 ## 2026-11-14 — line-by-line review, day 4 (part fifty: fifty-eighth to sixtieth passes)
 
 Three more searches: the address bar's quick answers and suggestions, tab

@@ -5902,6 +5902,12 @@ class _Vault112:
     def touch(self, host, username):
         _touched112.append(username)
 
+    def entries_for(self, host, scheme=None, *a, **k):
+        # the test tab's own loadFinished reaches _autofill while this
+        # stands in for the vault: without it, an AttributeError in that
+        # slot aborted the whole suite (2026-11-14, at check 508)
+        return []
+
 
 _touched112, _asked112 = [], []
 _real_v112, _real_pp112 = br.vault, br._password_prompt
@@ -16702,6 +16708,10 @@ _said60 = []
 _snap60 = lambda: json.dumps(br.config, sort_keys=True, default=str)
 _real_save60 = br.save_config
 br.__dict__["save_config"] = lambda *a, **k: _saves60.append(1)
+# the periodic session save (a timer: _save_groups -> save_config) is not
+# what these checks are about, and it landed inside a "no write" window
+# when its tick came round mid-section (2026-11-14, 277 red twice)
+br.__dict__["_save_groups"] = lambda *a, **k: None
 br.__dict__["flash"] = lambda text, *a, **k: _said60.append(str(text))
 _rg60 = B.QInputDialog.getText
 _rm60 = B.QInputDialog.getMultiLineText
@@ -17001,8 +17011,9 @@ try:
           _priv_rows == [] and len(_all_rows) >= 4,
           str((_priv_rows, _all_rows)))
 finally:
-    for _k in ("save_config", "flash", "desk", "media_state", "desk_tool",
-               "_tab_url", "media_tool2", "gamepad", "keyboard_lock",
+    for _k in ("save_config", "_save_groups", "flash", "desk", "media_state",
+               "desk_tool", "_tab_url", "media_tool2", "gamepad",
+               "keyboard_lock",
                "form_tool", "translate_page_now", "save_ics",
                "_bookmark_by_id", "vault_locked"):
         br.__dict__.pop(_k, None)
@@ -17047,6 +17058,565 @@ _g278b = _insp278b.getsource(B.Browser._gpu_record)
 check("278b the GPU probe's search for a normal tab survives a group header",
       "except (AttributeError, RuntimeError):\n                        continue"
       in _g278b)
+
+# ---- 279: userscripts: @exclude, only the header is metadata, /regex/ @include, any-case
+# hosts, and the cost list only names scripts that ran ----
+import re as _re279
+
+H.Handler.pages["/t279x"] = "<title>x279</title><p>x</p>"
+H.Handler.pages["/t279y"] = "<title>y279</title><p>y</p>"
+
+
+def _us279(key, lines, body=""):
+    return ("// ==UserScript==\n// @name p279 %s\n" % key
+            + "".join("// %s\n" % one for one in lines)
+            + "// ==/UserScript==\n" + body
+            + "document.documentElement.setAttribute('data-p279-%s',"
+              " location.pathname);\n" % key)
+
+
+_files279 = {
+    "p279excl.user.js": _us279("excl", ["@match http://127.0.0.1/*",
+                                        "@exclude http://127.0.0.1/t279x*"]),
+    "p279regex.user.js": _us279(
+        "regex", [r"@include /^http:\/\/127\.0\.0\.1:\d+\/t279y/"]),
+    "p279body.user.js": _us279(
+        "body", [], "// @include http://nowhere.invalid/*\n"),
+    "p279only.user.js": _us279("only", ["@match http://127.0.0.1/t279x*"]),
+    "p279upper.user.js": _us279("upper", ["@match http://LOCALHOST/t279y*"]),
+}
+_pd279 = br.plugins_dir
+_made279 = []
+_open279 = []
+try:
+    _pd279.mkdir(parents=True, exist_ok=True)
+    for _n279, _src279 in _files279.items():
+        (_pd279 / _n279).write_text(_src279, encoding="utf-8")
+        _made279.append(_pd279 / _n279)
+    br.reload_plugins()
+
+    def _at279(url):
+        v = br.new_tab()
+        _open279.append(v)
+        H.spin(300)
+        H.load(v, url)
+        H.spin(700)
+        marks = jsq(v, "JSON.stringify(['excl','regex','body','only','upper']"
+                       ".map(function(k){return document.documentElement"
+                       ".getAttribute('data-p279-'+k)}))")
+        cost = jsq(v, "JSON.stringify(Object.keys(window.__pluginCost||{}))",
+                   B.APP_WORLD_ID)
+        return v, dict(zip(["excl", "regex", "body", "only", "upper"],
+                           json.loads(marks or "[null,null,null,null,null]"))), \
+            json.loads(cost or "[]")
+
+    _vx279, _mx279, _cx279 = _at279(srv.url("/t279x"))
+    _vy279, _my279, _cy279 = _at279(srv.url("/t279y"))
+    _vu279, _mu279, _cu279 = _at279(srv.url("/t279y", host="localhost"))
+    check("279 @exclude keeps a userscript off the page it excludes",
+          _mx279["excl"] is None and _my279["excl"] == "/t279y",
+          (_mx279, _my279))
+    check("279 a /regex/ @include runs where its regex matches",
+          _my279["regex"] == "/t279y", _my279)
+    check("279 an @include line in the script's body is not part of its header",
+          _my279["body"] == "/t279y" and _mx279["body"] == "/t279x",
+          (_mx279, _my279))
+    check("279 an @match host matches in any case",
+          _mu279["upper"] == "/t279y", _mu279)
+    def _ran279(marks):
+        return sorted("p279%s.user.js" % k for k, v in marks.items() if v)
+
+    def _cost279(names):
+        return sorted(n for n in names if n.startswith("p279"))
+
+    check("279 the cost list names only the userscripts that ran on the page",
+          _cost279(_cx279) == _ran279(_mx279)
+          and _cost279(_cy279) == _ran279(_my279)
+          and _cost279(_cu279) == _ran279(_mu279)
+          and "p279only.user.js" in _cx279,
+          (_cost279(_cx279), _ran279(_mx279), _cost279(_cy279), _ran279(_my279)))
+    _rows279 = {r["name"]: r["runs"] for r in br.page_userscripts(_vx279)}
+    _rowsy279 = {r["name"]: r["runs"] for r in br.page_userscripts(_vy279)}
+    check("279 the userscript audit says an excluded script does not run there",
+          _rows279.get("p279excl.user.js") is False
+          and _rowsy279.get("p279excl.user.js") is True
+          and _rowsy279.get("p279regex.user.js") is True
+          and _rowsy279.get("p279body.user.js") is True, (_rows279, _rowsy279))
+    _rx279 = br._plugin_pattern_to_regex("https://Example.COM/*")
+    check("279 the pattern regex matches a lower-case host for an upper-case @match",
+          bool(_re279.match(_rx279, "https://example.com/a"))
+          or "(?i)" in _rx279 or _rx279.startswith("(?i"), _rx279)
+finally:
+    for _p279 in _made279:
+        try:
+            _p279.unlink()
+        except OSError:
+            pass
+    try:
+        br.reload_plugins()
+    except Exception as _e279:
+        print("  (279 reload after cleanup failed: %r)" % (_e279,))
+    for _v279 in _open279:
+        _close_if_open(_v279)
+    for _k279 in ("/t279x", "/t279y"):
+        H.Handler.pages.pop(_k279, None)
+
+# ---- 280-282: the side panel, the tab rail, read aloud, the slideshow and the share picker
+# (the 61st pass) ----
+H.Handler.pages["/t280"] = "<title>t280</title><p>panel page words</p>"
+_wins280 = []
+_said280 = []
+_cfg280 = {k: br.config.get(k, "__absent__")
+           for k in ("panelUrl", "tabStripWidth", "sidebarFolded", "tabStrip")}
+_qp280 = B.QProcess
+_st280 = br.__dict__.get("say_tool")
+_fl280 = br.__dict__.get("flash")
+_v280 = None
+try:
+    # 280a: a private window shows no website in the side panel
+    _wp280 = br.new_window(private=True)
+    _wins280.append(_wp280)
+    _wp280.__dict__["flash"] = lambda text, *a, **k: _said280.append(str(text))
+    H.spin(600)
+    _r1_280 = _wp280.open_panel(srv.url("/t280"))
+    _r2_280 = _wp280.toggle_panel(True)
+    H.spin(300)
+    check("280 a private window opens no website in the side panel and keeps no panelUrl",
+          _r1_280 is False and _r2_280 is False
+          and not _wp280._panel.isVisible()
+          and _wp280.config.get("panelUrl", "__absent__") == _cfg280["panelUrl"],
+          (_r1_280, _r2_280, _wp280._panel.isVisible(),
+           _wp280.config.get("panelUrl"), _said280[-1:]))
+    _wp280.close()
+    H.spin(300)
+
+    # 280b: moving the panel's page into a tab leaves nothing running in the panel
+    _wn280 = br.new_window()
+    _wins280.append(_wn280)
+    H.spin(600)
+    _wn280.open_panel(srv.url("/t280"))
+    H.wait_for(lambda: "/t280" in _wn280._panel_view.url().toString()
+               and not _wn280._panel_view.page().isLoading(), 6000)
+    _pv280 = _wn280._panel_view
+    _before280 = _pv280.url().toString()
+    _tab280 = _wn280.panel_to_tab()
+    H.spin(800)
+    check("280 moving the panel's page to a tab leaves nothing running in the panel",
+          "/t280" in _before280 and _tab280 is not None
+          and _pv280.url().toString() == "about:blank",
+          (_before280, _pv280.url().toString()))
+    _wn280.toggle_panel(True)
+    H.wait_for(lambda: "/t280" in _pv280.url().toString(), 5000)
+    check("280 the panel opened again after a move shows its site, not a blank page",
+          "/t280" in _pv280.url().toString(), _pv280.url().toString())
+    _wn280.toggle_panel(False)
+
+    # 280c: a popup from the panel opens where it can be seen
+    _wn280.sessions.append({"name": "X280", "sid": "x280"})
+    _wn280.switch_session("x280")
+    H.spin(400)
+    _pop280 = _pv280.createWindow(B.QWebEnginePage.WebWindowType.WebBrowserTab)
+    H.spin(300)
+    _at280 = _wn280.tabs.indexOf(_pop280)
+    check("280 a popup from the side panel opens in front, in the panel's browser",
+          _wn280.active_session == "main" and _wn280.current() is _pop280
+          and _at280 >= 0 and _wn280.tabs.tabBar().isTabVisible(_at280),
+          (_wn280.active_session, _wn280.current() is _pop280, _at280))
+    _wn280._close_session("x280")
+    _wn280.close()
+    H.spin(400)
+
+    # 281a: the fold key with the tabs on top does not save the hidden rail's 0 as 80
+    br.config["tabStrip"] = "top"
+    br.tab_strip_place("top")
+    br.config["tabStripWidth"] = 250
+    br.config["sidebarFolded"] = True
+    br.sidebar.set_folded(False)
+    H.spin(100)
+    _on281 = br.tab_sidebar_on()
+    br.fold_tab_sidebar()
+    check("281 the fold key with the tabs on top keeps the rail's saved width",
+          not _on281 and br.config.get("tabStripWidth") == 250,
+          (_on281, br.config.get("tabStripWidth")))
+    # 281b: a hand-edited tabStripWidth does not stop the strip being placed
+    br.config["tabStripWidth"] = "wide"
+    try:
+        _p281 = br.tab_strip_place("top")
+    except (TypeError, ValueError) as _e281:
+        _p281 = repr(_e281)
+    check("281 a tabStripWidth that is not a number does not stop the strip being placed",
+          _p281 == "top", _p281)
+
+    # 282a: read aloud frees each reader and a stopped one is not called a failure
+    class _Sig282:
+        def __init__(self):
+            self.slots = []
+
+        def connect(self, fn):
+            self.slots.append(fn)
+
+        def emit(self, *a):
+            for fn in list(self.slots):
+                fn(*a)
+
+    class _Proc282:
+        ExitStatus = _qp280.ExitStatus
+        made = []
+
+        def __init__(self, parent=None):
+            self.finished = _Sig282()
+            self.deleted = False
+            self.done = False
+            _Proc282.made.append(self)
+
+        def start(self, prog, args):
+            self.args = (prog, list(args))
+
+        @staticmethod
+        def readers():
+            # only the read-aloud ones: anything else in the browser that
+            # makes a QProcess while the fake is in place is not counted
+            return [p for p in _Proc282.made
+                    if getattr(p, "args", ("",))[0] == "spd-say"]
+
+        def kill(self):
+            if not self.done:
+                self.done = True
+                self.finished.emit(9, _qp280.ExitStatus.CrashExit)
+
+        def deleteLater(self):
+            self.deleted = True
+
+        @staticmethod
+        def startDetached(*a, **k):
+            return True
+
+    B.QProcess = _Proc282
+    br.__dict__["say_tool"] = lambda *a, **k: True
+    br.__dict__["flash"] = lambda text, *a, **k: _said280.append(str(text))
+    _v280 = br.new_tab()
+    H.spin(300)
+    H.load(_v280, srv.url("/t280"))
+    H.spin(500)
+    del _said280[:]
+    br.read_aloud(_v280)
+    H.wait_for(lambda: len(_Proc282.readers()) >= 1, 4000)
+    br.read_aloud(_v280)
+    H.wait_for(lambda: len(_Proc282.readers()) >= 2, 4000)
+    if _Proc282.readers():
+        _p2_282 = _Proc282.readers()[-1]
+        _p2_282.done = True
+        _p2_282.finished.emit(0, _qp280.ExitStatus.NormalExit)
+    H.spin(100)
+    _fail282 = br._ui_str("sayFailed")
+    check("282 read aloud frees each reader and calls a stopped one no failure",
+          len(_Proc282.readers()) == 2
+          and all(p.deleted for p in _Proc282.readers())
+          and _fail282 not in _said280 and getattr(br, "_say", None) is None,
+          ([p.deleted for p in _Proc282.readers()], len(_Proc282.made), _said280,
+           _v280.url().toString()))
+    B.QProcess = _qp280
+
+    # 282b: the slideshow's timer writes down when it changed the picture
+    _start282 = (B.APP_DIR / "start.html").read_text(encoding="utf-8")
+    _ti282 = _start282.find("window.__wallTimer = setInterval(")
+    check("282 the timed slideshow writes the time of each change",
+          _ti282 > 0 and "wallwhen" in _start282[_ti282:_ti282 + 300],
+          _start282[_ti282:_ti282 + 160])
+
+    # 282c: a window's answered share picker does not refuse its next request
+    class _Req282:
+        def __init__(self):
+            self.cancelled = 0
+
+        def screensModel(self):
+            return None
+
+        def windowsModel(self):
+            return None
+
+        def selectScreen(self, index):
+            pass
+
+        def selectWindow(self, index):
+            pass
+
+        def cancel(self):
+            self.cancelled += 1
+
+    _old282 = type("OldPicker", (), {"answered": True, "isVisible": lambda s: False,
+                                     "place": lambda s: None})()
+    br._share_picker = _old282
+    _req282 = _Req282()
+    _shown282 = []
+
+    def _answer282():
+        live = br._share_picker
+        _shown282.append(live is not None and live is not _old282)
+        if live is not None and live is not _old282:
+            live.cancel()
+
+    B.QTimer.singleShot(400, _answer282)
+    br._desktop_media_requested(_req282, _v280.page(), _v280)
+    H.spin(600)
+    check("282 an answered share picker does not refuse the window's next request",
+          _shown282 == [True] and _req282.cancelled == 1,
+          (_shown282, _req282.cancelled))
+finally:
+    B.QProcess = _qp280
+    br._share_picker = None
+    if _st280 is None:
+        br.__dict__.pop("say_tool", None)
+    else:
+        br.__dict__["say_tool"] = _st280
+    if _fl280 is None:
+        br.__dict__.pop("flash", None)
+    else:
+        br.__dict__["flash"] = _fl280
+    for _k280, _o280 in _cfg280.items():
+        if _o280 == "__absent__":
+            br.config.pop(_k280, None)
+        else:
+            br.config[_k280] = _o280
+    try:
+        br.tab_strip_place()
+    except Exception as _e280:
+        print("  (280 strip place after cleanup failed: %r)" % (_e280,))
+    if any(e.get("sid") == "x280" for e in br.sessions):
+        try:
+            br._close_session("x280")
+        except RuntimeError:
+            pass
+    for _w280 in _wins280:
+        try:
+            _w280.close()
+        except RuntimeError:
+            pass
+    if _v280 is not None:
+        _close_if_open(_v280)
+    H.Handler.pages.pop("/t280", None)
+    H.spin(300)
+
+# ---- 283/284: the page menu acts on the page that was right-clicked; a tab menu whose
+# tab has gone does nothing; Open as app keeps the tab's browser (the 63rd pass) ----
+H.Handler.pages["/t284"] = "<title>t284</title><p>words to search</p>"
+
+
+class _Req284:
+    def __init__(self, text="", link=""):
+        self._text, self._link = text, link
+
+    def selectedText(self):
+        return self._text
+
+    def linkUrl(self):
+        return B.QUrl(self._link)
+
+    def linkText(self):
+        return "a link"
+
+    def mediaUrl(self):
+        return B.QUrl()
+
+    def mediaType(self):
+        return None
+
+
+def _act284(menu, *path):
+    """The action at this path of labels (submenus by title)."""
+    for i, label in enumerate(path):
+        hit = None
+        for a in menu.actions():
+            if a.text().replace("&", "").startswith(label):
+                hit = a
+                break
+        if hit is None:
+            return None
+        if i == len(path) - 1:
+            return hit
+        menu = hit.menu()
+        if menu is None:
+            return None
+    return None
+
+
+_ui284 = br._ui_str
+_open284 = []
+_desk284 = []
+_tabs284 = []
+_real284 = {k: br.__dict__.get(k) for k in
+            ("desk_tool", "new_tab", "open_externally", "mute_tab", "close_tab")}
+_which284 = B.shutil.which
+_win284 = None
+try:
+    _front284 = br.new_tab()
+    _back284 = br.new_tab(switch=False)
+    _priv284 = br.new_tab(private=True, switch=False)
+    _open284 += [_front284, _back284, _priv284]
+    H.spin(300)
+    for _v in (_front284, _back284, _priv284):
+        H.load(_v, srv.url("/t284"))
+    H.spin(600)
+    br.tabs.setCurrentWidget(_front284)
+    H.spin(100)
+    br.__dict__["desk_tool"] = lambda name, view=None, then=None, arg=None: (
+        _desk284.append((name, view, arg)) or True)
+
+    # 284a: Big editor from the text tools menu gets a page, not checked=False
+    try:
+        _tm284 = br.text_tools_menu(view=_back284)
+    except TypeError:
+        _tm284 = br.text_tools_menu()
+    _be284 = _act284(_tm284, _ui284("bigEditor"))
+    del _desk284[:]
+    try:
+        _be284.trigger()
+    except Exception as _e284:
+        _desk284.append(("raised", repr(_e284), None))
+    check("284 Big editor from the text tools menu opens on the page it was asked for",
+          len(_desk284) == 1 and _desk284[0][0] == "bigeditor"
+          and _desk284[0][1] is _back284,
+          [(n, getattr(v, "__class__", v), a) for n, v, a in _desk284])
+
+    # 284b: the page menu's desk tools act on the right-clicked tab, not the front one
+    _dm284 = B.QMenu()
+    _back284._desk_actions(_dm284, _Req284())
+    del _desk284[:]
+    _up284 = _act284(_dm284, _ui284("deskMenu"), _ui284("textTools"),
+                     _ui284("textUpper"))
+    _ch284 = _act284(_dm284, _ui284("deskMenu"), _ui284("textTools"),
+                     _ui284("charPicker"), _ui284("charGerman"), "ä")
+    for _a284 in (_up284, _ch284):
+        if _a284 is not None:
+            _a284.trigger()
+    check("284 text tools and characters from a tab's own menu go into that tab",
+          len(_desk284) == 2 and all(v is _back284 for _n, v, _a in _desk284),
+          [(n, v is _back284, v is _front284, a) for n, v, a in _desk284])
+    _ext284 = []
+    B.shutil.which = lambda name, *a, **k: (
+        "/bin/true" if name in br.EXTERNAL_PROGRAMS else _which284(name, *a, **k))
+    br.__dict__["open_externally"] = lambda url=None, program="": (
+        _ext284.append(url) or program)
+    _dm2_284 = B.QMenu()
+    _back284._desk_actions(_dm2_284, _Req284())
+    _ow284 = _act284(_dm2_284, _ui284("deskMenu"), _ui284("extOpenWith"),
+                     br.EXTERNAL_PROGRAMS[0])
+    if _ow284 is not None:
+        _ow284.trigger()
+    B.shutil.which = _which284
+    check("284 Open with from a tab's own menu hands on that tab's address",
+          _ext284 == [srv.url("/t284")] and _ext284[0] is not None, _ext284)
+
+    # 284c: search and copy from a private tab that is not in front stay with it
+    _made284 = []
+
+    def _rec_new_tab(*a, **k):
+        _made284.append(k)
+        return None
+
+    br.__dict__["new_tab"] = _rec_new_tab
+    _sm284 = B.QMenu()
+    _priv284._search_actions(_sm284, _Req284(text="words"))
+    _sf284 = _act284(_sm284, _ui284("searchFor") % "words")
+    if _sf284 is not None:
+        _sf284.trigger()
+    _st284 = _act284(_sm284, _ui284("searchThisSite"))
+    if _st284 is not None:
+        _st284.trigger()
+    check("284 searching words from a private tab not in front opens a private tab",
+          len(_made284) == 2 and all(k.get("private") is True for k in _made284)
+          and "127.0.0.1" in str(_made284[1].get("url")),
+          _made284)
+    B.QGuiApplication.clipboard().setText("")
+    _cc284 = _act284(_sm284, _ui284("copyPageAs"), _ui284("copyClean"))
+    if _cc284 is not None:
+        _cc284.trigger()
+    _clip284 = B.QGuiApplication.clipboard().text()
+    check("284 copy page address from a tab's own menu copies that tab's address",
+          _clip284 == srv.url("/t284") and _front284.url().toString() == srv.url("/t284"),
+          _clip284)
+    # the same address on both: a stronger check, the front tab on another page
+    H.load(_front284, srv.url("/t284") + "?front")
+    H.spin(500)
+    B.QGuiApplication.clipboard().setText("")
+    _cc2_284 = _act284(_sm284, _ui284("copyPageAs"), _ui284("copyMarkdown"))
+    if _cc2_284 is not None:
+        _cc2_284.trigger()
+    _clip2_284 = B.QGuiApplication.clipboard().text()
+    check("284 copy as Markdown from a tab's own menu copies that tab, not the one in front",
+          "?front" not in _clip2_284 and "/t284" in _clip2_284, _clip2_284)
+
+    # 284d: the real link behind a wrapper opens in the right-clicked tab's browser
+    del _made284[:]
+    _lm284 = B.QMenu()
+    _back284._link_actions(_lm284, _Req284(
+        link="https://www.google.com/url?q=https%3A%2F%2Freal284.example%2F"))
+    _lr284 = _act284(_lm284, _ui284("linkReal"))
+    if _lr284 is not None:
+        _lr284.trigger()
+    check("284 the real link opens in the browser and group of the tab it was found in",
+          len(_made284) == 1 and _made284[0].get("session")
+          == (getattr(_back284, "session", None) or "main")
+          and "group" in _made284[0], _made284)
+    br.__dict__.pop("new_tab", None)
+
+    # 284e: a tab menu whose tab has gone mutes and closes nothing
+    _calls284 = []
+    br.__dict__["mute_tab"] = lambda i, on=None: _calls284.append(("mute", i))
+    br.__dict__["close_tab"] = lambda i, ask=True, **k: _calls284.append(("close", i))
+    br.solo_audio(-1)
+    br.close_other_tabs(-1)
+    br.close_other_tabs(-1, side="right")
+    check("284 'sound only here' and 'close other tabs' for a tab that has gone do nothing",
+          _calls284 == [], _calls284[:6])
+    br.__dict__.pop("mute_tab", None)
+    br.__dict__.pop("close_tab", None)
+
+    # 284f: Open as app keeps the tab's virtual browser
+    br.sessions.append({"name": "X284", "sid": "x284"})
+    _fake284 = type("V284", (), {"session": "x284", "private": False})()
+    _win284 = br.open_as_app(srv.url("/t284"), view=_fake284)
+    H.spin(800)
+    _cur284 = _win284.current() if _win284 is not None else None
+    check("284 Open as app opens in the tab's own virtual browser",
+          _win284 is not None and _win284.active_session == "x284"
+          and getattr(_cur284, "session", None) == "x284",
+          (getattr(_win284, "active_session", None),
+           getattr(_cur284, "session", None)))
+finally:
+    B.shutil.which = _which284
+    for _k284, _f284 in _real284.items():
+        if _f284 is None:
+            br.__dict__.pop(_k284, None)
+        else:
+            br.__dict__[_k284] = _f284
+    if _win284 is not None:
+        try:
+            _win284.close()
+        except RuntimeError:
+            pass
+        H.spin(300)
+    # the tabs first: closing a browser also drops the private jar, and
+    # the private tab of this section must be gone before that
+    for _v284 in _open284:
+        _close_if_open(_v284)
+    H.spin(300)
+    if any(e.get("sid") == "x284" for e in br.sessions):
+        try:
+            br._close_session("x284")
+        except RuntimeError:
+            pass
+    H.Handler.pages.pop("/t284", None)
+    H.spin(300)
+
+# ---- 283: as_qurl is the one place a value becomes a QUrl (test_barmarks' rule) ----
+import re as _re283
+_src283 = (B.APP_DIR / "browser.py").read_text(encoding="utf-8")
+_a283 = _src283.index("def as_qurl(url):")
+_b283 = _src283.index("def lookalike_warning(host):")
+_out283 = [m.start() for m in _re283.finditer(r"QUrl\(str\(", _src283)
+           if not _a283 < m.start() < _b283]
+check("283 no raw QUrl(str(...)) outside as_qurl", not _out283, len(_out283))
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
