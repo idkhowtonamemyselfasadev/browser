@@ -796,8 +796,9 @@ noted = []
 check("they are noted", win.note_form_values(view=hist,
                                              then=noted.append) is True)
 H.wait_for(lambda: noted, 5000)
+# kept by origin since fix254 (an https page's values never reach http)
 site_rows = win.form_history().get(
-    B.PasswordVault.normalize_host(QUrl(srv.url("/checkout")).host())) or {}
+    win._form_origin(QUrl(srv.url("/checkout")))) or {}
 check("...under the box's name", site_rows.get("city") == ["Hamburg"],
       site_rows)
 H.load(hist, srv.url("/checkout"))

@@ -170,6 +170,8 @@ def ask(storable=True, private=False, key="https://a.test|use the camera"):
     H.spin(150)
     card = win._perm_widget
     buttons = card.findChildren(B.QToolButton) if card is not None else []
+    # a new card takes no click for its first moment (fix261)
+    H.wait_for(lambda: all(b.isEnabled() for b in buttons), 3000)
     return perm, card, buttons
 
 

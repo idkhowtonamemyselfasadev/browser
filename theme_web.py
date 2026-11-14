@@ -111,17 +111,33 @@ def enabled(browser):
     return bool(browser.config.get("themeWeb", True))
 
 
+def _entry(browser, text):
+    """A list entry or a page host as the bare name location.hostname
+    gives: no scheme, port, path, "*." or "www.", and an international
+    name in its xn-- form. The page script compares exactly that, and
+    the lists held what was typed or what Qt hands out (the decoded
+    name), so an entry like that never matched."""
+    return _mod(browser)._site_entry(text)
+
+
+def own_hosts(browser):
+    """The hosts he excluded from the right-click menu, as _entry
+    writes them (so an older entry saved the other way still counts)."""
+    own = browser.config.get("themeWebSkip") or []
+    return [h for h in (_entry(browser, h) for h in own
+                        if isinstance(h, str)) if h]
+
+
 def _skipped(browser):
     """Hosts never themed: dark by design, Google, and his own list."""
     mod = _mod(browser)
-    own = browser.config.get("themeWebSkip") or []
     # ...and Settings' "Sites to leave alone", which said "never
     # darkened or re-themed" and was never read here
     dark = browser.config.get("darkSiteRules") or []
     return sorted(set(mod.NATIVE_DARK_SITES)
-                  | {h for h in own if isinstance(h, str) and h}
-                  | {h.strip().lower().removeprefix("www.") for h in dark
-                     if isinstance(h, str) and h.strip()})
+                  | set(own_hosts(browser))
+                  | {h for h in (_entry(browser, h) for h in dark
+                                 if isinstance(h, str)) if h})
 
 
 def _host(host):
@@ -132,7 +148,7 @@ def themes_host(browser, host):
     """Would a page on this host be themed right now?"""
     if not enabled(browser):
         return False
-    host = _host(host)
+    host = _entry(browser, host)
     if not host or re.fullmatch(r"google\.[a-z.]+", host):
         return False
     return not any(host == d or host.endswith("." + d)
@@ -142,14 +158,13 @@ def themes_host(browser, host):
 def toggle_host(browser, host):
     """Exclude a host from theming, or let it be themed again. Returns
     whether it is themed afterwards."""
-    host = _host(host)
-    own = [h for h in (browser.config.get("themeWebSkip") or [])
-           if isinstance(h, str) and h]
+    host = _entry(browser, host)
+    own = own_hosts(browser)
     if host in own:
-        own.remove(host)
+        own = [h for h in own if h != host]
     else:
         own.append(host)
-    browser.config["themeWebSkip"] = sorted(own)
+    browser.config["themeWebSkip"] = sorted(set(own))
     browser.save_config()
     if host not in own:
         # Settings' "Sites to leave alone" held the same host, so taking it
@@ -157,8 +172,7 @@ def toggle_host(browser, host):
         # a themed host is taken off that one too
         dark = [h for h in (browser.config.get("darkSiteRules") or [])
                 if isinstance(h, str)]
-        left = [h for h in dark
-                if h.strip().lower().removeprefix("www.") != host]
+        left = [h for h in dark if _entry(browser, h) != host]
         if len(left) != len(dark):
             setter = getattr(browser, "set_dark_site_rules", None)
             if setter is not None:
@@ -522,7 +536,10 @@ SITE_JS = """(function () {
   var TOK = %(tokens)s;
   var SKIP = %(skip)s;
   var GEN = %(gen)s;          // changes with the theme: see stale()
-  var host = location.hostname.toLowerCase().replace(/^www\\./, "");
+  // the root dot too, as the lists are written: "example.com." was
+  // themed while the menu said the site was left alone
+  var host = location.hostname.toLowerCase().replace(/^www\\./, "")
+    .replace(/\\.$/, "");
   if (/^google\\.[a-z.]+$/.test(host)) return;
   // One run at a time. A live re-theme runs this whole script again
   // in a page the last run is still watching, and the last run's
@@ -587,11 +604,43 @@ SITE_JS = """(function () {
       return { r: +m[1], g: +m[2], b: +m[3], a: isNaN(a) ? 1 : a };
     }
     m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s.trim());
-    if (!m) return null;
+    if (!m) return canvasColor(s);
     var h = m[1];
     if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
     return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16),
              b: parseInt(h.slice(4, 6), 16), a: 1 };
+  }
+  // A computed colour the page wrote as oklch(), lab() or color() (every
+  // Tailwind v4 card) stays in that notation, and the two patterns above
+  // read it as no colour at all: an opaque card counted as transparent,
+  // and its text was judged against the theme's ground instead of the
+  // card. The engine's own canvas turns any colour it knows into bytes.
+  var colCache = new Map(), colCtx = null;
+  function canvasColor(s) {
+    s = (s || "").trim();
+    if (!s || s === "transparent" || s.length > 200
+        || /^(currentcolor|inherit|initial|unset|revert)/i.test(s)) return null;
+    if (colCache.has(s)) return colCache.get(s);
+    var c = null;
+    try {
+      if (!colCtx) {
+        var cv = document.createElement("canvas");
+        cv.width = cv.height = 1;
+        colCtx = cv.getContext("2d", { willReadFrequently: true });
+      }
+      colCtx.clearRect(0, 0, 1, 1);
+      // a string the canvas does not know leaves fillStyle as it was
+      colCtx.fillStyle = "#010203";
+      colCtx.fillStyle = s;
+      if (colCtx.fillStyle !== "#010203") {
+        colCtx.fillRect(0, 0, 1, 1);
+        var d = colCtx.getImageData(0, 0, 1, 1).data;
+        c = { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+      }
+    } catch (e) { c = null; }
+    if (colCache.size >= 300) colCache.clear();
+    colCache.set(s, c);
+    return c;
   }
   function lum(c) { return .2126 * c.r + .7152 * c.g + .0722 * c.b; }
   function chan(v) {
@@ -1020,6 +1069,12 @@ SITE_JS = """(function () {
     for (var p in saved.put)
       if (el.style.getPropertyValue(p) !== saved.put[p]
           || el.style.getPropertyPriority(p) !== "important") {
+        // a value the site wrote here since is the site's now: undo gave
+        // back the snapshot from before and lost it (a toolbar that
+        // turned its icon red came back blue when the theme went off)
+        var site = el.style.getPropertyValue(p);
+        if (site && site !== saved.put[p])
+          saved.inl[p] = [site, el.style.getPropertyPriority(p)];
         saved.reputs = (saved.reputs || 0) + 1;
         stats.reputs++;
         el.style.setProperty(p, saved.put[p], "important");

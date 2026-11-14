@@ -1,5 +1,52 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part forty-eight: forty-fourth to forty-ninth passes)
+
+Six more searches with one subject each: password autofill, the theme
+engine, forms, keys and the mouse, tab groups and split view, and
+permission prompts with notifications. 37 bugs, fixed here:
+
+- **Passwords.** A login saved with no site is offered to no page -- a
+  page at "evil.example." (with the root dot) was offered every one of
+  them.
+- **Website themes.** "Don't theme this site" and "Sites to leave alone"
+  work for international names and for lines typed as an address, a port
+  or a wildcard, and a site left alone is no longer force-darkened
+  instead. Cards painted in oklch()/lab() colours (Tailwind v4) count as
+  the background their text sits on. Turning the theme off gives back the
+  colours a site set while it was themed. The page look reaches the half
+  of a split view, and the evening dim and warmth catch the hour they
+  slept through on a suspended laptop.
+- **Forms.** A draft belongs to its exact page (query and https/http
+  included): a reply typed in one thread no longer appears in another.
+  A sent form's draft is gone, drafts expire after a week, and typing one
+  box before the rest came back no longer loses them. Clearing history,
+  forgetting a site and a virtual browser's exit wipe take drafts and
+  form history with them; form history is kept per origin and never
+  offered to plain http. The username is a text box, not a checkbox; the
+  http form warning works without a password vault; split card expiry
+  boxes get the month and the year each.
+- **Keys and the mouse.** Vim keys and "pages may not grab keys" leave
+  letters typed in web-component inputs alone; gT works; a key he lets a
+  site keep goes to the site and not to the browser's shortcut. Settings
+  sees ctrl+t and Ctrl+T as one key, and a shortcut left unbound is said
+  (once, naming the right action). Side buttons switched off, and spare
+  buttons with an action, work without mouse gestures; a spare button
+  does its action once; only the left button opens a dock pin; a
+  sideways wheel with the right button held does not switch tabs; the
+  Menu key after a gesture still opens the menu.
+- **Tab groups and split view.** A group typed with a name another
+  virtual browser uses gets a name of its own; two windows' groups of one
+  name come back as two, each in its own browser. Closing the last tab
+  beside a split no longer closes the window; a group whose last tab is
+  the split half stays; closing a split puts the tab back at the end of
+  its group. Moving a group to another window keeps the tabs it cannot
+  carry.
+- **Permissions and notifications.** A new permission card ignores
+  clicks for its first moment, so a page cannot time a click onto
+  "Allow". "Never ask about notifications" and game mode silence sites
+  that were allowed before, too.
+
 ## 2026-11-14 — line-by-line review, day 4 (part forty-seven: thirty-seventh to forty-third passes)
 
 Seven more searches with one subject each: notes and the desk, the

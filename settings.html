@@ -6476,6 +6476,25 @@
   // the keys: one row per action, with the key in a box. A key that is
   // already taken by another action is said so and not saved, because a
   // shortcut that quietly shadows another is worse than no shortcut.
+  // a key as Qt would see it: "shift+ctrl+t" and "Ctrl+Shift+T" are one
+  // key, and compared as typed the second was never a clash with the
+  // first (the browser then kept only one of the two, silently)
+  const normKey = (text) => {
+    let t = String(text || "").trim();
+    if (!t) return "";
+    let key = "";
+    if (t === "+") return "+";
+    if (t.endsWith("+")) { key = "+"; t = t.slice(0, -1); }
+    const parts = t.split("+").map((p) => p.trim().toLowerCase())
+      .filter(Boolean);
+    if (!key) key = parts.pop() || "";
+    const alias = {control: "ctrl", option: "alt", esc: "escape",
+                   del: "delete", super: "meta", win: "meta", cmd: "meta"};
+    const mods = new Set(parts.map((p) => alias[p] || p));
+    key = alias[key] || key;
+    return ["ctrl", "alt", "shift", "meta"].filter((m) => mods.has(m))
+      .concat([key]).join("+");
+  };
   window.renderKeys = function (actions) {
     const box = document.getElementById("keyseditor");
     if (!box) return;
@@ -6510,7 +6529,8 @@
         // could take that key
         const clash = (window._keyActions || []).find(
           (o) => o.id !== a.id && want
-                 && (typeof o.key === "string" ? o.key : o.default) === want);
+                 && normKey(typeof o.key === "string" ? o.key : o.default)
+                    === normKey(want));
         if (clash) {
           sub.textContent = clash.name;
           input.value = a.key || "";

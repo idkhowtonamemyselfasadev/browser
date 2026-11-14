@@ -1238,6 +1238,7 @@ _once = _card.findChild(B.QToolButton, "permonce") if _card is not None \
 check("a site asking for notifications gets a card with 'this time'",
       _once is not None)
 if _once is not None:
+    H.wait_for(lambda: _once.isEnabled(), 3000)   # fix261's moment
     _once.click(); H.spin(800)
 check("...and 'this time' answers it", H.js(v19, "window.asked") == "granted",
       str(H.js(v19, "window.asked")))
@@ -1256,6 +1257,7 @@ check("...so the next visit, in a new tab, asks again",
 if _card2 is not None:
     _deny = _card2.findChild(B.QToolButton, "permdeny")
     if _deny is not None:
+        H.wait_for(lambda: _deny.isEnabled(), 3000)
         _deny.click(); H.spin(400)
 
 # the status line shows where a link goes as text, never as markup
@@ -2010,7 +2012,8 @@ _fh_on = br.config.get("formHistoryOn")
 br.config["formHistoryOn"] = True
 _fh = br.form_history()
 _fh_was = dict(_fh)
-_fh["127.0.0.1"] = {"who": ["me@example.invalid"]}
+# kept by origin since fix254 (a host-only row is offered to https only)
+_fh[br._form_origin(B.QUrl(srv.url("/")))] = {"who": ["me@example.invalid"]}
 _pv = br.new_tab(private=True); H.spin(300)
 H.load(_pv, srv.url("/twhome")); H.spin(500)
 _offered_priv = br.offer_form_history(view=_pv)
@@ -2914,6 +2917,7 @@ H.spin(300)
 _pc = getattr(br, "_perm_widget", None)
 _pa = _pc.findChild(B.QToolButton, "permallow") if _pc is not None else None
 if _pa is not None:
+    H.wait_for(lambda: _pa.isEnabled(), 3000)
     _pa.click(); H.spin(500)
 check("a private tab's permission answer is not logged in config.json",
       _pa is not None and _rq.answer is True
@@ -14222,6 +14226,1269 @@ br.forget_site("fp248.example")
 check("248 forgetting a site forgets what its private tabs were allowed",
       _pk248 not in br._private_perms, str(list(br._private_perms)[:5]))
 br._private_perms.pop(_pk248, None)
+
+# ---- 249: a vault row with no site fills no page, a dotted host included ----
+class _V249:
+    normalize_host = B.PasswordVault.normalize_host
+
+    def logins(self):
+        return [{"host": "", "scheme": "https", "username": "nosite249",
+                 "used": 2},
+                {"host": "bank249.example", "scheme": "https",
+                 "username": "bank249", "used": 1}]
+
+
+_e1 = [e["username"] for e in
+       B.PasswordVault.entries_for(_V249(), "evil249.example.", "https")]
+_e2 = [e["username"] for e in
+       B.PasswordVault.entries_for(_V249(), "x.bank249.example", "https")]
+check("249 a login with no site is offered to no page (not 'evil.example.')",
+      _e1 == [] and _e2 == ["bank249"], str((_e1, _e2)))
+
+# ---- 250-252: the 45th pass: theme exclusions, colours, undo, look ----
+_ABSENT252 = "__absent__"
+
+
+def _cfg252(keys):
+    return {k: br.config.get(k, _ABSENT252) for k in keys}
+
+
+def _restore252(saved):
+    for k, v in saved.items():
+        if v == _ABSENT252:
+            br.config.pop(k, None)
+        else:
+            br.config[k] = v
+
+
+# 250: both exclusion lists are bare ACE hosts, however they were written
+_keys250 = ("themeWeb", "themeWebSkip", "darkSiteRules")
+_old250 = _cfg252(_keys250)
+_ace250 = "bücher250.example".encode("idna").decode()
+_acet250 = "tür250.example".encode("idna").decode()
+try:
+    br.config["themeWeb"] = True
+    br.config["themeWebSkip"] = ["https://Bücher250.example/path",
+                                 "Www.Other250.example:8080"]
+    br.config["darkSiteRules"] = ["*.Tür250.example"]
+    _skip250 = B.theme_web._skipped(br)
+    check("250 a typed or Unicode entry reaches the page script as its "
+          "bare ACE host",
+          _ace250 in _skip250 and "other250.example" in _skip250
+          and _acet250 in _skip250, str(_skip250))
+    check("250 the script source carries the ACE name, not the Unicode one",
+          json.dumps(_ace250) in B.theme_web._source(br)
+          and "bücher250" not in B.theme_web._source(br))
+    check("250 a page on the Unicode or the ACE host is not themed",
+          not B.theme_web.themes_host(br, "bücher250.example")
+          and not B.theme_web.themes_host(br, _ace250)
+          and not B.theme_web.themes_host(br, "x.other250.example"))
+    check("250 site_left_alone folds the page host the same way",
+          br.site_left_alone("tür250.example")
+          and br.site_left_alone("sub.tür250.example"))
+    br.set_dark_site_rules(["https://Foo250.example/x", "Bücher250.example:81",
+                            "  "])
+    check("250 set_dark_site_rules stores bare ACE hosts",
+          br.config.get("darkSiteRules") == ["foo250.example", _ace250],
+          str(br.config.get("darkSiteRules")))
+    _themed250 = B.theme_web.toggle_host(br, "bücher250.example")
+    check("250 'Theme this site' on an IDN host removes its entry",
+          _themed250 is True and _ace250 not in B.theme_web.own_hosts(br)
+          and _ace250 not in (br.config.get("darkSiteRules") or []),
+          str((_themed250, br.config.get("themeWebSkip"))))
+finally:
+    _restore252(_old250)
+    br.set_dark_site_rules(br.config.get("darkSiteRules") or [])
+    _restore252(_old250)
+    br.save_config()
+
+# 251: oklch()/lab() colours are read, and undo keeps the site's latest value
+_v251 = br.new_tab(url=srv.url("/twhome"), switch=False)
+try:
+    H.wait_for(lambda: "twhome" in _v251.url().toString(), 8000)
+    H.spin(500)
+    _js251 = B.theme_web.SITE_JS.replace("%%", "%")
+    _pa251 = _js251.index("  function parseColor(s) {")
+    _pb251 = _js251.index("  function lum(c)")
+    _got251 = H.js(_v251, "(function(){" + _js251[_pa251:_pb251] + """
+      return JSON.stringify([parseColor('oklch(0.97 0 0)'),
+        parseColor('rgb(1, 2, 3)'), parseColor('rgba(0, 0, 0, 0)'),
+        parseColor('transparent'), parseColor('nonsense'),
+        parseColor('#abc'), parseColor('lab(50 0 0)')]);})()""")
+    _c251 = json.loads(_got251)
+    check("251 an oklch() colour is read as an opaque grey",
+          _c251[0] is not None and 238 <= _c251[0]["r"] <= 252
+          and _c251[0]["a"] == 1, _got251)
+    check("251 a lab() colour is read too",
+          _c251[6] is not None and 90 <= _c251[6]["g"] <= 140, _got251)
+    check("251 rgb(), rgba(), #hex, transparent and nonsense read as before",
+          _c251[1] == {"r": 1, "g": 2, "b": 3, "a": 1}
+          and _c251[2]["a"] == 0 and _c251[3] is None and _c251[4] is None
+          and _c251[5] == {"r": 170, "g": 187, "b": 204, "a": 1}, _got251)
+    _ra251 = _js251.index("  // a re-theme (dark to light)")
+    _rb251 = _js251.index("  // Has the page moved under us")
+    _undo251 = H.js(_v251, "(function(){var PROPS=['color'], "
+                    "orig=new WeakMap(), stats={reputs:0};"
+                    + _js251[_ra251:_rb251] + """
+      var el=document.createElement('div');
+      el.style.setProperty('color','blue');
+      var saved={inl:{color:[el.style.getPropertyValue('color'),'']},
+                 set:false, put:{}};
+      orig.set(el, saved);
+      put(el, saved, 'color', 'red');
+      el.style.setProperty('color', 'green');
+      reput(el);
+      var themed=el.style.getPropertyValue('color')+' '
+                 +el.style.getPropertyPriority('color');
+      restore(el, saved);
+      return [themed, el.style.getPropertyValue('color')];})()""")
+    check("251 undo gives back the colour the site set while themed",
+          _undo251 == ["red important", "green"], str(_undo251))
+finally:
+    _close_if_open(_v251)
+
+# 252: force-dark honours "leave alone"; the split half; the evening edge
+_keys252 = ("themeWeb", "darkSiteRules", "nightDim")
+_old252 = _cfg252(_keys252)
+br.force_dark_on = lambda: True
+try:
+    br.config["themeWeb"] = False
+    br.config["darkSiteRules"] = ["left252.example"]
+    _q252 = B.QUrl("https://left252.example/")
+    _o252 = B.QUrl("https://other252.example/")
+    check("252 a site on 'leave alone' is neither themed nor force-darkened",
+          br.page_darkening(_q252) == "none"
+          and br.page_darkening(B.QUrl("https://a.left252.example/"))
+          == "none", br.page_darkening(_q252))
+    check("252 any other site is still force-darkened",
+          br.page_darkening(_o252) == "force", br.page_darkening(_o252))
+finally:
+    br.__dict__.pop("force_dark_on", None)
+    _restore252(_old252)
+
+
+class _Page252:
+    def __init__(self):
+        self.ran = []
+
+    def runJavaScript(self, src, world=None, cb=None):
+        self.ran.append(src)
+
+
+class _Split252:
+    def __init__(self):
+        self._p = _Page252()
+
+    def page(self):
+        return self._p
+
+
+_split252 = _Split252()
+_oldsplit252 = getattr(br, "_split_view", None)
+br._split_view = _split252
+try:
+    br.refresh_page_look()
+    check("252 the live page look reaches the half of a split view",
+          bool(_split252._p.ran), str(len(_split252._p.ran)))
+finally:
+    br._split_view = _oldsplit252
+
+_calls252 = []
+try:
+    br.config["nightDim"] = 20
+    br._arm_evening_timer()
+    _watch252 = getattr(br, "_evening_watch", None)
+    check("252 a repeating check of the clock runs while the dimmer is on",
+          _watch252 is not None and _watch252.isActive()
+          and _watch252.interval() <= 60000, str(_watch252))
+    br.refresh_page_look = lambda live=True: _calls252.append(1)
+    now252 = B.evening_now(br.config)
+    br._evening_applied = now252
+    br._evening_recheck()
+    _quiet252 = len(_calls252)
+    br._evening_applied = not now252
+    br._evening_recheck()
+    check("252 the check refreshes the pages only when the evening changed",
+          _quiet252 == 0 and len(_calls252) == 1,
+          str((_quiet252, len(_calls252))))
+except AttributeError as e:
+    check("252 the check refreshes the pages only when the evening changed",
+          False, repr(e)[:80])
+finally:
+    br.__dict__.pop("refresh_page_look", None)
+    _restore252(_old252)
+    br._arm_evening_timer()
+
+# ---- 253-255: forms, the 46th pass ----
+import copy as _copy253
+
+
+class _Page253:
+    pass
+
+
+class _View253:
+    """A tab as far as the form code asks: an address, a private flag."""
+    def __init__(self, url, private=False):
+        self._u = B.QUrl(url)
+        self.private = private
+        self._pg = _Page253()
+
+    def url(self):
+        return self._u
+
+    def page(self):
+        return self._pg
+
+
+def _keys253(*urls):
+    return [br._draft_key(_View253(u)) for u in urls]
+
+
+# 253: the key is the page, not host+path
+_k253 = _keys253("https://f253.example/thread?id=5",
+                 "https://f253.example/thread?id=9",
+                 "https://f253.example/thread?id=5&utm_source=x&fbclid=1",
+                 "http://f253.example/thread?id=5",
+                 "https://f253.example:8443/thread?id=5",
+                 "https://f253.example/thread")
+_long253 = br._draft_key(_View253("https://f253.example/" + "p" * 400
+                                  + "?id=5"))
+check("253 a draft key tells apart the query, the scheme and the port",
+      _k253[0] != _k253[1] and _k253[0] == _k253[2]
+      and len({_k253[0], _k253[3], _k253[4], _k253[5]}) == 4
+      and len(_long253) <= 200
+      and _long253 != br._draft_key(_View253(
+          "https://f253.example/" + "p" * 400 + "?id=6")),
+      str(_k253))
+
+_cfg253 = {n: _copy253.deepcopy(br.config.get(n, "__absent__"))
+           for n in ("formDrafts", "formDraftsOn", "formHistory",
+                     "formHistoryOn", "warnForms")}
+
+
+def _restore_cfg253():
+    for n, v in _cfg253.items():
+        if v == "__absent__":
+            br.config.pop(n, None)
+        else:
+            br.config[n] = _copy253.deepcopy(v)
+
+
+def _fake_ft253(replies, seen):
+    def ft(name, view=None, then=None, arg=None):
+        seen.append((name, arg))
+        out = replies.get(name, "0" if name == "restoreform" else "[]")
+        if isinstance(out, list):
+            out = out.pop(0) if len(out) > 1 else out[0]
+        if then:
+            then(out)
+        return True
+    return ft
+
+
+br.save_config = lambda *a, **k: None
+try:
+    br.config["formDraftsOn"] = True
+    # 253: a sent form drops its draft; an old one is not put back
+    _v253 = _View253("https://f253.example/contact")
+    _key253 = br._draft_key(_v253)
+    _rows253 = [{"key": "#msg", "value": "already sent text"}]
+    br.config["formDrafts"] = {_key253: {"rows": _rows253,
+                                         "when": int(_time.time())}}
+    _seen253 = []
+    br.form_tool = _fake_ft253({"formvalues": json.dumps(_rows253)},
+                               _seen253)
+    _sent = getattr(br, "_form_sent", None)
+
+    class _Self253:
+        browser = br
+        _view = _v253
+        console_log = []
+
+    class _Lvl253:
+        name = "InfoMessageLevel"
+    try:
+        B.WebPage.javaScriptConsoleMessage(_Self253, _Lvl253, "browser-form-sent",
+                                           1, "")
+    except Exception:
+        pass
+    _gone253 = _key253 not in br.form_drafts()
+    check("253 a sent form's draft is dropped (the page tells the console hook)",
+          _gone253 and not _Self253.console_log,
+          str((_gone253, _Self253.console_log)))
+    # the script that says so is in the page tools
+    check("253 the page tools watch for a sent form",
+          "browser-form-sent" in B.FORM_TOOLS.get("formvalues", "")
+          and "browser-form-sent" in B.FORM_TOOLS.get("restoreform", "")
+          or "browser-form-sent" in getattr(B, "FORM_PICK", ""))
+    # a text that is still standing in the boxes of a page that stayed is
+    # not written down again
+    _t253 = []
+    br.save_form_draft(view=_v253, then=_t253.append)
+    check("253 ...and the text still in its boxes is not saved again",
+          _key253 not in br.form_drafts(), str(list(br.form_drafts())))
+    # a week old: not put back
+    br.config["formDrafts"] = {_key253: {"rows": _rows253,
+                                         "when": int(_time.time())
+                                         - 8 * 86400}}
+    _seen253.clear()
+    br.restore_form_draft(view=_v253)
+    _stale_used = any(n == "restoreform" for n, _a in _seen253)
+    br.config["formDrafts"] = {_key253: {"rows": _rows253,
+                                         "when": int(_time.time())}}
+    _seen253.clear()
+    br.restore_form_draft(view=_v253)
+    _fresh_used = any(n == "restoreform" for n, _a in _seen253)
+    check("253 a draft older than a week is not restored, a fresh one is",
+          _fresh_used and not _stale_used, str((_fresh_used, _stale_used)))
+    # saving drops the stale ones
+    br.config["formDrafts"] = {"old/x": {"rows": _rows253, "when": 1},
+                               "https://other.example/": {
+                                   "rows": _rows253, "when": 1}}
+    _v253b = _View253("https://f253b.example/c")
+    br.form_tool = _fake_ft253({"formvalues": json.dumps(
+        [{"key": "#a", "value": "typed"}])}, _seen253)
+    br.save_form_draft(view=_v253b)
+    check("253 saving a draft expires the ones older than a week",
+          list(br.form_drafts()) == [br._draft_key(_v253b)],
+          str(list(br.form_drafts())))
+
+    # 253: a box typed in before the restore found the others is merged
+    _v253c = _View253("https://f253c.example/c")
+    _key253c = br._draft_key(_v253c)
+    br.config["formDrafts"] = {_key253c: {"when": int(_time.time()), "rows": [
+        {"key": "#a", "value": "one"}, {"key": "#b", "value": "two"},
+        {"key": "#c", "value": "three"}]}}
+    br.form_tool = _fake_ft253({"formvalues": json.dumps(
+        [{"key": "#b", "value": "two, longer"}])}, _seen253)
+    _v253c._draft_pending = _key253c
+    br.save_form_draft(view=_v253c)
+    _rows_c = {r["key"]: r["value"] for r in
+               br.form_drafts().get(_key253c, {}).get("rows", [])}
+    check("253 until a restore worked, typing one box adds to the draft",
+          _rows_c == {"#a": "one", "#b": "two, longer", "#c": "three"},
+          str(_rows_c))
+    # ...and the restore asks again while the boxes are missing
+    _asked253 = []
+
+    def _late253(name, view=None, then=None, arg=None):
+        if name == "restoreform":
+            _asked253.append(1)
+            if then:
+                then("0" if len(_asked253) < 2 else "3")
+        return True
+    br.form_tool = _late253
+    _retry = getattr(br, "_restore_with_retries", None)
+    if _retry:
+        _retry(_v253c)
+        H.wait_for(lambda: len(_asked253) >= 2, 5000)
+    check("253 a restore that found no boxes is tried again",
+          len(_asked253) >= 2 and _v253c._draft_pending is None,
+          str((_asked253, _v253c._draft_pending)))
+finally:
+    br.__dict__.pop("form_tool", None)
+    br.__dict__.pop("save_config", None)
+    _restore_cfg253()
+
+# 254: clear history, forget site and the per-browser wipe take the form data
+_cfg254 = {n: _copy253.deepcopy(br.config.get(n, "__absent__"))
+           for n in ("formDrafts", "formHistory")}
+
+
+def _rows254():
+    br.config["formDrafts"] = {
+        "https://a254.example/p": {"rows": [], "when": 9},
+        "http://sub.a254.example:8080/x": {"rows": [], "when": 9},
+        "a254.example/old": {"rows": [], "when": 9},
+        "https://nota254.example/p": {"rows": [], "when": 9}}
+    br.config["formHistory"] = {
+        "https://a254.example": {"city": ["Berlin"]},
+        "http://x.a254.example:81": {"city": ["Bonn"]},
+        "a254.example": {"city": ["Ulm"]},
+        "nota254.example": {"city": ["Kiel"]}}
+
+
+try:
+    _rows254()
+    br._forget_history_extras(None)
+    check("254 clearing the history clears the drafts and the box values",
+          not br.config.get("formDrafts") and not br.config.get("formHistory"),
+          str((br.config.get("formDrafts"), br.config.get("formHistory"))))
+    _rows254()
+    br.forget_site("a254.example")
+    check("254 forgetting a site forgets its drafts and box values, "
+          "subdomains too, never a name that only ends the same way",
+          list(br.config.get("formDrafts", {})) ==
+          ["https://nota254.example/p"]
+          and list(br.config.get("formHistory", {})) == ["nota254.example"],
+          str((list(br.config.get("formDrafts", {})),
+               list(br.config.get("formHistory", {})))))
+    _rows254()
+    br.clear_form_history("a254.example")
+    check("254 'clear this site's values' takes its subdomains and both key shapes",
+          list(br.config.get("formHistory", {})) == ["nota254.example"],
+          str(list(br.config.get("formHistory", {}))))
+    # one virtual browser's history wiped: the form data of the sites only it visited
+    _rows254()
+    br.config["formHistory"] = {"https://sess254.example": {"c": ["x"]},
+                                "https://main254.example": {"c": ["y"]}}
+    br.config["formDrafts"] = {}
+    _hist254 = br.history
+    br.save_history = lambda *a, **k: None
+    br.history = [
+        {"url": "https://sess254.example/", "t": 1, "s": "s254"},
+        {"url": "https://main254.example/", "t": 2}]
+    try:
+        br._forget_session_history("s254")
+    except Exception as e:
+        print("   (session wipe raised %r)" % (e,))
+    finally:
+        br.history = _hist254
+        br.__dict__.pop("save_history", None)
+    check("254 a virtual browser's history wipe takes the box values of its sites only",
+          list(br.config.get("formHistory", {})) ==
+          ["https://main254.example"],
+          str(list(br.config.get("formHistory", {}))))
+
+    # 254: box values by origin; old host rows only on https
+    br.config["formHistory"] = {"old254.example": {"name": ["Old"]}}
+    br.config["formHistoryOn"] = True
+    br.save_config = lambda *a, **k: None
+    _sec = _View253("https://h254.example/")
+    _plain = _View253("http://h254.example/")
+    _seen254 = []
+    br.form_tool = _fake_ft253({"formvalues": json.dumps(
+        [{"key": "#city", "value": "Berlin"}])}, _seen254)
+    br.note_form_values(view=_sec)
+    _tab254 = list(br.config["formHistory"])
+    _seen254.clear()
+    br.config["formHistory"]["https://old254.example"] = {"x": ["y"]}
+    _got_plain = br.offer_form_history(view=_plain)
+    _got_sec = br.offer_form_history(view=_sec)
+    _args = [a for n, a in _seen254 if n == "suggest"]
+    br.config["formHistory"]["old254.example"] = {"name": ["Old"]}
+    _seen254.clear()
+    br.offer_form_history(view=_View253("https://old254.example/"))
+    _old_https = [a for n, a in _seen254 if n == "suggest"]
+    _seen254.clear()
+    _old_http = br.offer_form_history(view=_View253("http://old254.example/"))
+    check("254 box values are kept per origin, and an https page's are not offered to http",
+          "https://h254.example" in _tab254 and "h254.example" not in _tab254
+          and _got_plain is False and _got_sec is True
+          and _args and "city" in _args[0],
+          str((_tab254, _got_plain, _got_sec, _args)))
+    check("254 old host-keyed values are offered to https pages only",
+          _old_https and _old_https[0].get("name") == ["Old"]
+          and _old_http is False, str((_old_https, _old_http)))
+finally:
+    br.__dict__.pop("form_tool", None)
+    br.__dict__.pop("save_config", None)
+    for n, v in _cfg254.items():
+        if v == "__absent__":
+            br.config.pop(n, None)
+        else:
+            br.config[n] = _copy253.deepcopy(v)
+    _restore_cfg253()
+
+# 255: the warning without a vault; the username box; split card expiry
+_warned255 = []
+_real_vault255 = br.vault
+_real_warn255 = br.warn_about_form
+try:
+    br.vault = None
+    br.config["warnForms"] = True
+    br.config["formDraftsOn"] = False
+    br.config["formHistoryOn"] = False
+    br.form_tool = lambda *a, **k: True
+    br.warn_about_form = lambda view=None, then=None: _warned255.append(1)
+    br._form_settled(_View253("http://w255.example/login"))
+    check("255 the form warning is run with no vault", _warned255 == [1],
+          str(_warned255))
+    br.__dict__.pop("warn_about_form", None)
+    _flashed255 = []
+    _real_flash255 = br.flash
+    br.flash = lambda text, ms=2600: _flashed255.append(text)
+    br.form_facts = lambda view=None, then=None: then(
+        {"passwords": 1, "insecure": True, "signup": True}) or True
+    _said255 = []
+    br.warn_about_form(view=_View253("http://w255.example/login"),
+                       then=_said255.append)
+    check("255 ...and with no vault it says the http warning, not the account hint",
+          _said255 == [["insecure"]], str(_said255))
+finally:
+    br.vault = _real_vault255
+    for n in ("form_tool", "warn_about_form", "form_facts", "flash"):
+        br.__dict__.pop(n, None)
+    _restore_cfg253()
+
+_f255 = br.new_tab(url=srv.url("/twhome"), switch=False)
+H.wait_for(lambda: "/twhome" in _f255.url().toString(), 8000)
+H.spin(300)
+try:
+    jsq(_f255, "document.body.innerHTML = '<form id=f method=post>"
+        "<input type=checkbox name=remember_login>"
+        "<input type=search name=q placeholder=\"search account\">"
+        "<input type=text name=email value=me@f255.example>"
+        "<input type=password name=pw></form>'", B.MAIN_WORLD_ID)
+    _facts255 = []
+    br.form_facts(view=_f255, then=_facts255.append)
+    H.wait_for(lambda: _facts255, 5000)
+    check("255 the username is a text box, not a checkbox or a search box",
+          _facts255 and _facts255[0].get("username") == "me@f255.example",
+          str(_facts255))
+    jsq(_f255, "document.body.innerHTML = '<form>"
+        "<input id=num name=cardnumber autocomplete=cc-number>"
+        "<select id=mm name=expmonth autocomplete=cc-exp-month>"
+        "<option value=\"\">MM</option><option value=01>01</option>"
+        "<option value=12>12</option></select>"
+        "<input id=yr name=expyear autocomplete=cc-exp-year>"
+        "<input id=cv name=cvc></form>'", B.MAIN_WORLD_ID)
+    _card255 = []
+    br.form_tool("fillcard", view=_f255, then=_card255.append,
+                 arg={"number": "4111111111111111", "expiry": "12/27",
+                      "cvv": "123"})
+    H.wait_for(lambda: _card255, 5000)
+    # (id "yr": an id of "yy" asks for two digits, and gets them)
+    _vals255 = jsq(_f255, "[mm.value, yr.value, cv.value].join('|')",
+                   B.MAIN_WORLD_ID)
+    check("255 a card's month and year go into split boxes, each its own",
+          _vals255 == "12|2027|123", str(_vals255))
+    jsq(_f255, "document.body.innerHTML = '<form>"
+        "<input id=ex name=expiry placeholder=\"MM/YY\"></form>'",
+        B.MAIN_WORLD_ID)
+    _card255.clear()
+    br.form_tool("fillcard", view=_f255, then=_card255.append,
+                 arg={"expiry": "12/27"})
+    H.wait_for(lambda: _card255, 5000)
+    check("255 ...and a one-box expiry still gets MM/YY",
+          jsq(_f255, "ex.value", B.MAIN_WORLD_ID) == "12/27")
+    # the real page: a sent form drops the draft through the console
+    br.config["formDraftsOn"] = True
+    jsq(_f255, "document.body.innerHTML = '<form id=f method=post "
+        "onsubmit=\"return false\"><textarea id=msg></textarea></form>'",
+        B.MAIN_WORLD_ID)
+    _key255 = br._draft_key(_f255)
+    br.form_drafts()[_key255] = {"rows": [{"key": "#msg", "value": "hi"}],
+                                 "when": int(_time.time())}
+    br.form_tool("formvalues", view=_f255)
+    H.spin(300)
+    jsq(_f255, "document.getElementById('f').dispatchEvent("
+        "new Event('submit', {bubbles: true, cancelable: true}))",
+        B.MAIN_WORLD_ID)
+    check("253 a form sent in a real page drops its draft",
+          H.wait_for(lambda: _key255 not in br.form_drafts(), 3000),
+          str(list(br.form_drafts())))
+finally:
+    _restore_cfg253()
+    br.close_tab(br.tabs.indexOf(_f255), ask=False)
+
+# ---- 253b: old draft keys, partial restores, formmethod, sealed history ----
+check("253b an old draft key whose path holds '://' still names its site",
+      B.Browser._form_key_host("web.archive.org/web/2020/http://x.example/")
+      == "web.archive.org"
+      and B.Browser._form_key_host("https://new253b.example:8443/p?1")
+      == "new253b.example")
+_v253b = br.new_tab(url=srv.url("/twhome"), switch=False)
+H.wait_for(lambda: "/twhome" in _v253b.url().toString(), 8000)
+H.spin(200)
+_drafts_was253b = json.loads(json.dumps(br.config.get("formDrafts") or {}))
+try:
+    _k253b = br._draft_key(_v253b)
+    br.config["formDrafts"] = {_k253b: {
+        "rows": [["#a", "one"], ["#b", "two"], ["#c", "three"]],
+        "when": int(_time.time())}}
+    _fills253b = [1]
+    br.form_tool = lambda name, view=None, then=None, arg=None: (
+        then(str(_fills253b[0])) if then else None) or True
+    br.flash = lambda *a, **k: None
+    _v253b._draft_pending = _k253b
+    br.restore_form_draft(view=_v253b, quiet=True)
+    _after_one = getattr(_v253b, "_draft_pending", None)
+    _fills253b[0] = 3
+    br.restore_form_draft(view=_v253b, quiet=True)
+    _after_all = getattr(_v253b, "_draft_pending", None)
+finally:
+    for _n in ("form_tool", "flash"):
+        br.__dict__.pop(_n, None)
+    br.config["formDrafts"] = _drafts_was253b
+check("253b a draft half restored keeps merging; all of it back ends that",
+      _after_one == _k253b and _after_all is None,
+      str((_after_one, _after_all)))
+_close_if_open(_v253b)
+check("253b a submit button's formmethod=post counts as a sent form",
+      'getAttribute("formmethod")' in B.FORM_PICK)
+_fh_was253b = json.loads(json.dumps(br.config.get("formHistory") or {}))
+_lock_was253b = getattr(br, "_history_locked", False)
+try:
+    br.config["formHistory"] = {"https://locked253b.example": {"q": ["x"]}}
+    br._history_locked = True
+    _gone253b = br._forget_form_data_after(
+        [{"url": "https://locked253b.example/a"}])
+    _kept253b = "https://locked253b.example" in br.config["formHistory"]
+finally:
+    br._history_locked = _lock_was253b
+    br.config["formHistory"] = _fh_was253b
+check("253b with sealed history locked, a session wipe keeps form data",
+      _gone253b is False and _kept253b, str((_gone253b, _kept253b)))
+
+# ---- 256-258: the 47th pass (keys and input) ----
+# Appended to tests/test_review.py, above the closing "the suite's own window"
+# check. Uses H, B, br, srv, check, jsq, json, _close_if_open from above.
+from PyQt6.QtGui import (QMouseEvent as _QME258, QWheelEvent as _QWE258,
+                         QKeyEvent as _QKE258,
+                         QContextMenuEvent as _QCM258)
+from PyQt6.QtCore import QPointF as _QPF258, QPoint as _QP258, \
+    QObject as _QO258
+from PyQt6.QtTest import QTest as _QT258
+
+# 256: a key typed into a field inside a shadow root is typing, for the vim
+# keys and for noKeyGrab; and "g" then Shift+T is still gT
+_vim_was258 = br.config.get("vimKeys", False)
+_nav_was258 = br.config.get("nav")
+br.config["vimKeys"] = True
+br.config["nav"] = {"noKeyGrab": True}
+br.refresh_nav()
+_v258 = br.new_tab(url=srv.url("/twhome?k258"), switch=True)
+H.spin(1200)
+jsq(_v258, "(function(){var h=document.createElement('div');"
+           "h.id='h258';document.body.appendChild(h);"
+           "var r=h.attachShadow({mode:'open'});"
+           "var i=document.createElement('input');r.appendChild(i);"
+           "window.seen258=0;"
+           "i.addEventListener('keydown',function(){window.seen258++});"
+           "i.focus();return 1})()")
+_w258 = _v258.focusProxy() or _v258
+_w258.setFocus()
+H.spin(150)
+_QT258.keyClick(_w258, B.Qt.Key.Key_J)
+H.spin(300)
+_got258 = jsq(_v258, "[document.getElementById('h258').shadowRoot"
+                     ".firstChild.value, window.seen258]")
+check("256 a letter typed in a shadow-root input is kept, and the page's own "
+      "handler on it still runs (vim keys and noKeyGrab on)",
+      _got258 == ["j", 1], str(_got258))
+H.load(_v258, srv.url("/twhome?g258"))
+H.spin(800)
+jsq(_v258, "document.activeElement && document.activeElement.blur()")
+_w258 = _v258.focusProxy() or _v258
+_w258.setFocus()
+H.spin(150)
+jsq(_v258, "window.__navTabStep = 0", B.APP_WORLD_ID)
+_QT258.keyClick(_w258, B.Qt.Key.Key_G)
+_QT258.keyPress(_w258, B.Qt.Key.Key_Shift)
+# the character itself: Key_T with Shift sends the text "t" (a gt), while
+# a real Shift+T sends "T"
+_QT258.keyClick(_w258, "T", B.Qt.KeyboardModifier.ShiftModifier)
+_QT258.keyRelease(_w258, B.Qt.Key.Key_Shift)
+# the keys reach the page's script a moment later, under load more so
+H.wait_for(lambda: jsq(_v258, "window.__navTabStep", B.APP_WORLD_ID) == -1,
+           3000)
+_step258 = jsq(_v258, "window.__navTabStep", B.APP_WORLD_ID)
+check("256 gT: the Shift key's own keydown does not clear the pending g",
+      _step258 == -1, str(_step258))
+br.config["vimKeys"] = _vim_was258
+if _nav_was258 is None:
+    br.config.pop("nav", None)
+else:
+    br.config["nav"] = _nav_was258
+br.refresh_nav()
+_close_if_open(_v258)
+
+# 256: a key a site keeps is declined as a shortcut (ShortcutOverride accepted)
+_kt_was258 = br.config.get("keysThrough")
+_kv258 = br.new_tab(url=srv.url("/twhome?kt258"), switch=False)
+H.wait_for(lambda: "kt258" in _kv258.url().toString(), 8000)
+H.spin(200)
+_host258 = br._host_of(_kv258.url())
+br.config["keysThrough"] = {_host258: ["Ctrl+K"]}
+_mw258 = B.MouseWatch(br)
+_o258 = _QO258()
+_mw258.views[_o258] = _kv258
+_res258 = []
+for _key258 in (B.Qt.Key.Key_K, B.Qt.Key.Key_J):
+    _ev258 = _QKE258(B.QEvent.Type.ShortcutOverride, _key258,
+                     B.Qt.KeyboardModifier.ControlModifier)
+    _ev258.ignore()
+    _res258.append((bool(_mw258._watch(_o258, _ev258)), _ev258.isAccepted()))
+if _kt_was258 is None:
+    br.config.pop("keysThrough", None)
+else:
+    br.config["keysThrough"] = _kt_was258
+_close_if_open(_kv258)
+check("256 keysThrough: the listed key is taken off the browser's shortcuts "
+      "(accepted override), another key is not",
+      _res258 == [(True, True), (False, False)], str(_res258))
+# and the page script no longer stops the key on its way to the page
+check("256 keysThrough: the page script leaves the key to the page",
+      "e.stopPropagation();\n        return;\n      }\n      if ((W.guarded"
+      not in B.NAV_JS)
+
+# 257: the clash check reads keys the way Qt does
+import re as _re258
+_html258 = (_Path(B.__file__).parent / "settings.html").read_text()
+_m258 = _re258.search(r"  const normKey = \(text\) => \{.*?\n  \};\n",
+                      _html258, _re258.S)
+_kn258 = None
+if _m258:
+    _kv2 = br.new_tab(url=srv.url("/twhome?n258"), switch=False)
+    H.spin(500)
+    _kn258 = jsq(_kv2, "(function(){" + _m258.group(0)
+                 + "return [normKey('shift+ctrl+t'), normKey('Ctrl+Shift+T'),"
+                   "normKey('Ctrl++'), normKey('Ctrl+T')]})()")
+    _close_if_open(_kv2)
+check("257 settings: Ctrl+Shift+T and shift+ctrl+t are one key, Ctrl+T is not",
+      _kn258 is not None and _kn258[0] == _kn258[1] != _kn258[3]
+      and _kn258[2] != _kn258[3] and "normKey(want)" in _html258,
+      str(_kn258))
+_sc_was258 = br.config.get("shortcuts")
+_flashed258 = []
+br.__dict__["flash"] = lambda text, ms=2600: _flashed258.append(str(text))
+try:
+    # reopen takes newtab's Ctrl+T: one of the two cannot have it
+    br.config["shortcuts"] = {"reopen": "Ctrl+T"}
+    br.rebind_shortcuts()
+finally:
+    br.__dict__.pop("flash", None)
+    if _sc_was258 is None:
+        br.config.pop("shortcuts", None)
+    else:
+        br.config["shortcuts"] = _sc_was258
+    br.rebind_shortcuts()
+_said258 = br._ui_str("keyClashSkipped").split("%s")[0]
+check("257 a key given to an action that another already has is said, once",
+      len([t for t in _flashed258 if _said258 in t]) == 1, str(_flashed258))
+_ko_was258 = br.config.get("keysOffHere")
+br.config["keysOffHere"] = {"example.com": ["a"], "app.example.com": ["b"],
+                            "WWW.Other.com": ["c"]}
+_off258 = (br.site_keys_off("app.example.com"), br.site_keys_off("x.example.com"),
+           br.site_keys_off("other.com"))
+if _ko_was258 is None:
+    br.config.pop("keysOffHere", None)
+else:
+    br.config["keysOffHere"] = _ko_was258
+check("257 site_keys_off: the most specific host wins, stored hosts are "
+      "normalised", _off258 == (["b"], ["a"], ["c"]), str(_off258))
+
+# 258: the mouse
+_mg_was258 = br.config.get("mouseGestures", False)
+_mb_was258 = br.config.get("mouseButtons", True)
+_eb_was258 = br.config.get("extraButtons", "__absent__")
+br.config["mouseGestures"] = False
+br.config["mouseButtons"] = False
+_mv258 = br.new_tab(url=srv.url("/twhome?m258"), switch=False)
+H.spin(1500)
+_tg258 = _mv258.focusProxy()
+_inst258 = bool(_tg258 is not None and getattr(_tg258, "_mouse_watched", False))
+_again258 = br.watch_view_mouse(_mv258)
+check("258 (5) the filter is on the tabs with gestures off and the side "
+      "buttons switched off", _inst258 and _again258 is True,
+      str((_inst258, _again258)))
+br.config["mouseButtons"] = True
+br.config["extraButtons"] = {"XButton1": "reload"}
+_mw258b = B.MouseWatch(br)
+_ob258 = _QO258()
+_mw258b.views[_ob258] = _mv258
+_acts258 = []
+br.run_mouse_act = lambda act, view=None: _acts258.append(act) or act
+_r258 = []
+try:
+    for _kind258 in (B.QEvent.Type.MouseButtonPress,
+                     B.QEvent.Type.MouseButtonRelease):
+        _e258 = _QME258(_kind258, _QPF258(5, 5), _QPF258(5, 5),
+                        B.Qt.MouseButton.XButton1, B.Qt.MouseButton.NoButton,
+                        B.Qt.KeyboardModifier.NoModifier)
+        _r258.append(bool(_mw258b._watch(_ob258, _e258)))
+finally:
+    br.__dict__.pop("run_mouse_act", None)
+check("258 (5, 6) a spare button's action runs without gestures, press and "
+      "release are both held back, the action runs once",
+      _r258 == [True, True] and _acts258 == ["reload"],
+      str((_r258, _acts258)))
+br.config["mouseGestures"] = _mg_was258
+br.config["mouseButtons"] = _mb_was258
+if _eb_was258 == "__absent__":
+    br.config.pop("extraButtons", None)
+else:
+    br.config["extraButtons"] = _eb_was258
+_close_if_open(_mv258)
+
+class _Br258:
+    def __init__(self):
+        self.opened = []
+        self.browser = self
+
+    def open_pin(self, url, **kw):
+        self.opened.append(url)
+
+
+class _Fake258:
+    def __init__(self):
+        self.browser = _Br258()
+
+    def more_cell(self):
+        return None
+
+    def hit(self, point):
+        return {"url": "https://pin258.example/"}
+
+
+_f258 = _Fake258()
+_got7 = []
+for _btn258 in (B.Qt.MouseButton.XButton1, B.Qt.MouseButton.XButton2,
+                B.Qt.MouseButton.LeftButton):
+    _e258 = _QME258(B.QEvent.Type.MouseButtonPress, _QPF258(5, 5),
+                    _QPF258(5, 5), _btn258, _btn258,
+                    B.Qt.KeyboardModifier.NoModifier)
+    B.Dock.mousePressEvent(_f258, _e258)
+    _got7.append(len(_f258.browser.opened))
+check("258 (7) only the left button opens a dock pin",
+      _got7 == [0, 0, 1], str(_got7))
+
+_mg258 = br.config.get("mouseGestures", False)
+br.config["mouseGestures"] = True
+_t1258 = br.new_tab(url=srv.url("/twhome?w1"), switch=False)
+_t2258 = br.new_tab(url=srv.url("/twhome?w2"), switch=True)
+H.spin(400)
+_mw258c = B.MouseWatch(br)
+_oc258 = _QO258()
+_mw258c.views[_oc258] = _t2258
+_mw258c.right_down = True
+_res9 = []
+for _delta258 in (_QP258(120, 0), _QP258(0, 120)):
+    br.tabs.setCurrentWidget(_t2258)
+    _w258e = _QWE258(_QPF258(5, 5), _QPF258(5, 5), _QP258(0, 0), _delta258,
+                     B.Qt.MouseButton.RightButton,
+                     B.Qt.KeyboardModifier.NoModifier,
+                     B.Qt.ScrollPhase.NoScrollPhase, False)
+    _mw258c.right_down = True
+    _eaten = bool(_mw258c._watch(_oc258, _w258e))
+    _res9.append((_eaten, br.current() is _t2258))
+br.tabs.setCurrentWidget(_t2258)
+_close_if_open(_t1258)
+_close_if_open(_t2258)
+br.config["mouseGestures"] = _mg258
+check("258 (9) a sideways wheel with the right button held is no tab switch; "
+      "an up/down one still is",
+      _res9 == [(False, True), (True, False)], str(_res9))
+
+_mw258d = B.MouseWatch(br)
+_od258 = _QO258()
+_vd258 = br.new_tab(url=srv.url("/twhome?c258"), switch=False)
+_mw258d.views[_od258] = _vd258
+_mg258 = br.config.get("mouseGestures", False)
+br.config["mouseGestures"] = True
+_res10 = []
+for _why258 in (_QCM258.Reason.Keyboard, _QCM258.Reason.Mouse):
+    _mw258d.did_gesture = True
+    _cm258 = _QCM258(_why258, _QP258(3, 3))
+    _res10.append((bool(_mw258d._watch(_od258, _cm258)), _mw258d.did_gesture))
+br.config["mouseGestures"] = _mg258
+_close_if_open(_vd258)
+check("258 (10) the Menu key after a gesture still opens the menu; the "
+      "mouse's own menu request after one is swallowed",
+      _res10 == [(False, False), (True, False)], str(_res10))
+
+# ---- 257b: the clash message names the action left without the key, once ----
+_sc_was257b = br.config.get("shortcuts")
+_fl257b = []
+br.__dict__["flash"] = lambda text, ms=2600: _fl257b.append(str(text))
+try:
+    br.__dict__.pop("_clash_said", None)
+    # newtab (early in the list) takes reopen's Ctrl+Shift+T: reopen loses it
+    br.config["shortcuts"] = {"newtab": "Ctrl+Shift+T"}
+    br.rebind_shortcuts()
+    br.rebind_shortcuts()
+finally:
+    br.__dict__.pop("flash", None)
+    if _sc_was257b is None:
+        br.config.pop("shortcuts", None)
+    else:
+        br.config["shortcuts"] = _sc_was257b
+    br.rebind_shortcuts()
+_reopen257b = br._ui_str("actReopen")
+_newtab257b = br._ui_str("actNewTab")
+check("257b the clash message names the action that lost the key, and only once",
+      len(_fl257b) == 1 and _reopen257b in _fl257b[0]
+      and _newtab257b not in _fl257b[0], str(_fl257b))
+
+
+# ---- 259: tab groups, the 48th pass: names, sessions, the move to a window ----
+def _end259(win):
+    """A second window the section opened, closed without asking."""
+    try:
+        win._closing_anyway = True
+        win.close()
+    except RuntimeError:
+        pass
+
+
+def _idx259(win, view):
+    try:
+        return win.tabs.indexOf(view)
+    except RuntimeError:
+        return -1
+
+
+_NONE259 = object()
+_cfg259 = {k: br.config.get(k, _NONE259) for k in
+           ("tabGroups", "sessionTabs", "sessions")}
+
+# 1: the tab for "Add tab to new group" is found again after the prompt
+_w259 = br.new_window()
+try:
+    H.spin(300)
+    _x259 = _w259.new_tab(url=None, switch=False)
+    _at259 = _w259.tabs.indexOf(_x259)
+
+    def _ask259():
+        _w259.close_tab(_w259.tabs.indexOf(_x259), ask=False)
+        return ("G259a", "#89b4fa")
+
+    _w259._prompt_group = _ask259
+    _err259 = None
+    try:
+        try:
+            _w259._tab_to_new_group(_x259)
+        except TypeError:
+            _w259._tab_to_new_group(_at259)    # the old, index-taking form
+    except Exception as e:
+        _err259 = repr(e)[:80]
+    H.spin(100)
+    check("259 a tab closed under the group prompt leaves no empty header",
+          _err259 is None and "G259a" not in _w259.groups
+          and _w259._header_index("G259a") is None,
+          str((_err259, list(_w259.groups))))
+finally:
+    _w259.__dict__.pop("_prompt_group", None)
+    _end259(_w259)
+
+# 2: "group selection" never joins another virtual browser's group
+_w259 = br.new_window()
+try:
+    H.spin(300)
+    _w259._register_group("W259", "#a6e3a1", session="x259")
+    _v259 = _w259.new_tab(url=None, switch=False)
+    _got259 = _w259.ensure_group("W259")
+    _w259._move_tab_to_group(_w259.tabs.indexOf(_v259), "W259")
+    check("259 ensure_group and _move_tab_to_group keep to the tab's browser",
+          _got259 != "W259"
+          and _w259.group_sessions.get(_got259) == _w259.active_session
+          and getattr(_v259, "group", None) is None
+          and _w259.group_sessions.get("W259") == "x259",
+          str((_got259, getattr(_v259, "group", None))))
+finally:
+    _end259(_w259)
+
+# 3: two windows' same-named groups in different browsers stay two groups
+_wa259 = br.new_window()
+_wb259 = br.new_window()
+_wr259 = br.new_window()
+_sid259 = {"name": "T259", "sid": "x259"}
+try:
+    H.spin(300)
+    _cap259 = {}
+    _wa259._session_rows = lambda: ([{
+        "name": "S259", "color": "#89b4fa", "collapsed": False,
+        "gid": None, "session": "main",
+        "urls": [{"u": "http://a259.example/", "t": "a"}]}], {})
+    _wb259._session_rows = lambda: ([{
+        "name": "S259", "color": "#f38ba8", "collapsed": False,
+        "gid": None, "session": "x259",
+        "urls": [{"u": "http://b259.example/", "t": "b"}]}], {})
+    _wa259._write_session_state = lambda d, s, quiet=False: _cap259.update(
+        d=d)
+    _wa259._save_groups()
+    _rows259 = [e for e in _cap259.get("d", []) if e.get("name") == "S259"]
+    check("259 same-named groups of two browsers are saved as two entries",
+          len(_rows259) == 2
+          and {e.get("session") for e in _rows259} == {"main", "x259"}
+          and all(len(e["urls"]) == 1 for e in _rows259),
+          str([(e.get("session"), len(e["urls"])) for e in _rows259]))
+    # ...and come back as two groups, each tab opened in its own browser
+    _opened259 = []
+    _wr259.sessions.append(_sid259)
+    _wr259.new_tab = lambda *a, **k: _opened259.append(
+        (k.get("group"), k.get("session"))) or None
+    br.config["tabGroups"] = _rows259
+    _wr259._restore_groups()
+    _gs259 = {g: _wr259.group_sessions.get(g) for g in _wr259.groups}
+    check("259 two saved groups of one name come back as two, in their own "
+          "browsers",
+          len(_gs259) == 2 and set(_gs259.values()) == {"main", "x259"}
+          and sorted(_opened259, key=str)
+          == sorted(((g, s) for g, s in _gs259.items()), key=str),
+          str((_gs259, _opened259)))
+finally:
+    for _w in (_wa259, _wb259):
+        _w.__dict__.pop("_session_rows", None)
+    _wa259.__dict__.pop("_write_session_state", None)
+    _wr259.__dict__.pop("new_tab", None)
+    try:
+        _wr259.sessions.remove(_sid259)
+    except ValueError:
+        pass
+    for _k, _o in _cfg259.items():
+        if _o is _NONE259:
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+    for _w in (_wa259, _wb259, _wr259):
+        _end259(_w)
+
+# 7: moving a group to a window closes only the tabs that were carried
+_wg259 = br.new_window()
+_win259 = None
+try:
+    H.spin(300)
+    _wg259._register_group("G259", "#cba6f7")
+    _pa259 = _wg259.new_tab(url=B.QUrl(srv.url("/twhome")), switch=False,
+                            group="G259", at_end=True)
+    _pb259 = _wg259.new_tab(url=None, switch=False, group="G259",
+                            at_end=True)
+    H.wait_for(lambda: "/twhome" in _pa259.url().toString(), 8000)
+    H.spin(200)
+    _skipped259 = len(_wg259.tab_state(
+        indices={_wg259.tabs.indexOf(_pb259)})) == 0
+    _win259 = _wg259.move_group_to_window("G259")
+    H.spin(300)
+    _left259 = (_idx259(_wg259, _pb259) >= 0
+                and getattr(_pb259, "group", None) == "G259")
+    _gone259 = _idx259(_wg259, _pa259) < 0
+    # a group holding only tabs that cannot be carried is not closed
+    _wg259._register_group("E259", "#fab387")
+    _pc259 = _wg259.new_tab(url=None, switch=False, group="E259",
+                            at_end=True)
+    _none259 = _wg259.move_group_to_window("E259")
+    check("259 move_group_to_window keeps the tabs that were not carried",
+          _skipped259 and _win259 is not None and _left259 and _gone259
+          and _none259 is None and _idx259(_wg259, _pc259) >= 0,
+          str((_skipped259, _win259 is not None, _left259, _gone259,
+               _none259, _idx259(_wg259, _pc259))))
+finally:
+    if _win259 is not None:
+        _end259(_win259)
+    _end259(_wg259)
+H.spin(100)
+
+# ---- 260: split view, the 48th pass: the last tab, a group's last tab, the way back ----
+def _mk260():
+    w = br.new_window()
+    H.spin(300)
+    w.show()
+    return w
+
+
+# 4: closing the last strip tab beside a split keeps the window and the half
+_w260 = _mk260()
+try:
+    _t0 = _w260.current()
+    _t1 = _w260.new_tab(url=None, switch=False)
+    _w260.split_view(index=_w260.tabs.indexOf(_t1))
+    H.spin(300)
+    _split260 = _w260._split_view is _t1
+    _w260._closing_anyway = True
+    _w260.close_tab(_w260.tabs.indexOf(_t0), ask=False)
+    H.spin(200)
+    try:
+        _up260 = (_w260 in B.WINDOWS and _w260.isVisible()
+                  and _w260.tabs.indexOf(_t1) >= 0)
+    except RuntimeError:
+        _up260 = False
+    check("260 closing the last strip tab beside a split keeps the window",
+          _split260 and _up260, str((_split260, _up260)))
+finally:
+    _end259(_w260)
+H.spin(100)
+
+# 5: a group whose only member left is the split half is not deleted
+_w260 = _mk260()
+try:
+    _w260._register_group("G260", "#89b4fa")
+    _a260 = _w260.new_tab(url=None, switch=True, group="G260", at_end=True)
+    _b260 = _w260.new_tab(url=None, switch=False, group="G260", at_end=True)
+    _w260.tabs.setCurrentIndex(_w260.tabs.indexOf(_a260))
+    _w260.split_view(index=_w260.tabs.indexOf(_b260))
+    H.spin(300)
+    _split260 = _w260._split_view is _b260
+    _w260.close_tab(_w260.tabs.indexOf(_a260), ask=False)
+    H.spin(200)
+    _kept260 = ("G260" in _w260.groups
+                and _w260._header_index("G260") is not None
+                and "G260" in _w260.group_colors)
+    _w260.close_split()
+    H.spin(100)
+    _h260 = _w260._header_index("G260")
+    check("260 the group stays while its split half is its last tab",
+          _split260 and _kept260 and _h260 is not None
+          and _w260.tabs.indexOf(_b260) == _h260 + 1
+          and getattr(_b260, "group", None) == "G260",
+          str((_split260, _kept260, _h260, _w260.tabs.indexOf(_b260))))
+finally:
+    _end259(_w260)
+H.spin(100)
+
+# 6: the split half goes back to the end of its group's run
+_w260 = _mk260()
+try:
+    _t0 = _w260.current()
+    _w260._register_group("G260", "#89b4fa")
+    _a260 = _w260.new_tab(url=None, switch=True, group="G260", at_end=True)
+    _b260 = _w260.new_tab(url=None, switch=False, group="G260", at_end=True)
+    _t9 = _w260.new_tab(url=None, switch=False, group=None, at_end=True)
+    _w260.tabs.setCurrentIndex(_w260.tabs.indexOf(_a260))
+    _w260.split_view(index=_w260.tabs.indexOf(_b260))
+    H.spin(300)
+    _split260 = _w260._split_view is _b260
+    # while it is out: another group in front, taking two loose tabs
+    _w260._register_group("H260", "#f38ba8", at=0)
+    for _v in (_t0, _t9):
+        _w260._move_tab_to_group(_w260.tabs.indexOf(_v), "H260")
+    _w260.close_split()
+    H.spin(100)
+    _hg260 = _w260._header_index("G260")
+    _gi260 = _w260._group_indices("G260")
+    _hi260 = _w260._group_indices("H260")
+    check("260 close_split puts a grouped tab at the end of its group's run",
+          _split260 and _hg260 is not None
+          and _gi260 == [_hg260 + 1, _hg260 + 2] and len(_hi260) == 2
+          and _hi260 == list(range(_w260._header_index("H260") + 1,
+                                   _w260._header_index("H260") + 3))
+          and getattr(_b260, "group", None) == "G260",
+          str((_split260, _hg260, _gi260, _hi260)))
+finally:
+    _end259(_w260)
+H.spin(100)
+
+# ---- 261: the permission card waits a moment; blocked notifications stay blocked ----
+class _Perm261:
+    def __init__(self):
+        self.answered = ""
+
+    def grant(self):
+        self.answered = "grant"
+
+    def deny(self):
+        self.answered = "deny"
+
+
+_perms_was261 = json.loads(json.dumps(br.config.get("permissions") or {}))
+_p261 = _Perm261()
+_k261 = "https://p261.example|use the camera"
+br._request_is_live = lambda page: True
+try:
+    br._perm_queue.append((_p261, None, "p261.example", "use the camera",
+                           _k261, _k261.split("|")[0], True, False))
+    br._next_permission()
+    _card261 = br._perm_widget
+    _allow261 = (_card261.findChild(B.QToolButton, "permallow")
+                 if _card261 is not None else None)
+    if _allow261 is not None:
+        _allow261.click()           # at once: must not count
+    _early261 = _p261.answered
+    H.wait_for(lambda: _allow261 is not None and _allow261.isEnabled(), 3000)
+    if _allow261 is not None and br._perm_widget is _card261:
+        _card261.findChild(B.QToolButton, "permdeny").click()
+    H.spin(100)
+    _late261 = _p261.answered
+finally:
+    br.__dict__.pop("_request_is_live", None)
+    br.config["permissions"] = _perms_was261
+    br._session_perms.pop(_k261, None)
+check("261 a new permission card ignores a click in its first moment",
+      _allow261 is not None and _early261 == "" and _late261 == "deny",
+      str((_allow261 is not None, _early261, _late261)))
+
+
+class _Note261:
+    def __init__(self):
+        self.closed = 0
+
+    def origin(self):
+        return B.QUrl("https://n261.example/")
+
+    def title(self):
+        return "ping261"
+
+    def message(self):
+        return "body"
+
+    def close(self):
+        self.closed += 1
+
+    def show(self):
+        pass
+
+
+_bn_was261 = br.config.get("blockNotifications")
+_log_was261 = json.loads(json.dumps(br.config.get("notifyLog") or []))
+_flash261 = []
+br.flash = lambda *a, **k: _flash261.append(a)
+br.notify_desktop = lambda *a, **k: _flash261.append(("desk",) + a)
+try:
+    br.config["blockNotifications"] = True
+    _n261 = _Note261()
+    _shown261 = br._web_notification(_n261)
+finally:
+    br.__dict__.pop("flash", None)
+    br.__dict__.pop("notify_desktop", None)
+    if _bn_was261 is None:
+        br.config.pop("blockNotifications", None)
+    else:
+        br.config["blockNotifications"] = _bn_was261
+    _logged261 = any("ping261" in json.dumps(r)
+                     for r in br.config.get("notifyLog") or [])
+    br.config["notifyLog"] = _log_was261
+check("261 with notifications blocked, a site that already may is silent",
+      not _shown261 and _n261.closed == 1 and not _flash261
+      and not _logged261, str((_shown261, _n261.closed, _flash261,
+                               _logged261)))
+
+# ---- 259b: stacking a site beside another browser's group of that name ----
+_w259b = br.new_window()
+H.spin(800)
+try:
+    _w259b._register_group("127.0.0.1", B.GROUP_COLORS[1][1],
+                           session="other259b")
+    _ta259b = _w259b.new_tab(url=srv.url("/twhome?s259b"), switch=False)
+    _tb259b = _w259b.new_tab(url=srv.url("/twother?s259b"), switch=False)
+    H.wait_for(lambda: "s259b" in _ta259b.url().toString()
+               and "s259b" in _tb259b.url().toString(), 8000)
+    _w259b.flash = lambda *a, **k: None
+    _name259b = _w259b.stack_site_tabs(host="127.0.0.1")
+    _groups259b = (_w259b._group_of(_ta259b), _w259b._group_of(_tb259b))
+    _sess259b = _w259b.group_sessions.get(_name259b)
+finally:
+    _w259b._confirm_many_tabs = lambda *a, **k: True
+    _w259b.close()
+    H.spin(500)
+check("259b stacking a site keeps to this browser's own group of that name",
+      _name259b and _name259b != "127.0.0.1"
+      and _groups259b == (_name259b, _name259b)
+      and _sess259b == _w259b.active_session,
+      str((_name259b, _groups259b, _sess259b)))
+
+# the clash message comes back when the clash does
+_sc_was259b = br.config.get("shortcuts")
+_fl259b = []
+br.__dict__["flash"] = lambda text, ms=2600: _fl259b.append(str(text))
+try:
+    br.__dict__.pop("_clash_said", None)
+    br.config["shortcuts"] = {"newtab": "Ctrl+Shift+T"}
+    br.rebind_shortcuts()
+    br.config["shortcuts"] = {}
+    br.rebind_shortcuts()
+    br.config["shortcuts"] = {"newtab": "Ctrl+Shift+T"}
+    br.rebind_shortcuts()
+finally:
+    br.__dict__.pop("flash", None)
+    if _sc_was259b is None:
+        br.config.pop("shortcuts", None)
+    else:
+        br.config["shortcuts"] = _sc_was259b
+    br.rebind_shortcuts()
+check("259b a clash cleared and made again is said again",
+      len(_fl259b) == 2, str(_fl259b))
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

@@ -114,6 +114,12 @@ def click(granted):
     want = "permallow" if granted else "permdeny"
     for button in card.findChildren(QToolButton):
         if button.objectName() == want:
+            # a new card takes no click for its first moment (fix261)
+            import time as _t
+            until = _t.time() + 3
+            while not button.isEnabled() and _t.time() < until:
+                app.processEvents()
+                _t.sleep(0.02)
             button.click()
             app.processEvents()
             return True
