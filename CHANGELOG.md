@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part forty-five: twenty-sixth and twenty-seventh passes)
+
+The twenty-sixth search followed every per-site table (zoom, mute, focus,
+guards, permissions, popups, fullscreen, hand-off and the rest) from the
+menu that writes it to the code that reads it; the twenty-seventh looked
+at the agent bridge as an attacker would. 28 bugs, fixed here:
+
+- **Private tabs leave no site behind.** Muting a site for good, blocking
+  it in focus mode, allowing its popups, choosing a microphone or call
+  audio for it, the privacy menu's per-site switches, greyscale and
+  scrollbars, certificate watching, autoplay and video quality: from a
+  private tab these no longer write the site into config.json (the
+  entries are greyed). Settings can still remove a rule while a private
+  tab is in front.
+- **Rules you can see and undo.** A "never" for fullscreen or a hand-off
+  choice can be forgotten from the privacy menu; translation rules are
+  listed with a forget action; forgetting a site or clearing history also
+  clears its reading and media resume points.
+- **Rules that match.** Turning a rule off from a subdomain removes the
+  parent-domain rule that covered it (greyscale, scrollbars, focus, guard
+  exceptions, API blocks); international domain names match in pages;
+  the most specific site rule wins for keys and auto-click; a guard
+  exception or API block set twice for one host is merged, not replaced.
+- **Hand-edited or imported tables** of the wrong shape (permission
+  times, ad-block exceptions, session sites, media positions, auto-click
+  and pass-through keys, privacy imports) no longer break the readers;
+  a URL rule with no pattern no longer matches everything; a permission
+  with no time recorded now expires like the others; Ctrl+0 in a private
+  tab resets a site's zoom.
+- **The agent bridge.** A read-only agent can no longer clear the page's
+  console log; "find" never returns what is typed in a field (passwords
+  and card numbers included); no agent can erase the audit log, and one
+  held to some sites sees only their rows; the groups command respects
+  the site list; screenshots, PDFs and downloads from an agent held to a
+  site or command list can only be written into the downloads,
+  screenshots or temp folder, never through a link and never over a
+  file unless asked.
+
 ## 2026-11-13 — line-by-line review, day 3 (part forty-four: twenty-fourth and twenty-fifth passes)
 
 The twenty-fourth search looked at starting, quitting and the first run;

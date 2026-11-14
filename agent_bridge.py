@@ -482,7 +482,13 @@ _FINDTEXT_JS = """
     for (var k = 0; k < el.childNodes.length; k++)
       if (el.childNodes[k].nodeType === 3) own += el.childNodes[k].nodeValue;
     own = own.replace(/\\s+/g, " ").trim();
-    var value = el.value || el.getAttribute("aria-label") || "";
+    /* what is typed into a field is not a label: find is a read op and
+       matched and returned a password or card number, or let a
+       substring search guess it. Only a button's own caption counts. */
+    var field = el.tagName === "INPUT" || el.tagName === "TEXTAREA";
+    var caption = field && /^(submit|button|reset)$/.test(el.type || "");
+    var value = ((field && !caption) ? "" : el.value)
+      || el.getAttribute("aria-label") || "";
     var hay = (own + " " + value).toLowerCase();
     if (!hay.trim() || hay.indexOf(want) < 0) continue;
     var r = el.getBoundingClientRect();
@@ -670,6 +676,62 @@ class AgentBridge:
                 return v
         return None
 
+    def _out_path(self, req):
+        """The real path a file may be written to, or None.
+
+        shot, pdf and download wrote wherever the caller said, over
+        whatever was there: a site's bytes into a shell start-up file.
+        For an agent held to a site or op list: only the downloads
+        folder, the screenshots folder and the system temp folder; never
+        through a symlink; never over an existing file unless the request
+        says overwrite, and then only inside the browser's own folders."""
+        import tempfile
+        raw = os.path.expanduser(str(req.get("path") or ""))
+        if not raw or os.path.islink(raw):
+            return None
+        real = os.path.realpath(raw)
+        cfg = self.config or {}
+        if not (cfg.get("bridgeSites") or cfg.get("bridgeOps")):
+            # an agent with the run of the browser (no site or op list)
+            # already acts as him: it writes where it is told, as before,
+            # over a file of the same name too -- only never through a
+            # symlink. The folders below hold an agent he has limited.
+            req["overwrite"] = True
+            return real
+        roots = []
+        for pick in (lambda: self.win.download_dir(create=False),
+                     lambda: self.win.shot_dir()):
+            try:
+                roots.append(os.path.realpath(
+                    os.path.expanduser(str(pick()))))
+            except Exception:
+                pass
+
+        def inside(folder):
+            try:
+                return os.path.commonpath([real, folder]) == folder \
+                    and real != folder
+            except ValueError:
+                return False
+        own = any(inside(one) for one in roots)
+        if not (own or inside(os.path.realpath(tempfile.gettempdir()))):
+            return None
+        if os.path.lexists(real):
+            if not (req.get("overwrite") is True and own
+                    and os.path.isfile(real)):
+                return None
+        return real
+
+    @staticmethod
+    def _write_file(real, data, overwrite=False):
+        """Create the file; without overwrite it must not exist yet, and
+        a symlink put there since the check is not followed."""
+        flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) \
+            | (os.O_TRUNC if overwrite else os.O_EXCL)
+        fd = os.open(real, flags, 0o666)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+
     def _tab_info(self, index, v):
         return {"id": v._agent_id, "index": index, "url": self._view_url(v),
                 "title": v.title() if hasattr(v, "title") else "",
@@ -715,6 +777,10 @@ class AgentBridge:
             return str(req.get("action") or "") not in ("", "list", "search")
         if op == "groups":
             return bool(req.get("move") or req.get("name") and req.get("tab"))
+        if op == "console":
+            # clear empties the page's log, which the user's own console
+            # panel reads too
+            return bool(req.get("clear"))
         return False
 
     @staticmethod
@@ -806,16 +872,21 @@ class AgentBridge:
                     return False, "site-not-allowed"
         return True, ""
 
-    def note(self, op, target="", answer=""):
+    def note(self, op, target="", answer="", site=""):
         """One line in the audit log.
 
         Every op, with the time and what it was aimed at -- so there is
         an answer to "what has been driving this browser" that does not
         depend on trusting the thing that was driving it."""
         rows = self.audit_rows()
-        rows.append({"t": time.time(), "op": str(op),
-                     "target": str(target)[:200],
-                     "answer": str(answer)[:80]})
+        row = {"t": time.time(), "op": str(op),
+               "target": str(target)[:200],
+               "answer": str(answer)[:80]}
+        if site:
+            # which site it concerned, so a client held to some sites can
+            # be shown only its own rows
+            row["site"] = str(site)[:100]
+        rows.append(row)
         del rows[:-400]
         if self.config is not None:
             self.config["bridgeAudit"] = rows
@@ -824,6 +895,13 @@ class AgentBridge:
     def audit_rows(self):
         rows = (self.config or {}).get("bridgeAudit")
         return rows if isinstance(rows, list) else []
+
+    def clear_audit(self):
+        """Empty the audit log. Only the browser's own UI calls this:
+        the op used to, so a client that had just done something
+        unwanted wiped the record of it, its own clear request too."""
+        if self.config is not None:
+            self.config["bridgeAudit"] = []
 
     # ---- dispatch ----------------------------------------------------
     def _dispatch(self, conn, line):
@@ -842,8 +920,14 @@ class AgentBridge:
             # in front (the start page, a file), "macro list" was refused
             no_page = op == "macro" and str(req.get("do") or "status") \
                 in ("list", "status")
-            if op in self.TAB_OPS and not no_page:
-                v = self._find(req.get("tab"))
+            named = req.get("tab")
+            pick = op in self.TAB_OPS and not no_page
+            if op == "groups" and req.get("move") not in (None, ""):
+                # the tab it regroups is named by "move": the gate saw
+                # no tab at all and let it move one off his site list
+                pick, named = True, req.get("move")
+            if pick:
+                v = self._find(named)
                 if v is not None and not self._gone(v):
                     tab_url = self._view_url(v)
                     if getattr(v, "private", False):
@@ -862,11 +946,14 @@ class AgentBridge:
             ok, why = self.allowed(op, str(req.get("url") or ""), tab_url,
                                    host=host)
             self._req = None
+            site = ""
+            if target != "(private)":
+                site = QUrl(str(req.get("url") or tab_url)).host() or host
             if not ok:
-                self.note(op, target, why)
+                self.note(op, target, why, site=site)
                 self._reply(conn, {"ok": False, "error": why})
                 return
-            self.note(op, target, "run")
+            self.note(op, target, "run", site=site)
             # used now, so not idle: the sweep counted from when the tab
             # was opened and closed one the agent was still working in
             if op in self.TAB_OPS:
@@ -1180,8 +1267,24 @@ class AgentBridge:
         path = str(req.get("path") or "")
         if not path:
             raise ValueError("path required")
+        real = self._out_path(req)
+        if real is None:
+            self._reply(conn, {"ok": False, "error": "path-not-allowed"})
+            return
+        from PyQt6.QtCore import QBuffer, QByteArray, QIODevice
         pix = v.grab()
-        ok = pix.save(path, "PNG")
+        blob = QByteArray()
+        sink = QBuffer(blob)
+        sink.open(QIODevice.OpenModeFlag.WriteOnly)
+        ok = pix.save(sink, "PNG")
+        sink.close()
+        try:
+            if ok:
+                self._write_file(real, bytes(blob),
+                                 req.get("overwrite") is True)
+        except OSError:
+            self._reply(conn, {"ok": False, "error": "path-not-allowed"})
+            return
         self._reply(conn, {"ok": bool(ok), "path": path,
                            "visible": v is self.win.current(),
                            "width": pix.width(), "height": pix.height()})
@@ -1328,6 +1431,10 @@ class AgentBridge:
         path = str(req.get("path") or "")
         if not path:
             raise ValueError("path required")
+        real = self._out_path(req)
+        if real is None:
+            self._reply(conn, {"ok": False, "error": "path-not-allowed"})
+            return
         done = {"sent": False}
 
         def finished(data):
@@ -1337,8 +1444,7 @@ class AgentBridge:
             try:
                 raw = bytes(data) if data else b""
                 if raw:
-                    with open(path, "wb") as fh:
-                        fh.write(raw)
+                    self._write_file(real, raw, req.get("overwrite") is True)
                     self._reply(conn, {"ok": True, "path": path,
                                        "bytes": len(raw)})
                 else:
@@ -1544,6 +1650,10 @@ class AgentBridge:
         path = str(req.get("path") or "")
         if not url or not path:
             raise ValueError("url and path required")
+        real = self._out_path(req)
+        if real is None:
+            self._reply(conn, {"ok": False, "error": "path-not-allowed"})
+            return
         code = """(async function (url) {
           try {
             var r = await fetch(url, {credentials: "include"});
@@ -1570,8 +1680,7 @@ class AgentBridge:
             import base64
             try:
                 data = base64.b64decode(found.get("data") or "")
-                with open(path, "wb") as handle:
-                    handle.write(data)
+                self._write_file(real, data, req.get("overwrite") is True)
             except (OSError, ValueError) as e:
                 self._reply(conn, {"ok": False, "error": str(e)})
                 return
@@ -1926,6 +2035,8 @@ class AgentBridge:
         var el = e.target;
         if (!el || !("value" in el)) return;
         if (el.type === "password") return;
+        if (String(el.getAttribute("autocomplete") || "")
+            .indexOf("cc-") >= 0) return;
         window.__macroSteps.push({op: "type", selector: path(el),
                                   text: String(el.value).slice(0, 500),
                                   t: Date.now()});
@@ -1995,12 +2106,14 @@ class AgentBridge:
         # the page compares a lower-case name without "www." with the key
         host = self._clean_host(req.get("host")) or ""
         selector = str(req.get("selector") or "")
-        rows = dict((self.config or {}).get("autoClick") or {})
+        rows = (self.config or {}).get("autoClick")
+        rows = dict(rows) if isinstance(rows, dict) else {}
         if req.get("remove"):
             rows.pop(host, None)
         elif host and selector:
-            keep = [one for one in rows.get(host, [])
-                    if one != selector]
+            old = rows.get(host)
+            keep = [one for one in (old if isinstance(old, list) else [])
+                    if isinstance(one, str) and one != selector]
             keep.append(selector)
             rows[host] = keep
         if self.config is not None:
@@ -2062,11 +2175,17 @@ class AgentBridge:
     def op_audit(self, conn, req):
         """What has been driving this browser."""
         if req.get("clear"):
-            if self.config is not None:
-                self.config["bridgeAudit"] = []
-            self._reply(conn, {"ok": True, "cleared": True})
+            self._reply(conn, {"ok": False, "error": "audit-clear-user-only"})
             return
         rows = self.audit_rows()
+        sites = (self.config or {}).get("bridgeSites")
+        if isinstance(sites, list) and sites:
+            # a client held to some sites saw the targets of every op on
+            # every other site; a row with no site keeps its op but not
+            # its target
+            rows = [row if row.get("site") else dict(row, target="")
+                    for row in rows if not row.get("site")
+                    or self.site_ok("https://" + str(row.get("site")))]
         self._reply(conn, {"ok": True, "audit": rows[-int(
             req.get("limit") or 50):]})
 
@@ -2277,6 +2396,9 @@ class AgentBridge:
             if v is None:
                 self._reply(conn, {"ok": False, "error": "no-such-tab"})
                 return
+            if not self.site_ok(self._view_url(v)):
+                self._reply(conn, {"ok": False, "error": "site-not-allowed"})
+                return
             group = req.get("group")
             index = self.win.tabs.indexOf(v)
             if index < 0:
@@ -2314,6 +2436,11 @@ class AgentBridge:
             return
         rows = {}
         for i, v in self._views():
+            # only the tabs he lets this client see, as op_tabs does: the
+            # ids and the group names of every other tab were listed
+            if getattr(v, "private", False) \
+                    or not self.site_ok(self._view_url(v)):
+                continue
             name = self.win._group_of(v) or ""
             rows.setdefault(name, []).append(getattr(v, "_agent_id", None))
         self._reply(conn, {"ok": True, "groups": rows})

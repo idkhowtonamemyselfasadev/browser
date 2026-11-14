@@ -11982,6 +11982,514 @@ check("217 player labels come from the strings",
       "STR.mediaPrev" in _pl_x217 and "STR.mediaNext" in _pl_x217
       and _pl_x217.count("loopLabel();") >= 2)
 
+# ---- twenty-sixth pass, group 218: per-site tables ----
+_keys_x218 = ("micSites", "callAudio", "muteSites", "focusSites",
+              "siteLimits", "fullscreenSites", "handoffSites",
+              "translateRules", "mediaSites", "mediaPlaces", "readPlaces",
+              "popupSites", "zoomSites")
+_old_x218 = {k: json.loads(json.dumps(br.config[k])) if k in br.config
+             else None for k in _keys_x218}
+try:
+    # private current tab: the writers refuse
+    br._private_of = lambda view=None: True
+    try:
+        br.mic_for_site("priv-x218.test", "dev1")
+        br.call_audio_for_site("priv-x218.test", {"gain": True})
+        br.always_mute("priv-x218.test")
+        br.toggle_focus_site("priv-x218.test")
+        br.site_limit("priv-x218.test", 30)
+    finally:
+        br.__dict__.pop("_private_of", None)
+    check("private tab: mic, call audio, mute, focus and limit write nothing",
+          "priv-x218.test" not in (br.config.get("micSites") or {})
+          and "priv-x218.test" not in (br.config.get("callAudio") or {})
+          and "priv-x218.test" not in (br.config.get("muteSites") or [])
+          and "priv-x218.test" not in (br.config.get("focusSites") or [])
+          and "priv-x218.test" not in (br.config.get("siteLimits") or {}))
+    br.mic_for_site("norm-x218.test", "dev1")
+    br.toggle_focus_site("norm-x218.test")
+    check("normal tab: the same writers still write",
+          br.mic_for_site("norm-x218.test") == "dev1"
+          and "norm-x218.test" in br.config.get("focusSites", []))
+
+    # forget the fullscreen and hand-over answers for a site
+    br.config["fullscreenSites"] = {"fs-x218.test": False,
+                                    "other-x218.test": True}
+    br.config["handoffSites"] = {"torrent@fs-x218.test": True,
+                                 "ts3@fs-x218.test": True,
+                                 "torrent@other-x218.test": True}
+    check("site choices are found for the host and its subdomain",
+          len(br._site_choice_keys("sub.fs-x218.test")) == 1
+          and len(br._site_choice_keys("fs-x218.test")) == 3)
+    br.forget_site_choices("fs-x218.test")
+    check("forgetting the choices leaves other sites alone",
+          list(br.config["fullscreenSites"]) == ["other-x218.test"]
+          and list(br.config["handoffSites"]) == ["torrent@other-x218.test"])
+
+    # translation rules can be taken off
+    br.set_translate_rule("es", "always")
+    _menu_x218 = br.privacy_menu()
+    _subs_x218 = [a.menu() for a in _menu_x218.actions() if a.menu()]
+    _hit_x218 = [a for m in _subs_x218 for a in m.actions()
+                 if br._ui_str("trAlways") in a.text()]
+    check("privacy menu lists a translate rule to forget", bool(_hit_x218))
+    if _hit_x218:
+        _hit_x218[0].trigger()
+    check("and triggering it removes the rule",
+          "es" not in br.translate_rules())
+
+    # forget_site and clear history take the per-site tables with them
+    br.config["mediaSites"] = {"gone-x218.test": {"speed": 1.5},
+                               "keep-x218.test": {"speed": 2}}
+    br.config["mediaPlaces"] = {"https://gone-x218.test/v": {"at": 5},
+                                "https://keep-x218.test/v": {"at": 5}}
+    br.config["readPlaces"] = {"https://gone-x218.test/a": 900,
+                               "https://keep-x218.test/a": 900}
+    br.config["fullscreenSites"] = {"gone-x218.test": True}
+    br.config["handoffSites"] = {"ts3@gone-x218.test": True}
+    br.forget_site("gone-x218.test")
+    check("forget site drops its media, places, fullscreen and hand-over",
+          list(br.config["mediaSites"]) == ["keep-x218.test"]
+          and list(br.config["mediaPlaces"]) == ["https://keep-x218.test/v"]
+          and list(br.config["readPlaces"]) == ["https://keep-x218.test/a"]
+          and not br.config["fullscreenSites"]
+          and not br.config["handoffSites"])
+    br._forget_history_extras(["https://keep-x218.test/a"])
+    check("history extras drop the named address from the places",
+          not br.config["readPlaces"]
+          and "https://keep-x218.test/v" in br.config["mediaPlaces"])
+    br._forget_history_extras(None)
+    check("clearing all history empties both place tables",
+          not br.config["readPlaces"] and not br.config["mediaPlaces"])
+
+    # Ctrl+0 in a private tab
+    br.new_tab(url=srv.url("/twhome"), private=True)
+    _v_x218 = br.current()
+    try:
+        H.wait_for(lambda: "/twhome" in _v_x218.url().toString(), 8000)
+        br.config["zoomSites"] = {_v_x218.url().host(): 1.5}
+        _v_x218._zoom = 1.5
+        br.zoom_reset()
+        check("Ctrl+0 in a private tab goes to the default level",
+              abs(_v_x218.zoomFactor() - br.zoom_default()) < 1e-6,
+              str(_v_x218.zoomFactor()))
+    finally:
+        _close_if_open(_v_x218)
+finally:
+    br.__dict__.pop("_private_of", None)
+    for _k_x218, _v_x218b in _old_x218.items():
+        if _v_x218b is None:
+            br.config.pop(_k_x218, None)
+        else:
+            br.config[_k_x218] = _v_x218b
+    br.save_config(quiet=True)
+# ---- twenty-sixth pass, group 219: per-site tables, shapes and hosts ----
+_keys_x219 = ("greyscaleSites", "scrollbarsOff", "focusSites", "guardOff",
+              "blockApis", "urlRules", "noHistoryPerSession", "hideElements",
+              "permissions", "permissionTimes", "permissionDays",
+              "adBlockOff", "sessionSites", "mediaSites", "autoClick",
+              "keysThrough", "a11ySites")
+_missing_x219 = object()
+_old_x219 = {k: json.loads(json.dumps(br.config[k])) if k in br.config
+             else _missing_x219 for k in _keys_x219}
+try:
+    # covering rule on a parent comes off from the subdomain
+    br.config["greyscaleSites"] = ["x219.test"]
+    br.config["scrollbarsOff"] = ["x219.test"]
+    br.config["focusSites"] = ["x219.test"]
+    _g_x219 = br.toggle_greyscale(host="docs.x219.test")
+    _s_x219 = br.set_scrollbars(host="docs.x219.test")
+    br.toggle_focus_site("docs.x219.test")
+    check("grey, scrollbars and focus: a parent rule comes off from the subdomain",
+          _g_x219 is False and _s_x219 is False
+          and not br.config["greyscaleSites"]
+          and not br.config["scrollbarsOff"]
+          and not br.config["focusSites"])
+
+    if B.page_guard is not None:
+        br.config["guardOff"] = {"fingerprint": ["x219.test"]}
+        _e_x219 = br.toggle_guard_site("fingerprint", "docs.x219.test")
+        check("guard exception under a parent: a click turns the guard back on",
+              _e_x219 is False
+              and not br.config["guardOff"]["fingerprint"])
+        br.config["blockApis"] = {"x219.test": ["webgl"]}
+        check("api_blocks sees a block on the parent domain",
+              br.api_blocks("docs.x219.test") == ["webgl"])
+        _b_x219 = br.toggle_api_block("docs.x219.test", "webgl")
+        check("and unticking it lifts the parent's block",
+              _b_x219 is False and not br.config["blockApis"])
+        check("a guard table is keyed by the host as the page sees it (IDN)",
+              B.page_guard._host("bücher.de") == "xn--bcher-kva.de"
+              and B.page_guard._host("www.Example.com") == "example.com")
+
+    # keys the page reads: punycode keys, lists only, longest match
+    br.config["keysThrough"] = {"bücher.de": ["Ctrl+K"],
+                                "x219.test": ["Ctrl+S"],
+                                "docs.x219.test": ["Ctrl+J"],
+                                "bad219.test": "Ctrl+K"}
+    br.config["autoClick"] = {"x219.test": "button.accept"}
+    _pay_x219 = br.nav_payload()
+    check("keysThroughRows keys are punycode and a string value is dropped",
+          "xn--bcher-kva.de" in _pay_x219["keysThroughRows"]
+          and _pay_x219["keysThroughRows"].get("bad219.test") is None
+          and _pay_x219["autoClick"] == {})
+    check("site_keys_through picks the most specific entry",
+          br.site_keys_through("docs.x219.test") == ["Ctrl+J"]
+          and br.site_keys_through("a.x219.test") == ["Ctrl+S"])
+    br.config["a11ySites"] = {"bücher.de": {}}
+    check("a11y perHost is keyed by punycode",
+          "xn--bcher-kva.de" in br._a11y_script().sourceCode())
+
+    # an empty url rule pattern
+    br.config["urlRules"] = "-> block\n  -> /x.json\nads219.test"
+    br._url_rules = None
+    check("a url rule with an empty pattern is skipped",
+          br.url_rules() == [("ads219.test", "block")])
+
+    # imported shapes
+    check("import refuses a null row in a per-site table",
+          not br._privacy_value_ok("guardOff", {"gpc": None})
+          and not br._privacy_value_ok("permissionTimes", {"k": "x"})
+          and br._privacy_value_ok("guardOff", {"gpc": ["a.test"]}))
+    br.config["noHistoryPerSession"] = {"main": None}
+    br.config["hideElements"] = {"x219.test": None}
+    br.config["guardOff"] = {"gpc": None}
+    # guard_on returns at its first line while the guard is off, before the
+    # excused table is read: switch it on so the null row is walked
+    _gpc_x219 = br.config.get("guardGpc", _missing_x219)
+    br.config["guardGpc"] = True
+    try:
+        br.never_record("x219.test", "main")
+        br.hidden_elements("x219.test")
+        br.guard_on("gpc", "x219.test")
+        _ok_x219 = True
+    except Exception as _e:
+        _ok_x219 = False
+    finally:
+        if _gpc_x219 is _missing_x219:
+            br.config.pop("guardGpc", None)
+        else:
+            br.config["guardGpc"] = _gpc_x219
+    check("readers survive a null row", _ok_x219)
+
+    # permissions
+    br.config["permissions"] = {"https://a219.test:443|Mic": True,
+                                "https://b219.test:443|Mic": True}
+    br.config["permissionTimes"] = {"https://a219.test:443|Mic": "x"}
+    try:
+        br.note_permission("https://a219.test:443|Mic", True)
+        _rows_x219 = br.permission_rows()
+        _ok_x219 = len(_rows_x219) == 2
+    except Exception:
+        _ok_x219 = False
+    check("a non-dict permission row no longer breaks answering or the list",
+          _ok_x219)
+    br.config["permissionDays"] = 30
+    br.config["permissionTimes"] = {}
+    br.prune_permissions()
+    check("a grant with no time is stamped so it can expire",
+          br.config["permissionTimes"].get(
+              "https://b219.test:443|Mic", {}).get("t"))
+
+    # adblock rows of the wrong type
+    br.config["adBlockOff"] = ["x219.test"]
+    check("adBlockOff of the wrong type reads as empty",
+          br.adblock_off_rows() == {} and br.ad_block_on("x219.test") in
+          (True, False))
+
+    # session rule with a list value
+    br.config["sessionSites"] = {"twitch219.test": ["a"]}
+    try:
+        br.session_rule_for(B.QUrl("https://twitch219.test/"))
+        _ok_x219 = True
+    except Exception:
+        _ok_x219 = False
+    check("a non-string session rule is skipped", _ok_x219)
+
+    # media memory entries of the wrong shape
+    class _V219:
+        private = False
+
+        def url(self):
+            return B.QUrl("https://m219.test/")
+    br.config["mediaSites"] = {"m219.test": "x"}
+    try:
+        br.apply_media_memory(_V219())
+        br._remember_media(_V219(), "speed", 1.5)
+        br.config["mediaSites"] = {"m219.test": {"speed": "fast",
+                                                 "volume": "loud"}}
+        br.apply_media_memory(_V219())
+        _ok_x219 = True
+    except Exception:
+        _ok_x219 = False
+    check("media memory survives a string entry and string numbers", _ok_x219)
+finally:
+    for _k, _v in _old_x219.items():
+        if _v is _missing_x219:
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+    br._url_rules = None
+# ---- twenty-sixth pass, group 220: private tabs, merged guard keys, punycode page look ----
+class _PV220:
+    private = True
+
+
+class _NV220:
+    private = False
+
+
+_keys_x220 = ("noScriptSites", "greyscaleSites", "scrollbarsOff",
+              "certWatchSites", "autoplaySites", "siteQuality", "blockApis",
+              "guardOff", "translateRules", "siteFontSize", "guardGpc")
+_missing_x220 = object()
+_old_x220 = {k: json.loads(json.dumps(br.config[k])) if k in br.config
+             else _missing_x220 for k in _keys_x220}
+_saves_x220 = []
+br.save_config = lambda *a, **k: _saves_x220.append(1)
+try:
+    # private view: nothing written, nothing saved
+    for _k in ("noScriptSites", "greyscaleSites", "scrollbarsOff",
+               "certWatchSites"):
+        br.config.pop(_k, None)
+    _saves_x220.clear()
+    br.toggle_site_rule("noScriptSites", "p220.test", _PV220())
+    br.toggle_greyscale(host="p220.test", view=_PV220())
+    br.set_scrollbars(host="p220.test", view=_PV220())
+    br.watch_certificate("p220.test", view=_PV220())
+    br.autoplay_rule("p220.test", "block", _PV220())
+    br.site_quality("p220.test", "720p", _PV220())
+    check("a private view writes no per-site rule, autoplay or quality",
+          not _saves_x220
+          and not br.config.get("noScriptSites")
+          and not br.config.get("greyscaleSites")
+          and not br.config.get("scrollbarsOff")
+          and not br.config.get("certWatchSites")
+          and "p220.test" not in (br.config.get("autoplaySites") or {})
+          and "p220.test" not in (br.config.get("siteQuality") or {}))
+
+    # a normal view still writes; Settings (no view) removes even while the
+    # tab in front is private
+    check("a normal view still writes the rule",
+          br.toggle_site_rule("noScriptSites", "n220.test", _NV220()) is True
+          and "n220.test" in br.config["noScriptSites"])
+    br._private_of = lambda view=None: True
+    try:
+        _off_x220 = br.toggle_site_rule("noScriptSites", "n220.test")
+    finally:
+        br.__dict__.pop("_private_of", None)
+    check("removing a rule with no view works while the front tab is private",
+          _off_x220 is False and "n220.test" not in br.config["noScriptSites"])
+
+    # keys that fold to one host merge in the guard rules
+    if B.page_guard is not None:
+        # names from page_guard.API_TARGETS (camera/mic are not in it)
+        br.config["blockApis"] = {"www.m220.test": ["webgl"],
+                                  "m220.test": ["wasm"]}
+        _r_x220 = B.page_guard.rules(br.config)["apis"].get("m220.test", [])
+        _one_x220 = B.page_guard.rules(
+            {"blockApis": {"m220.test": ["webgl"]}})["apis"]["m220.test"]
+        _two_x220 = B.page_guard.rules(
+            {"blockApis": {"m220.test": ["wasm"]}})["apis"]["m220.test"]
+        check("page_guard merges blockApis keys that fold to one host",
+              set(_r_x220) == set(_one_x220) | set(_two_x220))
+        # an xn-- key and the Unicode form match
+        br.config["blockApis"] = {"xn--bcher-kva.de": ["webgl"]}
+        br.config["guardGpc"] = True
+        br.config["guardOff"] = {"gpc": ["xn--bcher-kva.de"]}
+        check("api_blocks and guard_on match an xn-- key to the Unicode host",
+              br.api_blocks("bücher.de") == ["webgl"]
+              and br.guard_on("gpc", "bücher.de") is False)
+        check("toggle_api_block lifts an xn-- key from the Unicode host",
+              br.toggle_api_block("bücher.de", "webgl") is False
+              and not br.config["blockApis"])
+
+    # page look keys are punycode
+    br.config["greyscaleSites"] = ["bücher.de"]
+    br.config["scrollbarsOff"] = ["bücher.de"]
+    br.config["siteFontSize"] = {"bücher.de": 20}
+    _pl_x220 = br.page_look_payload()
+    check("page look greyHosts, scrollbarsOff and fontSizes are punycode",
+          _pl_x220["greyHosts"] == ["xn--bcher-kva.de"]
+          and _pl_x220["scrollbarsOff"] == ["xn--bcher-kva.de"]
+          and list(_pl_x220["fontSizes"]) == ["xn--bcher-kva.de"])
+
+    # the translation forget entry takes the raw key
+    br.config["translateRules"] = {"EN": "always", "zh-hans": "never"}
+    check("forget takes a raw translate key that set_translate_rule misses",
+          br.forget_translate_rule("EN") is True
+          and br.forget_translate_rule("zh-hans") is True
+          and not br.translate_rules())
+finally:
+    br.__dict__.pop("save_config", None)
+    br.__dict__.pop("_private_of", None)
+    for _k, _v in _old_x220.items():
+        if _v is _missing_x220:
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+# ---- 221: the agent bridge gates (console clear, find, audit, groups, file paths) ----
+import agent_bridge as _AB221
+import os as _os221
+import tempfile as _tf221
+
+_ab221 = _AB221.AgentBridge(br)
+_out221 = []
+_ab221._reply = lambda conn, payload: _out221.append(payload)
+_keys221 = ("bridgeLevel", "bridgeSites", "bridgeOps", "bridgeAudit",
+            "downloadDir")
+_save221 = {k: br.config.get(k, "__absent__") for k in _keys221}
+
+
+def _ask221(req):
+    del _out221[:]
+    _ab221._dispatch(None, json.dumps(req).encode())
+    return _out221[-1] if _out221 else {}
+
+
+def _restore221():
+    for k, v in _save221.items():
+        if v == "__absent__":
+            br.config.pop(k, None)
+        else:
+            br.config[k] = v
+
+
+_tmp221 = _tf221.mkdtemp(prefix="t221")
+_v221 = br.new_tab(url=srv.url("/twhome?t221=1"), switch=True)
+H.wait_for(lambda: "/twhome" in _v221.url().toString(), 8000)
+try:
+    # console clear is a write: refused at read level, the log kept
+    _pg221 = _v221.page()
+    _had221 = list(getattr(_pg221, "console_log", []))
+    try:
+        _pg221.console_log = ["keep221"]
+        br.config["bridgeLevel"] = "read"
+        _r221 = _ask221({"op": "console", "clear": True})
+        _kept221 = list(_pg221.console_log)
+        _r2221 = _ask221({"op": "console"})
+    finally:
+        _pg221.console_log = _had221
+        _restore221()
+    check("read level refuses console clear and keeps the log",
+          _r221.get("error") == "bridge-read-only" and _kept221 == ["keep221"]
+          and _r2221.get("ok"), str((_r221, _kept221)))
+
+    # find never returns or matches a password, card or typed value --
+    # on a tab of its own (the one above had been driven by the checks
+    # before it), and only once the fields are really in the page, so
+    # an empty answer is not just an empty page
+    _fv221 = br.new_tab(url=srv.url("/twhome?find221=1"), switch=True)
+    H.wait_for(lambda: "find221" in _fv221.url().toString(), 8000)
+    H.wait_for(lambda: jsq(_fv221, "document.readyState") == "complete", 8000)
+    _n221 = jsq(_fv221, "(function(){var d=document.createElement('div');"
+                "d.innerHTML='<input id=p221 type=password value=hunter221zz>"
+                "<input id=c221 autocomplete=cc-number value=4242221card>"
+                "<input id=t221 type=text value=typed221val>"
+                "<input id=s221 type=submit value=Send221btn>';"
+                "document.body.appendChild(d);"
+                "return document.querySelectorAll('#p221,#c221,#t221,#s221')"
+                ".length})()")
+    _f221 = {}
+    for _w221 in ("hunter221zz", "4242221card", "typed221val", "Send221btn"):
+        _f221[_w221] = jsq(_fv221, _AB221._FINDTEXT_JS
+                           % (_AB221._js_string(_w221), 20))
+    check("find never matches or returns a password, card or typed value",
+          _n221 == 4
+          and all(json.loads(_f221[w] or "null") == []
+                  for w in ("hunter221zz", "4242221card", "typed221val"))
+          and "s221" in str(_f221["Send221btn"]), str((_n221, _f221)))
+    br.close_tab(br.tabs.indexOf(_fv221), ask=False)
+
+    # the audit log cannot be cleared by a client, and rows follow bridgeSites
+    br.config["bridgeAudit"] = [
+        {"t": 1, "op": "nav", "target": "https://a221.test/x",
+         "answer": "run", "site": "a221.test"},
+        {"t": 2, "op": "nav", "target": "https://b221.test/secret",
+         "answer": "run", "site": "b221.test"}]
+    _c221 = _ask221({"op": "audit", "clear": True})
+    _n221 = len(br.config.get("bridgeAudit") or [])
+    br.config["bridgeLevel"] = "read"
+    _c2221 = _ask221({"op": "audit", "clear": True})
+    br.config.pop("bridgeLevel", None)
+    br.config["bridgeSites"] = ["a221.test"]
+    _l221 = _ask221({"op": "audit", "limit": 100})
+    br.config.pop("bridgeSites", None)
+    _ab221.clear_audit()
+    check("an agent cannot clear the audit; only the UI call does",
+          _c221.get("ok") is False and _c2221.get("ok") is False
+          and _n221 >= 2 and br.config.get("bridgeAudit") == [], str(_c221))
+    check("a site-limited agent sees only its sites' audit rows",
+          _l221.get("ok") and "b221.test" not in json.dumps(_l221)
+          and "a221.test" in json.dumps(_l221), str(_l221))
+    _restore221()
+
+    # groups: a tab off the site list is neither moved nor listed
+    br.config["bridgeSites"] = ["allowed221.example"]
+    _id221 = [x for _i, x in _ab221._views() if x is _v221][0]._agent_id
+    _g221 = _ask221({"op": "groups", "move": _id221, "group": "x221"})
+    _gl221 = _ask221({"op": "groups"})
+    _in221 = br._group_of(_v221) or ""
+    _restore221()
+    check("groups respects bridgeSites for move and listing",
+          _g221.get("error") == "site-not-allowed" and _in221 == ""
+          and _gl221.get("groups") == {}, str((_g221, _gl221, _in221)))
+
+    # file paths, for an agent held to a site list: outside the allowed
+    # folders refused, temp dir works (an agent with no list is him)
+    _restore221()
+    br.config["bridgeSites"] = ["127.0.0.1"]
+    _bad221 = _ask221({"op": "shot", "path": "/etc/shot221.png"})
+    _home221 = _ask221({"op": "shot", "path": str(_Path.home() / "x221.png")})
+    _good221 = _tmp221 + "/ok221.png"
+    _ok221 = _ask221({"op": "shot", "path": _good221})
+    _again221 = _ask221({"op": "shot", "path": _good221})
+    _ovr221 = _ask221({"op": "shot", "path": _good221, "overwrite": True})
+    _os221.symlink(_good221, _tmp221 + "/ln221.png")
+    _sym221 = _ask221({"op": "shot", "path": _tmp221 + "/ln221.png",
+                       "overwrite": True})
+    _pdf221 = _ask221({"op": "pdf", "path": "/etc/pdf221.pdf"})
+    _dl221 = _ask221({"op": "download", "url": srv.url("/twhome"),
+                      "path": "/etc/dl221.bin"})
+    check("shot, pdf and download refuse a path outside the allowed folders",
+          all(r.get("error") == "path-not-allowed"
+              for r in (_bad221, _home221, _pdf221, _dl221))
+          and not _Path("/etc/shot221.png").exists(), str((_bad221, _pdf221)))
+    check("a shot into the temp dir works; no overwrite, no symlink",
+          _ok221.get("ok") is True and _os221.path.getsize(_good221) > 0
+          and _again221.get("error") == "path-not-allowed"
+          and _ovr221.get("error") == "path-not-allowed"
+          and _sym221.get("error") == "path-not-allowed",
+          str((_ok221, _again221, _ovr221, _sym221)))
+
+    # inside his own folder, overwrite is allowed only when asked for
+    _own221 = _Path(_tmp221) / "dl"
+    _own221.mkdir()
+    (_own221 / "f.bin").write_bytes(b"x")
+    br.config["downloadDir"] = str(_own221)
+    _o1221 = _ab221._out_path({"path": str(_own221 / "f.bin")})
+    _o2221 = _ab221._out_path({"path": str(_own221 / "f.bin"),
+                               "overwrite": True})
+    _o3221 = _ab221._out_path({"path": str(_own221 / "new.bin")})
+    _restore221()
+    check("inside the downloads folder overwrite needs overwrite=true",
+          _o1221 is None and _o2221 and _o3221, str((_o1221, _o2221, _o3221)))
+    # an agent with no site or op list writes where it is told, over an
+    # old file of the same name too, but never through a symlink
+    br.config.pop("bridgeSites", None)
+    br.config.pop("bridgeOps", None)
+    _free221 = {"path": str(_own221 / "f.bin")}
+    _f1221 = _ab221._out_path(_free221)
+    _f2221 = _ab221._out_path({"path": _tmp221 + "/ln221.png"})
+    check("an unlimited agent keeps writing where it is told, never via a symlink",
+          _f1221 and _free221.get("overwrite") is True and _f2221 is None,
+          str((_f1221, _f2221)))
+finally:
+    _restore221()
+    br.close_tab(br.tabs.indexOf(_v221), ask=False)
+    import shutil as _sh221
+    _sh221.rmtree(_tmp221, ignore_errors=True)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

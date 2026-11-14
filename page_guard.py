@@ -80,7 +80,22 @@ API_TARGETS = {
 
 
 def _host(text):
-    return str(text or "").strip().lower().removeprefix("www.")
+    """A host as the page's own script sees it. Qt gives the decoded
+    form of an international name and location.hostname the xn-- form,
+    so a rule written from the menu was never found."""
+    host = str(text or "").strip().lower().removeprefix("www.")
+    if host.isascii():
+        return host
+    ace = ""
+    try:
+        from PyQt6.QtCore import QUrl
+        ace = bytes(QUrl.toAce(host)).decode("ascii")
+    except (ImportError, UnicodeError, TypeError):
+        try:
+            ace = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            ace = ""
+    return ace or host
 
 
 def _table(config, key):
@@ -93,6 +108,18 @@ def _table(config, key):
 def _listed(config, key):
     value = config.get(key)
     return value if isinstance(value, list) else []
+
+
+def _calls(config):
+    """The call-audio rows keyed by host; rows of keys that fold to the
+    same host are merged, not replaced."""
+    out = {}
+    for host, row in _table(config, "callAudio").items():
+        if isinstance(row, dict):
+            out.setdefault(_host(host), {}).update(
+                {k: bool(v) for k, v in row.items()
+                 if k in ("gain", "noise", "echo")})
+    return out
 
 
 def rules(config):
@@ -120,8 +147,12 @@ def rules(config):
         wanted = [n for n in (names if isinstance(names, list) else [])
                   if n in API_TARGETS]
         if wanted:
-            apis[_host(host)] = sorted(
-                {target for name in wanted for target in API_TARGETS[name]})
+            # "www.example.com" and "example.com" are one host: the later
+            # key replaced the earlier one and only one block was left
+            have = set(apis.get(_host(host), ()))
+            have.update(target for name in wanted
+                        for target in API_TARGETS[name])
+            apis[_host(host)] = sorted(have)
     places = {}
     for host, where in _table(config, "fakePlaces").items():
         try:
@@ -138,7 +169,9 @@ def rules(config):
                  for sel in (selectors if isinstance(selectors, list) else [])
                  if str(sel).strip()]
         if clean:
-            hide[_host(host)] = clean[:200]
+            merged = hide.setdefault(_host(host), [])
+            merged.extend(sel for sel in clean if sel not in merged)
+            del merged[200:]
     return {
         "on": on,
         "off": off,
@@ -149,10 +182,7 @@ def rules(config):
         "allow": [_host(h) for h in _listed(config, "popupSites")],
         "mics": {_host(h): str(d)[:200] for h, d in
                  _table(config, "micSites").items() if d},
-        "calls": {_host(h): {k: bool(v) for k, v in (row or {}).items()
-                             if k in ("gain", "noise", "echo")}
-                  for h, row in _table(config, "callAudio").items()
-                  if isinstance(row, dict)},
+        "calls": _calls(config),
         "fonts": str(config.get("localFontStack")
                      or "system-ui, sans-serif")[:200],
         "reject": list(REJECT_WORDS),
