@@ -18432,7 +18432,17 @@ try:
     _w289.set_fullscreen(False)
     H.spin(300)
 
-    # 289c/d/e: the window-full video
+    # 289c/d/e: the window-full video (the pages have none: since
+    # fix326 a "novideo" answer gives the chrome back, so it is faked)
+    _real_mt289 = _w289.media_tool2
+
+    def _mt289(name, view=None, then=None, arg=None, **kw):
+        if name == "winfull":
+            if then is not None:
+                then("ok")
+            return True
+        return _real_mt289(name, view=view, then=then, arg=arg, **kw)
+    _w289.media_tool2 = _mt289
     _a289 = _tab289(_w289)
     _b289 = _tab289(_w289)
     _w289.tabs.setCurrentWidget(_a289)
@@ -18562,6 +18572,8 @@ try:
           "clear_private_downloads" in _insp289.getsource(B.Browser._clear_on_exit))
 finally:
     B.active_look = _look289
+    if _w289 is not None and not B.sip.isdeleted(_w289):
+        _w289.__dict__.pop("media_tool2", None)
     for _k289, _o289 in _cfg289.items():
         if _o289 == "__absent__":
             br.config.pop(_k289, None)
@@ -21608,6 +21620,526 @@ _fo323 = _mg323.find("folded = bool(self.collapsed.get(group))")
 check("323 (source) a group moved to a window keeps its fold, read before "
       "the split half comes back",
       0 <= _fo323 < _mg323.find("self.close_split()"), _fo323)
+
+# ---- 324: permissions and notifications, second look (the 88th pass) ----
+_runs324 = []
+_real_sd324 = B.QProcess.startDetached
+_real_which324 = B.shutil.which
+_dn324 = br.config.get("desktopNotify", "__absent__")
+br.config["desktopNotify"] = True
+B.QProcess.startDetached = staticmethod(
+    lambda prog, args=None, *a, **k: _runs324.append(list(args or [])) or True)
+B.shutil.which = lambda name, *a, **k: ("/usr/bin/notify-send"
+                                        if name == "notify-send"
+                                        else _real_which324(name, *a, **k))
+try:
+    br.notify_desktop("<b>Your bank</b> <a href='x'>verify</a> & more",
+                      title="<i>site</i>")
+    br.notify_desktop("x" * 5000)
+finally:
+    B.QProcess.startDetached = _real_sd324
+    B.shutil.which = _real_which324
+    if _dn324 == "__absent__":
+        br.config.pop("desktopNotify", None)
+    else:
+        br.config["desktopNotify"] = _dn324
+check("324 a page's notification body reaches the desktop as text (the "
+      "summary is plain by the spec), cut short",
+      len(_runs324) == 2
+      and _runs324[0][-2:] == ["<i>site</i>",
+                               "&lt;b&gt;Your bank&lt;/b&gt; &lt;a href='x'&gt;"
+                               "verify&lt;/a&gt; &amp; more"]
+      and len(_runs324[1][-1]) <= 500,
+      [r[-2:] for r in _runs324][:1])
+
+# 324b: "stop" takes back a camera grant kept for this run only
+_f324 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent))) / "cam324.html"
+_f324.write_text("<title>cam324</title><p>local</p>")
+_v324 = br.new_tab(url=None)
+H.spin(200)
+H.load(_v324, B.QUrl.fromLocalFile(str(_f324)).toString())
+H.spin(400)
+_key324 = B.QUrl.fromLocalFile(str(_f324)).toString() + "|MediaVideoCapture"
+br._session_perms[_key324] = True
+try:
+    br.stop_media_use(_v324)
+    _left324 = _key324 in br._session_perms
+finally:
+    br._session_perms.pop(_key324, None)
+    _close_if_open(_v324)
+check("324 stopping a local page's camera takes back its grant for this run",
+      _left324 is False, _left324)
+
+# ---- 325: context menus, second look (the 89th pass) ----
+# 325a: the thesaurus asks this machine only, its word shown as text
+_m325 = B.QMenu()
+br._fill_syn(_m325, "R&D", [])
+_t325 = _m325.actions()[0].text() if _m325.actions() else ""
+_m325.deleteLater()
+check("325 a word with & in the empty-thesaurus line is shown as text",
+      "R&&D" in _t325, _t325)
+_args325 = []
+_real_start325 = B.QProcess.start
+_real_which325 = B.shutil.which
+B.QProcess.start = lambda self, prog, args=None, *a, **k: _args325.append(
+    list(args or []))
+B.shutil.which = lambda name, *a, **k: ("/usr/bin/dict" if name == "dict"
+                                        else _real_which325(name, *a, **k))
+try:
+    br.synonyms("happy", then=lambda rows: None)
+finally:
+    B.QProcess.start = _real_start325
+    B.shutil.which = _real_which325
+check("325 the thesaurus asks this machine's dictionary server only",
+      _args325 and _args325[0][:2] == ["-h", "localhost"], _args325)
+# 325b: no image search for a picture with no web address
+_asked325 = []
+_real_q325 = B.QMessageBox.question
+B.QMessageBox.question = staticmethod(lambda *a, **k: (
+    _asked325.append(1) or B.QMessageBox.StandardButton.No))
+try:
+    _si325 = br.search_image("data:image/png;base64,iVBORw0KGgo=")
+finally:
+    B.QMessageBox.question = _real_q325
+check("325 a data: picture is not offered to the image search",
+      _si325 is None and _asked325 == [], (_si325, _asked325))
+# 325c: the bar's tools see this browser's bookmarks only
+_bid325 = br._new_bookmark_id()
+br.bookmarks.append({"id": _bid325, "parent": 0, "type": "link",
+                     "title": "T325", "url": "https://t325.example/",
+                     "tags": ["tag325"], "sid": "elsewhere325", "t": 1})
+try:
+    _tg325 = [t for t, _n in br.all_bookmark_tags() if t == "tag325"]
+    _wt325 = br.bookmarks_with_tag("tag325")
+    _un325 = [e for e in br.unused_bookmarks() if e.get("title") == "T325"]
+finally:
+    br.bookmarks[:] = [e for e in br.bookmarks if e.get("title") != "T325"]
+    br.save_bookmarks()
+check("325 'by tag' and 'unused' leave out bookmarks marked for another "
+      "browser", _tg325 == [] and _wt325 == [] and _un325 == [],
+      (_tg325, _wt325, _un325))
+# 325d: a locked folder is not re-sorted or given lines
+_said325 = []
+_real_fl325 = br.flash
+_fid325 = br._new_bookmark_id()
+br.bookmarks.append({"id": _fid325, "parent": 0, "type": "folder",
+                     "title": "F325", "locked": True})
+for _n325, _title in enumerate(("zebra325", "apple325")):
+    br.bookmarks.append({"id": br._new_bookmark_id(), "parent": _fid325,
+                         "type": "link", "title": _title,
+                         "url": "https://%s.example/" % _title})
+br.flash = lambda msg, *a, **k: _said325.append(str(msg))
+try:
+    br.sort_folder(_fid325, "title", permanent=True)
+    _ord325 = [e["title"] for e in br.bookmarks if e.get("parent") == _fid325]
+    _sep325 = br.add_separator(_fid325)
+finally:
+    br.__dict__.pop("flash", None)
+    br.bookmarks[:] = [e for e in br.bookmarks
+                       if e.get("id") != _fid325 and e.get("parent") != _fid325]
+    br.save_bookmarks()
+check("325 a locked folder keeps its order and gets no separator",
+      _ord325 == ["zebra325", "apple325"] and _sep325 is None
+      and _said325.count(br._ui_str("bmLocked")) == 2, (_ord325, _said325))
+# 325e: "close the others" spares a locked tab (in a browser of its own)
+_sess325 = list(br.sessions)
+br.sessions.append({"name": "X325", "sid": "x325"})
+_k325 = br.new_tab(url=srv.url("/twhome?k325"), session="x325", switch=False)
+_l325 = br.new_tab(url=srv.url("/twhome?l325"), session="x325", switch=False)
+_o325 = br.new_tab(url=srv.url("/twhome?o325"), session="x325", switch=False)
+H.spin(500)
+_l325.locked = True
+
+
+def _open325(v):
+    try:
+        return br.tabs.indexOf(v) >= 0
+    except RuntimeError:
+        return False
+
+
+try:
+    br.close_other_tabs(br.tabs.indexOf(_k325))
+    H.spin(300)
+    _left325 = (_open325(_k325), _open325(_l325), _open325(_o325))
+finally:
+    for _v in (_l325, _k325, _o325):
+        try:
+            _v.locked = False
+        except RuntimeError:
+            pass
+        if _open325(_v):
+            br.close_tab(br.tabs.indexOf(_v), ask=False)
+    br.sessions[:] = _sess325
+    br.session_profiles.pop("x325", None)
+check("325 'close other tabs' spares a locked tab",
+      _left325 == (True, True, False), _left325)
+# 325f: bookmarking the selected (here: the current) private tab writes nothing
+_p325 = br.new_tab(url=srv.url("/twhome?p325"), private=True)
+H.spin(500)
+br.tabs.setCurrentWidget(_p325)
+br.clear_tab_selection()
+br._sel_views = [_p325]          # the private tab, selected
+_where325 = br.tabs.indexOf(_p325)
+_ids325 = {e.get("id") for e in br.bookmarks}
+try:
+    br.selection_do("bookmark")
+    # by what is new (the query of the address is cleaned off a bookmark)
+    _added325 = [e.get("url") for e in br.bookmarks
+                 if e.get("id") not in _ids325]
+finally:
+    br.bookmarks[:] = [e for e in br.bookmarks if e.get("id") in _ids325]
+    br.save_bookmarks()
+    _close_if_open(_p325)
+check("325 bookmarking selected tabs writes no private tab down",
+      _where325 >= 0 and _added325 == [], (_where325, _added325))
+_sa325 = __import__("inspect").getsource(B.WebView._search_actions)
+check("325 (source) 'Search for' shows the selection as text, one line",
+      "short = _amp(re.sub(" in _sa325
+      and 'media.scheme() in ("http", "https")' in _sa325)
+
+# ---- 326: windows and fullscreen, second look (the 90th pass) ----
+# 326a: a reopened window shows its tab, with no spare start tab beside it
+B.CLOSED_WINDOWS.append({"t": 1, "tabs": [
+    {"u": srv.url("/twhome?w326"), "t": "w326", "s": "main"}]})
+_w326 = br.reopen_closed_window()
+H.spin(800)
+try:
+    _rows326 = [br._tab_url(v) if False else _w326._tab_url(v)
+                for _i, v in _w326._real_tabs()]
+    _cur326 = _w326._tab_url(_w326.current()) if _w326.current() else ""
+finally:
+    try:
+        _w326._closing_anyway = True
+        _w326.close()
+    except (RuntimeError, AttributeError):
+        pass
+    H.spin(300)
+check("326 a reopened window shows its own tab, with no spare start tab",
+      len(_rows326) == 1 and "w326" in _rows326[0] and "w326" in _cur326,
+      (_rows326, _cur326))
+# 326b: the lock covers popped-out tabs too, and no new one pops out
+_real_lockset326 = br.browser_lock_set
+br.browser_lock_set = lambda: True
+_po326 = br.new_tab(url=srv.url("/twhome?po326"))
+H.spin(400)
+_mini326 = br.pop_out_tab(br.tabs.indexOf(_po326))
+H.spin(400)
+_x326 = br.new_tab(url=srv.url("/twhome?x326"))
+H.spin(300)
+try:
+    _vis_before326 = bool(_mini326 and _mini326.isVisible())
+    br.lock_browser()
+    H.spin(200)
+    _vis_locked326 = bool(_mini326 and _mini326.isVisible())
+    _new326 = br.pop_out_tab(br.tabs.indexOf(_x326))
+    br.unlock_browser()
+    H.spin(200)
+    _vis_after326 = bool(_mini326 and _mini326.isVisible())
+finally:
+    br.__dict__.pop("browser_lock_set", None)
+    if br.locked_now():
+        br.unlock_browser()
+    try:
+        if _mini326 is not None:
+            _mini326.close()
+    except RuntimeError:
+        pass
+    H.spin(300)
+    _close_if_open(_po326)
+    _close_if_open(_x326)
+check("326 locking the window hides its popped-out tabs until it is opened",
+      _vis_before326 and not _vis_locked326 and _vis_after326
+      and _new326 is None,
+      (_vis_before326, _vis_locked326, _vis_after326, _new326))
+# 326c: window-fill on a page with no video gives the chrome back
+_nv326 = br.new_tab(url=srv.url("/twhome?nv326"))
+H.spin(500)
+br.tabs.setCurrentWidget(_nv326)
+try:
+    br.window_fullscreen(view=_nv326)
+    H.wait_for(lambda: getattr(br, "_win_full_view", None) is None, 3000)
+    _wf326 = (getattr(br, "_win_full_view", None) is None,
+              br.chrome.isVisible())
+finally:
+    if getattr(br, "_win_full_view", None) is not None:
+        br._drop_win_full()
+    _close_if_open(_nv326)
+check("326 window-fill on a page with no video gives the chrome back",
+      _wf326 == (True, True), _wf326)
+_src326 = __import__("inspect").getsource
+check("326 (source) a closed window is remembered without clean-room tabs, "
+      "fullscreen goes back to maximized, the window state keeps 'max'",
+      "self._kept_state(self.tab_state(), asked=True)"
+      in _src326(B.Browser._remember_window)
+      and "self.showMaximized()" in _src326(B.Browser.set_fullscreen)
+      and '"max": bool(' in _src326(B.Browser.window_state)
+      and "view.loadStarted.connect(" in _src326(B.Browser.window_fullscreen))
+
+# ---- 327: settings to effect, second look (the 91st pass) ----
+_w327 = br.new_window(); H.spin(800)
+_v327 = _w327.new_tab(url=srv.url("/twhome?w327")); H.spin(600)
+_hit327 = []
+_real_mt327 = br.media_tool
+_wv327 = br.config.get("wheelVolume", "__absent__")
+br.media_tool = lambda name, view=None, then=None, **a: (
+    _hit327.append((name, view)) or True)
+try:
+    br.bridge.setSetting("wheelVolume", "false")
+finally:
+    br.__dict__.pop("media_tool", None)
+    if _wv327 == "__absent__":
+        br.config.pop("wheelVolume", None)
+    else:
+        br.config["wheelVolume"] = _wv327
+    try:
+        _w327._closing_anyway = True
+        _w327.close()
+    except RuntimeError:
+        pass
+    H.spin(300)
+check("327 switching the wheel volume reaches another window's tabs too",
+      any(v is _v327 and n == "wheelvolumeoff" for n, v in _hit327),
+      len(_hit327))
+
+# ---- 328: startup and shutdown, second look (the 92nd pass) ----
+_sh328 = B._sane_config_shapes({"sessions": ["x", 5, {"sid": "a328"},
+                                             {"name": "no sid"},
+                                             {"sid": "b328", "name": "B"}]})
+_sh328b = B._sane_config_shapes({"sessions": {"sid": "c328"}})
+check("328 a virtual-browser list of the wrong shape is cleaned, not fatal",
+      _sh328["sessions"] == [{"sid": "a328", "name": "a328"},
+                             {"sid": "b328", "name": "B"}]
+      and _sh328b["sessions"] == [], (_sh328, _sh328b))
+_mn328 = __import__("inspect").getsource(B.main)
+check("328 (source) a SIGTERM / SIGHUP / SIGINT quits the way the menu does",
+      'for _name in ("SIGTERM", "SIGHUP", "SIGINT"):' in _mn328
+      and "QTimer.singleShot(0, app.quit)" in _mn328
+      and "_heartbeat.start(500)" in _mn328
+      and "_win._closing_anyway = True" in _mn328)
+
+# ---- 329: the address bar, third look (the 94th pass) ----
+# (what the line showed before: QUrl's toString cut at 160)
+_hl329 = getattr(B, "_hover_line", None) or (
+    lambda t: B.QUrl(t).toString()[:160])
+_h1_329 = _hl329("https://xn--pypal-4ve.com/login")
+_h2_329 = _hl329("https://www.paypal.com:" + "a" * 200 + "@evil.example/x")
+check("329 the hover line shows a look-alike host as punycode, and a long "
+      "user part never hides the real host",
+      "xn--pypal-4ve.com" in _h1_329 and "evil.example" in _h2_329
+      and len(_h2_329) <= 160, (_h1_329, _h2_329[:80]))
+
+
+class _PV329:
+    private = True
+
+    def url(self):
+        return B.QUrl("https://p329.example/")
+
+
+_cap329 = []
+_real_su329 = br.search_url_for
+_real_nt329 = br.new_tab
+br.search_url_for = lambda text, view=None: (_cap329.append(view)
+                                             or "https://s.example/?q=t")
+br.new_tab = lambda **k: None
+_pv329 = _PV329()
+try:
+    br.search_for("words329", view=_pv329)
+finally:
+    br.__dict__.pop("search_url_for", None)
+    br.__dict__.pop("new_tab", None)
+check("329 a search picks the engine of the page the words came from",
+      _cap329 == [_pv329], _cap329)
+_fs329 = __import__("inspect").getsource(B.Browser._fetch_suggestions)
+check("329 (source) words for a keyword, a bookmark keyword or a site search "
+      "are not sent for suggestions",
+      "or self.keyword_url(raw) or self.bookmark_keyword_url(raw)" in _fs329
+      and "or self.searching_site()" in _fs329)
+_rt329 = [br._resolve_typed(t) for t in ("nas:5000", "devbox:3000/admin")]
+_rs329 = br._resolve_typed("hello world")
+check("329 a one-word host with a port is opened, not searched",
+      _rt329 == ["http://nas:5000", "http://devbox:3000/admin"]
+      and "nas" not in _rs329 and "hello" in _rs329, (_rt329, _rs329[:60]))
+_open329 = []
+_real_su2_329 = br.selection_url
+br.selection_url = lambda view=None, then=None: then(
+    "https://example.com/page.") or True
+br.new_tab = lambda url=None, **k: _open329.append(
+    url.toString() if hasattr(url, "toString") else str(url))
+try:
+    br.go_to_selection()
+finally:
+    br.__dict__.pop("selection_url", None)
+    br.__dict__.pop("new_tab", None)
+check("329 'go to the selected address' leaves the sentence's full stop off",
+      _open329 == ["https://example.com/page"], _open329)
+
+# ---- 330: developer tools, second look (the 95th pass) ----
+_loc330 = [br.is_local_address(h) for h in (
+    "2002:808:808::", "0.0.0.0", "8.8.8.8", "192.168.0.5", "10.1.2.3",
+    "fe80::1", "::ffff:192.168.1.2", "localhost")]
+check("330 'home network' for bad certificates leaves out 6to4 and 0.0.0.0",
+      _loc330 == [False, False, False, True, True, True, True, True], _loc330)
+_got330 = []
+try:
+    _r330 = br.http_request("GET", "http://127.0.0.1:9/",
+                            headers=[("X-Name", "smile \U0001F600")],
+                            then=_got330.append)
+except UnicodeEncodeError as _e:
+    _r330 = repr(_e)
+check("330 a header the wire cannot carry is refused, not raised",
+      _r330 is False and _got330 == [{}], (_r330, _got330))
+
+
+class _Reply330:
+    def error(self):
+        return B.QNetworkReply.NetworkError.HostNotFoundError
+
+    def errorString(self):
+        return "Host nowhere330 not found"
+
+    def attribute(self, _a):
+        return None
+
+    def readAll(self):
+        return b""
+
+    def rawHeaderList(self):
+        return []
+
+    def deleteLater(self):
+        pass
+
+
+_ans330 = []
+br._http_answer(_Reply330(), B.time.monotonic(), then=_ans330.append)
+check("330 a failed request says why",
+      _ans330 and _ans330[0].get("error") == "Host nowhere330 not found",
+      _ans330)
+_rh330 = __import__("inspect").getsource(B.Browser.response_headers)
+check("330 (source) the response headers are read with a HEAD request",
+      "self._nam.head(QNetworkRequest(QUrl(url)))" in _rh330)
+
+# ---- 331: tab collections, second look (the 96th pass) ----
+_sess331 = list(br.sessions)
+br.sessions.append({"name": "X331", "sid": "x331"})
+_ws331 = {k: br.config.get(k, "__absent__") for k in ("workspaces",
+                                                      "workspaceNow")}
+_url331 = srv.url("/twhome?ws331")
+_p331 = br.new_tab(url=_url331, session="x331", switch=False)
+H.spin(500)
+br.pin_tab(br.tabs.indexOf(_p331), True)
+H.spin(200)
+# (into the config: with no sets yet workspaces() is a throwaway {})
+br.config["workspaces"] = dict(br.workspaces(),
+                               A331=[{"u": _url331, "s": "x331", "t": "p331"}])
+_opened331 = []
+try:
+    _opened331 = br.open_workspace("A331", keep=True) or []
+    H.spin(400)
+    _copies331 = [v for _i, v in br._real_tabs(session="x331")
+                  if br._tab_url(v) == _url331]
+finally:
+    for _v in list(_opened331) + [_p331]:
+        try:
+            _v.pinned = False
+            _close_if_open(_v)
+        except RuntimeError:
+            pass
+    br.workspaces().pop("A331", None)
+    for _k, _o in _ws331.items():
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        elif _k == "workspaceNow":
+            br.config[_k] = _o
+    br.sessions[:] = _sess331
+    br.session_profiles.pop("x331", None)
+check("331 opening a workspace does not reopen a pinned tab that stayed open",
+      len(_copies331) == 1, len(_copies331))
+# 331b: a group put aside comes back in its colour
+_ag331 = br.ensure_group("C331", "#123456")
+_at331 = br.new_tab(url=srv.url("/twhome?aside331"), switch=False)
+H.spin(400)
+br._move_tab_to_group(br.tabs.indexOf(_at331), _ag331)
+H.spin(200)
+_aside_was331 = list(br.aside_sets())
+try:
+    br.set_aside(group=_ag331)
+    H.spin(300)
+    _back331 = br.bring_back_aside(len(br.aside_sets()) - 1)
+    H.spin(300)
+    _col331 = br.group_colors.get("C331")
+finally:
+    for _v in _back331 if "_back331" in dir() else []:
+        _close_if_open(_v)
+    if "C331" in br.groups:
+        br.delete_group("C331")
+    br.config["asideSets"] = _aside_was331 if "asideSets" in br.config else _aside_was331
+check("331 a group put aside comes back in its own colour",
+      _col331 == "#123456", _col331)
+_src331 = __import__("inspect").getsource
+check("331 (source) close duplicates and close this site's tabs spare a game",
+      'getattr(view, "_game", False)' in _src331(B.Browser.close_duplicate_tabs)
+      and 'getattr(other, "_game", False)' in _src331(B.Browser.close_site_tabs))
+# 331c (review): a group that comes back renamed keeps its colour
+_sess331c = list(br.sessions)
+br.sessions.append({"name": "Y331", "sid": "y331"})
+_owned331c = br.ensure_group("D331", "#aaaaaa", session="y331")
+_views331c = []
+try:
+    _views331c = br.open_tab_state(
+        [{"u": srv.url("/twhome?d331"), "g": "D331"}],
+        colours={"D331": "#654321"})
+    H.spin(300)
+    _g331c = [getattr(v, "group", None) for v in _views331c]
+    _c331c = [br.group_colors.get(g) for g in _g331c]
+finally:
+    for _v in _views331c:
+        _close_if_open(_v)
+    for _g in ("D331 2", "D331"):
+        if _g in br.groups:
+            br.delete_group(_g)
+    br.sessions[:] = _sess331c
+    br.session_profiles.pop("y331", None)
+check("331 a put-aside group that comes back as 'name 2' keeps its colour",
+      _g331c == ["D331 2"] and _c331c == ["#654321"], (_g331c, _c331c))
+check("331 (source) bring_back_aside hands the colours to open_tab_state",
+      "colours=" in _src331(B.Browser.bring_back_aside))
+# 331d (review): a pinned private tab is no stand-in for a saved page
+_ws331d = {k: br.config.get(k, "__absent__") for k in ("workspaces",
+                                                       "workspaceNow")}
+_url331d = srv.url("/twhome?ws331d")
+_pp331d = br.new_tab(private=True, switch=False)
+H.spin(300)
+H.load(_pp331d, _url331d)
+H.spin(200)
+br.pin_tab(br.tabs.indexOf(_pp331d), True)
+H.spin(200)
+br.config["workspaces"] = dict(br.workspaces(),
+                               B331=[{"u": _url331d, "t": "d331"}])
+_opened331d = []
+try:
+    _opened331d = br.open_workspace("B331", keep=True) or []
+    H.spin(400)
+    _plain331d = [v for v in _opened331d
+                  if not getattr(v, "private", False)
+                  and br._tab_url(v) == _url331d]
+finally:
+    for _v in list(_opened331d) + [_pp331d]:
+        try:
+            _v.pinned = False
+            _close_if_open(_v)
+        except RuntimeError:
+            pass
+    br.workspaces().pop("B331", None)
+    for _k, _o in _ws331d.items():
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+check("331 a pinned private tab on the same page does not keep the set's "
+      "page from opening", len(_plain331d) == 1, len(_plain331d))
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

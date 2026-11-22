@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-11-22 — line-by-line review, day 5 (part fifty-five: eighty-eighth to ninety-sixth passes)
+
+Nine more searches: second looks at permissions and notifications, the
+context menus, windows and fullscreen, settings taking effect, startup
+and shutdown, the browser's own pages, developer tools and tab
+collections, and a third look at the address bar. Fixed here:
+
+- **Notifications and media.** A desktop notification's text is cut to
+  a sane length and its body can no longer carry markup from a page;
+  stopping a site's camera or microphone also drops its media keys in
+  every window.
+- **Context menus.** Labels with "&" show correctly and the search label
+  stays on one line; dictionary look-ups and image search only go where
+  they should; bookmarking a selection never takes a private tab's page;
+  "close other tabs" spares locked and game tabs; a locked bookmark
+  folder can no longer be sorted or given a separator.
+- **Windows and fullscreen.** A reopened window comes back in its own
+  virtual browser without a spare start tab, and does not bring back
+  throwaway tabs; locking a window also hides its popped-out tabs;
+  window-fill gives the chrome back when the page moves on or has no
+  video; leaving fullscreen keeps a maximized window maximized, and the
+  saved window size is the normal one.
+- **Settings.** The wheel-volume switch and the caption style reach
+  every window, the split view and popped-out tabs at once.
+- **Startup and shutdown.** A SIGTERM, SIGINT or SIGHUP (a logout, a
+  shutdown) now closes the browser cleanly, saving the session, instead
+  of leaving it marked as still running; a damaged session list is
+  repaired at start.
+- **Address bar.** The hover line shows the real host of a link, a
+  dotless name with a port opens as an address, keyword and site searches
+  no longer trigger remote suggestions, and "go to selection" drops
+  trailing punctuation.
+- **Developer tools.** "Home network" means private address ranges only
+  (not documentation or reserved ones), a failed request says why, and
+  bad header names or methods are refused instead of sent.
+- **Tab collections.** Opening a set no longer opens a second copy of a
+  pinned, locked or game tab that stayed open, and a pinned private tab
+  never stands in for a saved page; a group put aside comes back in its
+  own colour, even when it has to be renamed; "close duplicates" and
+  "close this site's tabs" spare game tabs.
+
 ## 2026-11-14 — line-by-line review, day 4 (part fifty-four: seventy-third to eighty-seventh passes)
 
 Fourteen more searches: second looks at notes and the desk, the engine

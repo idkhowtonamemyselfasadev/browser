@@ -527,8 +527,10 @@ win.debug_port(False)
 check("localhost is a local address", win.is_local_address("localhost")
       is True)
 check("so is 127.0.0.1", win.is_local_address("127.0.0.1") is True)
-check("so is a home network", win.is_local_address("192.0.2.10")
+check("so is a home network", win.is_local_address("192.168.0.10")
       is True)
+check("...but not a documentation address python calls private",
+      win.is_local_address("192.0.2.10") is False)
 check("a site on the internet is not",
       win.is_local_address("example.com") is False)
 check("...and neither is a public address",

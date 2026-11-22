@@ -3071,6 +3071,28 @@ KNOWN_SCRIPTS = ("LATIN", "CYRILLIC", "GREEK", "ARMENIAN", "HEBREW",
                  "ARABIC")
 
 
+def _hover_line(text, cap=160):
+    """A hovered link as the status line shows it: the host in letters a
+    person can check (punycode for a look-alike, as the bar does -- the
+    line drew "pаypal.com" with a Cyrillic a in its own letters), a user
+    part ("www.paypal.com:aaaa...@evil.com") cut short so the real host
+    stays in view, and only the rest cut at the end."""
+    text = str(text or "")
+    url = QUrl(text)
+    if url.isValid() and url.host():
+        user = url.userInfo()
+        out = pretty_url(url.adjusted(
+            QUrl.UrlFormattingOption.RemoveUserInfo).toString())
+        if user:
+            short = user if len(user) <= 20 else user[:19] + "\u2026"
+            scheme = url.scheme() + "://"
+            if out.startswith(scheme):
+                out = scheme + short + "@" + out[len(scheme):]
+    else:
+        out = text
+    return out if len(out) <= cap else out[:cap - 1] + "\u2026"
+
+
 def idn_safe_to_show(host):
     """Whether this host may be shown in its own letters.
 
@@ -17744,13 +17766,27 @@ class Bridge(QObject):
                 # the answer reads this table and kept answering from it
                 MONEY_RATES["rates"] = {}
                 MONEY_RATES["when"] = 0
-        elif key == "wheelVolume":
-            for _i, _view in browser._real_tabs():
-                browser.media_tool("wheelvolume" if value
-                                   else "wheelvolumeoff", view=_view)
-        elif key in ("capSize", "capColour", "capBack", "capBottom"):
-            for _i, _view in browser._real_tabs():
-                browser.apply_caption_style(_view, clearing=True)
+        elif key in ("wheelVolume", "capSize", "capColour", "capBack",
+                     "capBottom"):
+            # every window's tabs, the split half and the popped-out ones:
+            # only this window's strip was reached, and a second window's
+            # pages kept the wheel hook switched off (and the old caption
+            # style) until they were reloaded
+            views = [v for _w, v in browser._windows_views()]
+            for win in browser._all_windows():
+                for mini in list(getattr(win, "_popouts", [])):
+                    if getattr(mini, "view", None) is not None:
+                        views.append(mini.view)
+            for _view in views:
+                try:
+                    if key == "wheelVolume":
+                        browser.media_tool("wheelvolume" if value
+                                           else "wheelvolumeoff",
+                                           view=_view)
+                    else:
+                        browser.apply_caption_style(_view, clearing=True)
+                except RuntimeError:
+                    continue
         elif key == "snippets":
             browser.refresh_snippet_script()
         elif key == "clipHistory":
@@ -20409,7 +20445,7 @@ class WebView(QWebEngineView):
         if others and not self.private:
             sub = menu.addMenu(ui("linkInSession"))
             for entry in others:
-                sub.addAction(entry["name"]).triggered.connect(
+                sub.addAction(_amp(entry["name"])).triggered.connect(
                     lambda _, sid=entry["sid"]: (
                         browser.switch_session(sid),
                         browser.new_tab(url=real, session=sid)))
@@ -20441,6 +20477,10 @@ class WebView(QWebEngineView):
         if text:
             menu.addSeparator()
             short = text if len(text) <= 28 else text[:27] + "\u2026"
+            # one line, no direction overrides, "&" as an "&": "AT&T"
+            # showed as "ATT" and Alt+T ran the search
+            short = _amp(re.sub("[\u202a-\u202e\u2066-\u2069]", "",
+                                " ".join(short.split())))
             # view=self: words from a private half of the split view,
             # with a normal tab in front, were searched in a normal tab
             menu.addAction(ui("searchFor") % short).triggered.connect(
@@ -20468,7 +20508,11 @@ class WebView(QWebEngineView):
         kind = request.mediaType() if request is not None else None
         image = (kind == QWebEngineContextMenuRequest.MediaType.MediaTypeImage
                  if kind is not None else False)
-        if image and not media.isEmpty() and not self.private:
+        # an address on the web: a data: picture went to Google whole
+        # (megabytes, after a question that said "its address"), and a
+        # blob: one means nothing there
+        if image and not media.isEmpty() and not self.private \
+                and media.scheme() in ("http", "https"):
             menu.addAction(ui("searchImage")).triggered.connect(
                 lambda: browser.search_image(media.toString(), view=self))
 
@@ -29066,7 +29110,7 @@ class Browser(QMainWindow):
         if others and not getattr(view, "private", False):
             sub = menu.addMenu(ui("tabInSession"))
             for entry in others:
-                sub.addAction(entry["name"]).triggered.connect(
+                sub.addAction(_amp(entry["name"])).triggered.connect(
                     lambda _, sid=entry["sid"]:
                     self.open_in_session(at(), sid))
         menu.addSeparator()
@@ -29354,6 +29398,11 @@ class Browser(QMainWindow):
         for i, view in self._real_tabs(session=session):
             if view is keep or getattr(view, "pinned", False):
                 continue
+            # what close_site_tabs and close_duplicate_tabs spare: a tab
+            # he locked, a game -- close_tab(ask=False) skipped the
+            # question and closed them
+            if getattr(view, "locked", False) or getattr(view, "_game", False):
+                continue
             if side == "right" and i < here:
                 continue
             if side == "left" and i > here:
@@ -29383,8 +29432,11 @@ class Browser(QMainWindow):
         gone = 0
         for _key, views in seen.items():
             for view in views[:-1]:
+                # a game too: close_tab(ask=False) skipped the question
+                # that protects an hour of play
                 if getattr(view, "pinned", False) \
-                        or getattr(view, "locked", False):
+                        or getattr(view, "locked", False) \
+                        or getattr(view, "_game", False):
                     continue
                 i = self.tabs.indexOf(view)
                 if i >= 0:
@@ -29410,6 +29462,7 @@ class Browser(QMainWindow):
                 continue
             if other is not view and (
                     getattr(other, "locked", False)
+                    or getattr(other, "_game", False)
                     or bool(getattr(other, "private", False)) != private):
                 continue
             if as_qurl(self._tab_url(other)).host().removeprefix(
@@ -29857,8 +29910,11 @@ class Browser(QMainWindow):
             elif what == "pin":
                 self.pin_tab(at, True)
             elif what == "bookmark":
-                self.add_bookmark_url(view.url().toString(),
-                                      self._tab_title(at))
+                # as bookmark_all_tabs: nothing a private tab was on is
+                # written down (and a sleeping tab's real address)
+                if not getattr(view, "private", False):
+                    self.add_bookmark_url(self._tab_url(view),
+                                          self._tab_title(at))
             elif what == "sleep":
                 self.sleep_tab(view, True)
             elif what == "aside":
@@ -30401,9 +30457,12 @@ class Browser(QMainWindow):
             out.append(entry)
         return out
 
-    def open_tab_state(self, entries, switch=False, lazy=True):
+    def open_tab_state(self, entries, switch=False, lazy=True,
+                       colours=None):
         """Open what tab_state wrote down. Lazily by default: a set of
-        twenty tabs costs nothing until they are looked at."""
+        twenty tabs costs nothing until they are looked at. colours:
+        saved group name -> colour, given to a group made here (by the
+        saved name: it may come back as "name 2")."""
         opened = []
         for entry in entries or []:
             url = str(entry.get("u") or "")
@@ -30426,7 +30485,11 @@ class Browser(QMainWindow):
             if group:
                 # made in the tab's own virtual browser, or the tab and
                 # its group header disagreed about which one they were in
-                group = self.ensure_group(group, session=session)
+                colour = (colours.get(group)
+                          if isinstance(colours, dict) else None)
+                group = self.ensure_group(
+                    group, colour if isinstance(colour, str) else None,
+                    session=session)
             view = self.new_tab(url=url, switch=False, at_end=True,
                                 lazy=bool(lazy), group=group,
                                 session=session,
@@ -30611,8 +30674,14 @@ class Browser(QMainWindow):
                                  asked=True)
         if not state:
             return []
+        # the colours of its groups: re-made from the name alone, a
+        # group came back in the next colour of the palette
+        colours = {e.get("g"): self.group_colors.get(e.get("g"))
+                   for e in state if e.get("g")
+                   and self.group_colors.get(e.get("g"))}
         self.aside_sets().append({"t": int(time.time()),
-                                  "name": group or "", "tabs": state})
+                                  "name": group or "", "tabs": state,
+                                  "colours": colours})
         going = []
         for i in sorted(indices, reverse=True):
             widget = self.tabs.widget(i)
@@ -30645,7 +30714,11 @@ class Browser(QMainWindow):
             entry = sets[which]
         except IndexError:
             return []
-        views = self.open_tab_state(entry.get("tabs"), switch=True)
+        colours = entry.get("colours")
+        views = self.open_tab_state(
+            entry.get("tabs"), switch=True,
+            colours=colours if isinstance(colours, dict) else None)
+        self.tabs.tabBar().update()
         if not keep:
             sets.remove(entry)
             self.save_config(quiet=True)
@@ -30956,7 +31029,10 @@ class Browser(QMainWindow):
         back. A window closed by mistake is a worse loss than a tab."""
         if getattr(self, "_moved_away", False):
             return 0    # gathered into another window, not closed
-        state = self.tab_state()
+        # never a throwaway browser's tab: its jar is gone by the time
+        # the window comes back, and the clean room's page reopened in
+        # the main browser's
+        state = self._kept_state(self.tab_state(), asked=True)
         if not state:
             return 0
         CLOSED_WINDOWS.append({"t": int(time.time()), "tabs": state})
@@ -30970,7 +31046,21 @@ class Browser(QMainWindow):
             return None
         entry = CLOSED_WINDOWS.pop()
         win = self.new_window()
-        win.open_tab_state(entry.get("tabs"), switch=True, lazy=True)
+        spare = [w for _i, w in win._real_tabs()]
+        opened = win.open_tab_state(entry.get("tabs"), switch=True,
+                                    lazy=True)
+        if opened:
+            # as a tab moved to a window: its virtual browser in front
+            # (left on main, the restored tabs were hidden behind a start
+            # page), and the spare start tab gone
+            sid = getattr(opened[0], "session", "main") or "main"
+            if sid != getattr(win, "active_session", "main"):
+                win.switch_session(sid)
+            for w in spare:
+                at = win.tabs.indexOf(w)
+                if at >= 0:
+                    win.close_tab(at, ask=False, remember=False)
+            win.tabs.setCurrentWidget(opened[0])
         return win
 
     # ---- windows ----
@@ -31256,6 +31346,12 @@ class Browser(QMainWindow):
     def pop_out_tab(self, index):
         """The tab as a small window with only the page in it, for a
         chat beside a game. Closing it puts the tab back."""
+        # not while the window is locked (it would be a window the lock
+        # does not cover), and not out of an app window: its one site
+        # went into the mini, a start page took its place with no strip
+        # to leave it by
+        if self.locked_now() or getattr(self, "_app_url", None):
+            return None
         view = self.tabs.widget(index)
         if view is None or self._is_header(view):
             return None
@@ -37921,6 +38017,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # one-card microphone-and-camera grant has a name of its own
             if same_place(row["origin"]) and row["what"] in media:
                 self.revoke_permission(row["key"])
+        # and the answers kept for this run only (a local file page is
+        # never written down): left there, the page started the camera
+        # again with no card the moment after "stop"
+        for win in self.windows() or [self]:
+            book = getattr(win, "_session_perms", None)
+            if not isinstance(book, dict):
+                continue
+            for key in list(book):
+                origin, _, what = str(key).partition("|")
+                if same_place(origin) and what in media:
+                    book.pop(key, None)
         return True
 
     def media_indicator(self, rows=None):
@@ -38638,6 +38745,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         cover.show()
         cover.raise_()
         box.setFocus()
+        # the tabs popped out of it are windows of their own: a chat or a
+        # signed-in page stayed on the screen, usable, over the "locked"
+        # window. Hidden until the lock is opened.
+        self._lock_hidden = []
+        for mini in list(getattr(self, "_popouts", [])):
+            try:
+                if mini.isVisible():
+                    mini.hide()
+                    self._lock_hidden.append(mini)
+            except RuntimeError:
+                pass
         self._sync_window_title()
         # a video still talking behind the cover defeats the point of
         # the cover; his switch, because a paused film is a loss too
@@ -38652,6 +38770,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._lock_cover = None
         cover.hide()
         cover.deleteLater()
+        for mini in getattr(self, "_lock_hidden", None) or []:
+            try:
+                if mini in getattr(self, "_popouts", []):
+                    mini.show()
+            except RuntimeError:
+                pass
+        self._lock_hidden = []
         self._sync_window_title()
         view = self.current()
         if view is not None and not self._is_header(view):
@@ -39872,11 +39997,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         program = shutil.which("notify-send")
         if not program:
             return False
+        # the page's own words, shown as words: notification daemons that
+        # read markup in the body (GNOME, dunst, mako) rendered a page's
+        # <b>, <a href> and <img> under the real site's name -- and cut to
+        # a sane length (a megabyte body went to the command line)
+        def cut(value, cap):
+            value = str(value)
+            return value[:cap - 1] + "\u2026" if len(value) > cap else value
         try:
             # "--": a page names its own notification, and one called
-            # "-i /some/file" or "--expire-time" must be shown, not parsed
+            # "-i /some/file" or "--expire-time" must be shown, not parsed.
+            # The summary is plain text by the spec (escaped, it showed
+            # "&lt;"); only the body is read as markup.
             QProcess.startDetached(program, ["-a", "browser", "--",
-                                             title or "browser", str(text)])
+                                             cut(title or "browser", 200),
+                                             html.escape(cut(text, 500),
+                                                         quote=False)])
         except Exception:
             return False
         return True
@@ -43452,7 +43588,26 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.show_chrome(self.chrome_shown())
         except RuntimeError:
             pass
-        self.media_tool2("winfull", view=view, arg=want)
+        if want and not getattr(view, "_winfull_hooked", False):
+            # a new page in that tab takes the fill with it: the chrome
+            # stayed hidden over an ordinary page, and the next toggle
+            # found no fill to take off
+            view._winfull_hooked = True
+            try:
+                view.loadStarted.connect(
+                    lambda v=view: self._drop_win_full()
+                    if getattr(self, "_win_full_view", None) is v else None)
+            except (RuntimeError, TypeError):
+                pass
+
+        def answered(result):
+            # no video on the page: the chrome comes back rather than
+            # leaving a bare page that says "window full"
+            if want and result == "novideo" \
+                    and getattr(self, "_win_full_view", None) is view:
+                self._drop_win_full()
+                self.flash(self._ui_str("momentNoTime"))
+        self.media_tool2("winfull", view=view, arg=want, then=answered)
         self.flash(self._ui_str("winFull" if want else "winFullOff"))
         return want
 
@@ -43895,9 +44050,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 break
         if want is None:
             return False
-        self.showNormal()
-        self.setGeometry(want.geometry())
-        self.showFullScreen()
+        # onto that monitor, then the full screen F11 gives (the chrome
+        # hidden, the toolbar peek): setGeometry(the monitor) made the
+        # monitor's size the window's normal size, and the toolbar and
+        # strip stayed in the picture
+        if self.isFullScreen():
+            self.set_fullscreen(False)
+        box = want.availableGeometry()
+        self.move(box.left() + 40, box.top() + 40)
+        handle = self.windowHandle()
+        if handle is not None:
+            try:
+                handle.setScreen(want)
+            except RuntimeError:
+                pass
+        self.set_fullscreen(True)
         return True
 
     def screens_menu(self, menu=None):
@@ -52006,7 +52173,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             address = ipaddress.ip_address(host)
         except ValueError:
             return False
-        return bool(address.is_private or address.is_loopback)
+        # the ranges a home network is, by name -- Python's is_private
+        # also says yes to 6to4 (2002::/16, a public IPv4 inside) and to
+        # 0.0.0.0, and a bad certificate there was accepted with a flash
+        mapped = getattr(address, "ipv4_mapped", None)
+        if mapped is not None:
+            address = mapped
+        if address.is_loopback:
+            return True
+        homes = (("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                  "169.254.0.0/16") if address.version == 4
+                 else ("fc00::/7", "fe80::/10"))
+        return any(address in ipaddress.ip_network(net) for net in homes)
 
     # ---- the workbench (wave 26) ----
     def regex_test(self, pattern, text, flags=""):
@@ -53951,7 +54129,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if then:
                 then({})
             return False
-        reply = self._nam.get(QNetworkRequest(QUrl(url)))
+        # HEAD: a GET downloaded the whole thing into memory (an .iso
+        # open in the tab) only to read its headers
+        reply = self._nam.head(QNetworkRequest(QUrl(url)))
         reply.finished.connect(
             lambda r=reply: self._headers_answer(r, then))
         return True
@@ -54026,11 +54206,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 then({})
             return False
         request = QNetworkRequest(QUrl(url))
-        for name, value in (headers or []):
-            request.setRawHeader(str(name).encode("latin-1"),
-                                 str(value).encode("latin-1"))
-        data = str(body or "").encode("utf-8")
         method = str(method or "GET").upper()
+        try:
+            for name, value in (headers or []):
+                request.setRawHeader(str(name).encode("latin-1"),
+                                     str(value).encode("latin-1"))
+            if not re.fullmatch(r"[A-Z][A-Z0-9_-]{0,31}", method):
+                raise ValueError(method)
+        except (UnicodeEncodeError, ValueError):
+            # "X-Name: 😀" or a method "GÉT": raised out of the menu, and
+            # nothing went out with nothing said
+            self.flash(self._ui_str("devHttpBad"))
+            if then:
+                then({})
+            return False
+        data = str(body or "").encode("utf-8")
         started = time.monotonic()
         if method == "GET":
             reply = self._nam.get(request)
@@ -54053,6 +54243,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def _http_answer(self, reply, started, then=None):
         status = int(reply.attribute(
             QNetworkRequest.Attribute.HttpStatusCodeAttribute) or 0)
+        # refused, no such host, a bad certificate: "HTTP 0" and nothing
+        # else looked like an empty answer
+        error = ""
+        try:
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                error = str(reply.errorString() or "")
+        except (RuntimeError, AttributeError):
+            pass
         body = bytes(reply.readAll()).decode("utf-8", "replace")
         rows = []
         try:
@@ -54065,7 +54263,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         took = int((time.monotonic() - started) * 1000)
         reply.deleteLater()
         found = {"status": status, "headers": rows, "body": body[:200000],
-                 "ms": took}
+                 "ms": took, "error": error}
         if then:
             then(found)
         else:
@@ -54075,7 +54273,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def show_http_answer(self, found):
         """The answer as a page: the status, the headers, the body."""
         rows = ["<h2>HTTP %d <span class=ms>%d ms</span></h2>"
-                % (found.get("status", 0), found.get("ms", 0)), "<dl>"]
+                % (found.get("status", 0), found.get("ms", 0))]
+        if found.get("error"):
+            rows.append("<p>%s</p>" % html.escape(str(found["error"])))
+        rows.append("<dl>")
         for name, value in found.get("headers", []):
             rows.append("<dt>%s</dt><dd>%s</dd>"
                         % (html.escape(name), html.escape(value)))
@@ -54587,6 +54788,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return "http://" + text      # dev servers, routers: no TLS
             if colon and port.isdigit() and "." in host:
                 return "http://" + text
+            # a one-word host with a port ("nas:5000", "devbox:3000/x"):
+            # searched, its name and port went to the engine
+            if colon and re.fullmatch(r"\d{2,5}", port) \
+                    and int(port) <= 65535 \
+                    and re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}"
+                                     r"[A-Za-z0-9])?", host):
+                return "http://" + text
         if " " in text or "." not in text:
             return self.search_url_for(text)
         if "://" in text:
@@ -54921,7 +55129,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             url = (self.search_keywords().get(engine) or "%s").replace(
                 "%s", QUrl.toPercentEncoding(text).data().decode())
         else:
-            url = self.search_url_for(text)
+            # the engine of the page the words came from: a private half
+            # of the split view with a normal tab in front sent its words
+            # to the normal engine, past "private tabs search with"
+            url = self.search_url_for(text, view=view)
         if new_tab:
             self.new_tab(url=url, private=self._private_of(view))
         else:
@@ -54933,7 +55144,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         search that sends something off the page rather than something
         he typed: the picture's own address goes to the engine."""
         view = view if hasattr(view, "url") else None
-        if not image_url:
+        if not image_url or as_qurl(image_url).scheme() not in ("http",
+                                                                "https"):
             return None
         ask = QMessageBox.question(
             self, self._ui_str("searchImage"),
@@ -55068,7 +55280,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         size = self.config.get("statusLineSize")
         if isinstance(size, (int, float)) and 8 <= size <= 24:
             label.setStyleSheet("font-size: %dpx;" % int(size))
-        label.setText(text[:160])
+        label.setText(_hover_line(text))
         label.adjustSize()
         label.move(0, max(0, self.height() - label.height()))
         label.show()
@@ -55100,7 +55312,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         size = self.config.get("statusLineSize")
         if isinstance(size, (int, float)) and 8 <= size <= 24:
             label.setStyleSheet("font-size: %dpx;" % int(size))
-        label.setText(text[:160])
+        label.setText(_hover_line(text))
         label.resize(bar.width() - 12, bar.height() - 6)
         label.move(bar.mapTo(self, QPoint(6, 3)))
         label.show()
@@ -55459,9 +55671,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         domains = mine[:8] + domains
         if self._suggest_reply is not None:
             self._suggest_reply.abort()
+        raw = self.urlbar.text().strip()
         if (not self.config.get("searchSuggestions", True)
-                or not looks_like_search(self.urlbar.text().strip())
-                or self.bar_scope(self.urlbar.text().strip())[0]
+                or not looks_like_search(raw)
+                or self.bar_scope(raw)[0]
+                # words that go to his keyword's site, a bookmark keyword
+                # or the site he pressed Tab on: Enter never sends them to
+                # Google, and the suggestion asked Google about them
+                # (an intranet keyword's ticket number and all)
+                or self.keyword_url(raw) or self.bookmark_keyword_url(raw)
+                or self.searching_site()
                 or getattr(self.current(), "private", False)
                 # the suggestions come from Google: with DuckDuckGo or
                 # Brave chosen, every word typed still went to Google
@@ -56896,7 +57115,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                  and active_look() == "macos")
         if self._start_menu is not None:
             self._start_menu.dismiss()
-        self.showFullScreen() if on else self.showNormal()
+        if on:
+            if not self.isFullScreen():
+                self._max_before_fs = self.isMaximized()
+            self.showFullScreen()
+        elif getattr(self, "_max_before_fs", False):
+            # maximized before: back to maximized, not to the old normal
+            # size it had before that
+            self._max_before_fs = False
+            self.showMaximized()
+        else:
+            self.showNormal()
         # "show the toolbar at the top edge in full screen": the poll was
         # only started when the switch was flipped WHILE in full screen,
         # so switched on beforehand (or saved from last time) F11 never
@@ -62832,9 +63061,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def window_state(self):
         """What this window is: where it is, how big, which virtual
         browser, and what is open in it."""
-        geometry = self.geometry()
+        # its normal size when maximized or full: the whole screen was
+        # saved as the normal size and the maximized state lost
+        big = self.isMaximized() or self.isFullScreen()
+        geometry = self.normalGeometry() if big else self.geometry()
+        if not geometry.isValid():
+            geometry = self.geometry()
         return {"x": geometry.x(), "y": geometry.y(),
                 "w": geometry.width(), "h": geometry.height(),
+                "max": bool(self.isMaximized() or (
+                    self.isFullScreen()
+                    and getattr(self, "_max_before_fs", False))),
                 "session": self.active_session,
                 "workspace": self.workspace_now(),
                 # never a private tab's: this goes into config.json at
@@ -62896,6 +63133,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if wide and tall:
             self.resize(wide, tall)
         self.move(left, top)
+        if row.get("max") is True:
+            self.showMaximized()
         return {"x": left, "y": top, "w": wide, "h": tall}
 
     # ---- a price inside a sentence, in euros ----
@@ -66521,6 +66760,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         fetched. When neither is there it says so instead of offering
         an empty menu."""
         word = str(word or "").strip().split()[0] if word else ""
+        word = word[:60]          # one "word" can be a 50 KB blob
         if not word:
             if then:
                 then([])
@@ -66562,14 +66802,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.flash(self._ui_str("synNone") % word)
 
         proc.finished.connect(done)
-        proc.start(program, ["-d", "moby-thesaurus", "--", word])
+        # this machine's dictionary server only: a stock dict client with
+        # no local one asks its configured remote servers (dict.org), and
+        # the word -- from a private tab too -- left the machine
+        proc.start(program, ["-h", "localhost", "-d", "moby-thesaurus",
+                             "--", word])
         return True
 
     def _fill_syn(self, menu, word, rows, view=None):
         """The words, into a menu that is already on the screen."""
         menu.clear()
         if not rows:
-            menu.addAction(self._ui_str("synNone") % word).setEnabled(False)
+            # the word as text ("R&D" lost its & to a mnemonic), and short
+            shown = word if len(word) <= 40 else word[:39] + "\u2026"
+            menu.addAction(_amp(self._ui_str("synNone") % shown)) \
+                .setEnabled(False)
             return 0
         for one in rows:
             menu.addAction(one).triggered.connect(
@@ -67953,6 +68200,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # their old tabs: the others' were closed with nothing to bring
         # them back
         opened, covered = [], set()
+        # the tabs that stay open whatever (locked, pinned, game): saved
+        # into the set as well, they were opened a second time beside
+        # themselves, and every round trip doubled them again
+        staying = set()
+        for _i, view in self._real_tabs():
+            if getattr(view, "private", False):
+                continue      # never a stand-in for a saved page
+            if (getattr(view, "locked", False)
+                    or getattr(view, "pinned", False)
+                    or getattr(view, "_game", False)):
+                staying.add((getattr(view, "session", "main") or "main",
+                             self._tab_url(view) or ""))
         for row in rows[name]:
             if not isinstance(row, dict):
                 continue
@@ -67961,6 +68220,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 sid = str(row.get("s") or "")
                 if sid and not self._know_session(sid):
                     sid = "main"
+                if ((sid or self.active_session), url) in staying:
+                    covered.add(sid or self.active_session)
+                    continue
                 covered.add(sid or self.active_session)
                 # in its own browser and in no group: the tab in front's
                 # group (another browser's) was inherited with the session
@@ -68905,6 +69167,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         link."""
         def got(text):
             url = str(text or "")
+            # the sentence's own punctuation after it ("see x.com/page.",
+            # "(x.com/a), thanks"): kept, it opened a wrong address
+            url = re.sub(r"[.,;:!?]+$", "", url)
+            if url.endswith(")") and url.count("(") < url.count(")"):
+                url = url[:-1]
             if not url:
                 self.flash(self._ui_str("navNoUrlThere"))
                 return
@@ -74757,15 +75024,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def all_bookmark_tags(self):
         """Every tag in use, with how many bookmarks carry it."""
+        # this virtual browser's (see session_bookmarks): "by tag" and
+        # "unused" listed and opened the ones marked for another
         counts = {}
-        for entry in self.bookmarks:
+        for entry in self.session_bookmarks():
             for tag in entry.get("tags", []):
                 counts[tag] = counts.get(tag, 0) + 1
         return sorted(counts.items())
 
     def bookmarks_with_tag(self, tag):
         tag = str(tag or "").strip().lower()
-        return [e for e in self.bookmarks if tag in e.get("tags", [])]
+        return [e for e in self.session_bookmarks()
+                if tag in e.get("tags", [])]
 
     def smart_folders(self):
         """Saved searches that behave like folders: "everything tagged
@@ -74851,7 +75121,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         tidy up from."""
         cutoff = time.time() - max(1, int(days or 1)) * 86400
         out = []
-        for entry in self.bookmarks:
+        for entry in self.session_bookmarks():
             if entry.get("type") != "link":
                 continue
             used = _sane_number(entry.get("used"))
@@ -74975,6 +75245,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         parent = _sane_number(parent)
         if parent and parent not in self._bookmark_folder_ids():
             parent = 0
+        if parent and self._under_lock(self._bookmark_by_id(parent)):
+            # a locked folder is not changed (move_bookmark refuses too)
+            self.flash(self._ui_str("bmLocked"))
+            return None
         if len(self.bookmarks) >= BOOKMARKS_MAX:
             return None
         entry = {"id": self._new_bookmark_id(),
@@ -74999,6 +75273,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return (0, (entry.get("title") or "").lower())
 
         order = sorted(kids, key=sort_key)
+        if permanent and fid and self._under_lock(self._bookmark_by_id(fid)):
+            # shown sorted, but a locked folder's order is not rewritten
+            self.flash(self._ui_str("bmLocked"))
+            return order
         if permanent:
             rest = [e for e in self.bookmarks if e not in kids]
             at = min((self.bookmarks.index(e) for e in kids),
@@ -76409,7 +76687,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if others:
             sub = menu.addMenu(self._ui_str("bmToBrowser"))
             for browser_entry in others:
-                sub.addAction(browser_entry["name"]).triggered.connect(
+                sub.addAction(_amp(browser_entry["name"])).triggered.connect(
                     lambda _=False, e=entry, sid=browser_entry["sid"]:
                     self.copy_bookmarks_to_session(e["id"], sid))
         self._add_delete_action(menu, entry)
@@ -76500,7 +76778,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if tags:
             sub = menu.addMenu(ui("bmByTag"))
             for tag, count in tags:
-                sub.addAction("%s  (%d)" % (tag, count)).triggered.connect(
+                sub.addAction(_amp("%s  (%d)" % (tag, count))).triggered.connect(
                     lambda _c=False, t=tag: self.show_tag(t))
         if self.config.get("bookmarkMirror"):
             menu.addAction(ui("bmMirrorNow")).triggered.connect(
@@ -79379,6 +79657,23 @@ def _sane_config_shapes(config):
                     group.pop(key, None)
             clean.append(group)
         config["tabGroups"] = clean
+    if "sessions" in config:
+        # the virtual browsers: read while the window is built, every
+        # entry asked for .get("sid") -- a string or a number in the list
+        # raised, and the whole config.json was set aside
+        rows = config.get("sessions")
+        clean = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            sid = row.get("sid")
+            if not isinstance(sid, str) or not sid:
+                continue
+            row = dict(row)
+            if not isinstance(row.get("name"), str) or not row["name"]:
+                row["name"] = sid
+            clean.append(row)
+        config["sessions"] = clean
     return config
 
 
@@ -84256,6 +84551,33 @@ def main():
     # how long all of that took, for the line in Settings. Taken at the
     # moment the window is up, which is the moment he can use it.
     win._startup_took = time.monotonic() - _STARTED_AT
+    # a polite kill (a logout, systemctl stop, kill <pid>, Ctrl-C in a
+    # terminal) quits the way the menu does: with no handler the process
+    # just ended -- the last session save, clear-on-exit and the
+    # "closed cleanly" mark never ran, and the next start read it as a
+    # crash. Python only sees a signal between Qt events, so a small
+    # heartbeat keeps the event loop coming back to it.
+    def _quit_on_signal(*_args):
+        # nobody to ask: the many-tabs question held the quit (or a "No"
+        # cancelled it) until the session manager's SIGKILL -- as
+        # restart() does, every window closes without asking
+        for _win in list(WINDOWS):
+            try:
+                _win._closing_anyway = True
+            except RuntimeError:
+                pass
+        QTimer.singleShot(0, app.quit)
+    for _name in ("SIGTERM", "SIGHUP", "SIGINT"):
+        _sig = getattr(signal, _name, None)
+        if _sig is None:
+            continue
+        try:
+            signal.signal(_sig, _quit_on_signal)
+        except (ValueError, OSError):
+            pass
+    _heartbeat = QTimer()
+    _heartbeat.timeout.connect(lambda: None)
+    _heartbeat.start(500)
     app.exec()
     _end_process(win)
 
