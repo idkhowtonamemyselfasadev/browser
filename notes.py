@@ -82,21 +82,30 @@ def parse_note(text):
     """A note file as a dictionary. A file with no front matter is a
     note with no title: that is what a file somebody dropped in the
     folder looks like, and it is still a note."""
+    # Notepad's byte order mark in front of "---" hid the whole header,
+    # and the next Save wrote a second one above it
+    text = str(text or "").lstrip("\ufeff")
     out = {"title": "", "link": "", "tags": [], "t": 0, "edited": 0,
-           "body": str(text or "")}
+           "body": text}
     # split on "\n" only: splitlines also cuts at U+2028, \x0b, \x0c and
     # "\r", and the join below then turned each of them (and the last
     # newline) into something else on every save
-    lines = str(text or "").split("\n")
+    lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         return out
     body_at = None
     plain = dict(out)
     extra = []
+    seen = set()
     for i, line in enumerate(lines[1:], 1):
         if line.strip() == "---":
             body_at = i + 1
             break
+        if line[:1] in (" ", "\t") and line.strip():
+            # "  title: Dr" under "author:" is part of that key, not the
+            # note's title: kept as it is
+            extra.append(line)
+            continue
         key, colon, value = line.partition(":")
         if not colon:
             if line[:1] in (" ", "\t", "-") or not line.strip():
@@ -109,10 +118,12 @@ def parse_note(text):
             return plain
         key = key.strip().lower()
         value = value.strip()
-        if key not in FIELDS:
-            # his own keys (date:, aliases:) are kept and written back
+        if key not in FIELDS or key in seen:
+            # his own keys (date:, aliases:) are kept and written back;
+            # so is a second "tags:", which kept only the last one
             extra.append(line)
             continue
+        seen.add(key)
         if key == "tags":
             out["tags"] = [t.strip() for t in value.split(",") if t.strip()]
         elif key in ("t", "edited"):
@@ -177,8 +188,13 @@ class Desk:
         is one folder, and it would otherwise read as a note called
         "todo"."""
         try:
+            # only names _note_id can give back as they are: ".foo.md"
+            # was listed as ".foo", which _note_id refuses, so opening it
+            # showed foo.md and deleting it removed foo.md -- another note
             return sorted(p for p in self.folder.glob("*.md")
-                          if p.name != self.TODO_FILE)
+                          if p.name != self.TODO_FILE
+                          and not p.stem.startswith(".")
+                          and "\\" not in p.stem and "/" not in p.stem)
         except OSError:
             return []
 
@@ -330,35 +346,65 @@ class Desk:
     def todo_path(self):
         return self._dir(self.TODO_FILE)
 
+    def _read_todo_line(self, line):
+        """One line of todo.md as a row (without its id), or None."""
+        found = self._TODO.match(line)
+        if not found:
+            return None
+        text = found.group(2).strip()
+        link = ""
+        due = 0
+        url = re.search(r"<(https?://[^>]+)>", text)
+        if url:
+            link = url.group(1)
+            text = text.replace(url.group(0), "").strip()
+        when = re.search(r"\(due:\s*([^)]+)\)", text)
+        if when:
+            due = self._parse_due(when.group(1))
+            # only taken out when it was read: "(due: tomorrow)" was
+            # dropped and the line rewritten without it the next
+            # time any to-do in the file was ticked or moved
+            if due:
+                text = text.replace(when.group(0), "").strip()
+        return {"text": text, "done": found.group(1) != " ",
+                "link": link, "due": due}
+
     def todos(self):
         try:
             lines = self.todo_path().read_text(
-                encoding="utf-8", errors="replace").splitlines()
+                encoding="utf-8", errors="replace").lstrip(
+                    "\ufeff").splitlines()
         except OSError:
             return []
         out = []
         for i, line in enumerate(lines):
-            found = self._TODO.match(line)
-            if not found:
+            row = self._read_todo_line(line)
+            if row is None:
                 continue
-            text = found.group(2).strip()
-            link = ""
-            due = 0
-            url = re.search(r"<(https?://[^>]+)>", text)
-            if url:
-                link = url.group(1)
-                text = text.replace(url.group(0), "").strip()
-            when = re.search(r"\(due:\s*([^)]+)\)", text)
-            if when:
-                due = self._parse_due(when.group(1))
-                # only taken out when it was read: "(due: tomorrow)" was
-                # dropped and the line rewritten without it the next
-                # time any to-do in the file was ticked or moved
-                if due:
-                    text = text.replace(when.group(0), "").strip()
-            out.append({"id": i, "text": text, "done": found.group(1) != " ",
-                        "link": link, "due": due})
+            row["id"] = i
+            out.append(row)
         return out
+
+    def _keep_line(self, row, line):
+        """The line a row came from, as it was, when the row still says
+        what it said -- or None when it has to be written afresh. Every
+        change re-wrote every to-do line as "- [ ] text": the indent of a
+        sub-task and a "*" bullet were flattened on all of them. A row
+        that was only ticked keeps its line too, with its box changed."""
+        was = self._read_todo_line(line)
+        if was is None:
+            return None
+        same = all(was[k] == row.get(k) for k in ("text", "link", "due"))
+        if not same:
+            return None
+        if bool(was["done"]) == bool(row.get("done")):
+            return line
+        # the box is the first "[" after the bullet
+        bullet = re.match(r"^(\s*[-*]\s*\[)( |x|X)(\].*)$", line)
+        if bullet is None:
+            return None
+        return bullet.group(1) + ("x" if row.get("done") else " ") \
+            + bullet.group(3)
 
     @staticmethod
     def _parse_due(text):
@@ -394,7 +440,8 @@ class Desk:
         after the last to-do, and nothing else is touched."""
         try:
             lines = self.todo_path().read_text(
-                encoding="utf-8", errors="replace").splitlines()
+                encoding="utf-8", errors="replace").lstrip(
+                    "\ufeff").splitlines()
         except FileNotFoundError:
             lines = []
         except OSError:
@@ -411,7 +458,14 @@ class Desk:
         last = -1
         for i, line in enumerate(lines):
             if i in placed:
-                out.append(self._todo_line(placed[i]))
+                row = placed[i]
+                # the row's own line (its id), not the slot it moved into
+                own = lines[row["id"]] if 0 <= row["id"] < len(lines) \
+                    else None
+                kept_line = self._keep_line(row, own) \
+                    if own is not None else None
+                out.append(kept_line if kept_line is not None
+                           else self._todo_line(row))
                 last = len(out) - 1
             elif i in slots:
                 continue                    # a deleted to-do: its line goes
@@ -561,8 +615,20 @@ class Desk:
         if note:
             line += " — " + str(note)
         try:
+            lead = ""
+            try:
+                with path.open("rb") as fh:
+                    fh.seek(0, 2)
+                    if fh.tell():
+                        fh.seek(-1, 2)
+                        # a file written by hand may end without one: the
+                        # new line was glued onto its last
+                        if fh.read(1) not in (b"\n", b"\r"):
+                            lead = "\n"
+            except OSError:
+                pass
             with path.open("a", encoding="utf-8") as fh:
-                fh.write(line.strip() + "\n")
+                fh.write(lead + line.strip() + "\n")
         except OSError:
             return ""
         return str(path)
@@ -585,6 +651,7 @@ class Desk:
             return {}
         if not isinstance(raw, dict):
             return {}
+        # the cap is for showing and expanding: the file keeps what it has
         return {str(k)[:40]: str(v)[:4000] for k, v in raw.items()
                 if str(k).strip()}
 
@@ -597,6 +664,7 @@ class Desk:
         # moved aside first (one that cannot be read at all stops the
         # save), so what was in it can still be got back.
         path = self.snippet_path()
+        parsed = None
         try:
             parsed = json.loads(path.read_bytes().decode("utf-8"))
             broken = not isinstance(parsed, dict)
@@ -615,16 +683,22 @@ class Desk:
                 path.replace(aside)
             except OSError:
                 return False
-        table = self.snippets()
+        # the table as the file has it, whole: it went through the cap
+        # (40 characters a key, 4000 a value) and was written back, so one
+        # edit cut every long snippet on disk
+        table = {}
+        if not broken and isinstance(parsed, dict):
+            table = {str(k): str(v) for k, v in parsed.items()
+                     if str(k).strip()}
+        for k in [k for k in table if k[:40] == key]:
+            del table[k]
         if text:
             table[key] = str(text)[:4000]
-        else:
-            table.pop(key, None)
         try:
             _write_atomic(self.snippet_path(), json.dumps(table, indent=1))
         except OSError:
             return False
-        return table
+        return {k[:40]: v[:4000] for k, v in table.items()}
 
     def expand(self, word):
         """What a snippet key stands for, or "" when it is not one."""

@@ -4745,10 +4745,12 @@ _bg103 = br.new_tab(url=srv.url("/twhome?duck=2"), switch=False); H.spin(200)
 try:
     _bg103.page().recentlyAudible = lambda: True
     br.duck_others(_fr103)
-    _ducked103 = [(n, a) for n, v, a in _dk103 if v is _bg103]
+    _ducked103 = [(n, a) for n, v, a in _dk103
+                  if v is _bg103 and n == "duck"]
     del _dk103[:]
     br._audible_changed(_fr103, False)
-    _back103 = [(n, a) for n, v, a in _dk103 if v is _bg103]
+    _back103 = [(n, a) for n, v, a in _dk103
+                if v is _bg103 and n == "duck"]
 finally:
     br.media_tool2 = _real_mt103
     if _duck_was103 == "__absent__":
@@ -5000,7 +5002,7 @@ finally:
         br.config.pop("duckLevel", None)
     else:
         br.config["duckLevel"] = _dl105
-_own105 = [a for n, v, a in _dk105 if v is _db105]
+_own105 = [a for n, v, a in _dk105 if v is _db105 and n == "duck"]
 check("a ducked tab that starts playing in front gets its volume back",
       _own105 == [None] and _db105 not in (br._ducked or []),
       str((_own105, len(br._ducked or []))))
@@ -19800,6 +19802,1812 @@ finally:
 check("313 a recording tick that fires inside another one grabs nothing",
       _inside313 is False and _alone313 is True and _frames313 == [1]
       and _after313b is False, (_inside313, _alone313, _frames313, _after313b))
+
+# ---- 307-309: notes files, to-dos and snippets on disk, the drawer's page link,
+#      the edit-conflict guard, article_to_note and the agenda (the 73rd pass) ----
+import shutil as _shutil307
+_dir307 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+try:
+    _d307 = B.notes.Desk(_dir307)
+    # 1. a hidden file is no listed note, and deleting a listed id never
+    # takes another file
+    (_dir307 / "foo.md").write_text("---\ntitle: Foo\n---\nreal", encoding="utf-8")
+    (_dir307 / ".foo.md").write_text("hidden", encoding="utf-8")
+    _ids307 = sorted(n["id"] for n in _d307.notes())
+    for _n in list(_ids307):
+        if _n.startswith("."):
+            _d307.delete_note(_n)
+    check("307 a hidden .foo.md is not listed, and foo.md survives the clicks",
+          ".foo" not in _ids307 and (_dir307 / "foo.md").is_file(),
+          str(_ids307))
+    # 2. a byte order mark before the front matter
+    (_dir307 / "bom.md").write_bytes(
+        b"\xef\xbb\xbf---\ntitle: T\ntags: a, b\n---\nhi")
+    _bom307 = _d307.note("bom")
+    check("307 a BOM before --- does not hide the front matter",
+          _bom307 and _bom307["title"] == "T" and _bom307["tags"] == ["a", "b"]
+          and _bom307["body"] == "hi", str(_bom307))
+    (_dir307 / "todo.md").write_bytes(b"\xef\xbb\xbf- [ ] first\n- [ ] second\n")
+    check("307 a BOM on the first to-do line does not hide it",
+          [r["text"] for r in _d307.todos()] == ["first", "second"],
+          str(_d307.todos()))
+    # 3. an indented key and a repeated one
+    (_dir307 / "nest.md").write_text(
+        "---\ntitle: Real\nauthor:\n  title: Dr\ntags: a\ntags: b\n---\nbody",
+        encoding="utf-8")
+    _nest307 = B.notes.parse_note((_dir307 / "nest.md").read_text(encoding="utf-8"))
+    _saved307 = B.notes.note_text(_nest307)
+    check("307 an indented title: is not the title, a repeated tags: is kept",
+          _nest307["title"] == "Real" and _nest307["tags"] == ["a"]
+          and "  title: Dr" in _saved307 and "tags: b" in _saved307,
+          str((_nest307, _saved307)))
+finally:
+    _shutil307.rmtree(_dir307, ignore_errors=True)
+
+_dir308 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+try:
+    _d308 = B.notes.Desk(_dir308)
+    # 4. a collection file with no last newline
+    (_dir308 / "collections").mkdir()
+    (_dir308 / "collections" / "Reading.md").write_text("- [A](http://a)",
+                                                         encoding="utf-8")
+    _d308.add_to_collection("Reading", "B", "http://b")
+    _coll308 = (_dir308 / "collections" / "Reading.md").read_text(encoding="utf-8")
+    check("308 a collection line is not glued onto one with no newline",
+          _coll308 == "- [A](http://a)\n- [B](http://b)\n", repr(_coll308))
+    # 5. a to-do change keeps the lines it did not change
+    (_dir308 / "todo.md").write_text(
+        "# Plan\n* [ ] star bullet\n    - [ ] nested one\n- [ ] plain\n"
+        "  - [x] done nested\n", encoding="utf-8")
+    _rows308 = _d308.todos()
+    _tid308 = next(r["id"] for r in _rows308 if r["text"] == "plain")
+    _d308.toggle_todo(_tid308)
+    _after308 = (_dir308 / "todo.md").read_text(encoding="utf-8")
+    _d308.add_todo("fresh")
+    _after308b = (_dir308 / "todo.md").read_text(encoding="utf-8")
+    check("308 ticking one to-do leaves every other line as it was written",
+          _after308 == "# Plan\n* [ ] star bullet\n    - [ ] nested one\n"
+          "- [x] plain\n  - [x] done nested\n", repr(_after308))
+    check("308 adding one keeps the indents and bullets too",
+          _after308b.startswith("# Plan\n* [ ] star bullet\n    - [ ] nested one\n")
+          and "  - [x] done nested\n" in _after308b
+          and _after308b.rstrip().endswith("- [ ] fresh"), repr(_after308b))
+    _mv308 = _d308.todos()
+    _d308.move_todo(_mv308[0]["id"], 1)
+    _after308c = (_dir308 / "todo.md").read_text(encoding="utf-8")
+    check("308 moving one keeps both lines' own text",
+          "    - [ ] nested one\n" in _after308c
+          and "* [ ] star bullet\n" in _after308c, repr(_after308c))
+    # 6. one snippet edit does not cut the others
+    _long308 = "x" * 6000
+    _key308 = "k" * 60
+    (_dir308 / "snippets.json").write_text(
+        B.json.dumps({_key308: _long308, ";ip": "1.2.3.4"}), encoding="utf-8")
+    _d308.set_snippet(";new", "hello")
+    _raw308 = B.json.loads((_dir308 / "snippets.json").read_text(encoding="utf-8"))
+    check("308 setting one snippet leaves a long one on disk whole",
+          _raw308.get(_key308) == _long308 and _raw308.get(";new") == "hello"
+          and _raw308.get(";ip") == "1.2.3.4",
+          str({k[:12]: len(v) for k, v in _raw308.items()}))
+    check("308 ...and display still caps it",
+          len(_d308.snippets().get(_key308[:40], "")) == 4000)
+    _d308.set_snippet(";new", "")
+    _raw308b = B.json.loads((_dir308 / "snippets.json").read_text(encoding="utf-8"))
+    check("308 a snippet emptied is removed and the rest stays",
+          ";new" not in _raw308b and _raw308b.get(_key308) == _long308)
+finally:
+    _shutil307.rmtree(_dir308, ignore_errors=True)
+
+# 7-9 need the browser's drawer on a temp folder
+_dir309 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+_desk309 = getattr(br, "_desk", None)
+_flash309 = []
+_flash_was309 = br.flash
+_pv309 = None
+try:
+    br._desk = B.notes.Desk(_dir309)
+    br.flash = lambda text, *a, **k: _flash309.append(str(text))
+    # 7. pageLink from a private front tab gives nothing back
+    _pv309 = br.new_tab(url=srv.url("/twhome"), private=True); H.spin(500)
+    br.tabs.setCurrentWidget(_pv309); H.spin(100)
+    _link309 = br.desk_do("pageLink", "{}")
+    check("309 the drawer's page link hands a private tab's address to nobody",
+          _link309 is None, str(_link309))
+    _close_if_open(_pv309)
+    _pn309 = br.new_tab(url=srv.url("/twhome")); H.spin(500)
+    br.tabs.setCurrentWidget(_pn309); H.spin(100)
+    _link309b = br.desk_do("pageLink", "{}")
+    check("309 ...and an ordinary tab still does",
+          isinstance(_link309b, dict) and "twhome" in str(_link309b.get("url")),
+          str(_link309b))
+    _close_if_open(_pn309)
+    # 8. the conflict guard sees an edit made outside
+    _first309 = br._desk.save_note(None, "Outside", "mine v1")
+    _opened309 = br.desk_do("note", B.json.dumps({"id": _first309["id"]}))
+    _file309 = _dir309 / (_first309["id"] + ".md")
+    # another editor (Syncthing...) changes the body, the header stays
+    _txt309 = _file309.read_text(encoding="utf-8").replace("mine v1", "theirs")
+    _file309.write_text(_txt309, encoding="utf-8")
+    _os309 = B.os if hasattr(B, "os") else __import__("os")
+    _st309 = _file309.stat()
+    _os309.utime(_file309, ns=(_st309.st_atime_ns, _st309.st_mtime_ns + 5_000_000_000))
+    _res309 = br.desk_do("saveNote", B.json.dumps({
+        "id": _first309["id"], "title": "Outside", "body": "mine v2",
+        "edited": _opened309.get("edited") or 0}))
+    check("309 an edit made outside since the note was opened is not overwritten",
+          "theirs" in _file309.read_text(encoding="utf-8")
+          and _res309 and _res309.get("id") != _first309["id"],
+          str((_res309, _file309.read_text(encoding="utf-8"))))
+    # and without an outside edit the save goes through as before
+    _second309 = br._desk.save_note(None, "Calm", "v1")
+    _op2309 = br.desk_do("note", B.json.dumps({"id": _second309["id"]}))
+    _res2309 = br.desk_do("saveNote", B.json.dumps({
+        "id": _second309["id"], "title": "Calm", "body": "v2",
+        "edited": _op2309.get("edited") or 0}))
+    check("309 an untouched note saves in place",
+          _res2309 and _res2309.get("id") == _second309["id"]
+          and br._desk.note(_second309["id"])["body"] == "v2", str(_res2309))
+    # 9. article_to_note over a folder that cannot be written
+    _blocker309 = _dir309 / "blocked"
+    _blocker309.write_text("a file, not a folder", encoding="utf-8")
+    br._desk = B.notes.Desk(_blocker309 / "sub")
+    _read_was309 = br.read_page_tool
+    _thens309 = []
+    br.read_page_tool = lambda tool, view=None, then=None, **k: then(
+        B.json.dumps({"title": "T", "text": "body text"})) or True
+    _flash309.clear()
+    _tab309 = br.current()
+    try:
+        br.article_to_note(view=_tab309, then=lambda n: _thens309.append(n))
+    finally:
+        br.read_page_tool = _read_was309
+    check("309 article_to_note does not flash success over a failed write",
+          br._ui_str("noteMade") not in _flash309 and not _thens309
+          and br._ui_str("readSaveFailed") in _flash309, str(_flash309))
+finally:
+    br.flash = _flash_was309
+    br._desk = _desk309
+    if _pv309 is not None:
+        _close_if_open(_pv309)
+    _shutil307.rmtree(_dir309, ignore_errors=True)
+
+# 10. the agenda: a long timed event, DURATION, cancelled
+_ics309 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent))) / "a.ics"
+try:
+    _ics309.write_text(
+        "BEGIN:VCALENDAR\r\n"
+        "BEGIN:VEVENT\r\nDTSTART:20260309T220000\r\nDTEND:20260311T080000\r\n"
+        "SUMMARY:Night train\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260309\r\nDURATION:P3D\r\n"
+        "SUMMARY:Camp\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nDTSTART:20260310T100000\r\nSTATUS:CANCELLED\r\n"
+        "SUMMARY:Gone\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nDTSTART:20260310T120000\r\nDTEND:20260310T130000\r\n"
+        "SUMMARY:Lunch\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nDTSTART:20260309T200000\r\nDTEND:20260310T000000\r\n"
+        "SUMMARY:Ends at midnight\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260307\r\nDURATION:P3D\r\n"
+        "SUMMARY:Over already\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nDTSTART:20260310T180000\r\nDTEND:20260310T240000\r\n"
+        "SUMMARY:Till midnight\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nDTSTART:20260310T236000\r\n"
+        "SUMMARY:Odd clock\r\nEND:VEVENT\r\n"
+        "END:VCALENDAR\r\n", encoding="utf-8")
+    _when309 = B.time.mktime((2026, 3, 10, 12, 0, 0, 0, 0, -1))
+    _names309 = {r["name"]: r["at"] for r in
+                 br.agenda_today(when=_when309, path=str(_ics309))}
+    check("309 a long timed event, a DURATION span and a plain one are on the day",
+          _names309.get("Night train") == "" and "Camp" in _names309
+          and _names309.get("Lunch") == "12:00", str(_names309))
+    check("309 a cancelled event, one that ended at midnight and a past span are not",
+          "Gone" not in _names309 and "Ends at midnight" not in _names309
+          and "Over already" not in _names309, str(_names309))
+    check("309 an event ending at 24:00 and one with an odd local time are still listed",
+          _names309.get("Till midnight") == "18:00" and "Odd clock" in _names309,
+          str(_names309))
+finally:
+    _shutil307.rmtree(_ics309.parent, ignore_errors=True)
+
+# ---- 310: a translucent card keeps its theme through the re-looks (the 74th pass) ----
+H.Handler.pages["/t310"] = ("<title>t310</title><body style='background:#fff;margin:0'>"
+                            "<div id=c style='background:rgba(255,255,255,.9);"
+                            "height:60px'>card</div>"
+                            "<div style='height:4000px'></div></body>")
+_tw310 = br.config.get("themeWeb", "__absent__")
+_v310 = None
+try:
+    br.config["themeWeb"] = True
+    B.theme_web.refresh(br)
+    _v310 = br.new_tab()
+    H.spin(300)
+    H.load(_v310, srv.url("/t310"))
+    H.spin(2500)
+    _first310 = jsq(_v310, "getComputedStyle(document.getElementById('c'))"
+                           ".backgroundColor", B.MAIN_WORLD_ID)
+    for _k310 in range(8):
+        jsq(_v310, "window.scrollBy(0, %d); window.dispatchEvent(new Event('scroll')); 1"
+            % (40 if _k310 % 2 == 0 else -40), B.MAIN_WORLD_ID)
+        H.spin(1700)
+    _last310 = jsq(_v310, "getComputedStyle(document.getElementById('c'))"
+                          ".backgroundColor", B.MAIN_WORLD_ID)
+    check("310 a translucent card stays themed through many re-looks",
+          _first310 and _first310 != "rgba(255, 255, 255, 0.9)"
+          and _last310 == _first310, (_first310, _last310))
+finally:
+    if _tw310 == "__absent__":
+        br.config.pop("themeWeb", None)
+    else:
+        br.config["themeWeb"] = _tw310
+    B.theme_web.refresh(br)
+    if _v310 is not None:
+        _close_if_open(_v310)
+    H.Handler.pages.pop("/t310", None)
+
+# ---- 311: downloads (the 75th pass) ----
+_DS311 = B.QWebEngineDownloadRequest.DownloadState
+
+
+class _Req311:
+    DownloadState = _DS311
+
+    def __init__(self, state=None):
+        self._state = state if state is not None else _DS311.DownloadInProgress
+        self.resumed = 0
+
+    def resume(self):
+        self.resumed += 1
+
+    def state(self):
+        return self._state
+
+    def downloadFileName(self):
+        return "q311.bin"
+
+    def downloadDirectory(self):
+        return "/tmp"
+
+    def receivedBytes(self):
+        return 0
+
+    def totalBytes(self):
+        return 0
+
+
+_rows_was311 = list(br.downloads)
+_act_was311 = dict(br.dl_active)
+_q_was311 = list(getattr(br, "_dl_queue", None) or [])
+_lim311 = br.config.get("dlAtOnce", "__absent__")
+_said311 = []
+_fl311 = br.__dict__.get("flash")
+_save311 = br.__dict__.get("save_downloads")
+try:
+    br.__dict__["flash"] = lambda text, *a, **k: _said311.append(str(text))
+    br.__dict__["save_downloads"] = lambda *a, **k: None
+    # 311a: "download again" refuses a row the browser made itself
+    br.downloads.append({"id": 9311, "name": "page311.pdf", "url": srv.url("/twhome"),
+                         "state": "done", "local": True, "dir": "/tmp",
+                         "received": 1, "size": 1, "t": 1})
+    _ag311 = br.download_again(9311)
+    check("311 'download again' on a page saved here fetches nothing",
+          _ag311 is False and br._ui_str("dlAgainNo") in _said311, (_ag311, _said311[-2:]))
+    # 311b: every free slot is filled when the queue moves
+    br.config["dlAtOnce"] = 0
+    _reqs311 = {}
+    br._dl_queue = []
+    for _n311 in (9312, 9313, 9314):
+        br.downloads.append({"id": _n311, "name": "q%d" % _n311, "url": "http://x/",
+                             "state": "active", "queued": True, "dir": "/tmp",
+                             "received": 0, "size": 0, "t": 1})
+        _reqs311[_n311] = _Req311()
+        br.dl_active[_n311] = _reqs311[_n311]
+        br._dl_queue.append(_n311)
+    _first311 = br.start_next_download()
+    check("311 a queue with free slots starts every waiting download, not one",
+          _first311 == 9312 and all(r.resumed == 1 for r in _reqs311.values())
+          and not br._dl_queue, (_first311, [r.resumed for r in _reqs311.values()]))
+    # 311c: a waiting download cancelled from its bar leaves the queue
+    br.config["dlAtOnce"] = 1
+    _e311 = {"id": 9315, "name": "q9315", "url": "http://x/", "state": "active",
+             "queued": True, "dir": "/tmp", "received": 0, "size": 0, "t": 1}
+    br.downloads.append(_e311)
+    br._dl_queue = [9315]
+    br.dl_active[9315] = _Req311(_DS311.DownloadCancelled)
+    br.__dict__["start_next_download"] = lambda: None
+    try:
+        br._download_state(br.dl_active[9315], _e311)
+    finally:
+        br.__dict__.pop("start_next_download", None)
+    check("311 a waiting download cancelled from its bar is no longer marked waiting",
+          _e311.get("state") == "cancelled" and "queued" not in _e311
+          and 9315 not in br._dl_queue, (_e311.get("queued"), br._dl_queue))
+    # 311d: a new limit applies to the waiting ones at once
+    _calls311 = []
+    br.__dict__["start_next_download"] = lambda: _calls311.append(1)
+    try:
+        br.bridge.setSetting("dlAtOnce", json.dumps(3))
+    except TypeError:
+        br.bridge.setSetting("dlAtOnce", 3)
+    finally:
+        br.__dict__.pop("start_next_download", None)
+    check("311 changing 'at most N at once' lets the waiting downloads through",
+          len(_calls311) >= 1, _calls311)
+finally:
+    br.downloads[:] = _rows_was311
+    br.dl_active.clear()
+    br.dl_active.update(_act_was311)
+    br._dl_queue = _q_was311
+    if _lim311 == "__absent__":
+        br.config.pop("dlAtOnce", None)
+    else:
+        br.config["dlAtOnce"] = _lim311
+    for _k311, _f311 in (("flash", _fl311), ("save_downloads", _save311)):
+        if _f311 is None:
+            br.__dict__.pop(_k311, None)
+        else:
+            br.__dict__[_k311] = _f311
+
+# ---- 312: bookmarks and history, third look (the 76th pass) ----
+class _Lock312:
+    def __init__(self, key=None, on=True):
+        self.key, self.on = key, on
+
+    def enabled(self):
+        return self.on
+
+    def derived_key(self, label):
+        if self.key is None:
+            return None
+        return B.hmac.new(self.key, b"derived:" + label.encode(),
+                          B.hashlib.sha256).digest()
+
+    def locked(self):
+        return self.on and self.key is None
+
+
+_hf_real312 = B.HISTORY_FILE
+_hd312 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+B.HISTORY_FILE = _hd312 / "history.json"
+_lock_real312 = br.vault_lock
+_hist_real312 = list(br.history)
+_flags312 = (getattr(br, "_history_locked", False),
+             getattr(br, "_history_unsaved", False),
+             list(getattr(br, "_history_drops", None) or []))
+_he312 = br.config.get("historyEncrypted", "__absent__")
+_vk312 = b"v" * 32
+_hkey312 = B.hmac.new(_vk312, b"derived:history", B.hashlib.sha256).digest()
+_sealed312 = B.HISTORY_MAGIC + B._seal(
+    _hkey312, json.dumps([{"url": "https://old312.example/", "title": "o",
+                           "t": 5}]).encode(), aad=B.HISTORY_MAGIC)
+try:
+    # 312a: a sealed file, the setting reset to plain, the vault shut
+    br.config["historyEncrypted"] = False
+    br.vault_lock = _Lock312(None, on=True)
+    B.HISTORY_FILE.write_bytes(_sealed312)
+    br._history_locked, br._history_unsaved = False, False
+    br.history[:] = br._read_history()
+    _locked312 = br._history_locked
+    br.history.append({"url": "https://new312.example/", "title": "n",
+                       "t": 9})
+    br.save_history()
+    _raw312a = B.HISTORY_FILE.read_bytes()
+    check("312 a sealed history is not written over in plain text when the "
+          "setting says plain and the vault is shut",
+          _locked312 is True and _raw312a == _sealed312
+          and b"new312" not in _raw312a, str((_locked312, _raw312a[:16])))
+    # 312b: the vault opens -- both lists, and still sealed
+    br.vault_lock = _Lock312(_vk312, on=True)
+    br.unlock_history()
+    _urls312 = [e["url"] for e in br.history]
+    _raw312b = B.HISTORY_FILE.read_bytes()
+    _plain312 = (B._unseal(_hkey312, _raw312b[len(B.HISTORY_MAGIC):],
+                           aad=B.HISTORY_MAGIC)
+                 if _raw312b.startswith(B.HISTORY_MAGIC) else None)
+    check("312 ...opening the vault keeps the old and the new pages and "
+          "the file stays sealed",
+          _urls312 == ["https://old312.example/", "https://new312.example/"]
+          and _plain312 is not None and b"old312" in _plain312
+          and br.config.get("historyEncrypted") is True,
+          str((_urls312, _raw312b[:8], br.config.get("historyEncrypted"))))
+    # 312c: no master password at all: set aside, never lost
+    br.config["historyEncrypted"] = False
+    br.vault_lock = _Lock312(None, on=False)
+    for _o in _hd312.glob("history.json*"):
+        _o.unlink()
+    B.HISTORY_FILE.write_bytes(_sealed312)
+    br._history_locked, br._history_unsaved = False, False
+    br.history[:] = br._read_history()
+    br.history.append({"url": "https://new312c.example/", "title": "n",
+                       "t": 9})
+    br.save_history()
+    _aside312 = [o.read_bytes() for o in _hd312.glob("history.json.unreadable-*")]
+    _now312 = B.HISTORY_FILE.read_bytes() if B.HISTORY_FILE.exists() else b""
+    check("312 ...with no master password the sealed file is set aside, "
+          "not written over",
+          _aside312 == [_sealed312] and b"new312c" in _now312,
+          str((len(_aside312), _now312[:40])))
+finally:
+    br.vault_lock = _lock_real312
+    B.HISTORY_FILE = _hf_real312
+    br.history[:] = _hist_real312
+    br._history_locked, br._history_unsaved = _flags312[0], _flags312[1]
+    br._history_drops = _flags312[2]
+    if _he312 == "__absent__":
+        br.config.pop("historyEncrypted", None)
+    else:
+        br.config["historyEncrypted"] = _he312
+    br.save_config(quiet=True)
+
+# 312d: the same page read in another virtual browser is a row of its own
+_hist_real312 = list(br.history)
+_hv312 = getattr(br, "_history_view", None)
+_as312 = br.active_session
+_cfgh312 = br.config.get("history", True)
+try:
+    br.config["history"] = True
+    br._history_view = None
+    br.active_session = "main"
+    br.history[:] = [{"url": "https://dup312.example/", "title": "x",
+                      "t": 1, "s": "x312"}]
+    br._record_history(B.QUrl("https://dup312.example/"), "main read")
+    _rows312 = [(e["url"], e.get("s")) for e in br.history]
+finally:
+    br._history_view = _hv312
+    br.active_session = _as312
+    br.config["history"] = _cfgh312
+    br.history[:] = _hist_real312
+    br.save_history()
+check("312 a main tab on the page a virtual browser just read keeps that "
+      "browser's row",
+      _rows312 == [("https://dup312.example/", "x312"),
+                   ("https://dup312.example/", None)], str(_rows312))
+
+# 312e: a forgotten site does not come back through the pending Undo
+_hist_real312 = list(br.history)
+try:
+    br.history[:] = [
+        {"url": "https://forget312.example/a", "title": "a", "t": 1},
+        {"url": "https://keep312.example/", "title": "k", "t": 2}]
+    br.clear_history()
+    br.forget_site("forget312.example")
+    br.undo_history_delete()
+    _back312 = sorted(e["url"] for e in br.history)
+finally:
+    br.history[:] = _hist_real312
+    br._history_undo = None
+    br.save_history()
+check("312 Undo after forgetting a site does not bring its pages back",
+      _back312 == ["https://keep312.example/"], str(_back312))
+
+# 312f: "Forget this site" on the History page empties the bar's memory
+_hist_real312 = list(br.history)
+_kh312 = set(br.known_hosts)
+try:
+    br.history[:] = [{"url": "https://sub.fhs312.example/p", "title": "p",
+                      "t": 1},
+                     {"url": "https://stays312.example/", "title": "s",
+                      "t": 2}]
+    br.known_hosts = set(_kh312) | {"fhs312.example", "sub.fhs312.example",
+                                    "notfhs312.example"}
+    B._write_json(B.HOSTS_FILE, sorted(br.known_hosts))
+    br.forget_history_site("fhs312.example")
+    _kh_after312 = {h for h in br.known_hosts if "fhs312" in h}
+    try:
+        _disk312 = {h for h in json.loads(B.HOSTS_FILE.read_text())
+                    if "fhs312" in h}
+    except (OSError, ValueError):
+        _disk312 = {"?"}
+finally:
+    br.history[:] = _hist_real312
+    br._history_undo = None
+    br.known_hosts = _kh312
+    B._write_json(B.HOSTS_FILE, sorted(_kh312))
+    br.save_history()
+check("312 Forget this site on the History page drops it from the address "
+      "bar's memory",
+      _kh_after312 == {"notfhs312.example"}
+      and _disk312 == {"notfhs312.example"}, str((_kh_after312, _disk312)))
+
+# 312g: "Delete range" while the sealed rows are unread keeps a rule
+_flags312 = (getattr(br, "_history_locked", False),
+             list(getattr(br, "_history_drops", None) or []))
+_hist_real312 = list(br.history)
+try:
+    br._history_locked = True
+    br._history_drops = []
+    br.history[:] = [{"url": "https://inmem312.example/", "title": "m",
+                      "t": 150}]
+    br.delete_history_matching(since=100, until=200)
+    _drops312 = list(br._history_drops or [])
+    _hit312 = [bool(r({"url": "https://disk312.example/", "title": "d",
+                       "t": 120})) for r in _drops312]
+    _miss312 = [bool(r({"url": "https://disk312.example/", "title": "d",
+                        "t": 50})) for r in _drops312]
+finally:
+    br._history_locked, br._history_drops = _flags312
+    br.history[:] = _hist_real312
+    br._history_undo = None
+    br.save_history()
+check("312 Delete range with the sealed history unread drops those rows "
+      "when it opens",
+      _hit312 == [True] and _miss312 == [False], str((_hit312, _miss312)))
+
+# 312h: a mirror write cut off half way leaves the old copy whole
+import pathlib as _pl312
+_md312 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(_md312 / "bookmarks.json").write_text('[{"url": "https://old312.example/"}]')
+_real_wt312 = _pl312.Path.write_text
+
+
+def _half312(self, data, *a, **k):
+    _real_wt312(self, data[:len(data) // 2], *a, **k)
+    raise OSError(28, "No space left on device")
+
+
+_pl312.Path.write_text = _half312
+try:
+    _res312 = br.mirror_bookmarks(str(_md312))
+finally:
+    _pl312.Path.write_text = _real_wt312
+try:
+    _mir312 = json.loads((_md312 / "bookmarks.json").read_text())
+except (OSError, ValueError) as _e:
+    _mir312 = repr(_e)
+check("312 a mirror write cut off half way leaves the old copy whole",
+      _res312 == "" and _mir312 == [{"url": "https://old312.example/"}]
+      and not list(_md312.glob("*.new")), str((_res312, _mir312)))
+
+# 312i: a history import whose copy fails half way leaves no copy behind
+_fx312 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+(_fx312 / "places.sqlite").write_bytes(b"SQLite format 3\x00" + b"x" * 100)
+(_fx312 / "places.sqlite-wal").write_bytes(b"wal")
+os.chmod(str(_fx312 / "places.sqlite-wal"), 0)
+try:
+    _imp312 = br.import_history_from(str(_fx312 / "places.sqlite"),
+                                     which="firefox")
+finally:
+    os.chmod(str(_fx312 / "places.sqlite-wal"), 0o600)
+_left312 = (B.CONFIG_FILE.parent / "import-firefox.sqlite").exists()
+check("312 a history import whose copy fails leaves no copy of the other "
+      "browser's history", _imp312 is False and not _left312,
+      str((_imp312, _left312)))
+
+# 312j (review): Clear history with a sealed file unread and the setting on
+# plain deletes the file, not only the rows in memory
+_hf_real312 = B.HISTORY_FILE
+_hd312 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+B.HISTORY_FILE = _hd312 / "history.json"
+_lock_real312 = br.vault_lock
+_hist_real312 = list(br.history)
+_flags312 = (getattr(br, "_history_locked", False),
+             getattr(br, "_history_unsaved", False),
+             list(getattr(br, "_history_drops", None) or []))
+_he312 = br.config.get("historyEncrypted", "__absent__")
+try:
+    br.config["historyEncrypted"] = False
+    br.vault_lock = _Lock312(None, on=True)
+    B.HISTORY_FILE.write_bytes(_sealed312)
+    br._history_locked, br._history_unsaved = False, False
+    br.history[:] = br._read_history()
+    br.history.append({"url": "https://clr312.example/", "title": "c",
+                       "t": 9})
+    br.clear_history()
+    br.vault_lock = _Lock312(_vk312, on=True)
+    br.unlock_history()
+    _cleared312 = [e["url"] for e in br.history]
+    _file312 = B.HISTORY_FILE.read_bytes() if B.HISTORY_FILE.exists() else b""
+finally:
+    br.vault_lock = _lock_real312
+    B.HISTORY_FILE = _hf_real312
+    br.history[:] = _hist_real312
+    br._history_locked, br._history_unsaved = _flags312[0], _flags312[1]
+    br._history_drops = _flags312[2]
+    br._history_undo = None
+    if _he312 == "__absent__":
+        br.config.pop("historyEncrypted", None)
+    else:
+        br.config["historyEncrypted"] = _he312
+    br.save_config(quiet=True)
+check("312 Clear history with a sealed file unread (setting on plain) "
+      "keeps nothing for the vault to bring back",
+      _cleared312 == [] and b"old312" not in _file312,
+      str((_cleared312, _file312[:16])))
+
+# ---- 314: the password vault, second look (the 78th pass) ----
+_v314 = br.vault
+if _v314 is not None and not br.vault_locked():
+    # 314a: a store written item by item reads its access log back
+    _meta_was314 = (_v314.meta_file.read_bytes()
+                    if _v314.meta_file.exists() else None)
+    _prov314, _data314 = _v314.provider, _v314.data
+
+    class _Lazy314:
+        eager = False
+        locked = False
+
+    try:
+        B._write_private(_v314.meta_file, json.dumps({
+            "never": [], "access": [{"id": "a314", "field": "password",
+                                     "what": "revealed", "when": 1}]}).encode())
+        _v314.adopt(_Lazy314(), {})
+        _log314 = [r.get("id") for r in _v314.access_log()]
+    finally:
+        _v314.provider, _v314.data = _prov314, _data314
+        if _meta_was314 is None:
+            _v314.meta_file.unlink(missing_ok=True)
+        else:
+            B._write_private(_v314.meta_file, _meta_was314)
+    check("314 a store written item by item keeps its access log across a "
+          "restart", _log314 == ["a314"], _log314)
+
+    # 314b/c: "nothing written" and "not read" are shown, not raised
+    _flash314 = []
+    _real_flash314 = br.flash
+    _real_exp314 = _v314.export_encrypted
+    br.flash = lambda msg, *a, **k: _flash314.append(str(msg))
+    _v314.export_encrypted = lambda path, passphrase: 0
+    _csv314 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent))) / "e.csv"
+    _csv314.write_text("")
+    try:
+        try:
+            _exp314 = br.export_vault_encrypted(path="/nonexistent/x",
+                                                passphrase="p")
+        except TypeError as _e:
+            _exp314 = repr(_e)
+        try:
+            _imp314 = br.import_vault_file(str(_csv314))
+        except TypeError as _e:
+            _imp314 = repr(_e)
+    finally:
+        br.flash = _real_flash314
+        _v314.__dict__.pop("export_encrypted", None)
+        if _v314.export_encrypted != _real_exp314:
+            _v314.export_encrypted = _real_exp314
+    check("314 a failed encrypted export says nothing was written",
+          _exp314 == 0 and br._ui_str("vaultExportFailed") in _flash314,
+          (_exp314, _flash314))
+    check("314 an import of a file with nothing in it says it was not read",
+          _imp314 == 0 and br._ui_str("vaultImportBad") in _flash314,
+          (_imp314, _flash314))
+
+    # 314d: an export that fails half way leaves the old copy whole
+    _added314 = _v314.add_item({"type": "login", "host": "exp314.example",
+                                "username": "u314", "password": "p314"})
+    _ed314 = _Path(_tempfile.mkdtemp(dir=str(B.CONFIG_FILE.parent)))
+    _tgt314 = _ed314 / "vault.browservault"
+    _tgt314.write_bytes(b"the good old copy")
+    _real_fdopen314 = B.os.fdopen
+
+    class _Half314:
+        def __init__(self, fd, *a, **k):
+            self.f = _real_fdopen314(fd, *a, **k)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self.f.close()
+            return False
+
+        def write(self, data):
+            self.f.write(data[:len(data) // 2])
+            raise OSError(28, "No space left on device")
+
+        def flush(self):
+            self.f.flush()
+
+        def fileno(self):
+            return self.f.fileno()
+
+    B.os.fdopen = _Half314
+    try:
+        try:
+            _cnt314 = _v314.export_encrypted(str(_tgt314), "pass314")
+        except OSError as _e:
+            _cnt314 = repr(_e)
+    finally:
+        B.os.fdopen = _real_fdopen314
+        if _added314:
+            _v314.delete_item(_added314.get("id"))
+    check("314 an encrypted export that fails half way leaves the old copy "
+          "whole", _cnt314 == 0 and _tgt314.read_bytes() == b"the good old copy"
+          and not list(_ed314.glob("*.new")), (_cnt314, _tgt314.read_bytes()[:20]))
+
+    # 314e: a 2FA secret that does not work is refused, the old one kept
+    _seed314 = "JBSWY3DPEHPK3PXP"
+    _it314 = _v314.add_item({"type": "login", "host": "totp314.example",
+                             "username": "u", "password": "p",
+                             "totp": _seed314})
+    try:
+        _ans314 = json.loads(br.bridge.saveItem(br._page_key, json.dumps(
+            {"id": _it314["id"], "totp": "JBSWY3DP-not!base32"})))
+        _kept314 = next((i.get("totp") for i in _v314.items()
+                         if i.get("id") == _it314["id"]), None)
+    finally:
+        _v314.delete_item(_it314["id"])
+    check("314 a mistyped 2FA secret is refused and the working one kept",
+          _ans314.get("ok") is False and _ans314.get("totp") == "bad"
+          and _kept314 == _seed314, (_ans314, _kept314))
+    _pw314 = (B.APP_DIR / "passwords.html").read_text()
+    check("314 (page) the editor says why a 2FA secret was refused",
+          'toast(d.totp === "bad" ? S.pw2faBad : S.pwSaveFailed);' in _pw314)
+else:
+    check("314 the vault is open for the vault checks", False,
+          (br.vault is None, br.vault_locked()))
+
+# ---- 315: tab lifecycle, second look (the 79th pass) ----
+H.Handler.pages["/t315"] = "<title>t315</title><p>snooze me</p>"
+_snz_was315 = list(br.config.get("snoozed") or [])
+_v315 = br.new_tab(url=None)
+H.spin(200)
+H.load(_v315, srv.url("/t315"))
+H.spin(300)
+_v315.session = "x315"
+_v315.locked = True
+_v315.tab_name = "named315"
+_cap315 = []
+_real_ots315 = br.open_tab_state
+try:
+    br.snooze_tab(br.tabs.indexOf(_v315), minutes=1)
+    H.spin(200)
+    _row315 = [dict(r) for r in br.config.get("snoozed") or []
+               if "/t315" in str(r.get("url"))]
+    for _r in br.config.get("snoozed") or []:
+        if "/t315" in str(_r.get("url")):
+            _r["at"] = 0
+    br.open_tab_state = lambda entries, switch=False, lazy=True: (
+        _cap315.extend(entries) or [])
+    br.wake_snoozed()
+    H.spin(200)
+finally:
+    br.__dict__.pop("open_tab_state", None)
+    br.config["snoozed"] = _snz_was315
+    for _i in range(br.tabs.count() - 1, -1, -1):
+        _w = br.tabs.widget(_i)
+        if not br._is_header(_w) and "/t315" in br._tab_url(_w):
+            br.close_tab(_i, ask=False)
+check("315 a snoozed tab comes back in its own virtual browser, locked "
+      "and named as it was",
+      len(_row315) == 1 and _row315[0].get("s") == "x315"
+      and [(e.get("s"), e.get("l"), e.get("n")) for e in _cap315]
+      == [("x315", 1, "named315")], (_row315, _cap315))
+
+# 315b: unticking keep-awake on a subdomain a parent rule holds
+_ka315 = br.config.get("keepAwake", "__absent__")
+br.config["keepAwake"] = ["ka315.example", "other315.example"]
+try:
+    _was315 = br.is_kept_awake(host="sub.ka315.example")
+    _ret315 = br.keep_tab_awake("sub.ka315.example")
+    _now315 = br.is_kept_awake(host="sub.ka315.example")
+    _rows315 = sorted(br.keep_awake_sites())
+finally:
+    if _ka315 == "__absent__":
+        br.config.pop("keepAwake", None)
+    else:
+        br.config["keepAwake"] = _ka315
+    br.save_config(quiet=True)
+check("315 unticking keep-awake on a site a parent rule holds lets it sleep",
+      _was315 is True and _ret315 is False and _now315 is False
+      and _rows315 == ["other315.example"], (_was315, _ret315, _now315, _rows315))
+
+# 315c: a click counts as activity for the housekeeping's idle clock
+_li315 = getattr(br, "_last_input", 0)
+br._last_input = 1.0
+from PyQt6.QtGui import QMouseEvent as _QME315
+from PyQt6.QtCore import QPointF as _QPF315, QEvent as _QEV315, Qt as _Qt315
+from PyQt6.QtWidgets import QWidget as _QW315
+_w315 = _QW315()
+_ev315 = _QME315(_QEV315.Type.MouseButtonPress, _QPF315(1, 1),
+                 _QPF315(1, 1), _Qt315.MouseButton.LeftButton,
+                 _Qt315.MouseButton.LeftButton,
+                 _Qt315.KeyboardModifier.NoModifier)
+try:
+    br.eventFilter(_w315, _ev315)
+    _after315 = float(getattr(br, "_last_input", 0) or 0)
+finally:
+    br._last_input = _li315 if _li315 else _after315
+check("315 a click resets the housekeeping's idle clock",
+      _after315 > B.time.time() - 30, _after315)
+
+# 315d: setting a budget on a machine without PSI does not say "set a budget"
+_flash315 = []
+_real_flash315 = br.flash
+_real_pa315 = br.pressure_available
+_pw315 = br.config.get("pressureWatch", "__absent__")
+_mb315 = br.config.get("memoryBudget", 0)
+br.flash = lambda msg, *a, **k: _flash315.append(str(msg))
+br.pressure_available = lambda: False
+br.config["pressureWatch"] = False
+try:
+    br.set_memory_budget(4096)
+finally:
+    br.flash = _real_flash315
+    br.__dict__.pop("pressure_available", None)
+    br.__dict__.pop("flash", None)
+    br.set_memory_budget(_mb315 or 0)
+    if _pw315 == "__absent__":
+        br.config.pop("pressureWatch", None)
+    else:
+        br.config["pressureWatch"] = _pw315
+    br.save_config(quiet=True)
+check("315 a memory budget set without PSI does not say 'set a budget "
+      "instead'", br._ui_str("pressureNoPsi") not in _flash315, _flash315)
+
+# 315e (review): a tab snoozed from main comes back in main, not in the
+# virtual browser active when it is due (rows saved before have no "s")
+_snz_was315 = list(br.config.get("snoozed") or [])
+_cap315e = []
+br.config["snoozed"] = [{"url": "http://main315.example/", "title": "m",
+                         "at": 0}]
+br.open_tab_state = lambda entries, switch=False, lazy=True: (
+    _cap315e.extend(entries) or [])
+try:
+    br.wake_snoozed()
+finally:
+    br.__dict__.pop("open_tab_state", None)
+    br.config["snoozed"] = _snz_was315
+check("315 a tab snoozed from main comes back in main",
+      [e.get("s") for e in _cap315e] == ["main"]
+      and br._know_session("main"), _cap315e)
+
+# ---- 316: virtual browsers, second look (the 80th pass) ----
+_sess_was316 = [dict(e) for e in br.sessions]
+_cfg316 = {k: br.config.get(k, "__absent__")
+           for k in ("sessionSites", "clearOnExit", "cookiesWipePending")}
+
+
+def _restore316():
+    br.sessions[:] = [dict(e) for e in _sess_was316]
+    for _k, _o in _cfg316.items():
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+    br.save_config(quiet=True)
+
+
+# 316a: the most specific site rule wins
+br.sessions.extend([{"name": "P316", "sid": "p316"},
+                    {"name": "W316", "sid": "w316"}])
+br.config["sessionSites"] = {"g316.example": "P316",
+                             "mail.g316.example": "W316"}
+try:
+    _rule316 = (br.session_rule_for("https://mail.g316.example/"),
+                br.session_rule_for("https://www.g316.example/"))
+finally:
+    _restore316()
+check("316 the most specific site rule picks the virtual browser",
+      _rule316 == ("w316", "p316"), _rule316)
+
+# 316b: a new browser's name is unique whatever the case
+_real_gt316 = B.QInputDialog.getText
+_real_sw316 = br.switch_session
+br.sessions.append({"name": "W316", "sid": "w316"})
+B.QInputDialog.getText = staticmethod(lambda *a, **k: ("w316", True))
+br.switch_session = lambda sid: None
+try:
+    br._add_session()
+    _names316 = [e["name"] for e in br.sessions]
+finally:
+    B.QInputDialog.getText = _real_gt316
+    br.__dict__.pop("switch_session", None)
+    _restore316()
+check("316 a new virtual browser's name is unique whatever the case",
+      "w316 2" in _names316 and _names316.count("w316") == 0, _names316)
+
+# 316c: renaming a browser takes its site rules along
+
+
+class _Act316:
+    def setEnabled(self, on):
+        pass
+
+
+class _Menu316:
+    def __init__(self, *a):
+        self.acts = []
+
+    def addAction(self, text):
+        self.acts.append(_Act316())
+        return self.acts[-1]
+
+    def exec(self, *a):
+        return self.acts[0]          # "Rename..."
+
+    def deleteLater(self):
+        pass
+
+
+class _Btn316:
+    def mapToGlobal(self, p):
+        return p
+
+    def rect(self):
+        return B.QRect(0, 0, 10, 10)
+
+
+_real_menu316 = B.QMenu
+br.sessions.append({"name": "Work316", "sid": "wk316"})
+br.config["sessionSites"] = {"tw316.example": "work316",
+                             "other316.example": "Else316"}
+B.QMenu = _Menu316
+B.QInputDialog.getText = staticmethod(lambda *a, **k: ("Streaming316", True))
+try:
+    br._session_menu(_Btn316(), "wk316")
+    _rules316 = dict(br.config.get("sessionSites") or {})
+    _after316 = br.session_rule_for("https://tw316.example/")
+finally:
+    B.QMenu = _real_menu316
+    B.QInputDialog.getText = _real_gt316
+    _restore316()
+check("316 renaming a virtual browser keeps its site rules",
+      _rules316 == {"tw316.example": "Streaming316",
+                    "other316.example": "Else316"} and _after316 == "wk316",
+      (_rules316, _after316))
+
+# 316d: a link from outside sent to another browser switches to it
+_calls316 = []
+_real_ols316 = br.outside_link_session
+_real_nt316 = br.new_tab
+br.outside_link_session = lambda url: "w316"
+br.new_tab = lambda **k: _calls316.append(("new_tab", k.get("session"),
+                                           k.get("group", "INHERIT")))
+br.switch_session = lambda sid: _calls316.append(("switch", sid))
+try:
+    br._handoff_message("bg https://ho316.example/")
+    _bg316 = list(_calls316)
+    del _calls316[:]
+    br._handoff_message("https://ho316.example/")
+    _fg316 = list(_calls316)
+finally:
+    for _n in ("outside_link_session", "new_tab", "switch_session"):
+        br.__dict__.pop(_n, None)
+check("316 a link from another program sent to another virtual browser "
+      "switches to it (and joins none of this one's groups)",
+      _bg316 == [("new_tab", "w316", None)]
+      and _fg316 == [("new_tab", "w316", None), ("switch", "w316")],
+      (_bg316, _fg316))
+
+# 316f: "open in that browser" makes the tab before switching
+_calls316 = []
+_v316 = br.new_tab(url=None)
+H.spin(200)
+H.load(_v316, srv.url("/twhome"))
+H.spin(300)
+br.new_tab = lambda **k: _calls316.append(("new_tab", k.get("session"))) \
+    or "made"
+br.switch_session = lambda sid: _calls316.append(("switch", sid))
+try:
+    _made316 = br.open_in_session(br.tabs.indexOf(_v316), "w316")
+finally:
+    br.__dict__.pop("new_tab", None)
+    br.__dict__.pop("switch_session", None)
+    _close_if_open(_v316)
+check("316 open in another browser makes the tab first, then switches",
+      _calls316 == [("new_tab", "w316"), ("switch", "w316")]
+      and _made316 == "made", _calls316)
+
+# 316g: a browser with no jar open this run still forgets its history
+_hist316 = list(br.history)
+br.config["clearOnExit"] = {"gone316": ["history"]}
+try:
+    br.history[:] = _hist316 + [
+        {"url": "https://g316.example/", "title": "g", "t": 5,
+         "s": "gone316"}]
+    br.clear_on_exit_per_session()
+    _left316 = [e for e in br.history if e.get("s") == "gone316"]
+finally:
+    br.history[:] = _hist316
+    br.save_history()
+    _restore316()
+check("316 a closed virtual browser set to forget its history does at exit",
+      _left316 == [], _left316)
+
+# 316i: a bookmark copied out of a folder marked for another browser lands
+# where the target browser can see it
+br.sessions.extend([{"name": "A316", "sid": "a316"},
+                    {"name": "B316", "sid": "b316"}])
+_fid316 = br._new_bookmark_id()
+br.bookmarks.append({"id": _fid316, "parent": 0, "type": "folder",
+                     "title": "F316", "sid": "a316"})
+_lid316 = br._new_bookmark_id()
+br.bookmarks.append({"id": _lid316, "parent": _fid316, "type": "link",
+                     "title": "L316", "url": "https://l316.example/",
+                     "sid": "a316"})
+try:
+    br.copy_bookmarks_to_session(_lid316, "b316")
+    _copy316 = [dict(e) for e in br.bookmarks
+                if e.get("title") == "L316" and e.get("sid") == "b316"]
+finally:
+    br.bookmarks[:] = [e for e in br.bookmarks
+                       if e.get("title") not in ("F316", "L316")]
+    br.save_bookmarks()
+    _restore316()
+check("316 a bookmark copied into another browser is put where that browser "
+      "shows it", len(_copy316) == 1 and _copy316[0].get("parent") == 0,
+      _copy316)
+
+# 316j: a nickname of a bookmark marked for another browser does nothing here
+_nid316 = br._new_bookmark_id()
+br.bookmarks.append({"id": _nid316, "parent": 0, "type": "link",
+                     "title": "N316", "url": "https://n316.example/",
+                     "nick": "nk316", "sid": "elsewhere316"})
+try:
+    _nick316 = br.nickname_url("nk316")
+finally:
+    br.bookmarks[:] = [e for e in br.bookmarks if e.get("title") != "N316"]
+    br.save_bookmarks()
+check("316 a bookmark marked for another browser is not reached by its "
+      "nickname here", _nick316 == "", _nick316)
+
+# ---- 317: cookies and site data, second look (the 81st pass) ----
+_rules317 = br.config.get("cookieRules", "__absent__")
+br.config["cookieRules"] = dict(br.config.get("cookieRules") or {},
+                                **{"close317.example": "close"})
+
+
+class _Store317:
+    def __init__(self, until):
+        self.deleted = []
+        self._close_wipe_until = until
+
+    def deleteCookie(self, cookie):
+        self.deleted.append(bytes(cookie.name()))
+
+
+_ck317 = B.QNetworkCookie(b"login317", b"v")
+_ck317.setDomain("close317.example")
+_crash317 = _Store317(B.time.monotonic() + 20)
+_calm317 = _Store317(0)
+_queued_was317 = set(br._cookies_until_close)
+try:
+    _r1_317 = br._cookie_arrived(_crash317, _ck317)
+    _r2_317 = br._cookie_arrived(_calm317, _ck317)
+    _queued317 = "close317.example" in br._cookies_until_close
+finally:
+    br._cookies_until_close.clear()
+    br._cookies_until_close.update(_queued_was317)
+    if _rules317 == "__absent__":
+        br.config.pop("cookieRules", None)
+    else:
+        br.config["cookieRules"] = _rules317
+check("317 an 'until close' cookie read back after a crash is deleted at the "
+      "start", _r1_317 is True and _crash317.deleted == [b"login317"], 
+      (_r1_317, _crash317.deleted))
+check("317 ...and one set in a normal run waits for the exit as before",
+      _r2_317 is False and _calm317.deleted == [] and _queued317,
+      (_r2_317, _calm317.deleted, _queued317))
+_src317 = __import__("inspect").getsource(B.Browser.watch_cookies)
+check("317 (source) a jar made after a crash wipes for its first moments, "
+      "a private one not",
+      "time.monotonic() + 20" in _src317 and "_was_crash" in _src317
+      and 'getattr(store, "_jar", "") != "private"' in _src317)
+
+# 317b: Remove on the www row takes that cookie only
+_v317 = br.new_tab(url=None)
+H.spin(200)
+H.load(_v317, srv.url("/twhome"))
+H.spin(300)
+br.tabs.setCurrentWidget(_v317)
+H.spin(100)
+_store317 = _v317.page().profile().cookieStore()
+_live317 = getattr(_store317, "_live", None)
+if _live317 is None:
+    _live317 = _store317._live = {}
+_a317 = B.QNetworkCookie(b"sid317", b"a")
+_a317.setDomain("www.ex317.example")
+_a317.setPath("/")
+_b317 = B.QNetworkCookie(b"sid317", b"b")
+_b317.setDomain(".ex317.example")
+_b317.setPath("/")
+_live317[("www.ex317.example", "/", b"sid317")] = _a317
+_live317[(".ex317.example", "/", b"sid317")] = _b317
+try:
+    try:
+        _del317 = br.delete_cookie("sid317", "www.ex317.example", "/",
+                                   exact=True)
+    except TypeError as _e:
+        _del317 = repr(_e)
+    _left317 = sorted(k[0] for k in _live317 if k[2] == b"sid317")
+finally:
+    for _k in [k for k in _live317 if k[2] == b"sid317"]:
+        _live317.pop(_k, None)
+    _close_if_open(_v317)
+check("317 Remove on a cookie's www row leaves the bare domain's cookie",
+      _del317 is True and _left317 == [".ex317.example"], (_del317, _left317))
+_cm317 = __import__("inspect").getsource(B.Browser.cookies_menu)
+check("317 (source) the cookie editor removes by the exact domain",
+      "self.delete_cookie(name, where, path, exact=True)" in _cm317)
+
+# ---- 318: forms, second look (the 82nd pass) ----
+H.Handler.pages["/t318"] = (
+    "<title>t318</title><form><input type=submit value=Go>"
+    "<input type=range><input type=color>"
+    "<select name=s><option>a<option>b</select>"
+    "<input name=pre value=prefilled>"
+    "<textarea name=comment></textarea></form>"
+    "<form><textarea name=comment></textarea></form>")
+H.Handler.pages["/t318c"] = (
+    "<title>t318c</title><form>"
+    "<input name=creditCardExpiry><input name=creditcard_cvv>"
+    "<input name=pan></form>")
+_v318 = br.new_tab(url=None)
+H.spin(200)
+H.load(_v318, srv.url("/t318"))
+H.spin(400)
+H.js(_v318, "document.getElementsByName('comment')[0].value = "
+            "'first box text'; 1")
+_got318 = {}
+br.form_tool("formvalues", view=_v318,
+             then=lambda raw: _got318.__setitem__("rows", raw))
+H.wait_for(lambda: "rows" in _got318, 5000)
+try:
+    _rows318 = json.loads(_got318.get("rows") or "[]")
+except ValueError:
+    _rows318 = _got318.get("rows")
+check("318 a draft holds only what he typed (no button, slider, colour, "
+      "first choice or page-filled value)",
+      _rows318 == [{"key": "textarea[name=comment]",
+                    "value": "first box text"}], _rows318)
+# the first box emptied, the draft put back: into the first box
+H.js(_v318, "document.getElementsByName('comment')[0].value = ''; 1")
+_done318 = {}
+br.form_tool("restoreform", view=_v318, arg=[
+    {"key": "textarea[name=comment]", "value": "first box text"}],
+    then=lambda raw: _done318.__setitem__("n", raw))
+H.wait_for(lambda: "n" in _done318, 5000)
+_boxes318 = H.js(_v318, "Array.prototype.map.call("
+                        "document.getElementsByName('comment'), "
+                        "function (b) { return b.value; })")
+check("318 a draft of one of two boxes of one name goes back into that box",
+      _boxes318 == ["first box text", ""], _boxes318)
+_close_if_open(_v318)
+
+# 318c: the card number does not go into the expiry or CVV box
+_v318c = br.new_tab(url=None)
+H.spin(200)
+H.load(_v318c, srv.url("/t318c"))
+H.spin(400)
+_fill318 = {}
+br.form_tool("fillcard", view=_v318c, arg={
+    "number": "4111111111111111", "cardholder": "", "expiry": "12/27",
+    "cvv": "123"}, then=lambda raw: _fill318.__setitem__("r", raw))
+H.wait_for(lambda: "r" in _fill318, 5000)
+_vals318 = H.js(_v318c, "[document.getElementsByName('creditCardExpiry')[0]"
+                        ".value, document.getElementsByName('creditcard_cvv')"
+                        "[0].value]")
+_close_if_open(_v318c)
+check("318 a card's number never goes into a box named creditCardExpiry "
+      "or creditcard_cvv", isinstance(_vals318, list)
+      and "4111111111111111" not in _vals318
+      and _vals318[1] == "123", _vals318)
+
+# 318e: an IPv6 page's drafts belong to its host
+_k318 = (B.Browser._form_origin("http://[::1]:8080/a"),
+         B.Browser._form_key_host("http://[::1]:8080/a"),
+         B.Browser._form_key_host("http://::1:8080/a"),
+         B.Browser._form_key_host("https://www.example.com/x"))
+check("318 an IPv6 page's draft and box-history keys know their host",
+      _k318 == ("http://[::1]:8080", "::1", "::1", "example.com"), _k318)
+_fc318 = __import__("inspect").getsource(B.Browser.fill_card)
+check("318 (source) a card fill is judged private by the tab filled and "
+      "logged only when something was filled",
+      "private = self._private_of(page_view)" in _fc318
+      and "if not private and filled:" in _fc318)
+
+# 318f (review): a number box labelled "...American Express" / "Secure ..."
+# still gets the number; an untouched select with a disabled first choice
+# is no draft
+H.Handler.pages["/t318f"] = (
+    "<title>t318f</title><form>"
+    "<label for=n>Secure card number (Visa, Mastercard, American Express)"
+    "</label><input id=n name=cardnumber>"
+    "<select name=pick><option disabled value=x>Choose...</option>"
+    "<option value=a>A</option><option value=b>B</option></select>"
+    "<textarea name=note></textarea></form>")
+_v318f = br.new_tab(url=None)
+H.spin(200)
+H.load(_v318f, srv.url("/t318f"))
+H.spin(400)
+_ff318 = {}
+br.form_tool("fillcard", view=_v318f, arg={
+    "number": "4111111111111111", "cardholder": "", "expiry": "",
+    "cvv": ""}, then=lambda raw: _ff318.__setitem__("r", raw))
+H.wait_for(lambda: "r" in _ff318, 5000)
+_num318 = H.js(_v318f, "document.getElementById('n').value")
+H.js(_v318f, "document.getElementById('n').value = ''; "
+             "document.getElementsByName('note')[0].value = 'typed'; 1")
+_gf318 = {}
+br.form_tool("formvalues", view=_v318f,
+             then=lambda raw: _gf318.__setitem__("rows", raw))
+H.wait_for(lambda: "rows" in _gf318, 5000)
+try:
+    _rf318 = json.loads(_gf318.get("rows") or "[]")
+except ValueError:
+    _rf318 = _gf318.get("rows")
+_close_if_open(_v318f)
+check("318 a number box whose label says 'Secure ... American Express' "
+      "still gets the number", _num318 == "4111111111111111", _num318)
+check("318 an untouched list whose first choice is disabled is no draft",
+      _rf318 == [{"key": "textarea[name=note]", "value": "typed"}], _rf318)
+
+# ---- 319: session file and crash recovery, second look (the 83rd pass) ----
+_w319 = br.new_window(); H.spin(800)
+_v319 = _w319.new_tab(); H.spin(300)
+_saved319 = []
+_w319.__dict__["_save_groups"] = lambda quiet=False: (
+    _saved319.append(quiet) or True)
+_w319._session_timer.start()
+# every other window "private" for the moment: earlier sections leave
+# ordinary windows open, and then an ordinary window was always left
+_ap319 = [(w, w.__dict__.get("_all_private", "__absent__"))
+          for w in list(B.WINDOWS) if w is not _w319]
+for _w, _o in _ap319:
+    _w._all_private = True
+try:
+    _w319._closing_anyway = True
+    _w319.close()
+    H.spin(300)
+finally:
+    for _w, _o in _ap319:
+        try:
+            if _o == "__absent__":
+                _w.__dict__.pop("_all_private", None)
+            else:
+                _w._all_private = _o
+        except RuntimeError:
+            pass
+check("319 the last ordinary window closing while a private one stays "
+      "saves the session once more", _saved319 == [True], _saved319)
+
+# ---- 320: the agent bridge, third look (the 84th pass) ----
+import agent_bridge as _AB320
+
+_ab320 = _AB320.AgentBridge(br)
+_ab320._next_id = 2 * 10 ** 6 + max([0] + [
+    int(getattr(br.tabs.widget(_i), "_agent_id", 0) or 0)
+    for _i in range(br.tabs.count())])
+_out320 = []
+_ab320._reply = lambda conn, payload: _out320.append(payload)
+_cfg320 = {k: br.config.get(k, "__absent__")
+           for k in ("bridgeLevel", "bridgeSites", "bridgeOps")}
+for _k320 in _cfg320:
+    br.config.pop(_k320, None)
+
+
+def _ask320(req):
+    del _out320[:]
+    _ab320._dispatch(None, json.dumps(req).encode())
+    H.wait_for(lambda: bool(_out320), 6000)
+    return _out320[-1] if _out320 else {}
+
+
+def _md320(text):
+    try:
+        parts = json.loads(text)
+        return "".join(parts) if isinstance(parts, list) else str(text)
+    except (TypeError, ValueError):
+        return str(text)
+
+
+H.Handler.pages["/t320"] = (
+    "<title>t320</title><style>html{scroll-behavior:smooth}"
+    "body{height:4000px}</style>"
+    "<header><h1>Big Title 320</h1></header>"
+    "<form id=aspnetForm><p>" + "word320 " * 80 + "</p>"
+    "<pre id=code>line one\n  indented two</pre>"
+    "<table id=outer><tr><td>A320<table><tr><td>inner320</td></tr></table>"
+    "</td></tr></table></form>")
+_v320 = br.new_tab(url=None)
+H.spin(200)
+H.load(_v320, srv.url("/t320"))
+H.spin(500)
+_ab320._views()
+_t320 = _v320._agent_id
+try:
+    _md = _md320(_ask320({"op": "markdown", "tab": _t320}).get("text"))
+    check("320 markdown keeps a page inside a form and its header's title",
+          "Big Title 320" in _md and "word320" in _md, _md[:200])
+    check("320 markdown keeps a code block's lines",
+          "line one\n  indented two" in _md, _md[-200:])
+    _tb = _ask320({"op": "tables", "tab": _t320}).get("tables")
+    check("320 tables lists a layout table's own cells, its inner table once",
+          isinstance(_tb, list) and len(_tb) == 2
+          and _tb[1] == [["inner320"]] and len(_tb[0]) == 1, _tb)
+    _sy = _ask320({"op": "scroll", "tab": _t320, "y": 600}).get("y")
+    check("320 scroll answers where the page is on a smooth-scrolling page",
+          _sy == 600, _sy)
+    _cap320 = _AB320.HTML_CAP
+    _AB320.HTML_CAP = 50
+    try:
+        _ht = _ask320({"op": "html", "tab": _t320})
+    finally:
+        _AB320.HTML_CAP = _cap320
+    check("320 html says when the cap cut the page",
+          _ht.get("truncated") is True and len(_ht.get("html") or "") == 50,
+          {k: _ht.get(k) for k in ("ok", "truncated")})
+    # its own tabs closed in one go: never a locked one
+    _others320 = [(_w, getattr(_w, "_agent_owned", False))
+                  for _w in [br.tabs.widget(_i) for _i in range(br.tabs.count())]]
+    for _w, _o in _others320:
+        if _o and _w is not _v320:
+            _w._agent_owned = False
+    _v320._agent_owned = True
+    _v320.locked = True
+    try:
+        _mc = _ask320({"op": "mine", "do": "close"})
+        _still320 = br.tabs.indexOf(_v320) >= 0
+        _v320._agent_touched = 1
+        br.config["agentTabIdle"] = 1
+        _gone320 = _ab320.close_idle_agent_tabs()
+        _still320b = br.tabs.indexOf(_v320) >= 0
+    finally:
+        br.config.pop("agentTabIdle", None)
+        for _w, _o in _others320:
+            try:
+                _w._agent_owned = _o
+            except RuntimeError:
+                pass
+        _v320.locked = False
+    check("320 the agent's close-mine and idle sweep leave a tab he locked",
+          _still320 and _mc.get("closed") == 0 and _mc.get("kept") == 1
+          and _still320b and _gone320 == [], (_mc, _still320, _gone320))
+    # a macro stopped under a name after its tab went: not "saved" (the
+    # tab in front a web page, or the bridge refuses before the macro)
+    if br.tabs.indexOf(_v320) >= 0:
+        br.tabs.setCurrentWidget(_v320)
+        H.spin(100)
+    _ab320.macro = {"tab": 987654321, "steps": [], "started": 1,
+                    "private": False}
+    _ms = _ask320({"op": "macro", "do": "stop", "name": "m320"})
+    check("320 a macro whose tab is gone is not reported saved",
+          _ms.get("ok") is False and _ms.get("error") == "nothing-recorded"
+          and "m320" not in ((br.config.get("macros") or {})), _ms)
+    br.config["bridgeSites"] = ["x320.example"]
+    check("320 a client held to some sites cannot restart the browser",
+          _ab320.allowed("restart") == (False, "site-not-allowed"),
+          _ab320.allowed("restart"))
+finally:
+    for _k320, _o in _cfg320.items():
+        if _o == "__absent__":
+            br.config.pop(_k320, None)
+        else:
+            br.config[_k320] = _o
+    _close_if_open(_v320)
+
+# ---- 321: media, second look (the 85th pass) ----
+H.Handler.pages["/t321"] = (
+    "<title>t321</title><video id=v muted width=640 height=360></video>")
+_v321 = br.new_tab(url=None)
+H.spin(200)
+H.load(_v321, srv.url("/t321"))
+H.spin(500)
+br.tabs.setCurrentWidget(_v321)
+H.spin(100)
+try:
+    # 321a: a remembered volume does not unmute
+    _vt321 = {}
+    br.media_tool("volumeto", view=_v321, level=0.3,
+                  then=lambda r: _vt321.__setitem__("r", r))
+    H.wait_for(lambda: "r" in _vt321, 4000)
+    _mv321 = H.js(_v321, "[document.getElementById('v').muted, "
+                         "document.getElementById('v').volume]")
+    check("321 a remembered volume leaves a muted video muted",
+          _mv321 == [True, 0.3], _mv321)
+    # 321b: the boost is put back before the volume
+    _calls321 = []
+    _real_mt321 = br.media_tool
+    _real_ms321 = br._media_sites
+    br.media_tool = lambda name, view=None, then=None, **a: (
+        _calls321.append(name) or True)
+    br._media_sites = lambda: {"127.0.0.1": {"volume": 0.3, "boost": 2.0}}
+    try:
+        br.apply_media_memory(_v321)
+    finally:
+        br.__dict__.pop("media_tool", None)
+        br.__dict__.pop("_media_sites", None)
+    check("321 a site's boost is put back before its volume",
+          _calls321 == ["boost", "volumeto"], _calls321)
+    # 321f: transcript text without its entities
+    H.js(_v321, "var v=document.getElementById('v');"
+                "var t=v.addTextTrack('captions','x','en');t.mode='hidden';"
+                "t.addCue(new VTTCue(0,1,'Q&amp;A &lt;b&gt; &#39;x&#39; "
+                "<i>it</i>'));1")
+    _tr321 = {}
+    br.transcript(view=_v321, then=lambda rows: _tr321.__setitem__("rows", rows))
+    H.wait_for(lambda: "rows" in _tr321, 4000)
+    _txt321 = [r.get("text") for r in _tr321.get("rows") or []]
+    check("321 a caption's text comes without its &amp; and tags",
+          _txt321 == ["Q&A <b> 'x' it"], _txt321)
+    # 321g: a site's autoplay rule holds for media that starts later, and
+    # a play the browser starts itself (a media key, a call ending) is
+    # left alone (the guard runs in the browser's own world)
+    _real_ar321 = br.autoplay_rule
+    br.autoplay_rule = lambda host, rule=None, view=None: "mute"
+    try:
+        br.apply_autoplay_rule(_v321)
+        H.spin(300)
+        _late321 = H.js(_v321,
+            "var w=document.createElement('video');w.id='late321';"
+            "document.body.appendChild(w);w.muted=false;"
+            "w.dispatchEvent(new Event('play'));w.muted",
+            B.MAIN_WORLD_ID)
+        H.js(_v321, "window.__browserPlayAt=Date.now();1", B.APP_WORLD_ID)
+        _own321 = H.js(_v321,
+            "var w2=document.createElement('video');"
+            "document.body.appendChild(w2);w2.muted=false;"
+            "w2.dispatchEvent(new Event('play'));w2.muted",
+            B.MAIN_WORLD_ID)
+    finally:
+        br.__dict__.pop("autoplay_rule", None)
+    check("321 a video started after the load is held by the site's rule",
+          _late321 is True, _late321)
+    check("321 ...but a play the browser started itself is left alone",
+          _own321 is False, _own321)
+    # 321h: catch up to live leaves a normal video alone
+    _cu321 = {}
+    H.js(_v321, "var v=document.getElementById('v');"
+                "Object.defineProperty(v,'duration',{get:function(){return 3600;}});"
+                "Object.defineProperty(v,'seekable',{get:function(){return "
+                "{length:1,end:function(){return 3600;}};}});v.playbackRate=1.5;1",
+         B.APP_WORLD_ID)     # the world the media tools run in
+    br.media_catch_up(view=_v321, then=lambda r: _cu321.__setitem__("r", r))
+    H.wait_for(lambda: "r" in _cu321, 4000)
+    _rate321 = H.js(_v321, "document.getElementById('v').playbackRate",
+                    B.MAIN_WORLD_ID)
+    check("321 catch up to live leaves a video with a length (and its speed) "
+          "alone", _cu321.get("r") == "notlive" and _rate321 == 1.5,
+          (_cu321.get("r"), _rate321))
+finally:
+    _close_if_open(_v321)
+
+# 321d: "resumed at" only once the player took it
+_said321 = []
+_tries321 = []
+_real_fl321 = br.flash
+_real_mt2_321 = br.media_tool2
+_real_mp321 = br.media_places
+_v321d = br.new_tab(url=None)
+H.spin(200)
+H.load(_v321d, srv.url("/t321"))
+H.spin(2600)     # media_extras' own resume_media (2 s after the load)
+_key321 = B.clean_url(_v321d.url().toString())[:500]
+br.flash = lambda msg, *a, **k: _said321.append(str(msg))
+br.media_places = lambda: {_key321: {"at": 125}}
+
+
+def _mt2_321(name, view=None, then=None, arg=None):
+    _tries321.append(name)
+    if then is not None:
+        then("" if len(_tries321) == 1 else "set")
+    return True
+
+
+br.media_tool2 = _mt2_321
+try:
+    br.resume_media(view=_v321d)
+    _first321 = list(_said321)
+    H.wait_for(lambda: len(_tries321) >= 2, 5000)
+    H.spin(100)
+finally:
+    br.__dict__.pop("flash", None)
+    br.__dict__.pop("media_tool2", None)
+    br.__dict__.pop("media_places", None)
+    _close_if_open(_v321d)
+check("321 'resumed at' is said only once the player took the place "
+      "(tried once more)", _first321 == [] and len(_tries321) == 2
+      and len(_said321) == 1, (_first321, _tries321, _said321))
+
+# 321e (review): the retry is skipped when the tab has gone elsewhere
+_tries321e = []
+_v321e = br.new_tab(url=None)
+H.spin(200)
+H.load(_v321e, srv.url("/t321"))
+H.spin(2600)     # media_extras' own resume_media (2 s after the load)
+_key321e = B.clean_url(_v321e.url().toString())[:500]
+br.media_places = lambda: {_key321e: {"at": 125}}
+br.media_tool2 = lambda name, view=None, then=None, arg=None: (
+    _tries321e.append((name, arg)) or (then("") if then else None) or True)
+br.flash = lambda msg, *a, **k: None
+try:
+    br.resume_media(view=_v321e)
+    H.load(_v321e, srv.url("/twhome"))
+    H.spin(3800)
+finally:
+    br.__dict__.pop("flash", None)
+    br.__dict__.pop("media_tool2", None)
+    br.__dict__.pop("media_places", None)
+    _close_if_open(_v321e)
+# (a "position" with no place is the page's place being noted on the way
+# out, not a seek)
+check("321 the resume retry is skipped once the tab shows another page",
+      [x for x in _tries321e if x[1] == 125] == [("position", 125)],
+      _tries321e)
+
+# 321c: a popped-out tab's camera is on the in-use list
+_v321c = br.new_tab(url=None)
+H.spin(200)
+H.load(_v321c, srv.url("/t321"))
+H.spin(300)
+_mini321 = br.pop_out_tab(br.tabs.indexOf(_v321c))
+H.spin(400)
+_users321 = {}
+try:
+    H.js(_v321c, "window.__guardMedia=['camera'];1", B.MAIN_WORLD_ID)
+    br.media_users(then=lambda rows: _users321.__setitem__("rows", rows))
+    H.wait_for(lambda: "rows" in _users321, 4000)
+    _hit321 = [r for r in _users321.get("rows") or [] if r.get("view") is _v321c]
+finally:
+    try:
+        _mini321.close()
+    except (RuntimeError, AttributeError):
+        pass
+    H.spin(200)
+    _close_if_open(_v321c)
+check("321 a popped-out tab using the camera is on the in-use list",
+      len(_hit321) == 1 and _hit321[0].get("kind") == "camera", _hit321)
+_tm321 = __import__("inspect").getsource(B.Browser.transcript_menu)
+check("321 (source) a cue's & in the transcript menu is not a mnemonic",
+      "menu.addAction(_amp(self._elide(label, 80)))" in _tm321)
+
+# ---- 322: keys and input, second look (the 86th pass) ----
+H.Handler.pages["/t322"] = (
+    "<title>t322</title><body style='height:4000px;margin:0'>"
+    "<my-box322 id=mb></my-box322><p id=p>x</p><script>"
+    "customElements.define('my-box322', class extends HTMLElement {"
+    "constructor(){super();var r=this.attachShadow({mode:'open'});"
+    "var t=document.createElement('textarea');t.id='ta';t.rows=4;"
+    "t.value='a\\nb\\nc';r.appendChild(t);}});</script>")
+_cfg322 = {k: br.config.get(k, "__absent__") for k in ("nav", "navSites", "mouse")}
+
+
+def _restore322():
+    for _k, _o in _cfg322.items():
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+    br.refresh_nav()
+
+
+def _page322():
+    v = br.new_tab(url=None)
+    H.spin(200)
+    H.load(v, srv.url("/t322"))
+    H.spin(500)
+    br.tabs.setCurrentWidget(v)
+    H.spin(200)
+    return v
+
+
+try:
+    # 322a: a site's own switch survives its next load
+    br.config["nav"] = {"noKeyGrab": False}
+    br.config["navSites"] = {"127.0.0.1": {"noKeyGrab": True}}
+    br.refresh_nav()
+    _v322 = _page322()
+    _ng322 = H.js(_v322, "!!(window.__navWant && window.__navWant.noKeyGrab)",
+                  B.APP_WORLD_ID)
+    _close_if_open(_v322)
+    check("322 a site's own 'keep my keys' switch holds on its next load",
+          _ng322 is True, _ng322)
+    # 322b: the arrow step leaves a field inside a shadow root alone
+    br.config["navSites"] = {}
+    br.config["nav"] = {"noKeyGrab": False}
+    br.config["mouse"] = dict(br.config.get("mouse") or {}, keyStep=90)
+    br.refresh_nav()
+    _v322 = _page322()
+    H.js(_v322, "var t=document.getElementById('mb').shadowRoot"
+                ".getElementById('ta');t.focus();t.setSelectionRange(0,0);1",
+         B.MAIN_WORLD_ID)
+    _v322.setFocus()
+    H.spin(100)
+    H.key(_v322, B.Qt.Key.Key_Down)
+    H.spin(300)
+    _sy322 = H.js(_v322, "window.scrollY", B.MAIN_WORLD_ID)
+    _close_if_open(_v322)
+    check("322 an arrow key in a box inside a web component moves its caret, "
+          "not the page", _sy322 == 0, _sy322)
+    # 322c: "keep my keys" does not switch the arrow step off
+    br.config["nav"] = {"noKeyGrab": True}
+    br.refresh_nav()
+    _v322 = _page322()
+    H.js(_v322, "if (document.activeElement) document.activeElement.blur(); 1",
+         B.MAIN_WORLD_ID)
+    _v322.setFocus()
+    H.spin(100)
+    H.key(_v322, B.Qt.Key.Key_Down)
+    H.spin(300)
+    _sy322c = H.js(_v322, "window.scrollY", B.MAIN_WORLD_ID)
+    _close_if_open(_v322)
+    check("322 the arrow step still works with 'keep my keys' on",
+          _sy322c == 90, _sy322c)
+    # 322d: the middle-button roll stops when the window loses focus
+    br.config["nav"] = {"autoScroll": True}
+    br.refresh_nav()
+    _v322 = _page322()
+    H.js(_v322, "document.getElementById('p').dispatchEvent(new MouseEvent("
+                "'mousedown',{button:1,bubbles:true,clientX:50,clientY:50}));1",
+         B.MAIN_WORLD_ID)
+    _r1_322 = H.js(_v322, "window.__navAutoScroll(true)", B.APP_WORLD_ID)
+    H.js(_v322, "window.dispatchEvent(new Event('blur'));1", B.MAIN_WORLD_ID)
+    _r2_322 = H.js(_v322, "window.__navAutoScroll(true)", B.APP_WORLD_ID)
+    H.js(_v322, "window.__navAutoScroll(false);1", B.APP_WORLD_ID)
+    _close_if_open(_v322)
+    check("322 the middle-button roll stops when the window loses focus",
+          _r1_322 == "already" and _r2_322 == "off", (_r1_322, _r2_322))
+finally:
+    _restore322()
+_mg322 = __import__("inspect").getsource(B.Browser.set_mouse_gestures)
+check("322 (source) a gesture's line is cleared on a lost release and when "
+      "gestures go off", "self.gesture_trail([], self.current())" in _mg322)
+
+# ---- 323: tab groups and split view, second look (the 87th pass) ----
+_a323 = br.new_tab(url=srv.url("/twhome"))
+H.spin(300)
+_b323 = br.new_tab(url=srv.url("/twhome?b"), switch=False)
+_c323 = br.new_tab(url=srv.url("/twhome?c"), switch=False)
+H.spin(400)
+br.tabs.setCurrentWidget(_a323)
+H.spin(100)
+_g323 = br.ensure_group("G323")
+for _w in (_b323, _c323):
+    br._move_tab_to_group(br.tabs.indexOf(_w), _g323)
+H.spin(200)
+br.tabs.setCurrentWidget(_a323)
+try:
+    # 323a: a rename takes the split half along
+    br.split_view(index=br.tabs.indexOf(_b323), on=True)
+    H.spin(300)
+    _half323 = br._split_view is _b323
+    br._rename_group(_g323, "H323")
+    _rn323 = getattr(br._split_view, "group", None)
+    br._sync_at = 1200
+    br.split_scroll_sync(True)
+    _sync323 = br._sync_at
+    br.split_scroll_sync(False)
+    br.close_split()
+    H.spin(200)
+    _after323 = (getattr(_b323, "group", None), br.tabs.indexOf(_b323) >= 0)
+    check("323 renaming a group renames its tab in the split view too",
+          _half323 and _rn323 == "H323" and _after323 == ("H323", True),
+          (_half323, _rn323, _after323))
+    check("323 scroll sync forgets the last position when it comes back on",
+          _sync323 == -1, _sync323)
+    # 323b: ungroup reaches the split half (a group of its own, so the
+    # check does not lean on the rename above)
+    _u323 = br.ensure_group("U323")
+    for _w in (_b323, _c323):
+        br._move_tab_to_group(br.tabs.indexOf(_w), _u323)
+    br.tabs.setCurrentWidget(_a323)
+    br.split_view(index=br.tabs.indexOf(_b323), on=True)
+    H.spin(300)
+    _pre323 = getattr(br._split_view, "group", None)
+    br.ungroup(_u323)
+    _ug323 = getattr(br._split_view, "group", "x")
+    br.close_split()
+    H.spin(200)
+    check("323 ungrouping a group ungroups its tab in the split view",
+          _pre323 == _u323 and _ug323 is None
+          and getattr(_b323, "group", "x") is None, (_pre323, _ug323))
+    # 323c: closing a group closes its split half too
+    _d323 = br.ensure_group("D323")
+    for _w in (_b323, _c323):
+        br._move_tab_to_group(br.tabs.indexOf(_w), _d323)
+    br.tabs.setCurrentWidget(_a323)
+    br.split_view(index=br.tabs.indexOf(_b323), on=True)
+    H.spin(300)
+    br.delete_group(_d323)
+    H.spin(300)
+
+    def _gone323(v):
+        try:
+            return br.tabs.indexOf(v) < 0
+        except RuntimeError:
+            return True        # closed and deleted
+
+    check("323 closing a group closes its tab in the split view as well",
+          br._split_view is None and _gone323(_b323) and _gone323(_c323),
+          (br._split_view is None, _gone323(_b323), _gone323(_c323)))
+finally:
+    if br._split_view is not None:
+        br.close_split()
+    for _w in (_b323, _c323):
+        try:
+            _close_if_open(_w)
+        except RuntimeError:
+            pass
+
+# 323d: keeping a group with nothing keepable keeps the earlier one
+_sg323 = dict(br.saved_groups())
+br.saved_groups()["E323"] = {"colour": "#ffffff",
+                             "tabs": [{"u": "https://keep323.example/"}]}
+_e323 = br.ensure_group("E323")
+_blank323 = br.new_tab(url=None, switch=False)
+H.spin(300)
+br._move_tab_to_group(br.tabs.indexOf(_blank323), _e323)
+try:
+    _kept323 = br.save_group(_e323)
+    _entry323 = br.saved_groups().get("E323")
+    _still323 = _e323 in br.groups
+finally:
+    if _e323 in br.groups:
+        br.delete_group(_e323)
+    _close_if_open(_blank323)
+check("323 keeping a group with nothing keepable keeps the earlier kept one "
+      "and closes nothing", _kept323 == 0 and _still323
+      and _entry323 == {"colour": "#ffffff",
+                        "tabs": [{"u": "https://keep323.example/"}]},
+      (_kept323, _still323, _entry323))
+
+# 323e: a kept group comes back once, in its own browser
+br.saved_groups()["R323"] = {"colour": "#ff0000", "session": "main",
+                             "tabs": [{"u": srv.url("/twhome?r323")}]}
+_r1_323 = br.reopen_saved_group("R323")
+H.spin(300)
+_r2_323 = br.reopen_saved_group("R323")
+_gr323 = [getattr(v, "group", None) for v in _r1_323]
+try:
+    check("323 a kept group comes back once, in its group",
+          len(_r1_323) == 1 and _r2_323 == [] and _gr323 == ["R323"]
+          and "R323" not in br.saved_groups(), (_gr323, _r2_323))
+finally:
+    if "R323" in br.groups:
+        br.delete_group("R323")
+    br.config["savedGroups"] = _sg323
+_gm323 = __import__("inspect").getsource(B.Browser._group_menu)
+check("323 (source) group names in menus escape '&' and kept groups are "
+      "offered", "_amp(g)" in _gm323 and "reopen_saved_group(n)" in _gm323)
+
+# 323f: a tab of another browser's group of the same name keeps a group
+_sess323 = list(br.sessions)
+br.sessions.append({"name": "O323", "sid": "o323"})
+_w323 = br.ensure_group("W323")
+try:
+    _o323 = br.open_tab_state([{"u": srv.url("/twhome?o323"), "s": "o323",
+                                "g": "W323"}])
+    H.spin(300)
+    _og323 = [(getattr(v, "group", None), getattr(v, "session", None))
+              for v in _o323]
+    _os323 = br.group_sessions.get("W323 2")
+finally:
+    for _v in _o323 if "_o323" in dir() else []:
+        _close_if_open(_v)
+    for _g in ("W323", "W323 2"):
+        if _g in br.groups:
+            br.delete_group(_g)
+    br.sessions[:] = _sess323
+    br.session_profiles.pop("o323", None)
+check("323 a tab of another browser's group of that name comes back in a "
+      "group of its own", _og323 == [("W323 2", "o323")] and _os323 == "o323",
+      (_og323, _os323))
+_cs323 = __import__("inspect").getsource(B.Browser.close_split)
+check("323 (source) a tab back from the split view gets its icon and private "
+      "mark", "self._private_icon()" in _cs323 and "mono_icon" in _cs323)
+_close_if_open(_a323)
+
+# 323g (review): keeping a group with nothing keepable says so
+_said323 = []
+_real_fl323 = br.flash
+_k323 = br.ensure_group("K323")
+_blank323k = br.new_tab(url=None, switch=False)
+H.spin(300)
+br._move_tab_to_group(br.tabs.indexOf(_blank323k), _k323)
+br.flash = lambda msg, *a, **k: _said323.append(str(msg))
+try:
+    br.save_group(_k323)
+finally:
+    br.__dict__.pop("flash", None)
+    if _k323 in br.groups:
+        br.delete_group(_k323)
+    _close_if_open(_blank323k)
+br.saved_groups().pop("K323", None)
+check("323 keeping a group with nothing keepable says so",
+      _said323 == [br._ui_str("groupNothingKept")], _said323)
+_mg323 = __import__("inspect").getsource(B.Browser.move_group_to_window)
+_fo323 = _mg323.find("folded = bool(self.collapsed.get(group))")
+check("323 (source) a group moved to a window keeps its fold, read before "
+      "the split half comes back",
+      0 <= _fo323 < _mg323.find("self.close_split()"), _fo323)
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

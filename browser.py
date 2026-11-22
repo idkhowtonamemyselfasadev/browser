@@ -3745,10 +3745,44 @@ MEDIA_TOOLS = {
   return m.currentTime;
 })(%(secs)s, %(absolute)s)""",
 
+"autoplayguard": r"""(function (rule) {
+  /* the site's autoplay rule, for what is there now AND what starts
+     later: a player made after the load, the next video, an app's new
+     page all played (loud) past a rule applied once at load. A play he
+     started himself (a click or a key just before) is left alone, and
+     so is one the browser started (a media key, the end of a call,
+     the tab shown again): it says so, here in the browser's own world
+     where the page cannot write, or on the element (pause-when-hidden
+     runs in the page's world). */
+  window.__autoplayRule = rule;
+  var all = document.querySelectorAll("video,audio");
+  for (var i = 0; i < all.length; i++) {
+    if (rule === "mute") all[i].muted = true;
+    else if (rule === "block") { try { all[i].pause(); } catch (e) {} }
+  }
+  if (!window.__autoplayGuard) {
+    window.__autoplayGuard = true;
+    document.addEventListener("play", function (ev) {
+      var el = ev.target, now = window.__autoplayRule;
+      if (!el || !/^(VIDEO|AUDIO)$/.test(el.tagName || "")) return;
+      var ua = navigator.userActivation;
+      if (ua && ua.isActive) return;
+      var t = Date.now();
+      if (t - (window.__browserPlayAt || 0) < 2000) return;
+      if (t - Number((el.dataset && el.dataset.browserPlay) || 0) < 2000)
+        return;
+      if (now === "mute") el.muted = true;
+      else if (now === "block") { try { el.pause(); } catch (e) {} }
+    }, true);
+  }
+  return String(all.length);
+})(%(rule)s)""",
+
 "playpause": MEDIA_PICK + r"""(function (want) {
   var m = pick();
   if (!m) return "none";
   var play = want === null ? m.paused : want;
+  if (play) window.__browserPlayAt = Date.now();   /* see autoplayguard */
   if (play) { m.play().catch(function () {}); } else { m.pause(); }
   return play ? "playing" : "paused";
 })(%(want)s)""",
@@ -3773,6 +3807,7 @@ MEDIA_TOOLS = {
   document.querySelectorAll("video[data-paused-by-browser],"
     + " audio[data-paused-by-browser]").forEach(function (m) {
     delete m.dataset.pausedByBrowser;
+    window.__browserPlayAt = Date.now();   /* see autoplayguard */
     m.play().catch(function () {});
     n++;
   });
@@ -3834,7 +3869,9 @@ MEDIA_TOOLS = {
   var m = pick();
   if (!m) return -1;
   m.volume = Math.min(1, Math.max(0, Number(level) || 0));
-  m.muted = false;
+  /* muted stays muted: the remembered level is how loud, not "turn it
+     on" -- a muted autoplay preview (or a player he had muted) became
+     audible a second and a half after every load */
   return m.volume;
 })(%(level)s)""",
 
@@ -3907,9 +3944,14 @@ MEDIA_TOOLS = {
   if (m.__catchUp) {
     m.removeEventListener("timeupdate", m.__catchUp);
     m.__catchUp = null;
-    m.playbackRate = 1;
+    m.playbackRate = m.__catchBase || 1;
     return "off";
   }
+  /* a video with a length is no stream: its seekable end is its end,
+     and the whole of it was played at 1.1x, his own 1.5x dropped */
+  if (isFinite(m.duration)) return "notlive";
+  var base = m.playbackRate || 1;
+  m.__catchBase = base;
   var edge = function () {
     try {
       return m.seekable.length
@@ -3919,10 +3961,11 @@ MEDIA_TOOLS = {
   if (!edge()) return "notlive";
   var watch = function () {
     var behind = edge() - m.currentTime;
+    var fast = Math.max(base, 1.1);
     if (behind > 1.5) {
-      if (m.playbackRate !== 1.1) m.playbackRate = 1.1;
-    } else if (m.playbackRate !== 1) {
-      m.playbackRate = 1;
+      if (m.playbackRate !== fast) m.playbackRate = fast;
+    } else if (m.playbackRate !== base) {
+      m.playbackRate = base;
     }
   };
   m.__catchUp = watch;
@@ -6044,7 +6087,7 @@ UI_STRINGS = {
 "guardMenu":"What this page may do","guardFingerprint":"Blur what sites can tell about this computer","guardClipboardRead":"Never let a page read the clipboard","guardCopyGuard":"Copy only what is selected","guardLeaveTrap":"Ignore \u201cLeave site?\u201d boxes","guardGpc":"Tell sites not to sell or share","guardNoFrames":"Block frames from other sites","guardLocalFonts":"Use local fonts, not the site\u2019s","guardWsLog":"Note the live connections a page opens","guardNoWebRTC":"Switch WebRTC off","guardBanners":"Answer cookie banners with \u201creject\u201d","guardPopups":"Write down the windows a page tried to open","guardOffHere":"Leave %s alone","guardNoneOn":"Nothing is switched on.","guardApis":"What %s may not use","guardHideElement":"Hide an element here","guardHideHow":"Right-click the thing you want gone and pick \u201cHide this element\u201d.","guardHiddenHere":"%d hidden here","guardHidden":"Hidden: %s","guardNoPick":"Nothing to hide there.","guardPlace":"Give %s a fixed place","guardPlaceT":"A place of your choosing","guardPlaceAsk":"Latitude and longitude, separated by a comma. Empty = the real one.","guardPlaceBad":"That needs two numbers.","guardMissing":"page_guard.py is not next to the browser.","guardHideThis":"Hide this element","apiWebgl":"3D graphics (WebGL)","apiWasm":"WebAssembly","apiWebusb":"USB devices","apiBluetooth":"Bluetooth","apiSerial":"Serial ports","apiHid":"Game controllers and other HID","apiMidi":"MIDI instruments","apiSensors":"Motion sensors","apiIdle":"Whether you are at the computer","apiNfc":"NFC","apiBattery":"The battery","apiSpeech":"Speech recognition","redirectBlocked":"A background tab was stopped from going to %s","popupNone":"Nothing was blocked here.","popupAllow":"Let %s open windows","popupBlocked":"Blocked windows","dlElsewhere":"That download comes from %s, not from this site","linkReally":"%s \u2014 really %s","offlineOn":"Offline \u2014 nothing new is loaded","offlineOff":"Online again","offlineBlocked":"Offline \u2014 that page was not loaded","offlineRestart":"Offline is complete after a restart","privacyRestart":"That privacy setting applies after a restart","privacyNowOn":"Switched on since the last start: %s","privacyNowOff":"Switched off since the last start: %s","privacyNoList":"The phishing list is empty \u2014 put one host a line in phishing-hosts.txt","shotPrivateNo":"A private tab is not captured. Settings has the switch.","privateNotKept":"Not kept: this is a private tab","httpsOnlyName":"Only load sites over https","httpsOnlyHint":"An http address is tried over https first; if that fails you are asked before it loads.","httpsWarnT":"That site has no secure address","httpsWarnB":"%s did not answer over https. Carrying on means anyone between you and it can read and change the page. Go there anyway?","redirectGuardName":"Stop pages redirecting a tab you are not on","redirectGuardHint":"A background tab cannot send itself to another site without a click.","blockPingsName":"Block link tracking pings","blockPingsHint":"The hidden request a link can fire when you click it.","trimReferrerName":"Tell sites where you came from","trimReferrerHint":"Off sends no referrer at all. There is no origin-only setting in this engine.","trimReferrerFull":"As usual","trimReferrerNone":"Never","noSpeculativeName":"No connections before you click","noSpeculativeHint":"Stops DNS prefetching, preconnecting and link preloading.","siteIsolationName":"Every site in its own process","siteIsolationHint":"Safer and slower, and it costs memory.","webrtcGuardName":"Keep WebRTC off the home network","webrtcGuardHint":"A call still works; the page no longer learns this machine\u2019s local address.","dohName":"Encrypted DNS","dohHint":"Your name lookups go to this provider over https instead of to the router.","dohUrlName":"DNS provider","dohUrlHint":"An https:// template. Empty = off.","blockReplayName":"Block session recorders","blockReplayHint":"Hotjar, FullStory and the rest, by name, whatever else is switched on.","phishingListName":"Use my phishing list","phishingListHint":"One host a line in phishing-hosts.txt beside the config. Nothing is downloaded.","blockHostsName":"Domains to refuse","blockHostsHint":"One a line. The engine is told these names are nowhere.","oneLanguageName":"Send only one language","oneLanguageHint":"Accept-Language carries your language and nothing else.","expandShortName":"Resolve short links on hover","expandShortHint":"Asks bit.ly or t.co where the link goes \u2014 which tells them you saw it.","shotPrivateName":"Allow screenshots of private tabs","shotPrivateHint":"Off = the capture tools refuse a private tab.","privateNoMediaName":"Private tabs never appear in the media list","privateNoMediaHint":"Nothing playing in one is announced anywhere.","popupModeName":"An allowed window opens as","popupModeTab":"A tab","popupModeWindow":"A small window","privacyCheckName":"Say at startup when a privacy setting changed","privacyCheckHint":"One line, and only when something is different from the last start.","offlineAction":"Work offline",
 "startCountdowns":"Counting down","startRecent":"Just added","startRecentName":"Show the bookmarks you added last","startRecentHint":"A row on the start page with the newest bookmarks.",
 "histPicked":"%d picked","histForget":"Forget this page","histForgetSite":"Forget this site","histVisits":"%d visits","histPages":"Pages","histMost":"Most visited","histStats":"Statistics","histBySite":"Group by site","histHops":"Show hops","histExport":"Export","histDelRange":"Delete this range","histOpen":"Open","histOpenGroup":"Open as a group","histBookmark":"Bookmark","histCopy":"Copy","histDelete":"Delete","histNone":"Clear","histSite":"site","histAll":"All time","histHour":"Last hour","histWeek":"Last 7 days","histMonth":"Last 30 days","histEveryBrowser":"Every browser","histDeleted":"%d deleted","histUndo":"Undo","histPagesTotal":"%d pages","histDaysName":"Keep history for","histDaysHint":"Days. 0 = for ever. Older entries are deleted at the next start.","cleanTitlesName":"Tidy up page titles","cleanTitlesHint":"Takes the \u201c(3)\u201d and the \u201c- YouTube\u201d off what is written into the history.","bmTags":"Tags","bmTagsAsk":"Tags for this bookmark, separated by commas:","bmNote":"Note","bmNoteAsk":"A note of your own about this bookmark:","bmNick":"Nickname","bmNickAsk":"A short word that opens this bookmark from the address bar:","bmVisits":"Visited %d times, last on %s","bmRunlet":"Run this on the page","bmToBrowser":"Copy to another browser","bmOpenAllGroup":"Open all as a group","bmSort":"Sort this folder","bmSortName":"By name","bmSortAdded":"By when it was added","bmSortUsed":"By when it was last opened","bmSortVisits":"By how often it is opened","bmColour":"Folder colour","bmColourNone":"No colour","bmSeparator":"Add a separator line","bmLock":"Lock this folder","bmUnlock":"Unlock this folder","bmLocked":"That folder is locked.","bmExportFolder":"Export this folder","bmTools":"Bookmark tools","bmImport":"Import bookmarks","bmExport":"Export bookmarks","bmImported":"%d bookmarks imported \u2713","bmExported":"%d bookmarks written \u2713","bmDupes":"Merge %d duplicates","bmDupesT":"Merge the duplicates?","bmDupesB":"%d bookmarks point at a page another one already points at. The oldest of each is kept, with the tags and notes of the others.","bmDupesGone":"%d duplicates merged \u2713","bmUnused":"%d bookmarks you never open","bmUnusedT":"Delete the ones you never open?","bmUnusedB":"%d bookmarks have never been opened, or not in a year:\n\n%s","bmBackups":"Backups","bmNoBackups":"No backup yet.","bmBackupNow":"Make one now","bmBackedUp":"Written to %s","bmRestoreT":"Put this backup back?","bmRestoreB":"The bookmarks from %s replace the ones you have now. What you have now is backed up first.","bmRestored":"%d bookmarks restored \u2713","bmByTag":"By tag","bmNoMatch":"Nothing with that tag.","bmMirrorNow":"Write the copy now","bmMirrorMerge":"Take what the copy has","bmMirrored":"Copied to %s","bmMerged":"%d bookmarks taken from the copy","bmCheckLinks":"Check the links (goes online)","bmCheckT":"Check every bookmark?","bmCheckB":"This asks %d servers whether their page is still there. Each of them learns that you still have it bookmarked. Nothing else is sent and no page is loaded.","bmChecking":"Asking %d servers\u2026","bmChecked":"%d still there, %d dead, %d moved","bmMovedT":"Update the moved ones?","bmMovedB":"%d bookmarks answered with a permanent redirect:\n\n%s","bmHttps":"Move old bookmarks to https (goes online)","bmHttpsT":"Try https for the old bookmarks?","bmHttpsB":"%d bookmarks are still on http://. This asks each site whether it answers on https:// and changes only the ones that do.","bmHttpsDone":"%d bookmarks moved to https \u2713","bmHttpsNone":"Every bookmark is already on https.","bmScrollName":"Bookmarks remember where you had read to","bmScrollHint":"Reopening one goes back to that place on the page.","bmBackupName":"A dated copy of the bookmarks every day","bmBackupHint":"Kept beside the bookmarks file; the last fourteen.","bmMirrorName":"Keep a copy of the bookmarks in","bmMirrorHint":"A folder of yours \u2014 a share, a stick, a synced directory. No account and no cloud.",
-"privateWindowTitle":"Private window \u2014 browser","overviewFilter":"Type to narrow the tabs down\u2026","tabHidden":"folded away","tabOpened":"Opened %s ago","tabLastSeen":"Last looked at %s ago","tabUnread":"%d unread","selMenu":"%d selected tabs","selClose":"Close them","selMute":"Mute them","selReload":"Reload them","selPin":"Pin them","selBookmark":"Bookmark them","selAside":"Set them aside","selGroup":"Put them in a group","selGroupAsk":"Name for the group:","tabPopOut":"Pop out as a small window","tabAsApp":"Open this site as an app","tabPip":"Picture-in-picture","tabPipOff":"This build of the engine has picture-in-picture switched off.","tabPipNone":"No video on this page.","winToNew":"Move tab to a new window","winGroupToNew":"Move this group to a new window","groupSave":"Keep this group and close it","winNew":"New window","winMerge":"Gather every window here","winMergePrivate":"A private window cannot gather the others \u2014 do it from an ordinary window","winMergeApp":"An app window cannot gather the others \u2014 do it from an ordinary window","bgTooLarge":"That image is too large, sorry \u2014 try a smaller one.","pressAgain":"Press again to confirm","clearedMsg":"Cleared \u2713","uiRadiusDefault":"default","countdownSkipped":"Saved, but %d lines were not understood","winMenu":"Windows","tabsAll":"Every tab","tabSetsMenu":"Saved sets of tabs","asideMenu":"Set aside","asidePut":"Put these tabs aside","tabsExport":"Export the open tabs","tabsImport":"Open a list of addresses","tabsExported":"%d tabs written","setOpen":"Open it","setReplace":"Open it instead of these tabs","setDelete":"Forget this set","setSave":"Save these tabs as a set","setSaveAsk":"Name for this set of tabs:","sessionSaved":"\u201c%s\u201d saved \u2014 %d tabs","snapMenu":"Earlier today","closeManyT":"Close this window?","closeManyB":"%d tabs are open in it. They all close.","crashBackT":"Bring tabs back","crashBackB":"The browser did not close properly last time. These tabs were open \u2014 untick what you do not want back.","tabWidthName":"How wide tabs are","tabWidthHint":"Shrinking is the usual way; fixed lets the strip scroll instead.","tabWidthShrink":"Share the room out","tabWidthFixed":"All the same width","tabWidthIcon":"Just the site icon","tabMinWidthName":"Narrowest a tab gets","tabMinWidthHint":"Below this the strip scrolls instead of shrinking further.","closeButtonsName":"Show the close cross","closeButtonsHint":"Which tabs carry a cross, so it is not hit by accident.","closeButtonsWide":"On tabs with room for it","closeButtonsAll":"On every tab","closeButtonsHover":"Under the mouse, and on this tab","closeButtonsActive":"Only on this tab","hideStripName":"Hide the tab strip with one tab","hideStripHint":"A single tab needs no strip \u2014 like an app window.","stripDoubleName":"Double-click on the empty strip","stripDoubleHint":"Beside the tabs, where there is nothing.","tabDoubleName":"Double-click on a tab","tabMiddleName":"Middle-click on a tab","mouseNothing":"Nothing","mouseNewTab":"New tab","mouseClose":"Close it","mousePin":"Pin it","mouseDuplicate":"Duplicate it","mouseMute":"Mute it","autoCollapseName":"Fold the other groups away","autoCollapseHint":"Switching into one group collapses the rest, keeping the strip short.","confirmCloseName":"Ask before closing this many tabs","confirmCloseHint":"0 = never ask. Closing a window with twenty tabs cannot be undone.","tabTintName":"Give each site its own tab colour","tabTintHint":"A faint wash taken from the site\u2019s own icon.","unreadBadgeName":"Show the unread count on tabs","unreadBadgeHint":"The number a page puts in its title, such as Discord\u2019s \u201c(3)\u201d.","childNextName":"Links open next to the tab they came from","childNextHint":"Off = at the end of the strip.","backClosesName":"Back closes a tab that came from a link","backClosesHint":"On a tab with nothing behind it, Back shuts it and returns to the tab that opened it.","closeDownloadTabsName":"Close tabs that only started a download","closeDownloadTabsHint":"The blank tab a download link leaves behind closes itself.","staleDaysName":"Close tabs not looked at for","staleDaysHint":"Days. 0 = never. They go on the recently-closed list, not away.","snapshotsName":"Keep snapshots of the open tabs","snapshotsHint":"Every few minutes, so an older set of tabs can be put back.","sessionSitesName":"Sites that always open in one virtual browser","sessionSitesHint":"One \u201cdomain = browser name\u201d a line.","groupRulesName":"Put new tabs into groups by address","groupRulesHint":"One \u201cMods = modrinth.com, curseforge.com\u201d a line.","crashRecoveryName":"Offer the last tabs back after a crash","crashRecoveryHint":"A list with a box beside each tab, rather than all of them or none.","actNewWindow":"New window","actPrivateWindow":"New private window","actOverview":"All tabs as pictures","actAllTabs":"List every tab","actWindowList":"List the windows","actMergeWindows":"Gather every window here","actTabToWindow":"Move this tab to a new window","actPopOut":"Pop this tab out","actSiteAsApp":"Open this site as an app","actSaveTabSet":"Save these tabs as a set","actSetAside":"Set these tabs aside","actBringBack":"Bring back what was set aside","actExportTabs":"Export the open tabs","actImportTabs":"Open a list of addresses","appEntryWritten":"%s is in your application menu now","appEntryFailed":"That desktop entry could not be written."},
+"privateWindowTitle":"Private window \u2014 browser","overviewFilter":"Type to narrow the tabs down\u2026","tabHidden":"folded away","tabOpened":"Opened %s ago","tabLastSeen":"Last looked at %s ago","tabUnread":"%d unread","selMenu":"%d selected tabs","selClose":"Close them","selMute":"Mute them","selReload":"Reload them","selPin":"Pin them","selBookmark":"Bookmark them","selAside":"Set them aside","selGroup":"Put them in a group","selGroupAsk":"Name for the group:","tabPopOut":"Pop out as a small window","tabAsApp":"Open this site as an app","tabPip":"Picture-in-picture","tabPipOff":"This build of the engine has picture-in-picture switched off.","tabPipNone":"No video on this page.","winToNew":"Move tab to a new window","winGroupToNew":"Move this group to a new window","groupSave":"Keep this group and close it","winNew":"New window","winMerge":"Gather every window here","winMergePrivate":"A private window cannot gather the others \u2014 do it from an ordinary window","winMergeApp":"An app window cannot gather the others \u2014 do it from an ordinary window","dlAgainNo":"That file was made here, not downloaded \u2014 make it again from its page","groupNothingKept":"Nothing in this group can be kept (private tabs and start pages are not) \u2014 it stays open","bgTooLarge":"That image is too large, sorry \u2014 try a smaller one.","pressAgain":"Press again to confirm","clearedMsg":"Cleared \u2713","uiRadiusDefault":"default","countdownSkipped":"Saved, but %d lines were not understood","winMenu":"Windows","tabsAll":"Every tab","tabSetsMenu":"Saved sets of tabs","asideMenu":"Set aside","asidePut":"Put these tabs aside","tabsExport":"Export the open tabs","tabsImport":"Open a list of addresses","tabsExported":"%d tabs written","setOpen":"Open it","setReplace":"Open it instead of these tabs","setDelete":"Forget this set","setSave":"Save these tabs as a set","setSaveAsk":"Name for this set of tabs:","sessionSaved":"\u201c%s\u201d saved \u2014 %d tabs","snapMenu":"Earlier today","closeManyT":"Close this window?","closeManyB":"%d tabs are open in it. They all close.","crashBackT":"Bring tabs back","crashBackB":"The browser did not close properly last time. These tabs were open \u2014 untick what you do not want back.","tabWidthName":"How wide tabs are","tabWidthHint":"Shrinking is the usual way; fixed lets the strip scroll instead.","tabWidthShrink":"Share the room out","tabWidthFixed":"All the same width","tabWidthIcon":"Just the site icon","tabMinWidthName":"Narrowest a tab gets","tabMinWidthHint":"Below this the strip scrolls instead of shrinking further.","closeButtonsName":"Show the close cross","closeButtonsHint":"Which tabs carry a cross, so it is not hit by accident.","closeButtonsWide":"On tabs with room for it","closeButtonsAll":"On every tab","closeButtonsHover":"Under the mouse, and on this tab","closeButtonsActive":"Only on this tab","hideStripName":"Hide the tab strip with one tab","hideStripHint":"A single tab needs no strip \u2014 like an app window.","stripDoubleName":"Double-click on the empty strip","stripDoubleHint":"Beside the tabs, where there is nothing.","tabDoubleName":"Double-click on a tab","tabMiddleName":"Middle-click on a tab","mouseNothing":"Nothing","mouseNewTab":"New tab","mouseClose":"Close it","mousePin":"Pin it","mouseDuplicate":"Duplicate it","mouseMute":"Mute it","autoCollapseName":"Fold the other groups away","autoCollapseHint":"Switching into one group collapses the rest, keeping the strip short.","confirmCloseName":"Ask before closing this many tabs","confirmCloseHint":"0 = never ask. Closing a window with twenty tabs cannot be undone.","tabTintName":"Give each site its own tab colour","tabTintHint":"A faint wash taken from the site\u2019s own icon.","unreadBadgeName":"Show the unread count on tabs","unreadBadgeHint":"The number a page puts in its title, such as Discord\u2019s \u201c(3)\u201d.","childNextName":"Links open next to the tab they came from","childNextHint":"Off = at the end of the strip.","backClosesName":"Back closes a tab that came from a link","backClosesHint":"On a tab with nothing behind it, Back shuts it and returns to the tab that opened it.","closeDownloadTabsName":"Close tabs that only started a download","closeDownloadTabsHint":"The blank tab a download link leaves behind closes itself.","staleDaysName":"Close tabs not looked at for","staleDaysHint":"Days. 0 = never. They go on the recently-closed list, not away.","snapshotsName":"Keep snapshots of the open tabs","snapshotsHint":"Every few minutes, so an older set of tabs can be put back.","sessionSitesName":"Sites that always open in one virtual browser","sessionSitesHint":"One \u201cdomain = browser name\u201d a line.","groupRulesName":"Put new tabs into groups by address","groupRulesHint":"One \u201cMods = modrinth.com, curseforge.com\u201d a line.","crashRecoveryName":"Offer the last tabs back after a crash","crashRecoveryHint":"A list with a box beside each tab, rather than all of them or none.","actNewWindow":"New window","actPrivateWindow":"New private window","actOverview":"All tabs as pictures","actAllTabs":"List every tab","actWindowList":"List the windows","actMergeWindows":"Gather every window here","actTabToWindow":"Move this tab to a new window","actPopOut":"Pop this tab out","actSiteAsApp":"Open this site as an app","actSaveTabSet":"Save these tabs as a set","actSetAside":"Set these tabs aside","actBringBack":"Bring back what was set aside","actExportTabs":"Export the open tabs","actImportTabs":"Open a list of addresses","appEntryWritten":"%s is in your application menu now","appEntryFailed":"That desktop entry could not be written."},
 "de": {"settings":"Einstellungen","search":"Suche","searchEngine":"Suchmaschine",
 "appearance":"Aussehen","whiteGoogle":"Wei\u00dfes Google",
 "whiteGoogleHint":"Aus = pechschwarzes Google",
@@ -6204,7 +6247,7 @@ UI_STRINGS = {
 "guardMenu":"Was diese Seite darf","guardFingerprint":"Verwischen, was Seiten \u00fcber diesen Rechner erfahren","guardClipboardRead":"Keine Seite darf die Zwischenablage lesen","guardCopyGuard":"Nur kopieren, was ausgew\u00e4hlt ist","guardLeaveTrap":"\u201eSeite verlassen?\u201c-Fenster ignorieren","guardGpc":"Seiten sagen: nicht verkaufen oder weitergeben","guardNoFrames":"Rahmen von anderen Seiten blockieren","guardLocalFonts":"Lokale Schriften nehmen, nicht die der Seite","guardWsLog":"Offene Verbindungen einer Seite notieren","guardNoWebRTC":"WebRTC abschalten","guardBanners":"Cookie-Banner mit \u201eablehnen\u201c beantworten","guardPopups":"Aufschreiben, welche Fenster eine Seite \u00f6ffnen wollte","guardOffHere":"%s in Ruhe lassen","guardNoneOn":"Es ist nichts eingeschaltet.","guardApis":"Was %s nicht benutzen darf","guardHideElement":"Ein Element hier ausblenden","guardHideHow":"Rechtsklick auf das, was weg soll, und \u201eDieses Element ausblenden\u201c w\u00e4hlen.","guardHiddenHere":"%d hier ausgeblendet","guardHidden":"Ausgeblendet: %s","guardNoPick":"Da ist nichts zum Ausblenden.","guardPlace":"%s einen festen Ort geben","guardPlaceT":"Ein Ort deiner Wahl","guardPlaceAsk":"Breite und L\u00e4nge, mit Komma getrennt. Leer = der echte Ort.","guardPlaceBad":"Daf\u00fcr braucht es zwei Zahlen.","guardMissing":"page_guard.py liegt nicht neben dem Browser.","guardHideThis":"Dieses Element ausblenden","apiWebgl":"3D-Grafik (WebGL)","apiWasm":"WebAssembly","apiWebusb":"USB-Ger\u00e4te","apiBluetooth":"Bluetooth","apiSerial":"Serielle Anschl\u00fcsse","apiHid":"Gamepads und andere HID","apiMidi":"MIDI-Instrumente","apiSensors":"Bewegungssensoren","apiIdle":"Ob du am Rechner sitzt","apiNfc":"NFC","apiBattery":"Der Akku","apiSpeech":"Spracherkennung","redirectBlocked":"Ein Hintergrundtab wurde daran gehindert, zu %s zu wechseln","popupNone":"Hier wurde nichts blockiert.","popupAllow":"%s Fenster \u00f6ffnen lassen","popupBlocked":"Blockierte Fenster","dlElsewhere":"Dieser Download kommt von %s, nicht von dieser Seite","linkReally":"%s \u2014 eigentlich %s","offlineOn":"Offline \u2014 es wird nichts Neues geladen","offlineOff":"Wieder online","offlineBlocked":"Offline \u2014 diese Seite wurde nicht geladen","offlineRestart":"Offline gilt vollst\u00e4ndig nach einem Neustart","privacyRestart":"Diese Einstellung gilt nach einem Neustart","privacyNowOn":"Seit dem letzten Start eingeschaltet: %s","privacyNowOff":"Seit dem letzten Start ausgeschaltet: %s","privacyNoList":"Die Phishing-Liste ist leer \u2014 ein Host pro Zeile in phishing-hosts.txt","shotPrivateNo":"Ein privater Tab wird nicht aufgenommen. Der Schalter steht in den Einstellungen.","privateNotKept":"Nicht gespeichert: privater Tab","httpsOnlyName":"Seiten nur \u00fcber https laden","httpsOnlyHint":"Eine http-Adresse wird zuerst \u00fcber https versucht; schl\u00e4gt das fehl, wirst du vorher gefragt.","httpsWarnT":"Diese Seite hat keine sichere Adresse","httpsWarnB":"%s hat \u00fcber https nicht geantwortet. Weitermachen hei\u00dft: jeder zwischen dir und der Seite kann mitlesen und mitschreiben. Trotzdem hingehen?","redirectGuardName":"Seiten d\u00fcrfen keinen Tab umleiten, auf dem du nicht bist","redirectGuardHint":"Ein Hintergrundtab kann sich ohne Klick nicht auf eine andere Seite schicken.","blockPingsName":"Link-Tracking-Pings blockieren","blockPingsHint":"Die versteckte Anfrage, die ein Link beim Klick absetzen kann.","trimReferrerName":"Seiten sagen, woher du kommst","trimReferrerHint":"Aus sendet gar keinen Referrer. Nur-Herkunft gibt es in dieser Engine nicht.","trimReferrerFull":"Wie \u00fcblich","trimReferrerNone":"Nie","noSpeculativeName":"Keine Verbindungen vor dem Klick","noSpeculativeHint":"Kein DNS-Vorabruf, kein Vorverbinden, kein Link-Preload.","siteIsolationName":"Jede Seite in ihrem eigenen Prozess","siteIsolationHint":"Sicherer und langsamer, und es kostet Speicher.","webrtcGuardName":"WebRTC vom Heimnetz fernhalten","webrtcGuardHint":"Ein Anruf funktioniert weiter; die Seite erf\u00e4hrt die lokale Adresse nicht mehr.","dohName":"Verschl\u00fcsseltes DNS","dohHint":"Namensaufl\u00f6sungen gehen \u00fcber https an diesen Anbieter statt an den Router.","dohUrlName":"DNS-Anbieter","dohUrlHint":"Eine https://-Vorlage. Leer = aus.","blockReplayName":"Sitzungsaufzeichner blockieren","blockReplayHint":"Hotjar, FullStory und die anderen, namentlich, unabh\u00e4ngig vom Rest.","phishingListName":"Meine Phishing-Liste benutzen","phishingListHint":"Ein Host pro Zeile in phishing-hosts.txt neben der Konfiguration. Es wird nichts heruntergeladen.","blockHostsName":"Domains, die abgelehnt werden","blockHostsHint":"Eine pro Zeile. Der Engine wird gesagt, diese Namen gibt es nicht.","oneLanguageName":"Nur eine Sprache senden","oneLanguageHint":"Accept-Language tr\u00e4gt deine Sprache und sonst nichts.","expandShortName":"Kurzlinks beim \u00dcberfahren aufl\u00f6sen","expandShortHint":"Fragt bit.ly oder t.co, wohin der Link geht \u2014 und sagt denen damit, dass du ihn gesehen hast.","shotPrivateName":"Bildschirmfotos von privaten Tabs erlauben","shotPrivateHint":"Aus = die Aufnahmewerkzeuge verweigern einen privaten Tab.","privateNoMediaName":"Private Tabs tauchen nie in der Medienliste auf","privateNoMediaHint":"Was darin l\u00e4uft, wird nirgends angek\u00fcndigt.","popupModeName":"Ein erlaubtes Fenster \u00f6ffnet als","popupModeTab":"Tab","popupModeWindow":"Kleines Fenster","privacyCheckName":"Beim Start sagen, wenn sich eine Privatsph\u00e4re-Einstellung ge\u00e4ndert hat","privacyCheckHint":"Eine Zeile, und nur wenn etwas anders ist als beim letzten Start.","offlineAction":"Offline arbeiten",
 "startCountdowns":"Countdown","startRecent":"Gerade hinzugef\u00fcgt","startRecentName":"Die zuletzt hinzugef\u00fcgten Lesezeichen zeigen","startRecentHint":"Eine Zeile auf der Startseite mit den neuesten Lesezeichen.",
 "histPicked":"%d ausgew\u00e4hlt","histForget":"Diese Seite vergessen","histForgetSite":"Diese Website vergessen","histVisits":"%d Besuche","histPages":"Seiten","histMost":"Meistbesucht","histStats":"Statistik","histBySite":"Nach Website gruppieren","histHops":"Zwischenstationen zeigen","histExport":"Exportieren","histDelRange":"Diesen Zeitraum l\u00f6schen","histOpen":"\u00d6ffnen","histOpenGroup":"Als Gruppe \u00f6ffnen","histBookmark":"Als Lesezeichen","histCopy":"Kopieren","histDelete":"L\u00f6schen","histNone":"Auswahl aufheben","histSite":"Website","histAll":"Gesamter Zeitraum","histHour":"Letzte Stunde","histWeek":"Letzte 7 Tage","histMonth":"Letzte 30 Tage","histEveryBrowser":"Alle Browser","histDeleted":"%d gel\u00f6scht","histUndo":"Zur\u00fccknehmen","histPagesTotal":"%d Seiten","histDaysName":"Verlauf behalten f\u00fcr","histDaysHint":"Tage. 0 = f\u00fcr immer. \u00c4lteres wird beim n\u00e4chsten Start gel\u00f6scht.","cleanTitlesName":"Seitentitel aufr\u00e4umen","cleanTitlesHint":"Nimmt das \u201e(3)\u201c und das \u201e- YouTube\u201c aus dem, was in den Verlauf geschrieben wird.","bmTags":"Schlagw\u00f6rter","bmTagsAsk":"Schlagw\u00f6rter f\u00fcr dieses Lesezeichen, mit Komma getrennt:","bmNote":"Notiz","bmNoteAsk":"Eine eigene Notiz zu diesem Lesezeichen:","bmNick":"Kurzname","bmNickAsk":"Ein kurzes Wort, das dieses Lesezeichen aus der Adressleiste \u00f6ffnet:","bmVisits":"%d mal besucht, zuletzt am %s","bmRunlet":"Auf der Seite ausf\u00fchren","bmToBrowser":"In einen anderen Browser kopieren","bmOpenAllGroup":"Alle als Gruppe \u00f6ffnen","bmSort":"Diesen Ordner sortieren","bmSortName":"Nach Name","bmSortAdded":"Nach Hinzugef\u00fcgt","bmSortUsed":"Nach zuletzt ge\u00f6ffnet","bmSortVisits":"Nach H\u00e4ufigkeit","bmColour":"Ordnerfarbe","bmColourNone":"Keine Farbe","bmSeparator":"Trennlinie einf\u00fcgen","bmLock":"Diesen Ordner sperren","bmUnlock":"Diesen Ordner entsperren","bmLocked":"Dieser Ordner ist gesperrt.","bmExportFolder":"Diesen Ordner exportieren","bmTools":"Lesezeichen-Werkzeuge","bmImport":"Lesezeichen importieren","bmExport":"Lesezeichen exportieren","bmImported":"%d Lesezeichen importiert \u2713","bmExported":"%d Lesezeichen geschrieben \u2713","bmDupes":"%d Doppelte zusammenlegen","bmDupesT":"Doppelte zusammenlegen?","bmDupesB":"%d Lesezeichen zeigen auf eine Seite, auf die schon ein anderes zeigt. Das jeweils \u00e4lteste bleibt, mit den Schlagw\u00f6rtern und Notizen der anderen.","bmDupesGone":"%d Doppelte zusammengelegt \u2713","bmUnused":"%d Lesezeichen, die du nie \u00f6ffnest","bmUnusedT":"Die nie ge\u00f6ffneten l\u00f6schen?","bmUnusedB":"%d Lesezeichen wurden nie oder seit einem Jahr nicht ge\u00f6ffnet:\n\n%s","bmBackups":"Sicherungen","bmNoBackups":"Noch keine Sicherung.","bmBackupNow":"Jetzt eine anlegen","bmBackedUp":"Geschrieben nach %s","bmRestoreT":"Diese Sicherung zur\u00fcckholen?","bmRestoreB":"Die Lesezeichen von %s ersetzen die jetzigen. Die jetzigen werden vorher gesichert.","bmRestored":"%d Lesezeichen zur\u00fcckgeholt \u2713","bmByTag":"Nach Schlagwort","bmNoMatch":"Nichts mit diesem Schlagwort.","bmMirrorNow":"Kopie jetzt schreiben","bmMirrorMerge":"Nehmen, was die Kopie hat","bmMirrored":"Kopiert nach %s","bmMerged":"%d Lesezeichen aus der Kopie \u00fcbernommen","bmCheckLinks":"Links pr\u00fcfen (geht online)","bmCheckT":"Alle Lesezeichen pr\u00fcfen?","bmCheckB":"Das fragt %d Server, ob ihre Seite noch da ist. Jeder davon erf\u00e4hrt, dass du sie noch als Lesezeichen hast. Sonst wird nichts gesendet und keine Seite geladen.","bmChecking":"Frage %d Server\u2026","bmChecked":"%d noch da, %d tot, %d umgezogen","bmMovedT":"Die umgezogenen aktualisieren?","bmMovedB":"%d Lesezeichen antworteten mit einer dauerhaften Weiterleitung:\n\n%s","bmHttps":"Alte Lesezeichen auf https umstellen (geht online)","bmHttpsT":"Bei den alten Lesezeichen https versuchen?","bmHttpsB":"%d Lesezeichen stehen noch auf http://. Das fragt jede Seite, ob sie \u00fcber https:// antwortet, und \u00e4ndert nur die, die es tun.","bmHttpsDone":"%d Lesezeichen auf https umgestellt \u2713","bmHttpsNone":"Alle Lesezeichen sind schon auf https.","bmScrollName":"Lesezeichen merken, wo du gelesen hast","bmScrollHint":"Beim erneuten \u00d6ffnen geht es zur\u00fcck an diese Stelle.","bmBackupName":"T\u00e4glich eine datierte Kopie der Lesezeichen","bmBackupHint":"Liegt neben der Lesezeichendatei; die letzten vierzehn.","bmMirrorName":"Eine Kopie der Lesezeichen ablegen in","bmMirrorHint":"Ein Ordner von dir \u2014 eine Freigabe, ein Stick, ein synchronisiertes Verzeichnis. Kein Konto und keine Cloud.",
-"privateWindowTitle":"Privates Fenster \u2014 browser","overviewFilter":"Tippen, um die Tabs einzuschr\u00e4nken\u2026","tabHidden":"eingeklappt","tabOpened":"Vor %s ge\u00f6ffnet","tabLastSeen":"Zuletzt vor %s angesehen","tabUnread":"%d ungelesen","selMenu":"%d ausgew\u00e4hlte Tabs","selClose":"Schlie\u00dfen","selMute":"Stummschalten","selReload":"Neu laden","selPin":"Anheften","selBookmark":"Als Lesezeichen","selAside":"Zur Seite legen","selGroup":"In eine Gruppe","selGroupAsk":"Name der Gruppe:","tabPopOut":"Als kleines Fenster abl\u00f6sen","tabAsApp":"Diese Seite als App \u00f6ffnen","tabPip":"Bild im Bild","tabPipOff":"In dieser Version der Engine ist Bild im Bild abgeschaltet.","tabPipNone":"Auf dieser Seite ist kein Video.","winToNew":"Tab in ein neues Fenster","winGroupToNew":"Diese Gruppe in ein neues Fenster","groupSave":"Gruppe behalten und schlie\u00dfen","winNew":"Neues Fenster","winMerge":"Alle Fenster hier sammeln","winMergePrivate":"Ein privates Fenster kann die anderen nicht sammeln \u2014 mach es aus einem normalen Fenster","winMergeApp":"Ein App-Fenster kann die anderen nicht sammeln \u2014 mach es aus einem normalen Fenster","bgTooLarge":"Das Bild ist zu gro\u00df, tut mir leid \u2014 versuch ein kleineres.","pressAgain":"Nochmal klicken zum Best\u00e4tigen","clearedMsg":"Gel\u00f6scht \u2713","uiRadiusDefault":"Standard","countdownSkipped":"Gespeichert, aber %d Zeilen wurden nicht verstanden","winMenu":"Fenster","tabsAll":"Alle Tabs","tabSetsMenu":"Gespeicherte Tab-S\u00e4tze","asideMenu":"Zur Seite gelegt","asidePut":"Diese Tabs zur Seite legen","tabsExport":"Offene Tabs exportieren","tabsImport":"Eine Liste von Adressen \u00f6ffnen","tabsExported":"%d Tabs geschrieben","setOpen":"\u00d6ffnen","setReplace":"Statt dieser Tabs \u00f6ffnen","setDelete":"Diesen Satz vergessen","setSave":"Diese Tabs als Satz speichern","setSaveAsk":"Name f\u00fcr diesen Satz Tabs:","sessionSaved":"\u201e%s\u201c gespeichert \u2014 %d Tabs","snapMenu":"Fr\u00fcher heute","closeManyT":"Dieses Fenster schlie\u00dfen?","closeManyB":"Darin sind %d Tabs offen. Die gehen alle zu.","crashBackT":"Tabs zur\u00fcckholen","crashBackB":"Der Browser wurde beim letzten Mal nicht richtig geschlossen. Diese Tabs waren offen \u2014 nimm die H\u00e4kchen weg, die du nicht brauchst.","tabWidthName":"Wie breit Tabs sind","tabWidthHint":"Schrumpfen ist das \u00dcbliche; feste Breite l\u00e4sst die Leiste scrollen.","tabWidthShrink":"Platz aufteilen","tabWidthFixed":"Alle gleich breit","tabWidthIcon":"Nur das Seitensymbol","tabMinWidthName":"Schmalste Tabbreite","tabMinWidthHint":"Darunter scrollt die Leiste, statt weiter zu schrumpfen.","closeButtonsName":"Das Schlie\u00dfkreuz zeigen","closeButtonsHint":"Welche Tabs ein Kreuz tragen \u2014 damit man es nicht versehentlich trifft.","closeButtonsWide":"Auf Tabs, die Platz daf\u00fcr haben","closeButtonsAll":"Auf jedem Tab","closeButtonsHover":"Unter der Maus und auf diesem Tab","closeButtonsActive":"Nur auf diesem Tab","hideStripName":"Tableiste bei einem Tab verbergen","hideStripHint":"Ein einzelner Tab braucht keine Leiste \u2014 wie ein App-Fenster.","stripDoubleName":"Doppelklick auf die leere Leiste","stripDoubleHint":"Neben den Tabs, wo nichts ist.","tabDoubleName":"Doppelklick auf einen Tab","tabMiddleName":"Mittelklick auf einen Tab","mouseNothing":"Nichts","mouseNewTab":"Neuer Tab","mouseClose":"Schlie\u00dfen","mousePin":"Anheften","mouseDuplicate":"Duplizieren","mouseMute":"Stummschalten","autoCollapseName":"Andere Gruppen einklappen","autoCollapseHint":"Wer in eine Gruppe wechselt, klappt die anderen zu \u2014 die Leiste bleibt kurz.","confirmCloseName":"Ab so vielen Tabs vorher fragen","confirmCloseHint":"0 = nie fragen. Ein Fenster mit zwanzig Tabs zu schlie\u00dfen ist nicht r\u00fcckg\u00e4ngig zu machen.","tabTintName":"Jeder Seite ihre eigene Tabfarbe","tabTintHint":"Ein zarter Hauch aus dem Symbol der Seite.","unreadBadgeName":"Ungelesen-Zahl auf Tabs zeigen","unreadBadgeHint":"Die Zahl, die eine Seite in ihren Titel schreibt, etwa Discords \u201e(3)\u201c.","childNextName":"Links \u00f6ffnen neben ihrem Tab","childNextHint":"Aus = am Ende der Leiste.","backClosesName":"Zur\u00fcck schlie\u00dft einen Tab aus einem Link","backClosesHint":"Bei einem Tab ohne Vorgeschichte schlie\u00dft Zur\u00fcck ihn und geht zum Tab zur\u00fcck, aus dem er kam.","closeDownloadTabsName":"Tabs schlie\u00dfen, die nur einen Download gestartet haben","closeDownloadTabsHint":"Der leere Tab, den ein Download-Link hinterl\u00e4sst, schlie\u00dft sich selbst.","staleDaysName":"Tabs schlie\u00dfen, die so lange unangesehen sind","staleDaysHint":"Tage. 0 = nie. Sie landen in der Liste der geschlossenen Tabs, nicht im Nichts.","snapshotsName":"Zwischenst\u00e4nde der offenen Tabs behalten","snapshotsHint":"Alle paar Minuten, damit ein \u00e4lterer Satz Tabs zur\u00fcckkommen kann.","sessionSitesName":"Seiten, die immer in einem virtuellen Browser \u00f6ffnen","sessionSitesHint":"Eine Zeile \u201eDomain = Browsername\u201c pro Regel.","groupRulesName":"Neue Tabs nach Adresse in Gruppen stecken","groupRulesHint":"Eine Zeile \u201eMods = modrinth.com, curseforge.com\u201c pro Regel.","crashRecoveryName":"Nach einem Absturz die letzten Tabs anbieten","crashRecoveryHint":"Eine Liste mit einem K\u00e4stchen pro Tab, statt alle oder keine.","actNewWindow":"Neues Fenster","actPrivateWindow":"Neues privates Fenster","actOverview":"Alle Tabs als Bilder","actAllTabs":"Alle Tabs auflisten","actWindowList":"Fenster auflisten","actMergeWindows":"Alle Fenster hier sammeln","actTabToWindow":"Diesen Tab in ein neues Fenster","actPopOut":"Diesen Tab abl\u00f6sen","actSiteAsApp":"Diese Seite als App \u00f6ffnen","actSaveTabSet":"Diese Tabs als Satz speichern","actSetAside":"Diese Tabs zur Seite legen","actBringBack":"Zur Seite Gelegtes zur\u00fcckholen","actExportTabs":"Offene Tabs exportieren","actImportTabs":"Eine Liste von Adressen \u00f6ffnen","appEntryWritten":"%s steht jetzt im Anwendungsmen\u00fc","appEntryFailed":"Dieser Desktop-Eintrag konnte nicht geschrieben werden."},
+"privateWindowTitle":"Privates Fenster \u2014 browser","overviewFilter":"Tippen, um die Tabs einzuschr\u00e4nken\u2026","tabHidden":"eingeklappt","tabOpened":"Vor %s ge\u00f6ffnet","tabLastSeen":"Zuletzt vor %s angesehen","tabUnread":"%d ungelesen","selMenu":"%d ausgew\u00e4hlte Tabs","selClose":"Schlie\u00dfen","selMute":"Stummschalten","selReload":"Neu laden","selPin":"Anheften","selBookmark":"Als Lesezeichen","selAside":"Zur Seite legen","selGroup":"In eine Gruppe","selGroupAsk":"Name der Gruppe:","tabPopOut":"Als kleines Fenster abl\u00f6sen","tabAsApp":"Diese Seite als App \u00f6ffnen","tabPip":"Bild im Bild","tabPipOff":"In dieser Version der Engine ist Bild im Bild abgeschaltet.","tabPipNone":"Auf dieser Seite ist kein Video.","winToNew":"Tab in ein neues Fenster","winGroupToNew":"Diese Gruppe in ein neues Fenster","groupSave":"Gruppe behalten und schlie\u00dfen","winNew":"Neues Fenster","winMerge":"Alle Fenster hier sammeln","winMergePrivate":"Ein privates Fenster kann die anderen nicht sammeln \u2014 mach es aus einem normalen Fenster","winMergeApp":"Ein App-Fenster kann die anderen nicht sammeln \u2014 mach es aus einem normalen Fenster","dlAgainNo":"Diese Datei wurde hier erstellt, nicht geladen \u2014 erstelle sie neu von ihrer Seite","groupNothingKept":"In dieser Gruppe l\u00e4sst sich nichts aufheben (private Tabs und Startseiten nicht) \u2014 sie bleibt offen","bgTooLarge":"Das Bild ist zu gro\u00df, tut mir leid \u2014 versuch ein kleineres.","pressAgain":"Nochmal klicken zum Best\u00e4tigen","clearedMsg":"Gel\u00f6scht \u2713","uiRadiusDefault":"Standard","countdownSkipped":"Gespeichert, aber %d Zeilen wurden nicht verstanden","winMenu":"Fenster","tabsAll":"Alle Tabs","tabSetsMenu":"Gespeicherte Tab-S\u00e4tze","asideMenu":"Zur Seite gelegt","asidePut":"Diese Tabs zur Seite legen","tabsExport":"Offene Tabs exportieren","tabsImport":"Eine Liste von Adressen \u00f6ffnen","tabsExported":"%d Tabs geschrieben","setOpen":"\u00d6ffnen","setReplace":"Statt dieser Tabs \u00f6ffnen","setDelete":"Diesen Satz vergessen","setSave":"Diese Tabs als Satz speichern","setSaveAsk":"Name f\u00fcr diesen Satz Tabs:","sessionSaved":"\u201e%s\u201c gespeichert \u2014 %d Tabs","snapMenu":"Fr\u00fcher heute","closeManyT":"Dieses Fenster schlie\u00dfen?","closeManyB":"Darin sind %d Tabs offen. Die gehen alle zu.","crashBackT":"Tabs zur\u00fcckholen","crashBackB":"Der Browser wurde beim letzten Mal nicht richtig geschlossen. Diese Tabs waren offen \u2014 nimm die H\u00e4kchen weg, die du nicht brauchst.","tabWidthName":"Wie breit Tabs sind","tabWidthHint":"Schrumpfen ist das \u00dcbliche; feste Breite l\u00e4sst die Leiste scrollen.","tabWidthShrink":"Platz aufteilen","tabWidthFixed":"Alle gleich breit","tabWidthIcon":"Nur das Seitensymbol","tabMinWidthName":"Schmalste Tabbreite","tabMinWidthHint":"Darunter scrollt die Leiste, statt weiter zu schrumpfen.","closeButtonsName":"Das Schlie\u00dfkreuz zeigen","closeButtonsHint":"Welche Tabs ein Kreuz tragen \u2014 damit man es nicht versehentlich trifft.","closeButtonsWide":"Auf Tabs, die Platz daf\u00fcr haben","closeButtonsAll":"Auf jedem Tab","closeButtonsHover":"Unter der Maus und auf diesem Tab","closeButtonsActive":"Nur auf diesem Tab","hideStripName":"Tableiste bei einem Tab verbergen","hideStripHint":"Ein einzelner Tab braucht keine Leiste \u2014 wie ein App-Fenster.","stripDoubleName":"Doppelklick auf die leere Leiste","stripDoubleHint":"Neben den Tabs, wo nichts ist.","tabDoubleName":"Doppelklick auf einen Tab","tabMiddleName":"Mittelklick auf einen Tab","mouseNothing":"Nichts","mouseNewTab":"Neuer Tab","mouseClose":"Schlie\u00dfen","mousePin":"Anheften","mouseDuplicate":"Duplizieren","mouseMute":"Stummschalten","autoCollapseName":"Andere Gruppen einklappen","autoCollapseHint":"Wer in eine Gruppe wechselt, klappt die anderen zu \u2014 die Leiste bleibt kurz.","confirmCloseName":"Ab so vielen Tabs vorher fragen","confirmCloseHint":"0 = nie fragen. Ein Fenster mit zwanzig Tabs zu schlie\u00dfen ist nicht r\u00fcckg\u00e4ngig zu machen.","tabTintName":"Jeder Seite ihre eigene Tabfarbe","tabTintHint":"Ein zarter Hauch aus dem Symbol der Seite.","unreadBadgeName":"Ungelesen-Zahl auf Tabs zeigen","unreadBadgeHint":"Die Zahl, die eine Seite in ihren Titel schreibt, etwa Discords \u201e(3)\u201c.","childNextName":"Links \u00f6ffnen neben ihrem Tab","childNextHint":"Aus = am Ende der Leiste.","backClosesName":"Zur\u00fcck schlie\u00dft einen Tab aus einem Link","backClosesHint":"Bei einem Tab ohne Vorgeschichte schlie\u00dft Zur\u00fcck ihn und geht zum Tab zur\u00fcck, aus dem er kam.","closeDownloadTabsName":"Tabs schlie\u00dfen, die nur einen Download gestartet haben","closeDownloadTabsHint":"Der leere Tab, den ein Download-Link hinterl\u00e4sst, schlie\u00dft sich selbst.","staleDaysName":"Tabs schlie\u00dfen, die so lange unangesehen sind","staleDaysHint":"Tage. 0 = nie. Sie landen in der Liste der geschlossenen Tabs, nicht im Nichts.","snapshotsName":"Zwischenst\u00e4nde der offenen Tabs behalten","snapshotsHint":"Alle paar Minuten, damit ein \u00e4lterer Satz Tabs zur\u00fcckkommen kann.","sessionSitesName":"Seiten, die immer in einem virtuellen Browser \u00f6ffnen","sessionSitesHint":"Eine Zeile \u201eDomain = Browsername\u201c pro Regel.","groupRulesName":"Neue Tabs nach Adresse in Gruppen stecken","groupRulesHint":"Eine Zeile \u201eMods = modrinth.com, curseforge.com\u201c pro Regel.","crashRecoveryName":"Nach einem Absturz die letzten Tabs anbieten","crashRecoveryHint":"Eine Liste mit einem K\u00e4stchen pro Tab, statt alle oder keine.","actNewWindow":"Neues Fenster","actPrivateWindow":"Neues privates Fenster","actOverview":"Alle Tabs als Bilder","actAllTabs":"Alle Tabs auflisten","actWindowList":"Fenster auflisten","actMergeWindows":"Alle Fenster hier sammeln","actTabToWindow":"Diesen Tab in ein neues Fenster","actPopOut":"Diesen Tab abl\u00f6sen","actSiteAsApp":"Diese Seite als App \u00f6ffnen","actSaveTabSet":"Diese Tabs als Satz speichern","actSetAside":"Diese Tabs zur Seite legen","actBringBack":"Zur Seite Gelegtes zur\u00fcckholen","actExportTabs":"Offene Tabs exportieren","actImportTabs":"Eine Liste von Adressen \u00f6ffnen","appEntryWritten":"%s steht jetzt im Anwendungsmen\u00fc","appEntryFailed":"Dieser Desktop-Eintrag konnte nicht geschrieben werden."},
 "fr": {"settings":"Param\u00e8tres","search":"Recherche","searchEngine":"Moteur de recherche",
 "appearance":"Apparence","whiteGoogle":"Google blanc",
 "whiteGoogleHint":"D\u00e9sactiv\u00e9 = Google noir",
@@ -8239,6 +8282,30 @@ PERF_JS = r"""(function (want) {
 
 NAV_JS = r"""(function (want) {
   if (!want) return "off";
+  /* this site's own switches (the menu's "for this site"): the script
+     is in the page before the browser knows the host, so the table
+     comes along and the page lays its own row over the global answer.
+     Sent as the global answer only, a site's choice was gone at its
+     next load or reload. */
+  try {
+    var siteRows = want.navSitesRows || {};
+    var here = String(location.hostname || "").toLowerCase()
+      .replace(/^www\./, "");
+    var mine = Object.prototype.hasOwnProperty.call(siteRows, here)
+      ? siteRows[here] : null;
+    var switches = ["autoScroll", "boxLinks", "clickableUrls",
+                    "noScrollHijack", "noKeyGrab", "stopRefresh"];
+    if (mine && typeof mine === "object") {
+      for (var s = 0; s < switches.length; s++) {
+        var sk = switches[s];
+        if (!Object.prototype.hasOwnProperty.call(mine, sk)) continue;
+        if (sk === "boxLinks") want.boxLinks = !!mine[sk] || !!want.mouseLasso;
+        else if (sk === "autoScroll")
+          want.autoScroll = !!mine[sk] || !!want.mouseAutoScroll;
+        else want[sk] = !!mine[sk];
+      }
+    }
+  } catch (e) {}
   window.__navWant = want;
   var root = document.documentElement;
   if (!root) return "noroot";
@@ -8399,6 +8466,22 @@ NAV_JS = r"""(function (want) {
       }
       return rolling ? "already" : "off";
     };
+    /* stopped by more than a second middle click: switched away from
+       (blur, hidden), Escape, or any other click -- it went on rolling
+       the page in the background, its mark left on it */
+    var stopRoll = function () {
+      if (rolling) window.__navAutoScroll(false);
+    };
+    window.addEventListener("blur", stopRoll);
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) stopRoll();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") stopRoll();
+    }, true);
+    document.addEventListener("mousedown", function (e) {
+      if (e.button !== 1) stopRoll();
+    }, true);
     document.addEventListener("mousedown", function (e) {
       var W = window.__navWant || {};
       if (!W.autoScroll || e.button !== 1) return;
@@ -8463,6 +8546,8 @@ NAV_JS = r"""(function (want) {
         if (!W[flag]) return;
         if (flag === "noKeyGrab") {
           if (window.__navTyping(e)) return;
+          if (e.type === "keydown" && window.__navKeyStep)
+            window.__navKeyStep(e);
           e.stopPropagation();
           return;
         }
@@ -8720,22 +8805,32 @@ NAV_JS = r"""(function (want) {
        window), so a slide deck, a gallery or a list that uses the arrows
        and says so (preventDefault) is left alone. Never in a field, a
        list, a player, or a box that scrolls itself. */
-    window.addEventListener("keydown", function (e) {
+    var keyStep = function (e) {
       var W = window.__navWant || {};
       if (!e.isTrusted || !W.keyStep || e.defaultPrevented) return;
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-      var tag = (e.target && e.target.tagName) || "";
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
-          || tag === "VIDEO" || tag === "AUDIO"
-          || (e.target && e.target.isContentEditable)
+      /* a field anywhere in the path (a box inside a web component's
+         shadow root, whose host is all the window sees, scrolled the
+         page instead of moving the caret), a list, a menu */
+      if (window.__navTyping(e)) return;
+      var first = (e.composedPath && e.composedPath()[0]) || e.target;
+      var tag = (first && first.tagName) || "";
+      if (tag === "VIDEO" || tag === "AUDIO"
+          || (first && first.closest && first.closest(
+            "[role=listbox],[role=menu],[role=grid],[role=tree]"))
           || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey
-          || window.__navScrollsItself(e.target)) return;
+          || window.__navScrollsItself(first)) return;
       var main = document.scrollingElement || document.documentElement;
       if (main && main.scrollHeight > main.clientHeight + 1) {
         window.scrollBy(0, (e.key === "ArrowDown" ? 1 : -1) * W.keyStep);
         e.preventDefault();
       }
-    });
+    };
+    /* and from the key grab below too: with "keep my keys" on, the
+       page's handlers are stopped at the document, and this listener on
+       the window was stopped with them -- the step did nothing */
+    window.__navKeyStep = keyStep;
+    window.addEventListener("keydown", keyStep);
 
     /* a wheel step of his own, and the sideways swipe -- but never
        over something that scrolls by itself (a chat list, a code pane,
@@ -14466,8 +14561,19 @@ class PasswordVault:
         self.provider = provider
         self.data = self.migrate(snapshot or {})
         if not provider.eager:
-            self.data["never"] = self._load_meta().get("never", [])
+            self._take_meta()
         return True
+
+    def _take_meta(self):
+        """A store written item by item keeps the never-list and the
+        access log in the meta file. Only the never-list was read back:
+        the log started empty at every start, and the first password
+        revealed wrote that one line over every earlier one."""
+        meta = self._load_meta()
+        self.data["never"] = meta.get("never", [])
+        access = meta.get("access")
+        self.data["access"] = [r for r in access if isinstance(r, dict)][:200] \
+            if isinstance(access, list) else []
 
     @classmethod
     def _empty(cls):
@@ -14542,7 +14648,7 @@ class PasswordVault:
     def _load(self):
         self.data = self.migrate(self.provider.load())
         if not self.provider.eager:
-            self.data["never"] = self._load_meta().get("never", [])
+            self._take_meta()
 
     def _load_meta(self):
         """The meta file: the never-list and the access log.
@@ -15359,7 +15465,12 @@ class PasswordVault:
         try:
             target = Path(str(path))
             target.parent.mkdir(parents=True, exist_ok=True)
-            _write_private(target, VAULT_EXPORT_MAGIC + salt + body)
+            # written beside it and moved over it: written in place, an
+            # export onto last week's copy that failed half way (a full
+            # stick, a stick pulled) left neither, and a broken backup
+            # counted as one of the copies kept, so a good one was pruned
+            if not _write_atomic(target, VAULT_EXPORT_MAGIC + salt + body):
+                return 0
         except OSError:
             return 0
         return len(rows)
@@ -17665,6 +17776,10 @@ class Bridge(QObject):
                     win.tab_strip_place(str(value))
                 except RuntimeError:
                     pass
+        elif key == "dlAtOnce":
+            # raised (or off) with downloads waiting: they start now, not
+            # one at a time as others finish
+            browser.start_next_download()
         elif key == "tabStripWidth":
             for win in browser._all_windows():
                 try:
@@ -18085,6 +18200,13 @@ class Bridge(QObject):
             return "{}"
         item_id = str(fields.pop("id", "") or "")
         vault = self.browser.vault
+        # a 2FA secret that is not one: the store blanked it and said
+        # "Saved" -- over the seed that worked, with a typo in the new
+        # one, his codes were gone. Refused, and the page says why.
+        secret = fields.get("totp")
+        if secret is not None and str(secret).strip() \
+                and parse_otpauth(str(secret)) is None:
+            return json.dumps({"ok": False, "id": item_id, "totp": "bad"})
         # the code cached (or being fetched) for the old seed must not
         # be shown or land after this: forgotten now and once written
         self._totp_forget(item_id)
@@ -25192,6 +25314,11 @@ class Browser(QMainWindow):
             if jars and self._wipe_cookies_at_start is not True:
                 self._wipe_cookies_at_start = (
                     jars | (self._wipe_cookies_at_start or frozenset()))
+            # and its cache: only cookies and history were honoured, so
+            # a killed run kept the pages a browser was set to forget
+            self._wipe_cache_at_start = frozenset(
+                ("browser" if sid == "main" else "browser-s-" + sid)
+                for sid, what in told.items() if "cache" in what)
         # the tabs the dead run had open, kept before anything restores
         # or overwrites them: this is the only record a crash leaves,
         # and crash_recovery_dialog shows it rather than guessing
@@ -27031,6 +27158,12 @@ class Browser(QMainWindow):
                     group = None   # that browser's jar, not this group's
         if group is INHERIT_GROUP:
             group = self._group_of(self.current())
+            # the tab in front is in this browser: a tab made for another
+            # one landed inside this one's group block, saved with it
+            if group is not None and session is not None \
+                    and self.group_sessions.get(
+                        group, self.active_session) != session:
+                group = None
         if session is None:
             session = (self.group_sessions.get(group)
                        if group is not None else self.active_session)
@@ -27364,6 +27497,11 @@ class Browser(QMainWindow):
             w = self.tabs.widget(i)
             if getattr(w, "private", False):
                 out.append(w)
+        # and the split view's half, out of the strip while it shows
+        half = getattr(self, "_split_view", None)
+        if half is not None and getattr(half, "private", False) \
+                and half not in out:
+            out.append(half)
         return out
 
     def _update_private_marks(self):
@@ -28101,7 +28239,10 @@ class Browser(QMainWindow):
         name = name.strip()
         if not ok or not name:
             return
-        while name in names:
+        # whatever the case: the site rules look names up without it, so
+        # "Work" and "work" were one name there and the later one won
+        folded = {n.casefold() for n in names}
+        while name.casefold() in folded:
             name += " 2"
         self.sessions.append({"name": name, "sid": uuid.uuid4().hex[:8]})
         self.switch_session(self.sessions[-1]["sid"])
@@ -28174,10 +28315,25 @@ class Browser(QMainWindow):
             new, ok = QInputDialog.getText(
                 self, "Rename browser", "Name:", text=name)
             new = new.strip()
-            if ok and new and all(e["name"] != new for e in self.sessions):
+            if ok and new and all(e["name"].casefold() != new.casefold()
+                                  or e["sid"] == sid
+                                  for e in self.sessions):
                 for entry in self.sessions:
                     if entry["sid"] == sid:
                         entry["name"] = new
+                # its site rules ("twitch.tv = Work") go by the name: a
+                # rename left every one of them pointing at nothing
+                rules = self.config.get("sessionSites")
+                if isinstance(rules, dict) and name.strip():
+                    old = name.strip().casefold()
+                    moved = False
+                    for pattern, target in list(rules.items()):
+                        if isinstance(target, str) \
+                                and target.strip().casefold() == old:
+                            rules[pattern] = new
+                            moved = True
+                    if moved:
+                        self.save_config()
                 self._sessions_changed()
 
     def _sessions_changed(self):
@@ -28637,12 +28793,20 @@ class Browser(QMainWindow):
         listed = [g for g in self.groups
                   if self.group_sessions.get(g, "main") == self.active_session]
         for g in listed:
-            action = menu.addAction(self._group_dot(g), g)
+            action = menu.addAction(self._group_dot(g), _amp(g))
             action.setData(g)
             action.triggered.connect(lambda _, g=g: self._goto_group(g))
         if listed:
             menu.addSeparator()
         menu.addAction("New group\u2026").triggered.connect(self._new_group)
+        # the groups he kept and closed ("Keep this group and close it"):
+        # nothing anywhere brought one back, they sat in config.json
+        kept = sorted(self.saved_groups())
+        if kept:
+            sub = menu.addMenu("Kept groups")
+            for name in kept:
+                sub.addAction(_amp(name)).triggered.connect(
+                    lambda _c=False, n=name: self.reopen_saved_group(n))
         menu.exec(self._menu_anchor(self._book))
         menu.deleteLater()
 
@@ -28771,6 +28935,11 @@ class Browser(QMainWindow):
         new = new.strip()
         if not new or new in self.groups or old not in self.groups:
             return
+        # the split view's half too: out of the strip, it kept the old
+        # name, and at close_split left its group (or joined a new one
+        # of the old name)
+        if self._split_in_group(old):
+            self._split_view.group = new
         for i in self._group_indices(old):
             self.tabs.widget(i).group = new
         h = self._header_index(old)
@@ -28790,6 +28959,10 @@ class Browser(QMainWindow):
         """Dissolve the group but keep its tabs, like Chrome's Ungroup."""
         if self.collapsed.get(group):
             self._toggle_collapse(group)
+        if self._split_in_group(group):
+            # the half out of the strip is a member too
+            self._split_view.group = None
+            self._sync_profile(self._split_view)
         for i in self._group_indices(group):
             member = self.tabs.widget(i)
             member.group = None
@@ -28824,7 +28997,7 @@ class Browser(QMainWindow):
             if mine:
                 sub = menu.addMenu("Add tab to group")
                 for g in mine:
-                    sub.addAction(self._group_dot(g), g).triggered.connect(
+                    sub.addAction(self._group_dot(g), _amp(g)).triggered.connect(
                         lambda _, g=g: self._move_tab_to_group(
                             self.tabs.indexOf(view), g))
         else:
@@ -29372,9 +29545,12 @@ class Browser(QMainWindow):
         url = self._tab_url(view)
         if not url:
             return None
+        # the tab first, then the switch: switched to first, a browser
+        # with no tabs yet was given a blank one beside the page
+        made = self.new_tab(url=url, session=sid, group=None)
         if sid != self.active_session:
             self.switch_session(sid)
-        return self.new_tab(url=url, session=sid)
+        return made
 
     def open_in_private(self, index):
         view = self.tabs.widget(index)
@@ -30244,9 +30420,9 @@ class Browser(QMainWindow):
                 sid = "main"
             session = sid if self._know_session(sid) else None
             group = entry.get("g")
-            if group and session is not None \
-                    and self.group_sessions.get(group) not in (None, session):
-                group = None           # that group belongs to another one
+            # a group of that name in another virtual browser: ensure_group
+            # below makes it "name 2" in this one (dropped, a merged
+            # window's "Work" of another browser arrived as loose tabs)
             if group:
                 # made in the tab's own virtual browser, or the tab and
                 # its group header disagreed about which one they were in
@@ -30489,11 +30665,29 @@ class Browser(QMainWindow):
             return 0
         if self.session_is_throwaway(self.group_sessions.get(group, "main")):
             return 0
+        if self._split_in_group(group):
+            self.close_split()     # its split half is kept with it
         state = self._kept_state(self.tab_state(
             indices={i for i, _ in self._real_tabs(group=group)}),
             asked=True)
-        self.saved_groups()[group] = {
+        if not state:
+            # nothing that can be kept (private tabs, start pages): an
+            # earlier kept group of this name was replaced by nothing
+            # and this one closed with nothing kept. Said, not silent.
+            self.flash(self._ui_str("groupNothingKept"))
+            return 0
+        saved = self.saved_groups()
+        old = saved.get(group)
+        if isinstance(old, dict) and isinstance(old.get("tabs"), list):
+            # kept again under the same name: added to, not replaced
+            have = {str(e.get("u")) for e in state if isinstance(e, dict)}
+            state = [e for e in old["tabs"] if isinstance(e, dict)
+                     and str(e.get("u")) not in have] + state
+        saved[group] = {
             "colour": self.group_colors.get(group, "#6c7086"),
+            # its virtual browser: reopened from another one it came back
+            # as an empty header there and its tabs loose
+            "session": self.group_sessions.get(group, "main"),
             "t": int(time.time()), "tabs": state}
         self.save_config(quiet=True)
         if close:
@@ -30505,9 +30699,20 @@ class Browser(QMainWindow):
         entry = self.saved_groups().get(str(name))
         if not entry:
             return []
-        group = self.ensure_group(str(name), entry.get("colour"))
-        return self.open_tab_state(
-            [dict(e, g=group) for e in entry.get("tabs", [])])
+        session = str(entry.get("session") or "")
+        if not self._know_session(session):
+            session = None        # its browser is gone: the active one
+        group = self.ensure_group(str(name), entry.get("colour"),
+                                  session=session)
+        # taken back: off the list, or a second reopen opened every tab
+        # again beside the first
+        self.saved_groups().pop(str(name), None)
+        self.save_config(quiet=True)
+        here = {self._tab_url(w) for _i, w in self._real_tabs(group=group)}
+        rows = [dict(e, g=group, s=session or e.get("s"))
+                for e in entry.get("tabs", [])
+                if isinstance(e, dict) and str(e.get("u")) not in here]
+        return self.open_tab_state(rows)
 
     def _group_name_for(self, name, session):
         """`name`, or "name 2", "name 3"... when that name is another
@@ -30575,6 +30780,9 @@ class Browser(QMainWindow):
         # the way Settings asks for ever matched
         by_name = {str(e.get("name") or "").strip().lower(): e["sid"]
                    for e in self.sessions}
+        # the most specific rule wins: "google.com = Personal" typed
+        # before "mail.google.com = Work" took the mail tab to Personal
+        best, best_len = None, -1
         for pattern, target in rules.items():
             part = str(pattern or "").lower().strip().removeprefix("www.")
             if not isinstance(target, str):
@@ -30583,9 +30791,10 @@ class Browser(QMainWindow):
                 str(target or "").strip().lower())
             if not part or sid is None:
                 continue
-            if host == part or host.endswith("." + part):
-                return sid
-        return None
+            if (host == part or host.endswith("." + part)) \
+                    and len(part) > best_len:
+                best, best_len = sid, len(part)
+        return best
 
     def export_tabs(self, path, as_html=False):
         """The open tabs as a file: one address a line, or a page of
@@ -30932,6 +31141,11 @@ class Browser(QMainWindow):
         """Every tab of a group into a window of its own -- loaded, with
         its history, in the group's own colour, and without the new
         window's start tab beside it (as a single tab's move does)."""
+        # the fold first: close_split unfolds a folded group to put the
+        # half back, and the new window got it open
+        folded = bool(self.collapsed.get(group))
+        if self._split_in_group(group):
+            self.close_split()     # its split half goes with it
         tabs = self._real_tabs(group=group)
         if not tabs:
             return None
@@ -30951,7 +31165,8 @@ class Browser(QMainWindow):
         before = set(win.groups)
         opened = win.open_tab_state([e for _v, e, _h in pairs],
                                     switch=True, lazy=False)
-        win._carry_groups(before, {group: self.group_colors.get(group)})
+        win._carry_groups(before, {group: self.group_colors.get(group)},
+                          folded={group: folded})
         for (_view, _entry, (trail, at)), moved in zip(pairs, opened):
             if len(trail) > 1:
                 win.restore_tab_history(moved, trail, at)
@@ -31678,10 +31893,13 @@ class Browser(QMainWindow):
         boost = _finite_number(entry.get("boost"))
         if speed:
             self.media_tool("rate", view=view, step=0, absolute=speed)
-        if volume is not None:
-            self.media_tool("volumeto", view=view, level=volume)
+        # the boost first: on a cross-origin player it falls back to the
+        # element's own volume (min(1, factor)) and put a site he had
+        # turned down to 0.3 back at full
         if boost and boost != 1:
             self.media_tool("boost", view=view, factor=boost)
+        if volume is not None:
+            self.media_tool("volumeto", view=view, level=volume)
 
     def pause_all_media(self):
         """One key for silence everywhere; the same key brings back
@@ -32413,6 +32631,13 @@ class Browser(QMainWindow):
         if len(self.history) != before:
             self.save_history()
             self._history_dropped(old)
+        # nor in what an earlier delete keeps for its Undo: taken back
+        # within the minute, it put the forgotten site's pages back
+        undo = getattr(self, "_history_undo", None)
+        if isinstance(undo, list):
+            self._history_undo = [
+                e for e in undo if not (isinstance(e, dict) and this_site(
+                    QUrl(e.get("url", "")).host()))]
         def this_key(key):
             origin = str(key).rpartition("|")[0] or str(key)
             return this_site(QUrl(origin).host())
@@ -36371,6 +36596,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
     def delete_group(self, group):
         """Close the group's tabs and its header."""
+        # its tab in the split view back in the strip first, so it closes
+        # with the others: it stayed open, running, and came back loose
+        if self._split_in_group(group):
+            self.close_split()
         any_private = False
         for i in reversed(self._group_indices(group)):
             w = self.tabs.widget(i)
@@ -37371,6 +37600,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self._cookies_blocked += 1
             return True
         if rule == "close":
+            # read back from a run that was killed: it never got to clear
+            # them, and the login worked the whole next run. What the jar
+            # still holds of such a site when it is read at the start
+            # goes now (see watch_cookies)
+            if getattr(store, "_close_wipe_until", 0) > time.monotonic():
+                try:
+                    store.deleteCookie(cookie)
+                    return True
+                except (AttributeError, RuntimeError):
+                    pass
             self._cookies_until_close.add(domain.lstrip("."))
         return False
 
@@ -37592,7 +37831,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         is actually on -- so the page is asked, because the page knows."""
         rows = []
         waiting = {"n": 0}
-        tabs = self._real_tabs()
+        # and the tabs popped out of the strip: a video call beside a game
+        # was invisible to the marker, its menu and the pause for calls
+        tabs = list(self._real_tabs()) + [
+            (-1, mini.view) for mini in list(getattr(self, "_popouts", []))
+            if getattr(mini, "view", None) is not None]
         if not tabs:
             if then is not None:
                 then(rows)
@@ -38562,12 +38805,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 continue
             profile = self.session_profiles.get(sid) if sid != "main" \
                 else self.profile
-            if profile is None:
-                continue
-            if "cookies" in what:
+            # no jar open this run (closed, or never used): its cookies
+            # are emptied at the next start (below), but its history
+            # was skipped as well, and a killed run forgot it
+            if profile is not None and "cookies" in what:
                 profile.cookieStore().deleteAllCookies()
                 done += 1
-            if "cache" in what:
+            if profile is not None and "cache" in what:
                 profile.clearHttpCache()
                 done += 1
             if "history" in what:
@@ -39122,6 +39366,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         QGuiApplication.clipboard().setText(clips[int(index)]["text"])
         return True
 
+    def _note_seen_at(self, drawer, nid, keep=False):
+        """The modification time of a note's file, and (unless `keep`)
+        written down as the version the panel has now: saveNote compares
+        it with the file's time at the save."""
+        try:
+            key = drawer._note_id(str(nid or ""))
+            at = (drawer.folder / (key + ".md")).stat().st_mtime_ns
+        except (OSError, ValueError, AttributeError):
+            return None
+        if not keep:
+            seen = getattr(self, "_note_seen", None)
+            if seen is None or len(seen) > 200:
+                seen = self._note_seen = {}
+            seen[key] = at
+        return at
+
     # ---- the one door the panel talks through ----
     def desk_do(self, verb, payload):
         """Everything the notes panel asks for, by verb.
@@ -39146,7 +39406,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if verb == "notes":
             return drawer.notes(str(want.get("q") or ""))
         if verb == "note":
-            return drawer.note(str(want.get("id") or ""))
+            found = drawer.note(str(want.get("id") or ""))
+            if found:
+                self._note_seen_at(drawer, found.get("id"))
+            return found
         if verb == "saveNote":
             # what the page sent is the new value, empty included; what
             # it did not send (the panel has no link box) is kept
@@ -39160,6 +39423,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         > int(want.get("edited") or 0)
                 except (TypeError, ValueError):
                     newer = False
+                # and the file's own time: an edit made outside (a synced
+                # copy, another editor) leaves "edited" in the header as
+                # it was, so only the browser's own changes were seen
+                seen = (getattr(self, "_note_seen", None) or {}).get(
+                    drawer._note_id(str(nid)))
+                if (bool(now) and seen is not None
+                        and self._note_seen_at(drawer, nid, keep=True)
+                        not in (None, seen)):
+                    newer = True
                 if newer:
                     # changed on disk since the panel opened it (a clip,
                     # quick capture, a synced edit): his version goes in
@@ -39168,13 +39440,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     title_in = ((title_in if title_in is not None
                                  else now.get("title") or "")
                                 + " (2)")
-            return drawer.save_note(
+            saved = drawer.save_note(
                 nid,
                 title_in,
                 str(want.get("body") or "") if "body" in want else None,
                 str(want.get("link") or "") if "link" in want else None,
                 [str(t).strip() for t in (want.get("tags") or [])
                  if str(t).strip()] if "tags" in want else None)
+            if saved:
+                self._note_seen_at(drawer, saved.get("id"))
+            return saved
         if verb == "deleteNote":
             return drawer.delete_note(str(want.get("id") or ""))
         if verb == "daily":
@@ -39273,6 +39548,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if verb == "pageLink":
             view = self.current()
             if view is None or self._is_header(view):
+                return None
+            # the note is saved with it: a private tab's title and address
+            # go to disk the way every other keep-this action refuses
+            if self._refuse_private(view):
                 return None
             return {"title": self._view_title(view),
                     "url": self._tab_url(view)}
@@ -39684,7 +39963,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not isinstance(rows, list):
             rows = []
             self.config["snoozed"] = rows
-        rows.append({"url": url, "title": self._view_title(view), "at": at})
+        row = {"url": url, "title": self._view_title(view), "at": at}
+        # the virtual browser it was in, and what he had made of it: it
+        # came back in whichever one was active at the time, in that
+        # one's cookie jar (logged out, or the other account)
+        sid = getattr(view, "session", "main") or "main"
+        if sid != "main":
+            row["s"] = sid
+        if getattr(view, "pinned", False):
+            row["p"] = 1
+        if getattr(view, "locked", False):
+            row["l"] = 1
+        if getattr(view, "tab_name", None):
+            row["n"] = view.tab_name
+        rows.append(row)
         self.save_config(quiet=True)
         self.close_tab(index, ask=False)
         self.flash(self._ui_str("snoozed")
@@ -39724,8 +40016,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                   if r not in opening]
         self.save_config(quiet=True)
         due = opening
-        for row in due:
-            home.new_tab(url=row["url"], switch=False, lazy=True)
+        # back in the virtual browser it was snoozed from (one closed
+        # since: main), pinned, locked and named as it was
+        home.open_tab_state(
+            [{"u": row["url"], "t": row.get("title") or "",
+              "s": row.get("s") or "main", "p": row.get("p"),
+              "l": row.get("l"), "n": row.get("n")} for row in due],
+            switch=False, lazy=True)
         home.flash(self._ui_str("snoozeBack") % len(due))
         return len(due)
 
@@ -41281,6 +41578,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             note = drawer.save_note(title=out.get("title") or url,
                                     body="%s\n\n%s" % (url, out["text"]),
                                     link=url)
+            if note is None:
+                # "Noted" over a folder that could not be written to
+                self.flash(self._ui_str("readSaveFailed"))
+                return
             self.flash(self._ui_str("noteMade"))
             if then is not None:
                 then(note)
@@ -42152,9 +42453,29 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         at = _sane_number((row or {}).get("at"))
         if not at:
             return False
-        self.media_tool2("position", view=view, arg=at)
-        self.flash(self._ui_str("mediaResumed2") % (at // 60, at % 60),
-                   ms=7000)
+
+        key = clean_url(view.url().toString())[:500]
+
+        def same_page():
+            # the tab may have gone to another video in the 3 s: its
+            # place went onto that one, said as "resumed" for it
+            try:
+                return clean_url(view.url().toString())[:500] == key
+            except RuntimeError:
+                return False
+
+        def done(answer, again=True):
+            # said when the player took it: with its length not known
+            # yet (still loading) nothing moved, and "resumed at 41:07"
+            # was said over a video playing from 0:00. Tried once more.
+            if answer == "set":
+                self.flash(self._ui_str("mediaResumed2")
+                           % (at // 60, at % 60), ms=7000)
+            elif again:
+                QTimer.singleShot(3000, lambda: same_page() and self.media_tool2(
+                    "position", view=view, arg=at,
+                    then=lambda r: done(r, again=False)))
+        self.media_tool2("position", view=view, arg=at, then=done)
         return True
 
     def media_history(self, limit=40):
@@ -42341,7 +42662,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 at = int(row.get("t") or 0)
                 label = "%d:%02d  %s" % (at // 60, at % 60,
                                          str(row.get("text") or "")[:70])
-                action = menu.addAction(self._elide(label, 80))
+                action = menu.addAction(_amp(self._elide(label, 80)))
                 action.triggered.connect(
                     lambda _c=False, t=at, v=view:
                     self.media_tool2("seek", view=v, arg=t))
@@ -42651,13 +42972,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         paused the moment it starts."""
         host = self._host_of(view.url())
         rule = self.autoplay_rule(host) if host else "default"
+        # kept on the page, not applied once: media that starts later
+        # (a player made after the load, the next video) obeys it too
         if self.site_rule_on("muteSites", host):
-            self.media_tool2("mutepage", view=view, arg=True)
+            self.media_tool("autoplayguard", view=view, rule="mute")
+            view._autoplay_guarded = True
             return "mute"
-        if rule == "mute":
-            self.media_tool2("mutepage", view=view, arg=True)
-        elif rule == "block":
-            self.media_tool2("pauseall2", view=view)
+        if rule in ("mute", "block"):
+            self.media_tool("autoplayguard", view=view, rule=rule)
+            view._autoplay_guarded = True
+        elif getattr(view, "_autoplay_guarded", False):
+            # the rule went back to the default on a page that had one
+            self.media_tool("autoplayguard", view=view, rule="default")
         return rule
 
     def duck_others(self, view=None):
@@ -45160,6 +45486,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         it in the vault — this asks for the vault’s copy to be
         released, once, by hand."""
         page_view = self.current() if view is None else view
+        # the tab filled, not whichever is in front after the CVV box:
+        # a fill into a private tab was written to the access log
+        private = self._private_of(page_view)
         if (page_view is not None and not self._is_header(page_view)
                 and not self._card_safe_url(page_view.url())):
             # what is typed into a plain-http page crosses the network
@@ -45197,7 +45526,6 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 "cardholder": self.vault.reveal(item["id"], "cardholder"),
                 "expiry": self.vault.reveal(item["id"], "expiry"),
                 "cvv": str(cvv or "")}
-        private = self._private_of(view)
 
         def done(raw):
             found = self._as_json(raw) or {}
@@ -45208,7 +45536,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self.flash(self._ui_str("cardFrame"))
             else:
                 self.flash(self._ui_str("cardFilled") % filled)
-            if not private:
+            # a fill that put nothing anywhere filled nothing
+            if not private and filled:
                 self.vault.note_access(item["id"], "card", "filled")
             if then:
                 then(filled)
@@ -45761,6 +46090,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         port = url.port(-1)
         if port == {"http": 80, "https": 443}.get(scheme):
             port = -1
+        if ":" in host and not host.startswith("["):
+            # an IPv6 address, in brackets as in an address: without
+            # them no parser found the host, and forgetting the site
+            # left its drafts and box values behind
+            host = "[%s]" % host
         return "%s://%s%s" % (scheme, host, ":%d" % port if port > 0 else "")
 
     def _draft_key(self, view):
@@ -46076,7 +46410,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # key of a page like web.archive.org/web/2020/http://x/ had
             # no host at all, and forgetting the site left it behind
             if re.match(r"[a-z][a-z0-9+.-]*://", text, re.I):
-                host = urlsplit(text).hostname or ""
+                try:
+                    host = urlsplit(text).hostname or ""
+                except ValueError:
+                    host = ""
+                net = re.split(r"[/?#]", text.split("://", 1)[1], 1)[0]
+                if not host and net.count(":") >= 2 and "[" not in net:
+                    # an IPv6 address an older version wrote without
+                    # brackets (::1:8080): the port off first
+                    for cand in (net.rsplit(":", 1)[0], net):
+                        try:
+                            host = str(ipaddress.ip_address(cand))
+                            break
+                        except ValueError:
+                            continue
             else:
                 host = text.split("/")[0].split(":")[0]
         except ValueError:
@@ -46764,8 +47111,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not ok or not passphrase:
                 return 0
         count = self.vault.export_encrypted(path, passphrase)
-        self.flash(self._ui_str("vaultExported" if count
-                                else "vaultExportFailed") % count)
+        # the failure string has no number in it: "% 0" raised there
+        self.flash(self._ui_str("vaultExported") % count if count
+                   else self._ui_str("vaultExportFailed"))
         return count
 
     def import_vault_encrypted(self, path=None, passphrase=None):
@@ -46809,8 +47157,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         head = text.lstrip()[:1]
         count = (self.vault.import_bitwarden(text) if head == "{"
                  else self.vault.import_rows(text, shape or "chrome"))
-        self.flash(self._ui_str("vaultImported" if count
-                                else "vaultImportBad") % count)
+        self.flash(self._ui_str("vaultImported") % count if count
+                   else self._ui_str("vaultImportBad"))
         return count
 
     def vault_backup_now(self, folder=None, passphrase=None, quiet=False):
@@ -47523,6 +47871,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         url = str((entry or {}).get("url") or "")
         if not url:
             return False
+        # a row the browser made itself (a page saved as PDF, an image
+        # taken from a page) carries the PAGE's address: fetched again,
+        # its HTML was written under the .pdf name. And one still
+        # running is not fetched a second time.
+        if entry.get("local") or entry.get("state") == "active":
+            self.flash(self._ui_str("dlAgainNo"))
+            return False
         view = self.current()
         # a normal tab: from a private one the file came again without
         # its cookies, kept no row and was held under a private name
@@ -47960,6 +48315,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """Let the next one through when a slot comes free."""
         queue = getattr(self, "_dl_queue", None) or []
         limit = self.download_limit()
+        first = None
+        # every free slot: returning after the first one, a limit raised
+        # with several waiting (1 -> 3, or off) released one per finish
         while queue and (limit <= 0 or self.downloads_running() < limit):
             item_id = queue.pop(0)
             entry = self.download_entry(item_id)
@@ -47971,8 +48329,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 request.resume()
             except RuntimeError:
                 continue
-            return item_id
-        return None
+            if first is None:
+                first = item_id
+        return first
 
     def reorder_queue(self, item_id, up=True):
         """Move a waiting download in the queue."""
@@ -51352,13 +51711,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self._note_cookie(cookie, jar=self._jar_name(profile))
         return True
 
-    def delete_cookie(self, name, host=None, path="/"):
+    def delete_cookie(self, name, host=None, path="/", exact=False):
+        # exact: host is the cookie's own domain, as the editor lists it
+        # (".example.com", "www.example.com"): Remove on the www row also
+        # took example.com's cookie of the same name, signing him out
+        # of the other one
+        raw = str(host or "").lower()
         host = PasswordVault.normalize_host(
             host or (self._host_of(self.current().url())
                      if self.current() is not None else ""))
         if not host:
             return False
         want = str(host).lstrip(".").lower().removeprefix("www.")
+
+        def same(domain):
+            domain = str(domain or "").lower()
+            if exact and raw:
+                return domain == raw
+            return domain.lstrip(".").removeprefix("www.") == want
         path = str(path or "/")
         wanted = str(name).encode()
         # deleteCookie only takes away a cookie it is handed whole: one
@@ -51377,9 +51747,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         for store in stores:
             live = getattr(store, "_live", None) or {}
             for key, cookie in list(live.items()):
-                domain = (cookie.domain() or "").lstrip(".").lower() \
-                    .removeprefix("www.")
-                if (bytes(cookie.name()) == wanted and domain == want
+                if (bytes(cookie.name()) == wanted and same(cookie.domain())
                         and (cookie.path() or "/") == path):
                     try:
                         store.deleteCookie(cookie)
@@ -51394,8 +51762,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 continue
             if (str(row.get("name")) == str(name)
                     and str(row.get("path") or "/") == path
-                    and str(row.get("domain") or "").lstrip(".").lower()
-                    .removeprefix("www.") == want):
+                    and same(row.get("domain"))):
                 seen.pop(key, None)
                 dropped += 1
         return bool(gone or dropped)
@@ -53020,7 +53387,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             item.addAction(ui("devRemove")).triggered.connect(
                 lambda _c=False, name=row.get("name"),
                 where=row.get("domain"), path=row.get("path", "/"):
-                self.delete_cookie(name, where, path))
+                self.delete_cookie(name, where, path, exact=True))
         menu.addSeparator()
         menu.addAction(ui("devCookieNew")).triggered.connect(
             lambda: self.ask_cookie(host))
@@ -54913,7 +55280,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
         words = [w for w in low.split() if w]
         if want["bookmarks"] and scope in ("", "bookmarks"):
-            for entry in self.bookmarks:
+            # what this browser sees: one marked for another browser was
+            # offered here (its bar hid it)
+            for entry in self.session_bookmarks():
                 if entry.get("type") != "link":
                     continue
                 if not entry.get("url"):
@@ -55876,7 +56245,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             row["title"] = entry["title"]
             self.save_history()
             return
-        if self.history and self.history[-1]["url"] == entry["url"]:
+        # (in the same virtual browser only: a main tab on the page a
+        # virtual browser had just read took that row out of its history)
+        if self.history and self.history[-1]["url"] == entry["url"] \
+                and self.history[-1].get("s") == entry.get("s"):
             self.history[-1] = entry  # same page: refresh title/time only
         else:
             self.history.append(entry)
@@ -55983,6 +56355,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         if not any(gone(e) for gone in drops)]
             held = list(self.history)
             self.history[:] = rows + [e for e in held if e not in rows]
+            if not self.history_encrypted():
+                # it was sealed on disk though the setting said plain
+                # text (see save_history): it stays sealed, rather than
+                # being written out in the clear the moment it opened
+                self.config["historyEncrypted"] = True
+                self.save_config(quiet=True)
         self._history_unsaved = False
         self.save_history()
         return len(self.history)
@@ -56015,6 +56393,24 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                               HISTORY_MAGIC + _seal(key, body,
                                                     aad=HISTORY_MAGIC))
             else:
+                if getattr(self, "_history_locked", False):
+                    # The file on disk is sealed though the setting says
+                    # plain text: config.json reset or carried over, the
+                    # history restored out of a backup. The file says
+                    # what it is (_read_history). This wrote the few rows
+                    # in memory over it in the clear, and every older
+                    # page was gone. With a master password that may
+                    # still open it, the rows wait for it in memory
+                    # (unlock_history) ...
+                    lock = getattr(self, "vault_lock", None)
+                    if self.history_key() is None and lock is not None \
+                            and lock.enabled():
+                        self._history_unsaved = True
+                        return
+                    # ... and with none, or a key that does not open
+                    # it, it is set aside, never written over
+                    self._set_aside_history()
+                    self._history_locked = False
                 _write_json(HISTORY_FILE, self.history)
         except OSError:
             pass
@@ -56130,6 +56526,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                             QEvent.Type.MouseButtonPress,
                             QEvent.Type.Wheel):
             self._last_touch = _awake_clock()
+            # and the housekeeping's clock: only a key no widget took
+            # reached it, so a window he clicked, scrolled and typed into
+            # pages of was "idle" and its cache was cleared under him
+            if time.time() - float(getattr(self, "_last_input", 0) or 0) \
+                    >= 1:
+                self.note_activity()
         # the star rides along inside the address bar, and so does
         # the account chooser's handle at the other end
         if (obj is getattr(self, "urlbar", None)
@@ -56678,6 +57080,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # "clear cookies when the browser closes" was on last time;
             # every jar it named starts empty, late ones included
             profile.cookieStore().deleteAllCookies()
+            profile.clearHttpCache()
+        elif self._jar_name(profile) in (
+                getattr(self, "_wipe_cache_at_start", None) or ()):
             profile.clearHttpCache()
         return profile
 
@@ -58498,6 +58903,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # blocked site's old cookies were never seen to be blocked
         if any(rule in ("close", "block")
                for rule in self.cookie_rules().values()):
+            # after a crash, the "until close" cookies read back from the
+            # dead run are deleted as they arrive (a jar reads its old
+            # cookies in the first moments after it is made)
+            # (a jar on disk only: a private one holds nothing of the
+            # dead run, and its fresh login was deleted)
+            store._close_wipe_until = (
+                time.monotonic() + 20
+                if getattr(self, "_was_crash", False)
+                and getattr(store, "_jar", "") != "private" else 0)
             try:
                 store.loadAllCookies()
             except (AttributeError, RuntimeError):
@@ -63123,30 +63537,74 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # unfolded, or a SUMMARY stopped at the fold
         text = re.sub(r"\r?\n[ \t]", "", text)
         rows = []
-        for block in re.findall(r"BEGIN:VEVENT(.*?)END:VEVENT", text, re.S):
-            start = re.search(r"DTSTART[^:]*:(\d{8})(?:T(\d{6})(Z)?)?", block)
-            end = re.search(r"DTEND[^:]*:(\d{8})", block)
-            name = re.search(r"SUMMARY[^:]*:(.*)", block)
-            if not start:
-                continue
-            day, at = start.group(1), start.group(2) or ""
-            if at and start.group(3):
+        def moment(m):
+            """(day, time) of a DTSTART/DTEND match, UTC into his clock."""
+            day, at = m.group(1), m.group(2) or ""
+            if at and m.group(3):
                 # a UTC time ("Z", what Google writes): into his own day
                 # and clock -- read as local, an event at 23:00Z was
                 # listed today at 23:00 for someone at UTC+2
-                try:
-                    moment = calendar.timegm(time.strptime(day + at,
-                                                           "%Y%m%d%H%M%S"))
-                except ValueError:
-                    continue
-                here = time.localtime(moment)
+                here = time.localtime(calendar.timegm(
+                    time.strptime(day + at, "%Y%m%d%H%M%S")))
                 day = time.strftime("%Y%m%d", here)
                 at = time.strftime("%H%M%S", here)
-            if at:
-                if day != want:
-                    continue
-            elif not (day == want or (end and day <= want < end.group(1))):
-                continue         # an all-day span covers every day in it
+            return day, at
+
+        for block in re.findall(r"BEGIN:VEVENT(.*?)END:VEVENT", text, re.S):
+            start = re.search(r"DTSTART[^:]*:(\d{8})(?:T(\d{6})(Z)?)?", block)
+            end = re.search(r"DTEND[^:]*:(\d{8})(?:T(\d{6})(Z)?)?", block)
+            name = re.search(r"SUMMARY[^:]*:(.*)", block)
+            if not start:
+                continue
+            # a cancelled event is not on today's list
+            if re.search(r"^STATUS[^:\n]*:\s*CANCELLED", block, re.M | re.I):
+                continue
+            def when(d, t):
+                # "240000" (some exporters' midnight at the end of a day)
+                # is the next day's 00:00; strptime refused it, and the
+                # event, listed before, was dropped
+                if t[:2] == "24":
+                    return (datetime.datetime.strptime(d, "%Y%m%d")
+                            + datetime.timedelta(days=1))
+                return datetime.datetime.strptime(d + (t or "000000"),
+                                                  "%Y%m%d%H%M%S")
+            try:
+                day, at = moment(start)
+            except (ValueError, OverflowError):
+                continue
+            try:
+                first = when(day, at)
+            except (ValueError, OverflowError):
+                # a local time no calendar can mean (23:60): listed on its
+                # own day with what it says, as before this was parsed
+                first = None
+            last = None                # when it ends (all-day: exclusive)
+            try:
+                if first is not None and end:
+                    eday, eat = moment(end)
+                    last = when(eday, eat)
+                elif first is not None:
+                    span = re.search(
+                        r"^DURATION[^:\n]*:\+?P(?:(\d+)W)?(?:(\d+)D)?"
+                        r"(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?",
+                        block, re.M | re.I)
+                    if span:
+                        w, d, h, mi, s = (int(g or 0) for g in span.groups())
+                        last = first + datetime.timedelta(
+                            weeks=w, days=d, hours=h, minutes=mi, seconds=s)
+            except (ValueError, OverflowError):
+                last = None            # an end it cannot read: its own day
+            # the last day it covers: the end is exclusive (an event that
+            # ends at midnight is not on that day), for a timed event
+            # as for an all-day one
+            until = day
+            if last is not None and first is not None and last > first:
+                until = (last - datetime.timedelta(seconds=1)
+                         ).strftime("%Y%m%d")
+            if not (day <= want <= max(day, until)):
+                continue
+            if at and day != want:
+                at = ""          # a later day of a long event: no start time
             said = (name.group(1) if name else "")
             said = said.replace("\\,", ",").replace("\\;", ";") \
                 .replace("\\n", " ").replace("\\N", " ")
@@ -64280,6 +64738,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if Path(str(path) + "-wal").is_file():
                 _shutil.copyfile(str(path) + "-wal", str(sidecars[0]))
         except OSError:
+            # the main file copied and its log not (Firefox folded it in
+            # meanwhile, the disk filled): the copy of the other
+            # browser's whole history stayed in the config folder
+            for one in [copy] + sidecars:
+                try:
+                    one.unlink()
+                except OSError:
+                    pass
             return False
         if which == "firefox":
             # a place never visited (only bookmarked or typed) has no
@@ -64914,6 +65380,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if want:
             # every window's tabs, not only the calling window's
             self.watch_all_views()
+        else:
+            # switched off mid-drag: the line stayed over the page
+            self.gesture_trail([], self.current())
         return want
 
     def gesture_trail(self, points, view=None):
@@ -67141,6 +67610,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 pos = max([top] + self._group_indices(here)) + 1
         at = self.tabs.insertTab(pos, view, title or "Tab")
         self._add_close_button(at, view)
+        # its icon, and a private tab's mark and tint: back without them,
+        # the strip no longer said it was private
+        if getattr(view, "private", False):
+            self.tabs.setTabIcon(at, self._private_icon())
+            self.tabs.setTabToolTip(at, self._ui_str("privateTip"))
+            self.tabs.tabBar().setTabTextColor(
+                at, QColor(str(self.config.get("privateTint") or "#cba6f7")))
+        else:
+            try:
+                self.tabs.setTabIcon(at, self.mono_icon(view.icon()))
+            except RuntimeError:
+                pass
         holder.hide()
         self._split_view = None
         self.split_scroll_sync(False)
@@ -67168,6 +67649,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         if not self.split_showing():
             return False
+        # the last position seen, forgotten: a page already at it never
+        # moved the other half when sync came back on
+        self._sync_at = -1
         if timer is None:
             timer = self._sync_timer = QTimer(self)
             timer.timeout.connect(self._sync_tick)
@@ -67583,11 +68067,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not host:
             return False
         rows = self.keep_awake_sites()
-        want = (host not in rows) if on is None else bool(on)
+
+        def holds(one):
+            return host == one or host.endswith("." + one)
+        # the menu's tick says whether ANY rule holds the site (example.com
+        # holds sub.example.com): unticking it added the subdomain and
+        # the tab stayed awake, ticked, with no way off but Settings
+        want = (not any(holds(one) for one in rows)) if on is None \
+            else bool(on)
         if want and host not in rows:
             rows.append(host)
-        elif not want and host in rows:
-            rows.remove(host)
+        elif not want:
+            rows[:] = [one for one in rows if not holds(one)]
         self.config["keepAwake"] = sorted(set(rows))
         self.save_config(quiet=True)
         return want
@@ -67982,7 +68473,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 self._psi_timer = None
             return False
         if not self.pressure_available():
-            self.flash(self._ui_str("pressureNoPsi"))
+            # said when he switched the pressure watch on: setting a
+            # budget (or every new window, with one set) said "set a
+            # budget instead" to the man who just had
+            if self.config.get("pressureWatch", False):
+                self.flash(self._ui_str("pressureNoPsi"))
             if not _sane_number(self.config.get("memoryBudget") or 0):
                 return False      # nothing left for the tick to do
         if timer is None:
@@ -68225,6 +68720,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     one for one in value if isinstance(one, str))
         return out
 
+    def _nav_site_rows(self):
+        """navSites as the page script reads it: keyed by the host the
+        page sees (xn--, no www.), the getting-around switches only."""
+        rows = self.config.get("navSites")
+        out = {}
+        for key, value in (rows.items() if isinstance(rows, dict) else ()):
+            host = _ace_host(key)
+            if host and isinstance(value, dict):
+                out[host] = {k: bool(v) for k, v in value.items()
+                             if k in self.NAV_SWITCHES}
+        return out
+
     def nav_payload(self, host=""):
         palette = theme_palette()
         out = dict(self.nav_config(host))
@@ -68255,6 +68762,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     # so the page matches its own host (see
                     # __navKeysThrough)
                     "keysThroughRows": self._site_list_rows("keysThrough"),
+                    # the per-site switches, for the page to pick its own
+                    # (see the top of NAV_JS), and the mouse halves of
+                    # the two switches the mouse settings also turn on
+                    "navSitesRows": self._nav_site_rows(),
+                    "mouseLasso": bool(mouse.get("lasso")),
+                    "mouseAutoScroll": bool(mouse.get("autoScroll")),
                     "keysThrough": (self.site_keys_through(host)
                                     if host else []),
                     "guarded": self.key_guard_list(),
@@ -73462,6 +73975,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         entry["size"] = (request.totalBytes() or entry["received"]
                          if entry["state"] == "done" else entry["received"])
         entry["paused"] = False
+        # cancelled (or failed) while waiting -- from its bar, not the
+        # page: it stayed marked waiting, on the queue menu and on disk
+        entry.pop("queued", None)
+        queue = getattr(self, "_dl_queue", None)
+        if isinstance(queue, list) and entry["id"] in queue:
+            queue.remove(entry["id"])
         self.dl_active.pop(entry["id"], None)
         self.save_downloads()
         self._push_all("downloadsChanged")
@@ -73593,35 +74112,50 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         session is a virtual browser's id. noise=False drops the login
         bounces and link wrappers (see NOISE_HOSTS), which is what the
         page wants by default."""
-        words = [w for w in str(query or "").lower().split() if w]
-        host = str(host or "").lower().removeprefix("www.")
+        match = self._history_match(query, since, until, host, session,
+                                    noise)
         out = []
         # by the clock, not by the order the file is in: a hand-edited
         # or merged history is not promised to be in order, and a page
         # of rows in the wrong order is worse than a slow sort
         for entry in sorted(self.visible_history(),
                             key=lambda e: -e.get("t", 0)):
-            when = entry.get("t", 0)
-            if since is not None and when < since:
+            if not match(entry):
                 continue
-            if until is not None and when > until:
-                continue
-            url = entry.get("url", "")
-            if not noise and _is_noise(url):
-                continue
-            where = _hist_host(url)
-            if host and not (where == host or where.endswith("." + host)):
-                continue
-            if session and entry.get("s", "main") != session:
-                continue
-            if words:
-                hay = (entry.get("title", "") + " " + url).lower()
-                if any(word not in hay for word in words):
-                    continue
             out.append(entry)
             if len(out) >= limit:
                 break
         return out
+
+    @staticmethod
+    def _history_match(query="", since=None, until=None, host="",
+                       session="", noise=False):
+        """The test history_rows puts one row to, on its own: the
+        delete of what the page shows applies it to the sealed rows
+        too (see delete_history_matching)."""
+        words = [w for w in str(query or "").lower().split() if w]
+        host = str(host or "").lower().removeprefix("www.")
+
+        def match(entry):
+            when = entry.get("t", 0)
+            if since is not None and when < since:
+                return False
+            if until is not None and when > until:
+                return False
+            url = entry.get("url", "")
+            if not noise and _is_noise(url):
+                return False
+            where = _hist_host(url)
+            if host and not (where == host or where.endswith("." + host)):
+                return False
+            if session and entry.get("s", "main") != session:
+                return False
+            if words:
+                hay = (str(entry.get("title", "")) + " " + url).lower()
+                if any(word not in hay for word in words):
+                    return False
+            return True
+        return match
 
     def history_days(self, limit=60):
         """The history as days, newest first: the timeline the history
@@ -73668,6 +74202,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         doomed = {id(e) for e in self.history_rows(
             query=query, since=since, until=until, host=host,
             session=session, noise=noise, limit=10 ** 9)}
+        # the sealed rows not read yet (the vault shut since the start)
+        # by the same rule, when it opens: "Delete range" on the page
+        # comes here, and every page of that range came back on unlock
+        self._drop_from_sealed(self._history_match(
+            query, since, until, host, session, noise))
         if not doomed:
             return 0
         old = list(self.history)
@@ -73844,6 +74383,23 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self._note_history_undo(old)    # the same list, see above
             self.save_history()
             self._history_dropped(old)
+        # and its place in the address bar's memory (hosts.json): left
+        # there, the bar went on completing the site he had just had
+        # forgotten, and offering it as "did you mean"
+        def a_host(name):
+            name = str(name or "").lower().removeprefix("www.")
+            return name == host or name.endswith("." + host)
+        if any(a_host(h) for h in self.known_hosts):
+            kept_hosts = {h for h in self.known_hosts if not a_host(h)}
+            for win in [self] + [w for w in self.windows() if w is not self]:
+                try:
+                    win.known_hosts = set(kept_hosts)
+                except RuntimeError:
+                    pass
+            try:
+                _write_json(HOSTS_FILE, sorted(kept_hosts))
+            except OSError:
+                pass
         return gone
 
     def clear_history(self, undoable=True):
@@ -73854,8 +74410,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         gone = len(self.history)
         self.history = []
         self.save_history()
+        # a sealed file not read yet goes whole as well when the setting
+        # says plain (config reset, file restored): save_history holds
+        # rather than write over it, and every cleared page came back
+        # the moment the vault opened
         self._wipe_history_store(
-            self.history_encrypted() and self.history_key() is None)
+            (self.history_encrypted()
+             or getattr(self, "_history_locked", False))
+            and self.history_key() is None)
         self._forget_history_extras(None)
         return gone
 
@@ -74165,7 +74727,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         word = str(text or "").strip().lower()
         if not word:
             return ""
-        for entry in self.bookmarks:
+        for entry in self.session_bookmarks():
             if entry.get("nick") and entry["nick"] == word:
                 return entry.get("url", "")
         return ""
@@ -74578,9 +75140,25 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         ids = (self._bookmark_subtree(bid) if entry.get("type") == "folder"
                else {bid})
         rows = [e for e in self.bookmarks if e["id"] in ids]
+
+        def seen_by(parent):
+            # the nearest folder up the tree that the target browser
+            # shows: a copy kept a parent marked for another browser,
+            # which hid it from the bar for good
+            hops = 0
+            while parent and hops < 64:
+                above = self._bookmark_by_id(parent)
+                if above is None:
+                    return 0
+                if not above.get("sid") or above.get("sid") == sid:
+                    return parent
+                parent, hops = above.get("parent", 0), hops + 1
+            return 0
         if move:
             for row in rows:
                 row["sid"] = sid
+                if row["parent"] not in ids:
+                    row["parent"] = seen_by(row["parent"])
             self.save_bookmarks()
             return len(rows)
         if len(self.bookmarks) + len(rows) > BOOKMARKS_MAX:
@@ -74594,6 +75172,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         for row in made:
             if row["parent"] in remap:
                 row["parent"] = remap[row["parent"]]
+            else:
+                row["parent"] = seen_by(row["parent"])
         self.bookmarks.extend(made)
         self.save_bookmarks()
         return len(made)
@@ -74956,15 +75536,31 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not folder:
             return ""
         target = Path(str(folder)).expanduser() / "bookmarks.json"
+
+        def replace_whole(path, text):
+            # written beside it and moved over it in one step: written in
+            # place, a share that dropped or a stick pulled mid-write left
+            # the only copy cut short, and the other machine's merge
+            # skipped it. The folder's own permissions are kept (the
+            # other machine on the share has to read it).
+            tmp = path.with_name(path.name + ".new")
+            try:
+                tmp.write_text(text, encoding="utf-8")
+                os.replace(str(tmp), str(path))
+            except OSError:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             text = json.dumps(self.bookmarks, indent=1)
-            target.write_text(text, encoding="utf-8")
+            replace_whole(target, text)
             # and a file of this machine's own beside it: with two machines
             # on one folder each save replaced bookmarks.json, and what the
             # other one had added was gone before "merge" could take it
-            (target.parent / self._mirror_own_name()).write_text(
-                text, encoding="utf-8")
+            replace_whole(target.parent / self._mirror_own_name(), text)
         except OSError:
             return ""
         return str(target)
@@ -77189,9 +77785,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # in: his rule for that site, or the question, or the one
             # in front as before
             session = self.outside_link_session(url)
-            self.new_tab(url=url, switch=not background,
-                         session=session if session != self.active_session
-                         else None)
+            other = session if session != self.active_session else None
+            self.new_tab(url=url, switch=not background, session=other,
+                         group=None if other else INHERIT_GROUP)
+            # shown in front means that browser in front: the tab was
+            # current while the bar and the strip stayed on the old one
+            if other and not background:
+                self.switch_session(other)
         if background:
             return  # asked to stay out of the way: no raise
         self.showNormal()
@@ -77529,6 +78129,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # running hidden -- a video still playing in a window that
             # was closed -- and a private one kept the jar alive for
             # the next private tab.
+            # The last ordinary window going while a private or an app
+            # window stays: it writes the session once more, with its
+            # tabs still whole, as the last window of all does. Its timer
+            # stopped below with nobody to take it over, and up to 30 s
+            # of tab changes never reached the file.
+            ordinary_left = [w for w in WINDOWS
+                             if not getattr(w, "_all_private", False)
+                             and not getattr(w, "_app_url", None)]
+            writing = getattr(self, "_session_timer", None)
+            if not ordinary_left and writing is not None \
+                    and writing.isActive():
+                try:
+                    self._save_groups(quiet=True)
+                except RuntimeError:
+                    pass
             self._close_floaters()
             self._close_all_views()
             heir = WINDOWS[-1]
@@ -77986,6 +78601,9 @@ class MouseWatch(QObject):
             if self.right_down and not held & buttons.RightButton:
                 self.right_down = False
                 self.path = []
+                # and its line over the page: the release went to a menu
+                # or a drag, and the trail stayed until the next gesture
+                browser.gesture_trail([], view)
         if kind == QEvent.Type.MouseButtonPress:
             button = event.button()
             if button == buttons.RightButton:
@@ -81054,7 +81672,8 @@ FORM_TOOLS = {
                        "karteninhaber"]],
     [card.expiry, ["cc-exp", "expiry", "expiration", "gueltig",
                    "gültig", "mm/yy"]],
-    [card.cvv, ["cc-csc", "cvc", "cvv", "security-code", "prüfnummer"]],
+    [card.cvv, ["cc-csc", "cvc", "cvv", "security-code", "security code",
+                "securitycode", "sicherheitscode", "prüfnummer"]],
   ];
   var taken = [];
   /* A form with the month and the year in boxes of their own (inputs or
@@ -81123,6 +81742,13 @@ FORM_TOOLS = {
       var el = all[i];
       if (taken.indexOf(el) >= 0 || !visible(el)) continue;
       if (!wants(el, pairs[pair][1])) continue;
+      /* "creditCardExpiry", "creditcard_cvv", "Credit card holder" all
+         say creditcard: the number went into the expiry or the CVV */
+      if (pair === 0 && /exp|cvv|cvc|csc|secur|sicher|holder|inhaber|cc-name|name-on-card|nameoncard|ablauf|gültig|gueltig|month|monat|year|jahr/.test(
+          ((el.getAttribute("autocomplete") || "") + " " + (el.name || "")
+           + " " + (el.id || "")).toLowerCase())) continue;
+      /* (the box's own names only: its label text "Visa, Mastercard,
+         American Express" or "Secure card number" said exp / secur) */
       setVal(el, pairs[pair][0]);
       taken.push(el);
       done++;
@@ -81422,6 +82048,20 @@ FORM_TOOLS = {
   var all = fields(document);
   var out = [];
   var counts = {};
+  var seen = {};
+  /* what the box holds before anyone touches it: a fresh copy made from
+     its attributes (defaultValue is "" for a slider or a colour with no
+     value attribute, while the box itself says 50 or #000000) */
+  var asLoaded = function (el) {
+    var fresh = document.createElement(el.tagName);
+    for (var a = 0; a < el.attributes.length; a++) {
+      try {
+        fresh.setAttribute(el.attributes[a].name, el.attributes[a].value);
+      } catch (e) {}
+    }
+    if (el.tagName === "TEXTAREA") fresh.textContent = el.defaultValue;
+    return fresh.value;
+  };
   for (var i = 0; i < all.length; i++) {
     var el = all[i];
     if (el.type === "password" || el.type === "file") continue;
@@ -81431,14 +82071,50 @@ FORM_TOOLS = {
        or the draft goes back into the wrong box */
     var tag = el.tagName.toLowerCase();
     counts[tag] = (counts[tag] || 0) + 1;
+    /* two boxes of one name (a comment box in two forms, q[]): the
+       second is "~2", or both drafts went back into the last one */
+    var key = el.id ? "#" + el.id
+                    : (el.name ? tag + "[name=" + el.name + "]"
+                               : tag + ":" + counts[tag]);
+    seen[key] = (seen[key] || 0) + 1;
+    if (seen[key] > 1) key += "~" + seen[key];
     if (el.type === "checkbox" || el.type === "radio") continue;
+    if (/^(submit|button|reset|image)$/.test(el.type)) continue;
     if (secretField(el)) continue;
     var value = el.value;
     if (!value || String(value).length > 20000) continue;
-    out.push({key: el.id ? "#" + el.id
-                         : (el.name ? tag + "[name=" + el.name + "]"
-                                    : tag + ":" + counts[tag]),
-              value: String(value)});
+    /* only what he changed: a slider's 50, a colour's #000000, a
+       button's label and a list's first choice made a "draft" of
+       every page, and sixty of those pushed his real one out */
+    if (tag === "select") {
+      var moved = false;
+      if (el.multiple) {
+        for (var o = 0; o < el.options.length; o++) {
+          if (el.options[o].selected !== el.options[o].defaultSelected) {
+            moved = true; break;
+          }
+        }
+      } else {
+        /* what the page itself selects: the last option marked
+           selected, else the first one that can be chosen (a disabled
+           "Choose..." first is passed over, and was counted as moved) */
+        var first = -1, open = -1;
+        for (var p = 0; p < el.options.length; p++) {
+          var op = el.options[p];
+          if (op.defaultSelected) first = p;
+          var group = op.parentNode;
+          if (open < 0 && !op.disabled
+              && !(group && group.tagName === "OPTGROUP" && group.disabled))
+            open = p;
+        }
+        if (first < 0) first = open;
+        moved = el.selectedIndex !== first;
+      }
+      if (!moved) continue;
+    } else if (value === asLoaded(el)) {
+      continue;
+    }
+    out.push({key: key, value: String(value)});
   }
   return JSON.stringify(out);
 })()""" + FORM_END,
@@ -81449,14 +82125,19 @@ FORM_TOOLS = {
   var counts = {};
   var all = fields(document);
   var byKey = {};
+  var seen = {};
   for (var i = 0; i < all.length; i++) {
     var el = all[i];
     if (el.type === "password" || el.type === "file") continue;
     var tag = el.tagName.toLowerCase();
     counts[tag] = (counts[tag] || 0) + 1;
-    byKey[el.id ? "#" + el.id
-                : (el.name ? tag + "[name=" + el.name + "]"
-                           : tag + ":" + counts[tag])] = el;
+    /* the same names as formvalues gives: a repeated one is "~2" */
+    var key = el.id ? "#" + el.id
+                    : (el.name ? tag + "[name=" + el.name + "]"
+                               : tag + ":" + counts[tag]);
+    seen[key] = (seen[key] || 0) + 1;
+    if (seen[key] > 1) key += "~" + seen[key];
+    byKey[key] = el;
   }
   var done = 0;
   for (var r = 0; r < rows.length; r++) {
@@ -81916,12 +82597,30 @@ MEDIA_TOOLS2 = {
   var cues = track.cues;
   if (!cues || !cues.length) return "[]";
   var out = [];
+  /* the cue text is the raw WebVTT payload: "Q&amp;A" came out with
+     its &amp; in the menu, the copy and the .srt. Decoded by hand --
+     innerHTML throws on a Trusted Types page (YouTube) */
+  var named = {amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+               nbsp: "\u00a0", lrm: "\u200e", rlm: "\u200f"};
+  var plain = function (s) {
+    return s.replace(/<[^>]*>/g, "").replace(
+      /&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, function (all, code) {
+        if (code[0] === "#") {
+          var n = code[1] === "x" || code[1] === "X"
+            ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+          return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : all;
+        }
+        var k = code.toLowerCase();
+        return Object.prototype.hasOwnProperty.call(named, k)
+          ? named[k] : all;
+      });
+  };
   for (var c = 0; c < cues.length && c < 4000; c++) {
     /* to the millisecond: rounded to whole seconds, a saved .srt was
        up to half a second off and a short cue came out zero long */
     out.push({t: Math.round(cues[c].startTime * 1000) / 1000,
               e: Math.round(cues[c].endTime * 1000) / 1000,
-              text: String(cues[c].text || "").replace(/<[^>]*>/g, "")});
+              text: plain(String(cues[c].text || ""))});
   }
   return JSON.stringify(out);
 })()""",
@@ -82259,6 +82958,7 @@ MEDIA_TOOLS2 = {
                               all[i].pause(); }
       } else if (all[i].dataset.wasPlaying) {
         delete all[i].dataset.wasPlaying;
+        all[i].dataset.browserPlay = String(Date.now());  /* autoplayguard */
         all[i].play().catch(function () {});
       }
     }

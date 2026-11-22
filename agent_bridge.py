@@ -271,8 +271,10 @@ _TYPE_JS = """
 
 _SCROLL_JS = """
 (function(y){
-  if (y === "bottom") window.scrollTo(0, document.documentElement.scrollHeight);
-  else window.scrollTo(0, y);
+  // instant: on a page with scroll-behavior:smooth the answer was the
+  // old place, and the next shot caught the page half way
+  var top = y === "bottom" ? document.documentElement.scrollHeight : y;
+  window.scrollTo({top: top, left: 0, behavior: "instant"});
   return window.scrollY;
 })(%s)"""
 
@@ -296,10 +298,19 @@ _MARKDOWN_JS = """
   catch (e) { return "\u0001bad-selector"; }
   if (!root) return null;
   // the readable part of the page, not its furniture
-  var drop = "nav, header, footer, aside, script, style, noscript, form,"
+  var drop = "nav, footer, aside, script, style, noscript,"
     + " [aria-hidden=true], .nav, .menu, .sidebar, .cookie, .consent";
   var clone = root.cloneNode(true);
   clone.querySelectorAll(drop).forEach(function (el) { el.remove(); });
+  // a header and a form only when they are furniture: a whole page
+  // inside <form id=aspnetForm> came back empty, and an article's h1
+  // sat in its <header>
+  clone.querySelectorAll("header, form").forEach(function (el) {
+    var keep = el.tagName === "HEADER"
+      ? !!el.querySelector("h1, h2")
+      : (el.textContent || "").replace(/\\s+/g, " ").trim().length > 400;
+    if (!keep) el.remove();
+  });
   var out = [];
   function walk(node) {
     if (node.nodeType === 3) {
@@ -316,6 +327,13 @@ _MARKDOWN_JS = """
     }
     if (tag === "img") {
       if (node.alt) out.push("![" + node.alt + "](" + node.src + ")");
+      return;
+    }
+    if (tag === "pre") {
+      // its lines as they are: a listing came back as one run-on line
+      var code = node.textContent || "";
+      if (code.trim()) out.push("\\n\\n```\\n" + code.replace(/\\n+$/, "")
+                                + "\\n```\\n\\n");
       return;
     }
     if (/^h[1-6]$/.test(tag)) out.push("\\n\\n" + "#".repeat(+tag[1]) + " ");
@@ -454,9 +472,13 @@ _TABLES_JS = """
   document.querySelectorAll("table").forEach(function (t, n) {
     if (which !== null && n !== which) return;
     var rows = [];
-    t.querySelectorAll("tr").forEach(function (tr) {
+    // its own rows and cells: a layout table carried every nested
+    // table's rows as well, and those came again as tables of their own
+    t.querySelectorAll(":scope > tr, :scope > thead > tr,"
+                       + " :scope > tbody > tr, :scope > tfoot > tr")
+        .forEach(function (tr) {
       var cells = [];
-      tr.querySelectorAll("th, td").forEach(function (c) {
+      tr.querySelectorAll(":scope > th, :scope > td").forEach(function (c) {
         cells.push((c.textContent || "").replace(/\\s+/g, " ").trim());
       });
       if (cells.length) rows.push(cells);
@@ -885,6 +907,10 @@ class AgentBridge:
             # url and tab_url both empty these skipped the list entirely
             if op == "search":
                 return False, "site-not-allowed"
+            if op == "restart":
+                # every other site's tabs (and the private ones) went
+                # down with it, for a client allowed one site
+                return False, "site-not-allowed"
             if op == "cookies" and not host:
                 # no host means every cookie seen this run, every site's
                 return False, "site-not-allowed"
@@ -1168,10 +1194,15 @@ class AgentBridge:
         v = self._need_view(conn, req)
         if v is None:
             return
+        # "truncated": the cap cut it (an unclosed document read as the
+        # whole page otherwise)
         self._run(v, _HTML_JS % (_js_string(req.get("selector")), HTML_CAP),
                   lambda r: self._reply(conn, {"ok": r is not None,
                                                "html": r,
-                                               **({} if r is not None
+                                               **({"truncated": isinstance(
+                                                   r, str)
+                                                   and len(r) >= HTML_CAP}
+                                                  if r is not None
                                                   else {"error": "no-match"})}))
 
     def op_wait(self, conn, req):
@@ -2080,7 +2111,12 @@ class AgentBridge:
                                    "name": name})
 
             if v is None or self._gone(v):
-                self._reply(conn, {"ok": True, "steps": [], "name": name})
+                # its tab is gone: nothing was recorded, and with a name
+                # nothing was saved -- "ok" with the name made the agent
+                # play a macro that did not exist (or an older one)
+                self._reply(conn, {"ok": False, "steps": [],
+                                   "error": "nothing-recorded"} if name
+                            else {"ok": True, "steps": [], "name": name})
                 return
             self._run(v, "window.__macroTake ? window.__macroTake() : '[]'",
                       finish)
@@ -2240,13 +2276,20 @@ class AgentBridge:
         rows = [(i, v) for i, v in self._views()
                 if getattr(v, "_agent_owned", False)]
         if what == "close":
-            closed = 0
+            closed = kept = 0
             for _i, v in rows:
+                # what op_close refuses (he locked it, or it is a game):
+                # close_tab(ask=False) skipped the question and closed it
+                if getattr(v, "locked", False) or getattr(v, "_game", False):
+                    kept += 1
+                    continue
                 index = self.win.tabs.indexOf(v)
                 if index >= 0:
                     self.win.close_tab(index, ask=False)
-                    closed += 1
-            self._reply(conn, {"ok": True, "closed": closed})
+                    if self.win.tabs.indexOf(v) < 0:
+                        closed += 1
+            self._reply(conn, {"ok": True, "closed": closed,
+                               **({"kept": kept} if kept else {})})
             return
         if what == "idle":
             try:
@@ -2279,6 +2322,9 @@ class AgentBridge:
                 continue
             when = float(getattr(v, "_agent_touched", 0) or 0)
             if when and now - when < after:
+                continue
+            # one he locked since, or a game: never closed unasked
+            if getattr(v, "locked", False) or getattr(v, "_game", False):
                 continue
             index = self.win.tabs.indexOf(v)
             if index >= 0:

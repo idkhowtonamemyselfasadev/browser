@@ -1,5 +1,94 @@
 # Changelog
 
+## 2026-11-14 — line-by-line review, day 4 (part fifty-four: seventy-third to eighty-seventh passes)
+
+Fourteen more searches: second looks at notes and the desk, the engine
+that themes websites, downloads, the password vault, tab sleeping,
+virtual browsers, cookies, forms, the session file and crash recovery,
+media, keys and the mouse, and tab groups with the split view; a third
+look at bookmarks and history and at the agent bridge. About 80 bugs,
+fixed here:
+
+- **Notes and the desk.** A note whose name starts with a dot opens
+  that note and nothing else, and deleting it deletes that note. A note
+  saved by another program with a byte-order mark keeps its header and
+  its first to-do; indented or repeated header lines are kept on save.
+  Adding to a collection starts a new line, ticking a to-do leaves the
+  other lines as they were written, and editing one snippet no longer
+  cuts every long snippet short. A note changed by Syncthing or another
+  editor while it was open is not silently overwritten. "This page" in
+  the drawer does not pass a private tab to a note, saving an article as
+  a note says so when it fails, and the agenda shows timed events over
+  several days, all-day events given only a length, and leaves cancelled
+  events out.
+- **Website themes and downloads.** A translucent card on a themed page
+  keeps its dark colour. "Download again" on a file the browser made
+  itself no longer downloads the web page into it; raising "at most N at
+  once" starts every waiting download, and a waiting download cancelled
+  from its bar leaves the queue.
+- **Bookmarks and history.** An encrypted history is never written over
+  in plain text, even after a settings reset or a restore: the pages wait
+  for the vault, or the old file is kept aside, and clearing still
+  clears it. The same page read in a virtual browser and in a normal tab
+  stays in both histories; forgetting a site also takes it out of a
+  pending Undo and out of the address bar's suggestions; "Delete range"
+  covers encrypted pages not read yet. The bookmark copy in a shared
+  folder is replaced in one step, and a failed history import leaves no
+  copy of the other browser's history behind.
+- **Passwords.** A failed encrypted export or an empty import says so
+  instead of failing silently, the encrypted export replaces the old copy
+  in one step (a full stick no longer destroys last week's backup), a
+  mistyped two-factor secret is refused instead of erasing the working
+  one, and the 1Password store keeps its access log across restarts.
+- **Sleeping tabs and the session.** A snoozed tab comes back in its own
+  virtual browser, pinned, locked and named as it was. Unticking "keep
+  awake" on a site a parent rule holds lets it sleep, clicks and scrolling
+  count as activity for the idle housekeeping, and setting a memory
+  budget on a machine without pressure counters no longer tells you to
+  set one. Closing the last ordinary window while a private one stays
+  open saves the session first.
+- **Virtual browsers and cookies.** Browser names are unique whatever
+  the case, a rename keeps its site rules, and the most specific site
+  rule wins. A link from another program sent to another browser switches
+  to it (and no longer lands in this browser's group), "Open in that
+  browser" leaves no blank tab, a closed browser set to forget its history
+  does, a crash no longer keeps a cache meant to be forgotten, and a
+  bookmark copied into another browser shows there. Cookies kept "until
+  close" are gone after a crash too, and removing one cookie in the
+  editor no longer removes its www twin.
+- **Forms.** A draft holds only what you typed: buttons, sliders, colour
+  pickers and untouched lists no longer fill the draft list and push your
+  real drafts out. Two boxes of the same name get their own drafts back,
+  a card number never goes into an expiry or CVV box (and a "Secure card
+  number" box still gets it), and an IPv6 page's drafts are forgotten
+  with the site.
+- **Agent bridge.** The Markdown of a page inside a form (and its title
+  in a header) is no longer empty, code blocks keep their lines, scrolling
+  answers where the page is, tables list each table once, a cut HTML page
+  says so, "close my tabs" leaves a tab you locked, a macro is only
+  reported saved when it was, and a client limited to some sites cannot
+  restart the browser.
+- **Media.** A remembered volume no longer unmutes a muted video, and a
+  site turned down stays turned down on players from another domain. The
+  camera/microphone marker sees popped-out tabs, "resumed at" is said
+  only when it happened, captions show "&" instead of "&amp;", a site's
+  autoplay rule also holds for videos that start later (but not for a
+  play you or your media keys start), and "catch up to live" leaves
+  normal videos and your speed alone.
+- **Keys and the mouse.** A site's own getting-around switches survive
+  its next load, the arrow-key step leaves text boxes inside web
+  components alone and works with "keep my keys" on, middle-button
+  scrolling stops when you switch away, and a gesture's line never stays
+  on the page.
+- **Tab groups and the split view.** Renaming, ungrouping or closing a
+  group includes its tab in the split view, a group name with "&" shows
+  correctly, keeping a group never replaces an earlier kept one with
+  nothing, kept groups can be reopened from the group menu (once, in
+  their own virtual browser), merging windows keeps a same-named group of
+  another browser as its own group, a tab back from the split view keeps
+  its icon and private mark, and a group moved to its own window keeps
+  its split tab and its fold.
+
 ## 2026-11-14 — line-by-line review, day 4 (part fifty-three: sixty-seventh to seventy-second passes)
 
 Six more searches: a third look at the Settings page, a second look at

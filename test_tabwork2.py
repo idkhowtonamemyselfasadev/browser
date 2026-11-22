@@ -144,13 +144,15 @@ H.spin(400)
 check("saving a group writes its tabs down", kept == 2, kept)
 check("...and closes it", "Picked" not in win.groups)
 check("it is on the saved list", "Picked" in win.saved_groups())
+kept_colour = win.saved_groups()["Picked"]["colour"]
 back = win.reopen_saved_group("Picked")
 H.spin(600)
 check("reopening it brings the tabs back", len(back) == 2, len(back))
 check("in a group of the same name", "Picked" in win.groups)
 check("and with its colour",
-      win.group_colors.get("Picked") ==
-      win.saved_groups()["Picked"]["colour"])
+      win.group_colors.get("Picked") == kept_colour)
+check("...and it is off the kept list once reopened",
+      "Picked" not in win.saved_groups())
 for i, _ in reversed(win._real_tabs(group="Picked")):
     win.close_tab(i, ask=False)
 H.spin(200)

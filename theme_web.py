@@ -982,7 +982,11 @@ SITE_JS = """(function () {
     var bg = done.backgroundColor, col = done.color, bd = done.borderTopColor;
     for (var i = 0; i < plan.work.length; i++) {
       var prop = plan.work[i][0], c = parseColor(plan.work[i][1]);
-      if (!c) continue;
+      // a translucent write (a color-mix) keeps its read-back, as said
+      // above: predicted as opaque rgb(), it never matched the page's
+      // rgba() again -- every later look called it moved, repainted it,
+      // and after six rounds gave the card back to the site's colours
+      if (!c || (c.a !== undefined && c.a < 0.995)) continue;
       if (prop === "background-color") bg = rgb(c);
       else if (prop === "color") col = rgb(c);
       else if (prop === "border-color") bd = rgb(c);
