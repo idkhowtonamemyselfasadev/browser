@@ -138,6 +138,22 @@
     return Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min";
   }
 
+  let dayFmt = null, dayFmtLang = null, timeFmt = null;
+  function dayFormat() {
+    const lang = JSON.stringify(STR.lang || "");
+    if (!dayFmt || dayFmtLang !== lang) {
+      dayFmt = new Intl.DateTimeFormat(STR.lang || [],
+        { weekday: "long", day: "numeric", month: "long" });
+      dayFmtLang = lang;
+    }
+    return dayFmt;
+  }
+  function timeFormat() {
+    if (!timeFmt)
+      timeFmt = new Intl.DateTimeFormat([],
+        { hour: "2-digit", minute: "2-digit" });
+    return timeFmt;
+  }
   function dayLabel(t) {
     const d = new Date(t * 1000), now = new Date();
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -145,8 +161,7 @@
     // by the calendar: 24 hours back is the wrong day after a clock change
     if (d >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
       return STR.yesterday;
-    return d.toLocaleDateString(STR.lang || [],
-      { weekday: "long", day: "numeric", month: "long" });
+    return dayFormat().format(d);
   }
 
   function speedOf(e) {
@@ -189,8 +204,7 @@
       return [parts.join(" · "), ""];
     }
     if (e.size > 0 || e.received > 0) parts.push(fmtSize(e.size || e.received));
-    parts.push(new Date(e.t * 1000).toLocaleTimeString([],
-      { hour: "2-digit", minute: "2-digit" }));
+    parts.push(timeFormat().format(new Date(e.t * 1000)));
     const status = {done: [STR.dlDone, "ok"], cancelled: [STR.dlCancelled, ""],
                     failed: [STR.dlFailed, "bad"]}[e.state] || [e.state, ""];
     return [parts.join(" · ") + " · ", status];

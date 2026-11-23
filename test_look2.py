@@ -247,11 +247,24 @@ check("the selection colour can be ours",
 H.spin(400)
 check("...and the page says so", "::selection" in look())
 win.set_themed_selection(False)
+# website theming (on by default) already paints this page's background,
+# and then it rightly is not "a page with no background of its own"
+_tw = B.theme_web
+_tw_was = win.config.get("themeWeb", True)
+win.config["themeWeb"] = False
+_tw.refresh(win)
+_tw.undo_open_sites(win)
+H.spin(400)
 check("a page with no background of its own can have the theme's",
       win.set_unstyled_background(True) is True)
 H.spin(400)
 check("...and the rule is there", "html:not([style" in look(), look()[:60])
 win.set_unstyled_background(False)
+win.config["themeWeb"] = _tw_was
+_tw.refresh(win)
+if _tw_was:
+    _tw.repaint_open_sites(win)
+H.spin(300)
 check("a site can have its own text size",
       win.set_site_font_size("127.0.0.1", 22) == 22)
 H.spin(500)

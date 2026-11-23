@@ -161,9 +161,10 @@ check("this machine's cards are in it, with what drives a screen",
 check("which Vulkan drivers are installed is in it",
       isinstance(on_disk["vulkanDrivers"], list),
       on_disk["vulkanDrivers"])
-check("...which is why this box cannot show his fault: no real one here",
-      all("nvidia" not in name for name in on_disk["vulkanDrivers"]),
-      on_disk["vulkanDrivers"])
+# (a fact about the test machine, not about the browser: the old server
+# had no NVIDIA Vulkan driver, the new one does -- only said, not checked)
+print("  note  NVIDIA Vulkan driver on this box:",
+      any("nvidia" in name for name in on_disk["vulkanDrivers"]))
 check("what the page answered is kept as the page said it",
       on_disk["web"]["webgl"]["card"] == "ANGLE (NVIDIA, Vulkan 1.3)")
 check("a page that could not answer is not a missing record",

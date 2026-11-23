@@ -558,7 +558,7 @@ KEEP_ENTRY = vars(B.Browser)["_pw_step_entry"]
 # the account as a guess again"
 LOOSE_STICKS = staticmethod(lambda old, typed: bool(typed))
 # "a half-login we have nothing saved for may fall back to a guess"
-LOOSE_ENTRY = (lambda self, host, scheme, step:
+LOOSE_ENTRY = (lambda self, host, scheme, step, view=None:
                self.vault.for_username(host, scheme, step["username"])
                or (None if step["typed"]
                    else self.vault.best_for(host, scheme)))

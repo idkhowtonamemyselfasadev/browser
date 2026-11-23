@@ -154,7 +154,7 @@ keep_sticks = vars(B.Browser)["_typed_sticks"]
 keep_entry = vars(B.Browser)["_pw_step_entry"]
 B.Browser._typed_sticks = staticmethod(lambda old, typed: bool(typed))
 B.Browser._pw_step_entry = (
-    lambda self, host, scheme, step:
+    lambda self, host, scheme, step, view=None:
     self.vault.for_username(host, scheme, step["username"])
     or (None if step["typed"] else self.vault.best_for(host, scheme)))
 try:

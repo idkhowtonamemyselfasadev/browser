@@ -7976,8 +7976,13 @@ PAGE_LOOK_JS = r"""(function (want) {
     var mine = document.getElementById("__pagelook");
     if (mine) mine.disabled = true;
     var clear = function (node) {
-      if (!node) return true;
-      var st = getComputedStyle(node);
+      /* not an element (a document still being built, a page that has
+         replaced document.body): nothing to read, and a throw here
+         ended the whole look -- scrollbars, selection, font size --
+         for that page */
+      if (!node || !(node instanceof Element)) return true;
+      var st;
+      try { st = getComputedStyle(node); } catch (e) { return true; }
       return st.backgroundImage === "none"
         && (st.backgroundColor === "rgba(0, 0, 0, 0)"
             || st.backgroundColor === "transparent");

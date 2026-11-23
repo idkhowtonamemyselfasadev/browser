@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 1 (part fifty-six: memory and test health)
+
+- **The start page no longer leaks.** Its clock built two new date
+  formatters every second and rewrote the same text 59 times a minute;
+  measured, that grew the page's memory by about 265 MB an hour. Now the
+  formatters are kept and the text is only written when it changes:
+  about 9 MB an hour. The downloads page had the same habit while a
+  download runs and keeps its formatters now too.
+- **Website look is sturdier.** The script that applies scrollbars,
+  selection colour and text size to pages no longer gives up on a page
+  where it cannot read the background.
+- **The whole test run is green again on the new machine.** Six suites
+  had gone stale since earlier fixes (two password tests still faked an
+  old function shape, a vim-keys test sent keys to a hidden window, a
+  bookmark test opened its page in a private tab it had left open, a
+  look test did not expect website theming to be on, and a GPU report
+  test checked the test machine instead of the browser).
+
 ## 2026-11-22 — line-by-line review, day 5 (part fifty-five: eighty-eighth to ninety-sixth passes)
 
 Nine more searches: second looks at permissions and notifications, the

@@ -178,8 +178,13 @@ check("...as pictures to click",
       H.js(grid, "document.querySelectorAll('a img').length", APP)
       == len(rows),
       H.js(grid, "document.querySelectorAll('a img').length", APP))
-check("a private tab is never kept",
-      win.save_visit_thumb(win.new_tab(url=None, private=True)) is False)
+_priv = win.new_tab(url=None, private=True)
+check("a private tab is never kept", win.save_visit_thumb(_priv) is False)
+# closed again: left in front, the bookmark of (6) opened INTO it, and a
+# private tab is (rightly) never offered a moved bookmark
+win.close_tab(win.tabs.indexOf(_priv), ask=False)
+win.tabs.setCurrentWidget(view)
+H.spin(200)
 win.keep_thumbnails(False)
 
 print("\n(5) history out of another browser")

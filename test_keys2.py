@@ -290,39 +290,43 @@ check("...and the page is told", js("(window.__navWant||{}).vimKeys", APP)
       is True)
 js("window.scrollTo(0, 0)", MAIN)
 H.spin(200)
-js("""document.dispatchEvent(new KeyboardEvent('keydown',
-     {bubbles: true, key: 'j'}))""", APP)
+
+
+def real_keys(s):
+    """Typed through Qt, so the page sees isTrusted events: the nav
+    handler ignores anything a script dispatches (a page must not be
+    able to drive the browser's own keys)."""
+    if not win.isVisible():
+        win.show()          # a hidden window gets no key events at all
+        H.spin(300)
+    win.activateWindow()
+    view.setFocus()
+    js("document.activeElement && document.activeElement.blur && "
+       "document.activeElement.blur(); 1", MAIN)
+    H.spin(100)
+    H.type_text(view, s)
+
+
+real_keys("j")
 H.spin(300)
 check("...and j really scrolls", (js("window.scrollY|0", MAIN) or 0) > 0,
       js("window.scrollY|0", MAIN))
-js("""document.dispatchEvent(new KeyboardEvent('keydown',
-     {bubbles: true, key: 'G'}))""", APP)
+real_keys("G")
 H.spin(400)
 check("...and G goes to the bottom",
       (js("window.scrollY|0", MAIN) or 0) > 1000,
       js("window.scrollY|0", MAIN))
-js("""(function(){
-  document.dispatchEvent(new KeyboardEvent('keydown',
-    {bubbles: true, key: 'g'}));
-  document.dispatchEvent(new KeyboardEvent('keydown',
-    {bubbles: true, key: 'g'}));
-  return 'gg';})()""", APP)
+real_keys("gg")
 H.spin(400)
 check("...and gg comes back to the top",
       (js("window.scrollY|0", MAIN) or 0) < 50,
       js("window.scrollY|0", MAIN))
-js("""(function(){
-  document.dispatchEvent(new KeyboardEvent('keydown',
-    {bubbles: true, key: 'g'}));
-  document.dispatchEvent(new KeyboardEvent('keydown',
-    {bubbles: true, key: 't'}));
-  return 'gt';})()""", APP)
+real_keys("gt")
 H.spin(200)
 check("...and gt asks the browser for the next tab",
       js("window.__navTakeTabStep()", APP) == 1,
       js("window.__navTakeTabStep()", APP))
-js("""document.dispatchEvent(new KeyboardEvent('keydown',
-     {bubbles: true, key: '/'}))""", APP)
+real_keys("/")
 H.spin(200)
 check("...and / asks for the find bar",
       js("window.__navTakeFind()", APP) is True)
