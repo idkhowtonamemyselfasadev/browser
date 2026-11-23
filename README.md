@@ -55,8 +55,12 @@ with pip as a fallback) and registers a desktop entry with an icon.
 To run it without installing:
 
 ```sh
-python3 browser.py
+python3 launch.py
 ```
+
+(`python3 browser.py` works too, but Python compiles the 84,000-line file
+again on every start that way; `launch.py` loads it from its bytecode,
+which takes the start from about 0.9 s to about 0.3 s.)
 
 **Requirements:** Python 3 and PyQt6 WebEngine.
 

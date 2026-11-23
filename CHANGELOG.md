@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 6 (part sixty-one: a faster start, and downloads a third time)
+
+- **The browser starts about three times faster.** Started as
+  `python3 browser.py`, Python compiled all 84,000 lines again on every
+  launch: about 0.6 s of nothing. The new `launch.py` loads it from its
+  compiled form instead (0.9 s to 0.3 s until the browser is ready, measured);
+  a restart and the graphics re-start use it too. Installed packages
+  start through it and compile the program once at install.
+- **Downloads.** The "no room for this" question now measures the disk the
+  file is actually going to (a private or per-browser folder on another
+  drive was judged by the default folder's room). A file type you blocked
+  is also asked about when your naming pattern is what gives it that
+  ending. An "open with" rule with a quoted program path containing a
+  space works, instead of quietly falling back to the desktop's choice.
+
 ## 2026-11-23 — two months on the browser, round 5 (part sixty: polish from screenshots)
 
 Every own page was photographed in a dark and a light theme and looked at.

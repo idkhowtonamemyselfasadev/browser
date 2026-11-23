@@ -1388,8 +1388,18 @@ def _gpu_startup(release=None):
             pass
     # start again with the environment in place: the engine reads it
     # when its GPU process starts, which is after this point in a run
-    os.execve(sys.executable, [sys.executable, os.path.abspath(__file__)]
+    os.execve(sys.executable, [sys.executable, _program_file()]
               + sys.argv[1:], env)
+
+
+def _program_file():
+    """What to start the browser again with: launch.py when it is there
+    (it loads this module from its compiled bytecode instead of
+    compiling 84k lines again), else this file."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    launcher = os.path.join(here, "launch.py")
+    return launcher if os.path.isfile(launcher) \
+        else os.path.abspath(__file__)
 
 
 _GPU_APP = None
@@ -48303,8 +48313,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         wanted = str(self.open_with_rules().get(ending) or "")
         if not wanted:
             return ""
-        program = shutil.which(wanted.split()[0]) if wanted else ""
+        # the program as open_with_args reads the rule: shell words, so a
+        # quoted path with a space in it ("/opt/My Reader/reader") is one
+        words = self._open_with_words(wanted)
+        program = shutil.which(words[0]) if words else ""
         return program or ""
+
+    @staticmethod
+    def _open_with_words(wanted):
+        import shlex
+        try:
+            return shlex.split(str(wanted or ""))
+        except ValueError:
+            return str(wanted or "").split()
 
     def open_with_args(self, name):
         """What a rule says after the program: "pdf=zathura --fork" opens
@@ -48312,18 +48333,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         never did what it said."""
         ending = str(name or "").rsplit(".", 1)[-1].lower()
         wanted = str(self.open_with_rules().get(ending) or "")
-        import shlex
-        try:
-            words = shlex.split(wanted)
-        except ValueError:
-            words = wanted.split()
-        return words[1:]
+        return self._open_with_words(wanted)[1:]
 
     def open_with_missing(self):
         """The rules whose program is not on this machine."""
         out = []
         for ending, wanted in sorted(self.open_with_rules().items()):
-            first = str(wanted or "").split()
+            first = self._open_with_words(wanted)
             if first and not shutil.which(first[0]):
                 out.append((ending, wanted))
         return out
@@ -48430,6 +48446,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def free_space(self, folder=None):
         """How much room is left where downloads go, in bytes."""
         target = Path(str(folder or self.download_dir()))
+        while not target.exists() and target.parent != target:
+            target = target.parent
         try:
             return shutil.disk_usage(target).free
         except OSError:
@@ -74184,7 +74202,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self._close_download_tab(page)
             return
         # the kinds he never wants arriving by themselves
+        blocked_asked = False
         if self.download_blocked(name):
+            blocked_asked = True
             if QMessageBox.question(
                     self, self._ui_str("dlBlockedTitle"),
                     literal(self._ui_str("dlBlockedAsk") % name)) \
@@ -74194,8 +74214,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 # close the blank target=_blank tab, so it is closed here
                 self._close_download_tab(page)
                 return
-        # too big, or no room for it
-        trouble = self.download_too_big(request.totalBytes())
+        # too big, or no room for it -- on the disk it is going to: the
+        # private folder, a virtual browser's own folder or a shelf can be
+        # on another drive, and the default folder's room was measured
+        trouble = self.download_too_big(
+            request.totalBytes(),
+            folder=self._download_target_dir(page, name))
         if trouble:
             if QMessageBox.question(
                     self, self._ui_str("dlBigTitle"),
@@ -74222,6 +74246,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if renamed and renamed != name:
             request.setDownloadFileName(renamed)
             name = renamed
+            # his template can give a file with no ending one ("{title}"
+            # on a page called setup.sh): the blocked kinds are checked
+            # against the name it is really saved as, once
+            if not blocked_asked and self.download_blocked(name):
+                if QMessageBox.question(
+                        self, self._ui_str("dlBlockedTitle"),
+                        literal(self._ui_str("dlBlockedAsk") % name)) \
+                        != QMessageBox.StandardButton.Yes:
+                    request.cancel()
+                    self._close_download_tab(page)
+                    return
         # the same file again, under the same name
         # (not for a private page: its file goes to the private folder,
         # and the question was about one in his normal downloads)
@@ -74281,6 +74316,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if self.config.get("openAfterDownload", False):
             request.isFinishedChanged.connect(
                 lambda r=request: self._opened_when_done(r))
+
+    def _download_target_dir(self, page, name):
+        """Where a download from this page will land (as the placement
+        in _download decides it), without taking the batch folder."""
+        try:
+            if getattr(self, "_batch_dir", ""):
+                return Path(self._batch_dir)
+            return ((self.private_download_dir()
+                     if self._page_is_private(page) else None)
+                    or self.session_download_dir(
+                        session=str(getattr(self._download_view(page),
+                                            "session", "main") or "main"))
+                    or self.download_dir_for(name))
+        except Exception:
+            return None
 
     def _download_view(self, page):
         """Which tab a page belongs to, for the folder a virtual
@@ -78442,7 +78492,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             value_next = arg.lstrip("-") in _QT_VALUE_OPTIONS \
                 and "=" not in arg
         QProcess.startDetached(sys.executable,
-                               [str(APP_DIR / "browser.py")] + keep)
+                               [_program_file()] + keep)
         QApplication.instance().quit()
 
     def _release_engine_hooks(self):

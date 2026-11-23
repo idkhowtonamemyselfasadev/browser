@@ -22412,6 +22412,45 @@ check("335 (source) every own page themes its scrollbars",
 check("335 (source) Downloads hides 'Clear finished' with nothing finished",
       'document.getElementById("clear").hidden =' in _pages335["downloads.html"])
 
+# ---- 336: the browser starts from its compiled module ----
+_launch336 = _Path(B.__file__).parent / "launch.py"
+check("336 launch.py loads the browser as a module and runs main()",
+      _launch336.is_file() and "import browser" in _launch336.read_text()
+      and "browser.main()" in _launch336.read_text())
+check("336 a restart and the GPU re-exec start it through launch.py",
+      B._program_file() == str(_launch336.resolve())
+      or B._program_file() == str(_launch336))
+
+# ---- 337: downloads, third look (the 99th pass) ----
+import tempfile as _tf337
+import os as _os337
+_d337 = _Path(_tf337.mkdtemp()) / "My Reader"
+_d337.mkdir()
+_prog337 = _d337 / "reader"
+_prog337.write_text("#!/bin/sh\nexit 0\n")
+_os337.chmod(_prog337, 0o755)
+_ow_was337 = dict(br.open_with_rules())
+try:
+    br.open_with_rules()["pdf337"] = '"%s" --fork' % _prog337
+    _for337 = br.open_with_for("x.pdf337")
+    _args337 = br.open_with_args("x.pdf337")
+    _missing337 = [e for e, _w in br.open_with_missing() if e == "pdf337"]
+finally:
+    br.open_with_rules().clear()
+    br.open_with_rules().update(_ow_was337)
+check("337 an open-with rule with a quoted path holding a space finds its program",
+      _for337 == str(_prog337) and _args337 == ["--fork"] and _missing337 == [],
+      (_for337, _args337, _missing337))
+_src337 = __import__("inspect").getsource
+check("337 (source) the free-space check measures the folder the file goes to",
+      "folder=self._download_target_dir(page, name)"
+      in _src337(B.Browser._download))
+check("337 a folder not made yet is measured on the disk it will be on",
+      br.free_space(_Path(_tf337.mkdtemp()) / "not" / "made" / "yet") > 0)
+check("337 (source) a blocked kind is asked about by the name it is saved as",
+      "if not blocked_asked and self.download_blocked(name):"
+      in _src337(B.Browser._download))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 
