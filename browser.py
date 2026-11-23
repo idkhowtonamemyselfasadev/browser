@@ -4013,13 +4013,20 @@ MEDIA_TOOLS = {
     } catch (e) { return 0; }
   };
   if (!edge()) return "notlive";
+  var mine = base;     /* the last rate this set */
   var watch = function () {
+    /* a rate this did not set is his: the new base (his 1.25x was
+       put back to the old one at the next timeupdate) */
+    if (m.playbackRate !== mine) {
+      base = m.__catchBase = m.playbackRate;
+      mine = base;
+    }
     var behind = edge() - m.currentTime;
     var fast = Math.max(base, 1.1);
     if (behind > 1.5) {
-      if (m.playbackRate !== fast) m.playbackRate = fast;
+      if (m.playbackRate !== fast) m.playbackRate = mine = fast;
     } else if (m.playbackRate !== base) {
-      m.playbackRate = base;
+      m.playbackRate = mine = base;
     }
   };
   m.__catchUp = watch;
@@ -10095,6 +10102,7 @@ MEDIA_JS = r"""
     return JSON.stringify({
       title: (md && md.title) || "",
       artist: (md && md.artist) || "",
+      has: !!(el || md),
       playing: !!(el && !el.paused && !el.ended),
       prev: typeof handlers.previoustrack === "function",
       next: typeof handlers.nexttrack === "function"
@@ -43682,6 +43690,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
 
         def got(now):
             now = now or {}
+            if now.get("has") is False:
+                # the player tab went on to a page with no media at all:
+                # its title and address are not a track for the desktop
+                service.update(playing=None)
+                return
             try:
                 title = win._view_title(view)
                 url = win._tab_url(view)
@@ -83328,7 +83341,7 @@ MEDIA_TOOLS2 = {
     comp.threshold.value = 0;      /* off until asked for */
     comp.ratio.value = 1;
     window.__audioChain = {ctx: ctx, comp: comp, pan: pan, gain: gain,
-                           bands: bands, mono: false, freqs: freqs};
+                           bands: bands, mono: false, freqs: freqs, el: m};
   }
   var chain = window.__audioChain;
   if (want) {
@@ -83407,6 +83420,9 @@ MEDIA_TOOLS2 = {
   var ctx, from, analyser;
   try {
     if (chain) {
+      /* the sound chain carries ONE video's audio: another video's
+         silence sped this one up */
+      if (chain.el && chain.el !== m) return "taken";
       ctx = chain.ctx;
       from = chain.gain;
     } else if (wired) {
@@ -83446,16 +83462,24 @@ MEDIA_TOOLS2 = {
   window.__silenceEl = m;
   var data = new Uint8Array(analyser.frequencyBinCount);
   window.__silenceRate = m.playbackRate;
+  /* the last rate this set: any other one is his (a speed key, 1.5x),
+     and becomes the rate quiet stretches are measured from -- it was
+     put back within a quarter second, and lost when this went off */
+  window.__silenceSet = m.playbackRate;
   window.__silenceTimer = setInterval(function () {
+    if (m.playbackRate !== window.__silenceSet) {
+      window.__silenceRate = m.playbackRate;
+      window.__silenceSet = m.playbackRate;
+    }
     analyser.getByteFrequencyData(data);
     var sum = 0;
     for (var i = 0; i < data.length; i++) sum += data[i];
     var loud = sum / data.length;
     var fast = window.__silenceRate * 2.5;
     if (loud < 6 && !m.paused) {
-      if (m.playbackRate !== fast) m.playbackRate = fast;
+      if (m.playbackRate !== fast) m.playbackRate = window.__silenceSet = fast;
     } else if (m.playbackRate !== window.__silenceRate) {
-      m.playbackRate = window.__silenceRate;
+      m.playbackRate = window.__silenceSet = window.__silenceRate;
     }
   }, 250);
   return "on";

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 11 (part sixty-six: media, third look)
+
+- **Your speed wins.** With "skip silence" or "catch up to live" on, a speed
+  you set yourself (a speed key, 1.25x, 1.5x) was put back within a
+  moment, and lost when the feature was switched off. Both now take your
+  speed as the new normal.
+- **Skip silence listens to the right video.** On a page with several
+  videos it could measure one video's sound and speed up another; it now
+  says it cannot rather than guess.
+- **The desktop's media widget forgets a page with nothing playing.** After
+  you paused a video and took that tab to another page (mail, the bank),
+  the desktop's player widget and lock screen kept showing that page's
+  title and address as if it were a track.
+
 ## 2026-11-23 — two months on the browser, round 10 (part sixty-five: virtual browsers, third look)
 
 - **The clean room stays clean.** "Open in a clean room" looked the site up

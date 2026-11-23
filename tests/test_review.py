@@ -22645,6 +22645,49 @@ check("341 (source) 'ask where to save' starts in the folder it would go to",
       "self._download_target_dir(page, name)" in _src341(B.Browser._download)
       and _src341(B.Browser._download).count("_download_target_dir(") >= 2)
 
+# ---- 342: media, third look (the 103rd pass) ----
+class _Mpris342:
+    def __init__(self):
+        self.calls = []
+
+    def update(self, **kw):
+        self.calls.append(kw)
+
+
+_m342 = _Mpris342()
+_was342 = getattr(br, "_mpris", None)
+br._mpris = _m342
+_v342 = br.current()
+br._audible_anywhere = lambda: (br, _v342)
+br.media_now = lambda cb: cb({"title": "", "playing": False, "has": False})
+try:
+    br._mpris_push()
+    _gone342 = list(_m342.calls)
+    del _m342.calls[:]
+    br.media_now = lambda cb: cb({"title": "Song", "playing": True, "has": True})
+    br._mpris_push()
+    _there342 = list(_m342.calls)
+finally:
+    br._mpris = _was342
+    for _n in ("_audible_anywhere", "media_now"):
+        br.__dict__.pop(_n, None)
+check("342 a player tab gone to a page with no media is no track for the desktop",
+      _gone342 == [{"playing": None}], _gone342)
+check("342 ...while one with a video still is",
+      len(_there342) == 1 and _there342[0].get("title") == "Song"
+      and _there342[0].get("playing") is True, _there342)
+_t342 = B.MEDIA_TOOLS2
+check("342 (source) skip-silence takes a speed he sets as its new base",
+      "window.__silenceSet" in _t342["skipsilence"]
+      and "window.__silenceRate = m.playbackRate;\n      window.__silenceSet" in _t342["skipsilence"])
+check("342 (source) skip-silence refuses to listen to another video's sound",
+      "chain.el && chain.el !== m" in _t342["skipsilence"]
+      and "el: m}" in _t342["audiochain"])
+_catch342 = [v for k, v in vars(B).items()
+             if isinstance(v, dict) and "catchup" in v]
+check("342 (source) catch-up to live takes a speed he sets as its new base",
+      any("base = m.__catchBase = m.playbackRate" in d["catchup"] for d in _catch342))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 
