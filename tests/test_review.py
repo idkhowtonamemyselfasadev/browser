@@ -22367,6 +22367,51 @@ check("334 (source) a private download is not asked about a twin in the normal f
       "self._page_is_private(page)" in _src334(B.Browser._download)
       and "else self.download_twice(name)" in _src334(B.Browser._download))
 
+# ---- 335: polish from screenshots of the own pages ----
+_lang_was335 = br.config.get("translateLang", "__absent__")
+try:
+    br.config["translateLang"] = "de"
+    br.relabel_toolbar()
+    _ph_de335 = br.urlbar.placeholderText()
+    _nt_de335 = br._new_tab_text()
+    _v335 = br.new_tab(url=None, switch=False); H.spin(200)
+    _label0_335 = br.tabs.tabText(br.tabs.indexOf(_v335))
+    # once the start page has loaded and taken its strings
+    H.wait_for(lambda: br._tab_title(br.tabs.indexOf(_v335)) == "Neuer Tab",
+               6000)
+    _label335 = br._tab_title(br.tabs.indexOf(_v335))
+    _close_if_open(_v335)
+    br.config["translateLang"] = "en"
+    br.relabel_toolbar()
+    _ph_en335 = br.urlbar.placeholderText()
+finally:
+    if _lang_was335 == "__absent__":
+        br.config.pop("translateLang", None)
+    else:
+        br.config["translateLang"] = _lang_was335
+    br.relabel_toolbar()
+check("335 the address bar's placeholder follows the language",
+      _ph_de335 == "Suchen oder Adresse eingeben"
+      and _ph_en335 == "Search or enter address", (_ph_de335, _ph_en335))
+check("335 a new tab is labelled in his language",
+      _nt_de335 == "Neuer Tab" and _label335 == "Neuer Tab"
+      and "New tab" not in _label0_335, (_nt_de335, _label0_335, _label335))
+_dir335 = _Path(B.__file__).parent
+_pages335 = {n: (_dir335 / n).read_text() for n in
+             ("bookmarks.html", "downloads.html", "history.html", "mictest.html",
+              "notes.html", "passwords.html", "player.html", "settings.html",
+              "start.html")}
+check("335 (source) every own page really hides what is marked hidden",
+      all("[hidden] { display: none !important; }" in t
+          for t in _pages335.values()),
+      [n for n, t in _pages335.items()
+       if "[hidden] { display: none !important; }" not in t])
+check("335 (source) every own page themes its scrollbars",
+      all("::-webkit-scrollbar-thumb" in t for t in _pages335.values()),
+      [n for n, t in _pages335.items() if "::-webkit-scrollbar-thumb" not in t])
+check("335 (source) Downloads hides 'Clear finished' with nothing finished",
+      'document.getElementById("clear").hidden =' in _pages335["downloads.html"])
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

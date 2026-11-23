@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 5 (part sixty: polish from screenshots)
+
+Every own page was photographed in a dark and a light theme and looked at.
+
+- **Your language everywhere you look first.** The address bar said
+  "Search or enter address" and every new tab "New tab" in English,
+  whatever language the browser was set to; both follow the language now,
+  and change with it.
+- **Hidden means hidden.** History showed its row of selection buttons
+  (Open, Bookmark, Delete, …) with nothing selected and nothing in the
+  list; a page rule kept it on screen. Every own page now really hides
+  what it marks as hidden.
+- **Scrollbars match the theme.** Only Settings had themed scrollbars;
+  the first-run setup's step list and language list, and the other own
+  pages, showed bright default ones on a dark theme.
+- **Downloads** no longer offers "Clear finished" when nothing has
+  finished.
+
 ## 2026-11-23 — two months on the browser, round 4 (part fifty-nine: private mode and cookies, third look)
 
 - **Read later keeps no private tab.** Ctrl+Alt+D on a private tab put

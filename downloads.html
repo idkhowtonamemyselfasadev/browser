@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <title>Downloads</title>
 <style>
+  [hidden] { display: none !important; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #000000; }
+  ::-webkit-scrollbar-thumb { background: rgba(108, 112, 134, .45); }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(166, 173, 200, .7); }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     background: #000000;
@@ -214,6 +219,9 @@
     const list = document.getElementById("list");
     list.innerHTML = "";
     document.getElementById("empty").hidden = entries.length > 0;
+    // nothing finished, nothing to clear
+    document.getElementById("clear").hidden =
+      !entries.some(e => e.state && e.state !== "active");
     let lastDay = null;
     for (const e of [...entries].reverse()) {
       const label = dayLabel(e.t);

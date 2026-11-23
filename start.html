@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <title>New tab</title>
 <style>
+  [hidden] { display: none !important; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #000000; }
+  ::-webkit-scrollbar-thumb { background: rgba(108, 112, 134, .45); }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(166, 173, 200, .7); }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
   body {
@@ -2726,6 +2731,7 @@
   }
   function applyStrings() {
     try {
+      if (STR.tbNewTab) document.title = STR.tbNewTab;
       document.querySelector("#addform button").textContent = STR.add;
       document.querySelector("#settings h3").textContent = STR.background;
       document.getElementById("allsettings").textContent = STR.allSettings;

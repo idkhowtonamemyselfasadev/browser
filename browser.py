@@ -12283,7 +12283,8 @@ class TabRail(QWidget):
         if not folded:
             name = (b.tabs.tabText(i)
                     or getattr(view, "tab_name", None)
-                    or getattr(view, "_last_title", None) or "New tab")
+                    or getattr(view, "_last_title", None)
+                    or b._new_tab_text())
             budget = max(10, right - (box.right() + 8))
             painter.setPen(QColor(theme_color("text") if active
                                   else theme_color("subtext")))
@@ -12509,7 +12510,7 @@ class TabSidebar(QWidget):
         row.setSpacing(4)
         self._foot = row
         self.newbtn = QToolButton(foot, text="+", objectName="sidebarnew")
-        self.newbtn.setToolTip("New tab")
+        self.newbtn.setToolTip(browser._ui_str("tbNewTab"))
         self.newbtn.clicked.connect(lambda: browser.new_tab())
         self.count = QLabel("", foot, objectName="sidebarcount")
         self.foldbtn = QToolButton(foot, text="‹",
@@ -25496,7 +25497,7 @@ class Browser(QMainWindow):
         self._tb_buttons = {}
         self.urlbar = UrlBar(objectName="urlbar")
         self.urlbar.browser = self
-        self.urlbar.setPlaceholderText("Search or enter address")
+        self.urlbar.setPlaceholderText(self._ui_str("barPlaceholder"))
         self.urlbar.returnPressed.connect(self._navigate)
 
         # the star lives inside the address bar, like Chrome's: the bar
@@ -25630,7 +25631,7 @@ class Browser(QMainWindow):
         # the + rides along right after the last tab, like Chrome
         self._newtab_btn = QToolButton(self.tabs.tabBar(), text="+",
                                        objectName="newtabbtn")
-        self._newtab_btn.setToolTip("New tab")
+        self._newtab_btn.setToolTip(self._ui_str("tbNewTab"))
         self._newtab_btn.setFixedSize(28, 26)
         self._newtab_btn.clicked.connect(lambda: self.new_tab())
         self._newtab_btn.installEventFilter(self)
@@ -27472,7 +27473,7 @@ class Browser(QMainWindow):
             # group's own block, so a group is never split in two
             if after and cur in self._group_indices(group):
                 at = cur + 1
-            i = self.tabs.insertTab(at, view, "New tab")
+            i = self.tabs.insertTab(at, view, self._new_tab_text())
         elif (after and held is not None and not self._is_header(held)
                 and getattr(held, "group", None) is None
                 # and in this virtual browser: "right after this tab"
@@ -27486,9 +27487,9 @@ class Browser(QMainWindow):
                         or not getattr(nxt, "pinned", False)):
                     break
                 at += 1
-            i = self.tabs.insertTab(at, view, "New tab")
+            i = self.tabs.insertTab(at, view, self._new_tab_text())
         else:
-            i = self.tabs.addTab(view, "New tab")
+            i = self.tabs.addTab(view, self._new_tab_text())
 
         self._add_close_button(i, view)
         if private:
@@ -29289,7 +29290,7 @@ class Browser(QMainWindow):
             return ""                    # pinned tabs are their icon
         name = getattr(view, "tab_name", None)
         if not name:
-            name = getattr(view, "_last_title", None) or "New tab"
+            name = getattr(view, "_last_title", None) or self._new_tab_text()
         if view.page().isAudioMuted():
             name = self.MUTE_MARK + name
         if getattr(self, "_recording_mark", False):
@@ -57854,6 +57855,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # ago: whether it belongs back on the screen is asked again
         self._update_private_marks()
 
+    def _new_tab_text(self):
+        """A fresh tab's label, in his language."""
+        return self._ui_str("tbNewTab")
+
     def relabel_toolbar(self):
         """The tooltips, in his language. Apart from rebuild_toolbar so
         that a language change can call it on its own."""
@@ -57861,6 +57866,18 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if name == "star":
                 continue  # _sync_star says whether it adds or removes
             btn.setToolTip(self._tb_tip(name))
+        try:
+            self._newtab_btn.setToolTip(self._ui_str("tbNewTab"))
+        except (AttributeError, RuntimeError):
+            pass
+        # the address bar's own words too (unless a site search is
+        # showing its "search <site>" line)
+        try:
+            if not self.searching_site():
+                self.urlbar.setPlaceholderText(
+                    self._ui_str("barPlaceholder"))
+        except (AttributeError, RuntimeError):
+            pass
         # and the star's tooltip is _sync_star's to write, so it is
         # asked rather than skipped: left out, the one button whose
         # tooltip says what it will do stays in the old language until
@@ -76361,7 +76378,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return  # full: refuse it now rather than lose it later
         view = self.current()
         title = (self._tab_title(self.tabs.indexOf(view)) or "").strip()
-        if title in ("", "New tab"):
+        if title in ("", "New tab", self._new_tab_text()):
             title = url.host() or url.toString()
         self.bookmarks.append({
             "id": self._new_bookmark_id(),
