@@ -8993,9 +8993,27 @@ NAV_JS = r"""(function (want) {
          plain text boxes; a draft of those is not worth keeping */
       var ac = String(el.getAttribute && el.getAttribute("autocomplete")
                       || "").toLowerCase();
-      if (/(^|\s)(cc-|one-time-code|new-password|current-password)/.test(ac))
-        return;
       var key = el.id || el.name || el.placeholder || "field";
+      /* and by its names, not only its autocomplete token: a card
+         number, a CVV or a one-time code in a plain text box (most
+         sites give none) went into the page's own sessionStorage, where
+         the page and every script on it can read it */
+      var said = [ac, el.name || "", el.id || "",
+                  el.getAttribute("placeholder") || "",
+                  el.getAttribute("aria-label") || ""].join(" ").toLowerCase();
+      if (el.type === "hidden" || el.hasAttribute("data-pwshown")
+          || /(^|\s)(cc-|one-time-code|new-password|current-password)/.test(ac)
+          || /cc-|cc[-_ ]?(num|number|exp|csc|cvv|cvc)|ccnum|card[-_ ]?(num|no|number|holder)|cardnumber|creditcard|debitcard|cvc|cvv|csc|kartennummer|prüfnummer|pruefnummer|security.?code|sicherheitscode|iban|one.?time|otp.?code|sms.?code|auth.?code|pin.?code|verification.?code|bestätigungscode|bestaetigungscode|social.?security|steuer.?id|password|passwort|kennwort|passcode/.test(said)
+          || /(^|[^a-z0-9])(tan|otp|ssn|cvv|cvc|pw|pwd)([^a-z0-9]|$)/.test(said)) {
+        try {
+          var held = JSON.parse(sessionStorage.getItem("__formdraft") || "{}");
+          if (key in held) {
+            delete held[key];
+            sessionStorage.setItem("__formdraft", JSON.stringify(held));
+          }
+        } catch (err) {}
+        return;
+      }
       var rows = {};
       try {
         rows = JSON.parse(sessionStorage.getItem("__formdraft") || "{}");
@@ -45770,6 +45788,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         Sign-up and checkout forms, which are the same seven fields
         under forty different names — that is what the matching in
         the page tool is for."""
+        if self.vault is None or self.vault_locked():
+            self.flash(self._ui_str("vaultLockedShort"))
+            return False      # not "no saved addresses": they are there
         rows = self.vault_items_of("identity")
         if not rows:
             self.flash(self._ui_str("identNone"))
@@ -45827,6 +45848,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # what is typed into a plain-http page crosses the network
             # readable by anyone on the way
             self.flash(self._ui_str("cardInsecure"))
+            return False
+        if self.vault is None or self.vault_locked():
+            self.flash(self._ui_str("vaultLockedShort"))
             return False
         rows = self.vault_items_of("card")
         if not rows:
@@ -81616,9 +81640,25 @@ FORM_PICK = r"""(function () {
        one-time code. Nothing that keeps what he typed (drafts, form
        history) may write one of these to disk. */
     if (el.type === "password" || el.type === "hidden") return true;
+    /* a password made readable (the show-password eye, a site's own
+       toggle) is still a password */
+    if (el.hasAttribute && el.hasAttribute("data-pwshown")) return true;
     var words = label(el);
-    return /cc-|card|cvc|cvv|csc|kartennummer|pr\u00fcfnummer|pruefnummer|security.?code|sicherheitscode|iban|one-time|verification.?code|best\u00e4tigungscode|bestaetigungscode|social.?security|steuer.?id|password|passwort|kennwort|passcode/.test(words)
-      || /(^|[^a-z0-9])(tan|pin|otp|bic|ssn|mfa|2fa|totp)([^a-z0-9]|$)/.test(words);
+    /* "cc_number", "ccnum", "otpCode" (lower-cased: "otpcode") and the
+       like were missed by the word-boundary forms */
+    return /cc-|cc[-_ ]?(num|number|exp|csc|cvv|cvc)|ccnum|card|cvc|cvv|csc|kartennummer|prüfnummer|pruefnummer|security.?code|sicherheitscode|iban|one.?time|otp.?code|sms.?code|auth.?code|pin.?code|verification.?code|bestätigungscode|bestaetigungscode|social.?security|steuer.?id|password|passwort|kennwort|passcode/.test(words)
+      || /(^|[^a-z0-9])(tan|pin|otp|bic|ssn|mfa|2fa|totp|pw|pwd|pass|passwd)([^a-z0-9]|$)/.test(words);
+  }
+
+  function textBox(el) {
+    /* a box a name, an address or a card number can go into: not a
+       radio, a checkbox, a file picker or a button (a payment-method
+       radio with id=creditcard took the card number; a file input
+       threw and stopped the whole fill half way) */
+    if (el.tagName === "TEXTAREA") return true;
+    if (el.tagName !== "INPUT") return false;
+    return /^(|text|email|tel|search|url|number)$/.test(
+      String(el.getAttribute("type") || "").toLowerCase());
   }
 
   function setVal(el, value) {
@@ -81631,7 +81671,9 @@ FORM_PICK = r"""(function () {
                                            : HTMLInputElement.prototype);
       var setter = Object.getOwnPropertyDescriptor(proto, "value").set;
       setter.call(el, value);
-    } catch (e) { el.value = value; }
+    } catch (e) {
+      try { el.value = value; } catch (e2) { return; }
+    }
     el.dispatchEvent(new Event("input", {bubbles: true}));
     el.dispatchEvent(new Event("change", {bubbles: true}));
   }
@@ -82270,7 +82312,7 @@ FORM_TOOLS = {
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
       if (taken.indexOf(el) >= 0 || !visible(el)) continue;
-      if (el.type === "password" || el.tagName === "SELECT") continue;
+      if (el.type === "password" || !textBox(el)) continue;
       if (!wants(el, want[w][2])) continue;
       if (wants(el, want[w][3])) continue;
       setVal(el, value);
@@ -82362,6 +82404,9 @@ FORM_TOOLS = {
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
       if (taken.indexOf(el) >= 0 || !visible(el)) continue;
+      /* a CVV box is often type=password, an expiry type=month */
+      if (!(textBox(el) || el.type === "password" || el.type === "month"))
+        continue;
       if (!wants(el, pairs[pair][1])) continue;
       /* "creditCardExpiry", "creditcard_cvv", "Credit card holder" all
          say creditcard: the number went into the expiry or the CVV */
@@ -82765,7 +82810,27 @@ FORM_TOOLS = {
     var el2 = byKey[rows[r].key];
     /* never over the top of something he has typed since, and never
        into a secret box (a draft from before they were left out) */
-    if (el2 && !el2.value && !secretField(el2)) {
+    /* a list is "untouched" at its own default choice, not when it is
+       empty: one whose first option has a value was never put back */
+    var fresh = false;
+    if (el2 && el2.tagName === "SELECT") {
+      if (el2.multiple) {
+        fresh = true;
+        for (var o2 = 0; o2 < el2.options.length; o2++) {
+          if (el2.options[o2].selected !== el2.options[o2].defaultSelected)
+            fresh = false;
+        }
+      } else {
+        var dflt = 0;
+        for (var o = 0; o < el2.options.length; o++) {
+          if (el2.options[o].defaultSelected) { dflt = o; break; }
+        }
+        fresh = el2.selectedIndex === dflt;
+      }
+    } else if (el2) {
+      fresh = !el2.value;
+    }
+    if (el2 && fresh && !secretField(el2)) {
       setVal(el2, rows[r].value); done++;
     }
   }

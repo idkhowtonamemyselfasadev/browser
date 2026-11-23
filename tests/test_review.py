@@ -22688,6 +22688,85 @@ _catch342 = [v for k, v in vars(B).items()
 check("342 (source) catch-up to live takes a speed he sets as its new base",
       any("base = m.__catchBase = m.playbackRate" in d["catchup"] for d in _catch342))
 
+# ---- 343: forms, third look (the 104th pass) ----
+_fv343 = br.new_tab(); H.spin(300)
+H.load(_fv343, srv.url("/twhome?form343")); H.spin(500)
+br.tabs.setCurrentWidget(_fv343); H.spin(100)
+H.js(_fv343, """(function(){
+  document.body.innerHTML =
+    '<form>' +
+    '<label><input type=radio name=pay id=creditcard value=cc> Card</label>' +
+    '<input id=cardnumber name=cardnumber autocomplete=cc-number>' +
+    '<input type=password id=cvc name=cvc autocomplete=cc-csc>' +
+    '<label for=proof>Upload address proof</label><input type=file id=proof>' +
+    '<input id=street name=street autocomplete=street-address>' +
+    '<input id=city name=city>' +
+    '<select id=land name=country><option value=de selected>DE</option>' +
+    '<option value=at>AT</option><option value=ch>CH</option></select>' +
+    '<input id=ccn name=cc_number>' +
+    '<input id=otp name=otpCode>' +
+    '</form>';
+  return 1; })()""")
+H.spin(200)
+_res343 = {}
+br.form_tool("fillcard", view=_fv343,
+             then=lambda r: _res343.__setitem__("card", r),
+             arg={"number": "4111111111111111", "cardholder": "", "expiry": "",
+                  "cvv": "123"})
+H.wait_for(lambda: "card" in _res343, 4000)
+br.form_tool("fillident", view=_fv343,
+             then=lambda r: _res343.__setitem__("ident", r),
+             arg={"fullname": "", "email": "", "phone": "", "street": "Main 1",
+                  "city": "Town", "zip": "", "country": ""})
+H.wait_for(lambda: "ident" in _res343, 4000)
+_state343 = H.js(_fv343, """JSON.stringify({
+  radio: document.getElementById('creditcard').value,
+  number: document.getElementById('cardnumber').value,
+  cvc: document.getElementById('cvc').value,
+  street: document.getElementById('street').value,
+  city: document.getElementById('city').value})""")
+# a list choice comes back
+H.js(_fv343, "document.getElementById('land').value = 'de'; 1")
+br.form_tool("restoreform", view=_fv343,
+             then=lambda r: _res343.__setitem__("restore", r),
+             arg=[{"key": "#land", "value": "ch"}])
+H.wait_for(lambda: "restore" in _res343, 4000)
+_land343 = H.js(_fv343, "document.getElementById('land').value")
+# secret boxes stay out of the page's own draft store
+_kd_was343 = br.config.get("keepDrafts", "__absent__")
+br.config["keepDrafts"] = True
+br.refresh_nav()
+H.spin(300)
+H.js(_fv343, """(function(){
+  sessionStorage.removeItem('__formdraft');
+  ['ccn','otp','city'].forEach(function(id){
+    var el = document.getElementById(id); el.value = id + '-typed';
+    el.dispatchEvent(new Event('input', {bubbles: true})); });
+  return 1; })()""")
+H.spin(200)
+_drafts343 = H.js(_fv343, "sessionStorage.getItem('__formdraft') || ''") or ""
+if _kd_was343 == "__absent__":
+    br.config.pop("keepDrafts", None)
+else:
+    br.config["keepDrafts"] = _kd_was343
+br.refresh_nav()
+_close_if_open(_fv343)
+_st343 = json.loads(_state343 or "{}")
+check("343 the card number goes into the number box, not a payment radio",
+      _st343.get("radio") == "cc" and _st343.get("number") == "4111111111111111",
+      _st343)
+check("343 ...and the CVV into a password-type CVV box", _st343.get("cvc") == "123", _st343)
+check("343 an address fill gets past a file input labelled 'address'",
+      _st343.get("street") == "Main 1" and _st343.get("city") == "Town", _st343)
+check("343 a saved list choice is put back", _land343 == "ch", _land343)
+check("343 a card number or one-time code in a plain box is no draft",
+      "ccn-typed" not in _drafts343 and "otp-typed" not in _drafts343
+      and "city-typed" in _drafts343, _drafts343)
+_fp343 = B.FORM_PICK
+check("343 (source) the German words for a CVV and a code are matched as written",
+      ("pr\u00fcfnummer" in _fp343 or "pr\\u00fcfnummer" in _fp343)
+      and "pr\\\\u00fcfnummer" not in _fp343)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

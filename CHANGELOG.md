@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 12 (part sixty-seven: forms, third look)
+
+- **Card fill puts the number in the number box.** On a checkout whose
+  "pay by card" radio button is called "creditcard", the card number went
+  into the radio button and the real number box stayed empty. Card and
+  address fill now only type into boxes that take text (and a CVV box that
+  hides what is typed); a file-upload box labelled "address proof" no
+  longer stops an address fill half way.
+- **Card numbers and codes are not kept as drafts.** The page-side draft
+  keeper (so a reload does not lose what you typed) also kept card numbers,
+  security codes and one-time codes typed into plain text boxes, in
+  storage the page itself can read; a password made visible with the
+  "show password" eye was kept too. These boxes are now recognised by
+  their names as well (cc_number, otpCode, Prüfnummer …).
+- **A saved choice in a list comes back** when a form draft is restored
+  (country, topic); only lists with an empty first entry did before.
+- **A locked vault says it is locked** instead of "no saved addresses" or
+  "no saved cards".
+
 ## 2026-11-23 — two months on the browser, round 11 (part sixty-six: media, third look)
 
 - **Your speed wins.** With "skip silence" or "catch up to live" on, a speed
