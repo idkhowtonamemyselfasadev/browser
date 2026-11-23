@@ -22816,6 +22816,13 @@ check("344 (source) a selection is searched from its own tab",
 check("344 (source) a key given to a site outranks 'pages may not grab keys'",
       "window.__navKeysThrough && window.__navKeysThrough(e)) return;" in B.NAV_JS)
 
+# ---- 345: the proxy settings speak his language ----
+_set345 = (_Path(B.__file__).parent / "settings.html").read_text()
+check("345 the proxy page's buttons and choices are translated",
+      'data-str="proxyAddRule"' in _set345
+      and "S.proxySystem" in _set345 and "proxyDirect ||" in _set345
+      and B.UI_STRINGS["de"].get("proxyAddRule") == "Regel hinzufügen")
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

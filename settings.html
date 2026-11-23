@@ -3599,7 +3599,7 @@
           <input type="text" id="arpat" placeholder="*.reddit.com" style="width:190px">
           <span style="flex:0">&rarr;</span>
           <select id="arprof"></select>
-          <button id="araddbtn">Add rule</button>
+          <button id="araddbtn" data-str="proxyAddRule">Add rule</button>
         </div>
         <div class="hint" id="t_autoHint">Rules override the mode above for matching sites; changes apply after a restart (system proxy is read at launch).</div>
       </div>
@@ -6783,8 +6783,8 @@
     box.innerHTML = "";
     const active = window._activeProxy;
     const S = window.STR || {};
-    const rows = [{name:"system", label:"System"},
-                  {name:"direct", label:"Direct"}]
+    const rows = [{name:"system", label:S.proxySystem || "System"},
+                  {name:"direct", label:S.proxyDirect || "Direct"}]
       .concat((window._proxyProfiles||[]).map(p =>
         ({name:p.name, label:p.name + "  (" + p.type + " " + p.host + ":" + p.port + ")",
           user:true})));
@@ -6821,7 +6821,7 @@
   }
   function profOptions(sel, chosen) {
     sel.innerHTML = "";
-    const opts = [["direct","Direct"]]
+    const opts = [["direct", (window.STR || {}).proxyDirect || "Direct"]]
       .concat((window._proxyProfiles||[]).map(p=>[p.name,p.name]));
     for (const [v,l] of opts) {
       const o = document.createElement("option");

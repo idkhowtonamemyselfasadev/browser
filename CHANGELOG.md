@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 14 (part sixty-nine: Settings, looked at page by page)
+
+All 25 Settings pages were photographed in the light theme and looked at.
+They hold together well; one page did not:
+
+- **The proxy page speaks your language.** "System", "Direct" and "Add
+  rule" were English in every language.
+
 ## 2026-11-23 — two months on the browser, round 13 (part sixty-eight: keys and the mouse, third look)
 
 - **Two switches that did nothing now work.** "Ctrl+Tab in most recently
