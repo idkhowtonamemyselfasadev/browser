@@ -8612,6 +8612,9 @@ NAV_JS = r"""(function (want) {
         if (!W[flag]) return;
         if (flag === "noKeyGrab") {
           if (window.__navTyping(e)) return;
+          /* a key he gave this site keeps reaching the site's own
+             handlers: stopped here at capture, it never did */
+          if (window.__navKeysThrough && window.__navKeysThrough(e)) return;
           if (e.type === "keydown" && window.__navKeyStep)
             window.__navKeyStep(e);
           e.stopPropagation();
@@ -11998,6 +12001,11 @@ class TabWidget(QTabWidget):
         super().__init__()
         self.browser = browser
         self.setTabBar(GroupTabBar(browser))
+        try:
+            self.tabBar().setChangeCurrentOnDrag(
+                bool(browser.mouse_config().get("hoverSwitch", True)))
+        except Exception:
+            pass
 
     # Qt calls these for every tab that arrives or goes, however it
     # happened. The sidebar needs exactly that and cannot get it from
@@ -33134,9 +33142,12 @@ class Browser(QMainWindow):
              True),
             ("tabsearch", "actTabSearch", self.open_tab_switcher,
              "Ctrl+Shift+A", True),
-            ("nexttab", "actNextTab", lambda: self._cycle(1), "Ctrl+Tab",
-             True),
-            ("prevtab", "actPrevTab", lambda: self._cycle(-1),
+            # cycle_recent is strip order unless "most recently used
+            # order" is on -- the switch was saved and ticked and Ctrl+Tab
+            # never asked it
+            ("nexttab", "actNextTab", lambda: self.cycle_recent(1),
+             "Ctrl+Tab", True),
+            ("prevtab", "actPrevTab", lambda: self.cycle_recent(-1),
              "Ctrl+Shift+Tab", True),
             ("movetabright", "actMoveTabRight", lambda: self.move_tab_by(1),
              "Ctrl+Shift+PgDown", True),
@@ -34548,6 +34559,14 @@ class Browser(QMainWindow):
         self.save_config(quiet=True)
         self.refresh_nav()
         self.apply_scroll_steps()
+        if key == "hoverSwitch":
+            # read by nothing before: the setting ticked and unticked
+            # and the strip did what it always did
+            for win in self._all_windows():
+                try:
+                    win.tabs.tabBar().setChangeCurrentOnDrag(bool(value))
+                except (AttributeError, RuntimeError):
+                    continue
         return value
 
     def apply_scroll_steps(self):
@@ -34750,13 +34769,25 @@ class Browser(QMainWindow):
         if not host or not key:
             return False
         rows = dict(self.config.get("keysThrough") or {})
-        keys = [str(k) for k in (rows.get(host) or [])]
+        # the row the menu read: this host's own (however it was
+        # stored, "WWW.Example.com" too), else the parent domain's it
+        # inherits -- toggled from an empty list, a ticked inherited key
+        # was "added" again and every other inherited key dropped
+        own = next((k for k in rows
+                    if str(k).strip().lower().removeprefix("www.") == host),
+                   None)
+        keys = ([str(k) for k in (rows.get(own) or [])] if own is not None
+                else list(self.site_keys_through(host)))
+        if own is not None and own != host:
+            rows.pop(own, None)
         want = (key not in keys) if on is None else bool(on)
         if want and key not in keys:
             keys.append(key)
         elif not want and key in keys:
             keys.remove(key)
-        if keys:
+        # an empty list is kept when it overrides a parent domain's
+        # (dropped, the parent's keys applied here again)
+        if keys or own is None:
             rows[host] = keys
         else:
             rows.pop(host, None)
@@ -34795,13 +34826,19 @@ class Browser(QMainWindow):
         if not host or not action_id:
             return False
         rows = dict(self.config.get("keysOffHere") or {})
-        ids = [str(i) for i in (rows.get(host) or [])]
+        own = next((k for k in rows
+                    if str(k).strip().lower().removeprefix("www.") == host),
+                   None)
+        ids = ([str(i) for i in (rows.get(own) or [])] if own is not None
+               else list(self.site_keys_off(host)))
+        if own is not None and own != host:
+            rows.pop(own, None)
         want = (action_id not in ids) if on is None else bool(on)
         if want and action_id not in ids:
             ids.append(action_id)
         elif not want and action_id in ids:
             ids.remove(action_id)
-        if ids:
+        if ids or own is None:
             rows[host] = ids
         else:
             rows.pop(host, None)
@@ -34975,8 +35012,8 @@ class Browser(QMainWindow):
         if on:
             if getattr(self, "_peek_from", None) is not None:
                 return False
-            was = self.tabs.currentIndex()
-            rows = self.recent_tab_order()
+            was = self.current()
+            rows = self._recent_here()
             target = None
             for one in rows[1:]:
                 if self.tabs.indexOf(one) >= 0:
@@ -34984,6 +35021,8 @@ class Browser(QMainWindow):
                     break
             if target is None:
                 return False
+            # the tab itself, not its index: a tab closed or moved while
+            # the key was held sent him back to whichever sat there
             self._peek_from = was
             self.tabs.setCurrentIndex(self.tabs.indexOf(target))
             return True
@@ -34991,9 +35030,28 @@ class Browser(QMainWindow):
         self._peek_from = None
         if was is None:
             return False
-        if 0 <= was < self.tabs.count():
-            self.tabs.setCurrentIndex(was)
+        try:
+            at = self.tabs.indexOf(was)
+        except RuntimeError:
+            return False
+        if at >= 0:
+            self.tabs.setCurrentIndex(at)
         return True
+
+    def _recent_here(self):
+        """recent_tab_order, the tabs of this virtual browser only (the
+        ones the strip shows): peek and Ctrl+Tab in MRU order jumped
+        into another browser's tab without switching to it."""
+        bar = self.tabs.tabBar()
+        out = []
+        for one in self.recent_tab_order():
+            try:
+                at = self.tabs.indexOf(one)
+                if at >= 0 and bar.isTabVisible(at):
+                    out.append(one)
+            except RuntimeError:
+                continue
+        return out
 
     def recent_tab_order(self):
         """The tabs, most recently looked at first.
@@ -35037,8 +35095,7 @@ class Browser(QMainWindow):
         that: the tab he was on before, then the one before that."""
         if not self.config.get("mruTabs", False):
             return self._cycle(step)
-        rows = [one for one in self.recent_tab_order()
-                if self.tabs.indexOf(one) >= 0]
+        rows = self._recent_here()
         if len(rows) < 2:
             return self._cycle(step)
         at = int(getattr(self, "_mru_at", 0) or 0) + (1 if step > 0 else -1)
@@ -35097,7 +35154,9 @@ class Browser(QMainWindow):
 
         def done(text):
             if (text or "").strip():
-                self.search_for(text.strip())
+                # with its tab: a private tab's selection went to the
+                # normal engine and history
+                self.search_for(text.strip(), view=view)
         view.page().runJavaScript(PAGE_TOOLS["selection"], APP_WORLD_ID, done)
         return True
 
@@ -57119,7 +57178,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 and event.type() in (QEvent.Type.MouseButtonPress,
                                      QEvent.Type.MouseButtonDblClick)):
             i = obj.tabAt(event.position().toPoint())
-            if event.type() == QEvent.Type.MouseButtonPress:
+            if (event.type() == QEvent.Type.MouseButtonPress
+                    and event.button() == Qt.MouseButton.LeftButton):
+                # the left button only: a right-click's menu swallows the
+                # release, and the "drag" stayed on
                 self._drag_active = True
                 w0 = self.tabs.widget(i) if i >= 0 else None
                 # remember which tab the hand is on: during a drag Qt

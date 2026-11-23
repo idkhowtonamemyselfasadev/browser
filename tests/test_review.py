@@ -22767,6 +22767,55 @@ check("343 (source) the German words for a CVV and a code are matched as written
       ("pr\u00fcfnummer" in _fp343 or "pr\\u00fcfnummer" in _fp343)
       and "pr\\\\u00fcfnummer" not in _fp343)
 
+# ---- 344: keys and input, third look (the 105th pass) ----
+_src344 = __import__("inspect").getsource
+# 344a: a key inherited from the parent domain is switched OFF from the subdomain
+_kt_was344 = json.dumps(br.config.get("keysThrough") or {})
+try:
+    br.config["keysThrough"] = {"kt344.example": ["Ctrl+S"]}
+    _shown344 = br.site_keys_through("sub.kt344.example")
+    _w344 = br.set_keys_through("sub.kt344.example", "Ctrl+S")
+    _after344 = br.site_keys_through("sub.kt344.example")
+    br.set_keys_through("sub2.kt344.example", "Ctrl+K")
+    _other344 = br.site_keys_through("sub2.kt344.example")
+finally:
+    br.config["keysThrough"] = json.loads(_kt_was344)
+check("344 a key the subdomain inherits is switched off there, not added again",
+      _shown344 == ["Ctrl+S"] and _w344 is False and _after344 == [],
+      (_shown344, _w344, _after344))
+check("344 ...and adding another key keeps the inherited one",
+      sorted(_other344) == ["Ctrl+K", "Ctrl+S"], _other344)
+# 344b: Ctrl+Tab asks cycle_recent; MRU stays in this browser
+check("344 (source) Ctrl+Tab follows 'most recently used order'",
+      "self.cycle_recent(1)" in _src344(B.Browser._actions)
+      if hasattr(B.Browser, "_actions") else
+      "lambda: self.cycle_recent(1)" in _Path(B.__file__).read_text())
+_hid344 = br.new_tab(url=srv.url("/twhome?mru344a"), switch=False); H.spin(200)
+_vis344 = br.new_tab(url=srv.url("/twhome?mru344b"), switch=True); H.spin(200)
+br.note_recent_tab(_hid344)
+br.note_recent_tab(_vis344)
+br.tabs.tabBar().setTabVisible(br.tabs.indexOf(_hid344), False)
+_here344 = br._recent_here()
+_close_if_open(_hid344)
+_close_if_open(_vis344)
+check("344 peek and MRU cycling see only the tabs this browser shows",
+      _hid344 not in _here344 and _vis344 in _here344, len(_here344))
+# 344c: the hover-switch setting reaches the strip
+_ms_was344 = json.dumps(br.config.get("mouse") or {})
+try:
+    br.set_mouse("hoverSwitch", False)
+    _off344 = br.tabs.tabBar().changeCurrentOnDrag()
+    br.set_mouse("hoverSwitch", True)
+    _on344 = br.tabs.tabBar().changeCurrentOnDrag()
+finally:
+    br.config["mouse"] = json.loads(_ms_was344)
+check("344 'switch tabs while dragging over them' reaches the tab strip",
+      _off344 is False and _on344 is True, (_off344, _on344))
+check("344 (source) a selection is searched from its own tab",
+      "self.search_for(text.strip(), view=view)" in _src344(B.Browser.search_selection))
+check("344 (source) a key given to a site outranks 'pages may not grab keys'",
+      "window.__navKeysThrough && window.__navKeysThrough(e)) return;" in B.NAV_JS)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

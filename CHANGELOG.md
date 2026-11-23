@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 13 (part sixty-eight: keys and the mouse, third look)
+
+- **Two switches that did nothing now work.** "Ctrl+Tab in most recently
+  used order" was saved and ticked, but Ctrl+Tab always went in strip
+  order; and "switch to a tab when dragging over it" changed nothing at
+  all. Both do what they say now.
+- **Peek and Ctrl+Tab stay in the browser you are in.** Holding the peek
+  key or cycling in most-recently-used order could jump into a tab of
+  another virtual browser without switching to it; letting go of peek
+  after closing a tab could land on the wrong one.
+- **Keys you let a site keep, per subdomain.** Unticking a key a subdomain
+  inherited from its main site ticked it again, and ticking another one
+  dropped the inherited keys there. And a key you gave a site now
+  reaches it even with "pages may not grab keys" on.
+- **Small ones.** Searching for a selected word from a private tab goes
+  through the private search, and a right-click on a tab no longer leaves
+  the strip thinking a drag is going on.
+
 ## 2026-11-23 — two months on the browser, round 12 (part sixty-seven: forms, third look)
 
 - **Card fill puts the number in the number box.** On a checkout whose
