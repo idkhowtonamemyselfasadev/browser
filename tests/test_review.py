@@ -22451,6 +22451,33 @@ check("337 (source) a blocked kind is asked about by the name it is saved as",
       "if not blocked_asked and self.download_blocked(name):"
       in _src337(B.Browser._download))
 
+# ---- 338: a ticking title does not rewrite the history every second ----
+_hv338 = br.new_tab(); H.spin(300)
+H.load(_hv338, srv.url("/twhome?tick338")); H.spin(600)
+br.tabs.setCurrentWidget(_hv338); H.spin(100)
+_writes338 = []
+_real_pdc338 = B._page_data_changed
+B._page_data_changed = lambda *a, **k: (_writes338.append(1), _real_pdc338(*a, **k))
+try:
+    br._title_changed(_hv338, "tick 0")      # the row for this page
+    H.spin(100)
+    del _writes338[:]
+    for _n in range(1, 6):
+        br._title_changed(_hv338, "tick %d" % _n)
+        H.spin(150)
+    _burst338 = len(_writes338)
+    H.spin(2600)
+    _after338 = len(_writes338)
+    _row338 = [r for r in br.history[-50:] if "tick338" in r.get("url", "")]
+finally:
+    B._page_data_changed = _real_pdc338
+    _close_if_open(_hv338)
+check("338 five title changes in a row write the history once, a moment later",
+      _burst338 == 0 and _after338 == 1, (_burst338, _after338))
+check("338 ...and that write carries the last title",
+      bool(_row338) and _row338[-1].get("title") == "tick 5",
+      [r.get("title") for r in _row338])
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

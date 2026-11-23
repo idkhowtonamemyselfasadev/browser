@@ -56626,7 +56626,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 and row.get("s") == entry.get("s")
                 and any(r is row for r in self.history[-200:])):
             row["title"] = entry["title"]
-            self.save_history()
+            self._save_history_soon()
             return
         # (in the same virtual browser only: a main tab on the page a
         # virtual browser had just read took that row out of its history)
@@ -56748,7 +56748,32 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.save_history()
         return len(self.history)
 
+    def _save_history_soon(self, ms=2000):
+        """One write for a run of title changes (see _record_history),
+        and never later than the quit."""
+        timer = getattr(self, "_history_save_timer", None)
+        if timer is None:
+            timer = self._history_save_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self.save_history)
+            try:
+                QApplication.instance().aboutToQuit.connect(
+                    self._flush_history_soon)
+            except (AttributeError, RuntimeError):
+                pass
+        timer.start(int(ms))
+        return True
+
+    def _flush_history_soon(self):
+        timer = getattr(self, "_history_save_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+            self.save_history()
+
     def save_history(self):
+        timer = getattr(self, "_history_save_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()      # this write carries the waiting title too
         _page_data_changed()
         try:
             HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)

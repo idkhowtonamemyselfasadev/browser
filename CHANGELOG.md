@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 7 (part sixty-two: a ticking title costs nothing)
+
+- **No more disk write every second for a busy tab.** A page whose title
+  keeps changing (a timer, an unread count, a live chat) rewrote the whole
+  history file, synced to disk, on every change for as long as it was
+  open. A title-only change is now written once things have been quiet
+  for two seconds, and at the latest when the browser closes.
+
 ## 2026-11-23 — two months on the browser, round 6 (part sixty-one: a faster start, and downloads a third time)
 
 - **The browser starts about three times faster.** Started as
