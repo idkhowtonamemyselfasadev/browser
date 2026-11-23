@@ -20506,7 +20506,6 @@ class WebView(QWebEngineView):
             for entry in others:
                 sub.addAction(_amp(entry["name"])).triggered.connect(
                     lambda _, sid=entry["sid"]: (
-                        browser.switch_session(sid),
                         browser.new_tab(url=real, session=sid)))
         copy = menu.addMenu(ui("linkCopyAs"))
         copy.addAction(ui("copyClean")).triggered.connect(
@@ -27268,8 +27267,9 @@ class Browser(QMainWindow):
             if session is None:
                 sid = self.session_rule_for(url)
                 if sid is not None and sid != self.active_session:
-                    if switch:
-                        self.switch_session(sid)
+                    # switched to once the tab exists (below): switching
+                    # first found that browser empty and opened a blank
+                    # tab in it beside this one
                     session = sid
                     group = None   # that browser's jar, not this group's
         if group is INHERIT_GROUP:
@@ -27508,6 +27508,22 @@ class Browser(QMainWindow):
             i = self.tabs.addTab(view, self._new_tab_text())
 
         self._add_close_button(i, view)
+        # a tab of another virtual browser: in front, that browser is
+        # switched to (it has a tab now, so no blank one is made);
+        # behind, it is not shown in this one's strip and sidebar
+        other = getattr(view, "session", None)
+        if (not private and other and other != PRIVATE_SESSION
+                and other != self.active_session
+                and any(e.get("sid") == other for e in self.sessions)):
+            if switch:
+                self.tabs.setCurrentIndex(i)      # this one is in front
+                self.switch_session(other)
+                i = self.tabs.indexOf(view)
+            else:
+                try:
+                    self.tabs.tabBar().setTabVisible(i, False)
+                except RuntimeError:
+                    pass
         if private:
             self.tabs.setTabIcon(i, self._private_icon())
             self.tabs.setTabToolTip(i, self._ui_str("privateTip"))
@@ -28422,7 +28438,10 @@ class Browser(QMainWindow):
         name = next((e["name"] for e in self.sessions if e["sid"] == sid), sid)
         rename = menu.addAction("Rename\u2026")
         close = menu.addAction("Close \u201c%s\u201d" % name)
-        close.setEnabled(len(self.sessions) > 1)
+        # not the main one: its jar is the browser's own, it came back
+        # at the next start with every login, and in the meantime tabs
+        # that fall back to "main" landed in a browser on no bar
+        close.setEnabled(len(self.sessions) > 1 and sid != "main")
         chosen = menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
         menu.deleteLater()
         if chosen is close:
@@ -28463,7 +28482,7 @@ class Browser(QMainWindow):
         return True
 
     def _close_session(self, sid):
-        if len(self.sessions) <= 1:
+        if len(self.sessions) <= 1 or sid == "main":
             return
         # in every window: closed in one, it went on in the others with
         # its tabs on a jar no longer on the list (the next tab there
@@ -38225,7 +38244,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.config["throwawaySessions"] = names
         return names
 
-    def add_throwaway_session(self, name=""):
+    def add_throwaway_session(self, name="", switch=True):
         """A virtual browser with nowhere to write: a fresh session,
         gone when it closes. For one look at a site without joining it
         to anything, and for the clean room."""
@@ -38235,7 +38254,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.throwaway_sessions().append(sid)
         self.save_config(quiet=True)
         self._sessions_changed()
-        self.switch_session(sid)
+        if switch:
+            self.switch_session(sid)
         return sid
 
     def session_is_throwaway(self, sid):
@@ -38257,8 +38277,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             url = self._tab_url(view) if view is not None else ""
         if not url:
             return None
-        self.add_throwaway_session(self._ui_str("sessCleanRoom"))
-        return self.new_tab(url=url)
+        # into that browser by name: new_tab(url) alone looked the site
+        # up in the site rules, and a rule sent the "keeps nothing" look
+        # to a normal browser's jar -- logged in, written to its history
+        sid = self.add_throwaway_session(self._ui_str("sessCleanRoom"),
+                                         switch=False)
+        return self.new_tab(url=url, session=sid, group=None)
 
     # ---- what the connection actually is ----
     def certificate_for(self, host, port=443, timeout=4.0):
@@ -49393,6 +49417,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         private = (view is not None and not self._is_header(view)
                    and self._page_is_private(self._live_page(view)))
         folder = (self.private_download_dir() if private else None) \
+            or (self.session_download_dir(view=view) if not private
+                else None) \
             or self.download_dir()
         args = [program, "--no-playlist", "-P", str(folder)]
         if audio:
@@ -74322,7 +74348,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if self.download_should_ask(name):
             path, _ = QFileDialog.getSaveFileName(
                 self, "Save file",
-                str(self.download_dir() / request.downloadFileName()))
+                str((self._download_target_dir(page, name)
+                     or self.download_dir())
+                    / request.downloadFileName()))
             if not path:
                 request.cancel()
                 self._close_download_tab(page)

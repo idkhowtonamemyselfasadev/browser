@@ -4044,6 +4044,8 @@ _s88 = getattr(_r88[0], "session", None) if _r88 else None
 for _v in _r88:
     _close_if_open(_v)
 br.sessions[:] = _sess_was
+if br.active_session not in [e["sid"] for e in br.sessions]:
+    br.switch_session("main")   # a test left in a browser it took away
 check("a restored tab goes back into the virtual browser it was in",
       _s88 == "rv88", str(_s88))
 
@@ -4542,6 +4544,8 @@ if _name101 and br._header_index(_name101) is not None:
     except Exception:
         pass
 br.sessions[:] = _sess101
+if br.active_session not in [e["sid"] for e in br.sessions]:
+    br.switch_session("main")   # a test left in a browser it took away
 
 # ===== fourth pass, part 8: pop-out return, fills, reader, typed lines ====
 import os
@@ -4710,6 +4714,8 @@ check("a grouped tab's lock and name are saved with the group",
       any(r.get("l") and r.get("n") == "Kept 102" for r in _saved_rows102),
       str(_saved_rows102))
 br.sessions[:] = _sess102
+if br.active_session not in [e["sid"] for e in br.sessions]:
+    br.switch_session("main")   # a test left in a browser it took away
 
 # ===== fourth pass, part 9: highlights, ducking, split, cookies, fonts ===
 _hv103 = br.new_tab(url=srv.url("/twhome?hl=1"), switch=True)
@@ -6382,6 +6388,8 @@ _saved120 = _sid120 in (br.config.get("sessionTabs") or {}) or any(
     e.get("sid") == _sid120 for e in br.config.get("sessions") or [])
 br.close_tab(br.tabs.indexOf(_tv120), ask=False)
 br.sessions[:] = _sess120
+if br.active_session not in [e["sid"] for e in br.sessions]:
+    br.switch_session("main")   # a test left in a browser it took away
 _tw120[:] = _tw_before120
 br._save_groups(quiet=True)
 check("a throwaway browser writes no history and no saved tabs",
@@ -6391,6 +6399,8 @@ br.sessions.append({"name": "Work120", "sid": "w120abcd"})
 br.config["sessionSites"] = {"work120.example": "Work120"}
 _rule120 = br.session_rule_for("https://work120.example/x")
 br.sessions[:] = _sess120
+if br.active_session not in [e["sid"] for e in br.sessions]:
+    br.switch_session("main")   # a test left in a browser it took away
 if _ss120 == "__absent__":
     br.config.pop("sessionSites", None)
 else:
@@ -6629,6 +6639,8 @@ finally:
     if _in126 and br not in B.WINDOWS:
         B.WINDOWS.insert(0, br)
 br.sessions[:] = _sess126
+if br.active_session not in [e["sid"] for e in br.sessions]:
+    br.switch_session("main")   # a test left in a browser it took away
 try:
     _nw126._closing_anyway = True
     _nw126.close()
@@ -7382,6 +7394,8 @@ try:
 except RuntimeError:
     pass
 br.sessions[:] = _sess_was133
+if br.active_session not in [e["sid"] for e in br.sessions]:
+    br.switch_session("main")   # a test left in a browser it took away
 # T7 leaving a tab counts as looking at it; T8 it is saved with the session
 _sa133 = br.new_tab(url=srv.url("/twhome?sa133")); H.spin(300)
 _sb133 = br.new_tab(url=srv.url("/twhome?sb133"), switch=False); H.spin(300)
@@ -21592,6 +21606,8 @@ finally:
         if _g in br.groups:
             br.delete_group(_g)
     br.sessions[:] = _sess323
+    if br.active_session not in [e["sid"] for e in br.sessions]:
+        br.switch_session("main")   # a test left in a browser it took away
     br.session_profiles.pop("o323", None)
 check("323 a tab of another browser's group of that name comes back in a "
       "group of its own", _og323 == [("W323 2", "o323")] and _os323 == "o323",
@@ -21775,6 +21791,8 @@ finally:
         if _open325(_v):
             br.close_tab(br.tabs.indexOf(_v), ask=False)
     br.sessions[:] = _sess325
+    if br.active_session not in [e["sid"] for e in br.sessions]:
+        br.switch_session("main")   # a test left in a browser it took away
     br.session_profiles.pop("x325", None)
 check("325 'close other tabs' spares a locked tab",
       _left325 == (True, True, False), _left325)
@@ -22058,6 +22076,8 @@ finally:
         elif _k == "workspaceNow":
             br.config[_k] = _o
     br.sessions[:] = _sess331
+    if br.active_session not in [e["sid"] for e in br.sessions]:
+        br.switch_session("main")   # a test left in a browser it took away
     br.session_profiles.pop("x331", None)
 check("331 opening a workspace does not reopen a pinned tab that stayed open",
       len(_copies331) == 1, len(_copies331))
@@ -22105,6 +22125,8 @@ finally:
         if _g in br.groups:
             br.delete_group(_g)
     br.sessions[:] = _sess331c
+    if br.active_session not in [e["sid"] for e in br.sessions]:
+        br.switch_session("main")   # a test left in a browser it took away
     br.session_profiles.pop("y331", None)
 check("331 a put-aside group that comes back as 'name 2' keeps its colour",
       _g331c == ["D331 2"] and _c331c == ["#654321"], (_g331c, _c331c))
@@ -22569,6 +22591,59 @@ finally:
     br.config["snoozed"] = _snz_was340
 check("340 a snoozed tab comes back in its group, in its colour",
       _bg340 == ["Snooze340"] and _bc340 == ["#a1b2c3"], (_bg340, _bc340))
+
+# ---- 341: virtual browsers, third look (the 102nd pass) ----
+_src341 = __import__("inspect").getsource
+_sess341 = [dict(e) for e in br.sessions]
+_rules_was341 = br.config.get("sessionRules", "__absent__")
+_act341 = br.active_session
+br.sessions.append({"name": "R341", "sid": "r341"})
+br._sessions_changed()
+_n_before341 = len(br._real_tabs(session="r341"))
+_rule_key341 = None
+try:
+    # 341a: a site rule's tab opened behind is not shown in this strip
+    br.session_rule_for = lambda url, _real=br.session_rule_for: (
+        "r341" if "rule341" in B.QUrl(url).toString()
+        else _real(url))
+    _bg341 = br.new_tab(url=srv.url("/twhome?rule341bg"), switch=False)
+    H.spin(300)
+    _vis341 = br.tabs.tabBar().isTabVisible(br.tabs.indexOf(_bg341))
+    # 341b: opened in front: that browser, and no stray blank tab beside it
+    _fg341 = br.new_tab(url=srv.url("/twhome?rule341fg"), switch=True)
+    H.spin(300)
+    _act_after341 = br.active_session
+    _r_tabs341 = [br._tab_url(v) for _i, v in br._real_tabs(session="r341")]
+finally:
+    br.__dict__.pop("session_rule_for", None)
+    for _v in [v for _i, v in br._real_tabs(session="r341")]:
+        _close_if_open(_v)
+    br.switch_session(_act341)
+    br.sessions[:] = _sess341
+    if br.active_session not in [e["sid"] for e in br.sessions]:
+        br.switch_session("main")   # a test left in a browser it took away
+    br._sessions_changed()
+check("341 a site rule's tab opened behind does not show in this browser's strip",
+      _vis341 is False, _vis341)
+check("341 a site rule's tab in front switches browser with no blank tab beside it",
+      _act_after341 == "r341"
+      and all("rule341" in u for u in _r_tabs341) and len(_r_tabs341) == 2,
+      (_act_after341, _r_tabs341))
+# 341c: the clean room ignores site rules
+check("341 (source) the clean room opens in its own browser by name",
+      "session=sid, group=None" in _src341(B.Browser.open_clean_room))
+# 341d: main cannot be closed
+_before341 = [e["sid"] for e in br.sessions]
+br.sessions.append({"name": "X341", "sid": "x341"})
+br._close_session("main")
+_after341 = [e["sid"] for e in br.sessions]
+br.sessions[:] = [e for e in br.sessions if e["sid"] != "x341"]
+check("341 the main browser cannot be closed", "main" in _after341, _after341)
+check("341 (source) yt-dlp saves into the virtual browser's folder",
+      "self.session_download_dir(view=view)" in _src341(B.Browser.save_with_ytdlp))
+check("341 (source) 'ask where to save' starts in the folder it would go to",
+      "self._download_target_dir(page, name)" in _src341(B.Browser._download)
+      and _src341(B.Browser._download).count("_download_target_dir(") >= 2)
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 10 (part sixty-five: virtual browsers, third look)
+
+- **The clean room stays clean.** "Open in a clean room" looked the site up
+  in your site rules first: with a rule sending that site to one of your
+  browsers, the "keeps nothing" visit opened in that browser instead,
+  logged in and written to its history. It now always opens in its own
+  throwaway browser (and without an extra blank tab).
+- **Site rules open the tab where it belongs.** A link sent to another
+  browser by a site rule, opened in the background, showed up in the
+  browser you were in; opened in front, it could leave a stray blank tab
+  in the target browser. Both fixed, also for "open link in another
+  browser".
+- **The first browser cannot be closed.** It could be closed from its
+  menu, but it is the browser's own jar: it came back at the next start
+  with every login.
+- **Downloads per browser.** Saving a video with yt-dlp and the "ask where
+  to save" dialog now use the virtual browser's own download folder.
+
 ## 2026-11-23 — two months on the browser, round 9 (part sixty-four: sleeping tabs, third look)
 
 - **Game mode ends with the game.** Quitting the browser while game mode
