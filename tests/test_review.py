@@ -8114,7 +8114,7 @@ _src146 = _Path(B.__file__).read_text()
 check("the window that takes over the session restores it first, and a "
       "parent's block leaves a subdomain he allowed",
       "_restore_as_writer = True" in _src146
-      and 'self.cookie_rules().get(here) == "allow"' in _src146)
+      and 'self.cookie_rule_for(here) == "allow"' in _src146)
 if br.desk() is not None:
     _dw146 = br.new_window(); H.spin(700)
     _same146 = _dw146.desk() is br.desk()
@@ -14225,12 +14225,15 @@ _secure248 = []
 _made248 = []
 
 
-def _note248(cookie, jar=""):
+_store248 = br.profile.cookieStore()
+
+
+def _set248(cookie, origin=None):
     _secure248.append(bool(cookie.isSecure()))
     _made248.append(_QNC247(cookie))
 
 
-br._note_cookie = _note248
+_store248.setCookie = _set248
 try:
     for _u248 in ("http://plain248.example/", "https://tls248.example/"):
         _fv248 = _View248(_u248)
@@ -14239,7 +14242,8 @@ try:
         br.set_cookie("n248", "1")
         del br.current, br._live_page
 finally:
-    for _n in ("_note_cookie", "current", "_live_page"):
+    _store248.__dict__.pop("setCookie", None)
+    for _n in ("current", "_live_page"):
         br.__dict__.pop(_n, None)
     for _ck in _made248:
         try:
@@ -20892,7 +20896,7 @@ _src317 = __import__("inspect").getsource(B.Browser.watch_cookies)
 check("317 (source) a jar made after a crash wipes for its first moments, "
       "a private one not",
       "time.monotonic() + 20" in _src317 and "_was_crash" in _src317
-      and 'getattr(store, "_jar", "") != "private"' in _src317)
+      and '_jar_off_record(getattr(store, "_jar", ""))' in _src317)
 
 # 317b: Remove on the www row takes that cookie only
 _v317 = br.new_tab(url=None)
@@ -22274,6 +22278,94 @@ check("333 with vim keys, swipe and super drag off the poll runs nothing in the 
       _off333 is False, _off333)
 check("333 ...and with vim keys or swipe on it looks again",
       _on333 is True and _sw333 is True, (_on333, _sw333))
+
+# ---- 334: private mode, cookies and site data, third look (the 98th pass) ----
+_src334 = __import__("inspect").getsource
+# 334a: a throwaway browser's jar is its own, not "private"
+_sess334 = list(br.sessions)
+_tw334 = br.add_throwaway_session("T334")
+_twsid334 = _tw334 if isinstance(_tw334, str) else (br.sessions[-1]["sid"])
+_prof334 = br._session_profile(_twsid334)
+_jar334 = br._jar_name(_prof334)
+_privjar334 = br._jar_name(br.private_profile())
+br._close_session(_twsid334)
+H.spin(200)
+br.sessions[:] = [e for e in br.sessions if e.get("sid") != _twsid334] or _sess334
+check("334 a throwaway browser's cookies are not the private tabs' jar",
+      _jar334 == "tmp:" + _twsid334 and _privjar334 == "private",
+      (_jar334, _privjar334))
+# 334b: forget/clear reaches an allowed subdomain's page storage
+_rules_was334 = br.config.get("cookieRules", "__absent__")
+_sub334 = br.new_tab(); H.spin(300)
+H.load(_sub334, srv.url("/twhome?sub334").replace("127.0.0.1", "a.localhost"))
+H.spin(500)
+_ran334 = []
+_pg334 = _sub334.page()
+_pg334.runJavaScript = lambda code, *a, **k: _ran334.append(code[:40])
+try:
+    br.config["cookieRules"] = {"localhost": "block", "a.localhost": "allow"}
+    br.clear_site_data("localhost")
+    H.spin(100)
+finally:
+    _pg334.__dict__.pop("runJavaScript", None)
+    if _rules_was334 == "__absent__":
+        br.config.pop("cookieRules", None)
+    else:
+        br.config["cookieRules"] = _rules_was334
+    _close_if_open(_sub334)
+check("334 'forget this site' clears an allowed subdomain's page storage too",
+      len(_ran334) >= 1, _ran334)
+check("334 (source) ...and reaches popped-out tabs and the split half",
+      "_popouts" in _src334(B.Browser.clear_site_data)
+      and "_windows_views()" in _src334(B.Browser.clear_site_data))
+# 334c: a browser set to forget its cache says so for the next start
+_coe_was334 = br.config.get("clearOnExit", "__absent__")
+_cwp_was334 = br.config.get("cacheWipePending", "__absent__")
+_ckp_was334 = br.config.get("cookiesWipePending", "__absent__")
+try:
+    br.config["clearOnExit"] = {"main": ["cache"]}
+    br.config.pop("cacheWipePending", None)
+    br.clear_on_exit_per_session()
+    _cwp334 = br.config.get("cacheWipePending")
+finally:
+    for _k, _o in (("clearOnExit", _coe_was334),
+                   ("cacheWipePending", _cwp_was334),
+                   ("cookiesWipePending", _ckp_was334)):
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+check("334 a cache wipe on exit is written down to be done again at start",
+      _cwp334 == ["browser"], _cwp334)
+# 334d (source): the cookie editor and IDN sites; a set cookie's real row
+check("334 (source) the cookie editor folds international names to xn--",
+      "_ace_host(host)" in _src334(B.Browser.site_cookies)
+      and "_ace_keep(host)" in _src334(B.Browser.set_cookie)
+      and "_ace_keep(host)" in _src334(B.Browser.delete_cookie))
+check("334 ...keeping www. and a cookie's leading dot",
+      B._ace_keep("www.Bücher.de") == "www.xn--bcher-kva.de"
+      and B._ace_keep(".bücher.de") == ".xn--bcher-kva.de"
+      and B._ace_keep("WWW.Example.com") == "www.example.com",
+      (B._ace_keep("www.Bücher.de"), B._ace_keep(".bücher.de")))
+check("334 (source) a throwaway jar's cookies stay out of the browser-wide list",
+      _src334(B.Browser.watch_cookies).count("_jar_off_record(") == 3)
+check("334 (source) set_cookie leaves the row to the engine's own cookie",
+      "self._note_cookie(" not in _src334(B.Browser.set_cookie))
+# 334e: Read later keeps no private tab
+_rl_was334 = list(br.config.get("readLater") or [])
+_pv334 = br.new_tab(private=True); H.spin(300)
+H.load(_pv334, srv.url("/twhome?later334")); H.spin(300)
+br.tabs.setCurrentWidget(_pv334); H.spin(100)
+_rl334 = br.read_later()
+_after334 = list(br.config.get("readLater") or [])
+br.config["readLater"] = _rl_was334
+_close_if_open(_pv334)
+check("334 Read later puts no private tab into config.json",
+      _rl334 is False and not any("later334" in str(e) for e in _after334),
+      (_rl334, len(_after334)))
+check("334 (source) a private download is not asked about a twin in the normal folder",
+      "self._page_is_private(page)" in _src334(B.Browser._download)
+      and "else self.download_twice(name)" in _src334(B.Browser._download))
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

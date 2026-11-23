@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 4 (part fifty-nine: private mode and cookies, third look)
+
+- **Read later keeps no private tab.** Ctrl+Alt+D on a private tab put
+  its address and title into the settings file. Now it says that a
+  private tab keeps nothing.
+- **A throwaway browser is not the private one.** Both were filed as the
+  same cookie jar: a private tab's cookie editor and cookies.txt showed
+  the throwaway browser's cookies (and the other way round), and closing
+  the last private tab emptied a still-open throwaway's list.
+- **"Forget this site" forgets all of it.** A subdomain with its own
+  "allow" rule had its cookies deleted but kept its local storage,
+  databases and service workers; popped-out tabs and the second half of
+  a split view were skipped entirely. Only a cookie rule's own clean-up
+  spares an allowed subdomain now.
+- **A browser set to forget its cache on exit does.** The cache wipe could
+  still be running when the browser closed; it is now written down and
+  finished at the next start.
+- **The cookie editor knows international sites.** A site like
+  bücher.de showed no cookies and a cookie set by hand landed nowhere;
+  removing a cookie you had just set by hand also really removes it now.
+- **Private downloads** are no longer asked about a file of the same name
+  in your normal downloads folder.
+
 ## 2026-11-23 — two months on the browser, round 3 (part fifty-eight: an idle browser stays idle)
 
 - **No more script in the front page four times a second.** The poll

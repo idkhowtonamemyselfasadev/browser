@@ -2441,6 +2441,28 @@ def _ace_host(host):
     return ace or host
 
 
+def _ace_keep(host):
+    """Lower case and an international name in its xn-- form, and
+    nothing else: www. and a leading dot stay (a cookie's domain is
+    exactly that, unlike _ace_host's page-script form)."""
+    host = str(host or "").strip().lower()
+    if host.isascii():
+        return host
+    dot = "." if host.startswith(".") else ""
+    try:
+        ace = bytes(QUrl.toAce(host.lstrip("."))).decode("ascii")
+    except (UnicodeError, TypeError):
+        ace = ""
+    return (dot + ace) if ace else host
+
+
+def _jar_off_record(jar):
+    """The private jar or a throwaway browser's: neither is ever on
+    disk, and neither belongs in the browser-wide cookie list."""
+    jar = str(jar or "")
+    return jar == "private" or jar.startswith("tmp:")
+
+
 def _site_entry(text):
     """A line of "Sites to leave alone" or "Don't theme this site" as the
     bare host the page script sees in location.hostname, or "". Both lists
@@ -25389,6 +25411,13 @@ class Browser(QMainWindow):
             self._wipe_cache_at_start = frozenset(
                 ("browser" if sid == "main" else "browser-s-" + sid)
                 for sid, what in told.items() if "cache" in what)
+        cache_pending = (None if share is not None
+                         else self.config.pop("cacheWipePending", None))
+        if isinstance(cache_pending, list) and cache_pending:
+            self._wipe_cache_at_start = (
+                frozenset(str(n) for n in cache_pending)
+                | (getattr(self, "_wipe_cache_at_start", None)
+                   or frozenset()))
         # the tabs the dead run had open, kept before anything restores
         # or overwrites them: this is the only record a crash leaves,
         # and crash_recovery_dialog shows it rather than guessing
@@ -28429,6 +28458,13 @@ class Browser(QMainWindow):
                 continue
         self.sessions = [e for e in self.sessions if e["sid"] != sid]
         self.session_profiles.pop(sid, None)
+        # a throwaway's cookies went with its jar; the editor's rows of
+        # them stayed for the rest of the run
+        seen = getattr(self, "_cookie_seen", None)
+        if seen:
+            for key in [k for k in seen
+                        if str(k).startswith("tmp:" + sid + "|")]:
+                seen.pop(key, None)
         # a throwaway browser's mark goes with it (the list only ever
         # grew). What to wipe of it at exit stays: that wipe goes by its
         # name, and dropped here its jar's cookies stayed on disk
@@ -32678,25 +32714,40 @@ class Browser(QMainWindow):
         # service workers as well as the web storage (only that went,
         # and only from a tab on exactly this host). A site with no tab
         # open keeps what it stored until it is opened and cleared.
-        for win in self.windows() or [self]:
+        # every view: the strip, the split half (not in the strip while
+        # split) and popped-out tabs (their own small windows) -- the
+        # last two kept their storage through a "forget this site"
+        views = [v for _w, v in self._windows_views()]
+        for win in self._all_windows():
+            for mini in list(getattr(win, "_popouts", None) or []):
+                try:
+                    if getattr(mini, "view", None) is not None:
+                        views.append(mini.view)
+                except RuntimeError:
+                    continue
+        seen_views = set()
+        for view in views:
+            if id(view) in seen_views:
+                continue
+            seen_views.add(id(view))
             try:
-                rows = win._real_tabs()
+                here = _ace_host(view.url().host()).rstrip(".")
+            except (AttributeError, RuntimeError):
+                continue
+            if here != host and not here.endswith("." + host):
+                continue
+            # only a cookie rule's own wipe spares a subdomain he
+            # allowed (as the cookie side does, through keep): a
+            # "forget this site" deleted its cookies and left its
+            # storage. The same closest-rule test as the cookies.
+            if by_rule and here != host \
+                    and self.cookie_rule_for(here) == "allow":
+                continue
+            try:
+                view.page().runJavaScript(_CLEAR_STORAGE_JS, APP_WORLD_ID)
+                QTimer.singleShot(300, lambda v=view: self._reload_live(v))
             except RuntimeError:
                 continue
-            for _, view in rows:
-                try:
-                    here = _ace_host(view.url().host()).rstrip(".")
-                except RuntimeError:
-                    continue
-                if here != host and not here.endswith("." + host):
-                    continue
-                if here != host and self.cookie_rules().get(here) == "allow":
-                    continue   # he allowed this one by name: not wiped
-                try:
-                    view.page().runJavaScript(_CLEAR_STORAGE_JS, APP_WORLD_ID)
-                    QTimer.singleShot(300, lambda v=view: self._reload_live(v))
-                except RuntimeError:
-                    continue
         self.flash(self._ui_str("privCleared") % (shown or host))
         return gone
 
@@ -36287,6 +36338,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """Put a page on the list, or take it off. No folder, no tags —
         a list of what to come back to, which is what "read later" is."""
         view = self.current()
+        if url is None and view is not None and self._refuse_private(view):
+            return False      # its address and title would go to config.json
         if url is None and view is not None and hasattr(view, "url"):
             url = view.url().toString()
             title = title or self._tab_title(self.tabs.indexOf(view))
@@ -39001,7 +39054,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         jars = sorted({("browser" if sid == "main" else "browser-s-" + sid)
                        for sid, what in wanted.items()
                        if isinstance(what, list) and "cookies" in what})
-        if done or jars:
+        # and the cache: clearHttpCache is not done when it returns, and
+        # the process ends right after -- written down, it is done again
+        # at the next start (as a crash already did)
+        caches = sorted({("browser" if sid == "main" else "browser-s-" + sid)
+                         for sid, what in wanted.items()
+                         if isinstance(what, list) and "cache" in what})
+        if caches:
+            self.config["cacheWipePending"] = caches
+        if done or jars or caches:
             was = self.config.get("cookiesWipePending")
             if was is not True:
                 self.config["cookiesWipePending"] = jars or False
@@ -51822,11 +51883,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     # ---- developer tools: the browser’s side ----
     @staticmethod
     def _jar_name(profile):
-        """Which cookie jar a profile is: "private", or the name its
-        storage lives under."""
+        """Which cookie jar a profile is: "private", a throwaway
+        browser's own "tmp:<sid>", or the name its storage lives
+        under. A throwaway browser is off the record as well, and both
+        were "private": a private tab's cookie editor and cookies.txt
+        listed the throwaway's cookies, values and all, and closing the
+        last private tab dropped a live throwaway's rows."""
         try:
             if profile.isOffTheRecord():
-                return "private"
+                return getattr(profile, "_jar_tag", None) or "private"
             return str(profile.storageName() or "main")
         except (AttributeError, RuntimeError):
             return "main"
@@ -51850,6 +51915,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         host = PasswordVault.normalize_host(
             host or (self._host_of(self.current().url())
                      if self.current() is not None else ""))
+        # the jar keeps an international name in its xn-- form
+        host = _ace_host(host) if host else host
         # one jar: the one the tab in front uses. A private window's
         # cookies are not this window's, and cookies.txt is written to
         # disk.
@@ -51921,6 +51988,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         else:
             host = ((as_qurl(view.url()).host() or "").lower()
                     if view is not None else "")
+        host = _ace_keep(host) if host else host   # xn--, www. kept
         if not host or not str(name):
             return False
         if secure is None:
@@ -51948,7 +52016,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             profile = self.profile
         profile.cookieStore().setCookie(
             cookie, QUrl("%s://%s%s" % (scheme, host, path or "/")))
-        self._note_cookie(cookie, jar=self._jar_name(profile))
+        # no row written here: the engine stores it as ".host", and the
+        # row noted by hand ("host") never matched it -- Remove on it
+        # left the cookie in the jar. cookieAdded writes the real one.
         return True
 
     def delete_cookie(self, name, host=None, path="/", exact=False):
@@ -51962,6 +52032,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                      if self.current() is not None else ""))
         if not host:
             return False
+        host = _ace_keep(host)
+        raw = _ace_keep(raw) if raw else raw
         want = str(host).lstrip(".").lower().removeprefix("www.")
 
         def same(domain):
@@ -57213,7 +57285,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
               and not self.config.get("autoHideChrome", False)):
             timer.stop()
 
-    def _make_profile(self, storage):
+    def _make_profile(self, storage, jar_tag=None):
         """A fully configured cookie jar; each tab group gets its own.
 
         storage=None builds the off-the-record jar a private tab uses.
@@ -57225,6 +57297,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         private = storage is None
         profile = (QWebEngineProfile(self) if private
                    else QWebEngineProfile(storage, self))
+        if jar_tag:
+            # before watch_cookies below reads it (see _jar_name)
+            profile._jar_tag = str(jar_tag)
         profile.setPersistentCookiesPolicy(
             QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies
             if private else
@@ -59169,7 +59244,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # to" lists and the bridge's cookies op read. The private jar
             # going away removes no cookie one by one, so a private
             # session's sites stayed on all three until a restart.
-            if getattr(store, "_jar", "") != "private":
+            if not _jar_off_record(getattr(store, "_jar", "")):
                 self._cookies[key] = (when.toString(Qt.DateFormat.ISODate)
                                       if when.isValid() else "")
             # and the whole row, for the cookie editor and the
@@ -59184,7 +59259,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 seen.pop("%s|%s|%s|%s" % (
                     store._jar, cookie.domain(), cookie.path(),
                     bytes(cookie.name()).decode("utf-8", "replace")), None)
-            if getattr(store, "_jar", "") != "private":
+            if not _jar_off_record(getattr(store, "_jar", "")):
                 self._cookies.pop((bytes(cookie.name()).decode(
                     "utf-8", "replace"), cookie.domain()), None)
         # a jar outlives a closed window by a moment and keeps reporting:
@@ -59217,7 +59292,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             store._close_wipe_until = (
                 time.monotonic() + 20
                 if getattr(self, "_was_crash", False)
-                and getattr(store, "_jar", "") != "private" else 0)
+                and not _jar_off_record(getattr(store, "_jar", ""))
+                else 0)
             try:
                 store.loadAllCookies()
             except (AttributeError, RuntimeError):
@@ -73988,9 +74064,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # a throwaway browser is given the jar a private tab gets:
             # nowhere to write, so there is nothing to tidy up when it
             # closes (see add_throwaway_session)
-            storage = (None if self.session_is_throwaway(sid)
-                       else "browser-s-" + sid)
-            self.session_profiles[sid] = self._make_profile(storage)
+            throwaway = self.session_is_throwaway(sid)
+            storage = None if throwaway else "browser-s-" + sid
+            self.session_profiles[sid] = self._make_profile(
+                storage, jar_tag=("tmp:" + sid) if throwaway else None)
         return self.session_profiles[sid]
 
     def _sync_profile(self, view):
@@ -74129,7 +74206,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             request.setDownloadFileName(renamed)
             name = renamed
         # the same file again, under the same name
-        twin = self.download_twice(name)
+        # (not for a private page: its file goes to the private folder,
+        # and the question was about one in his normal downloads)
+        twin = (None if self._page_is_private(page)
+                else self.download_twice(name))
         if twin is not None and not self.config.get("askDownload"):
             if QMessageBox.question(
                     self, self._ui_str("dlTwiceTitle"),
