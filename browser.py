@@ -28301,9 +28301,10 @@ class Browser(QMainWindow):
         menu.deleteLater()
 
     def _translate_page(self, lang, view=None):
-        self.config["translateLang"] = lang
-        self.save_config()
-        self.apply_language()
+        if lang != self.config.get("translateLang"):
+            self.config["translateLang"] = lang
+            self.save_config()
+            self.apply_language()
         # the tab asked about, not whichever is in front: a background
         # tab's "always" rule sent the FRONT tab to Google, a private
         # one included, and left its own page as it was
@@ -35549,7 +35550,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         lang = str(self.config.get("translateLang", "de")).split("-")[0]
 
         def done(text):
-            text = (text or "").strip()
+            nonlocal lang
+            if isinstance(text, dict):
+                page = str(text.get("l") or "").strip().split("-")[0]
+                if page.isalpha() and len(page) <= 3:
+                    lang = page.lower()
+                text = text.get("t")
+            text = str(text or "").strip()
             if not text:
                 self.flash(self._ui_str("sayNothing"))
                 return
@@ -35607,9 +35614,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             except (OSError, RuntimeError):
                 self.flash(self._ui_str("sayMissing"))
         view.page().runJavaScript(
-            "(function(){var s=String(window.getSelection()||'').trim();"
-            "return s || (document.querySelector('.__readerbody')||document.body)"
-            ".innerText;})()", APP_WORLD_ID, done)
+            "(function(){var g=window.getSelection(),s=String(g||'').trim();"
+            "var n=s&&g.anchorNode?g.anchorNode:null;"
+            "if(n&&n.nodeType!==1)n=n.parentElement;"
+            "var h=n&&n.closest?n.closest('[lang]'):null;"
+            "var l=(h&&h.getAttribute('lang'))||document.documentElement.lang||'';"
+            "return {t:s || (document.querySelector('.__readerbody')||document.body)"
+            ".innerText, l:l};})()", APP_WORLD_ID, done)
         return True
 
     def _say_check(self, timer=None):
@@ -81352,9 +81363,18 @@ READ_TOOLS = {
   var copy = best.cloneNode(true);
   /* what the page itself does not show: scripts, the markup inside a
      noscript or a template, and whatever it marks hidden */
-  copy.querySelectorAll("script,style,noscript,template,aside,form,iframe,"
-                        + "[hidden],[aria-hidden=true]")
+  copy.querySelectorAll("script,style,noscript,template,aside,iframe,"
+                        + "svg,math,[hidden],[aria-hidden=true]")
       .forEach(function (n) { n.remove(); });
+  /* a form holding the article (ASP.NET wraps the whole page in one)
+     is unwrapped; a small one (search, login) goes */
+  copy.querySelectorAll("form").forEach(function (f) {
+    if (!f.parentNode) return;
+    if (f.querySelectorAll("p").length > 2) {
+      while (f.firstChild) f.parentNode.insertBefore(f.firstChild, f);
+    }
+    f.remove();
+  });
   /* the page's own header, nav and footer go; an article's header
      (its h1 sits in it) is the article */
   copy.querySelectorAll("nav,footer,header").forEach(function (n) {
@@ -81380,7 +81400,13 @@ READ_TOOLS = {
       } else if (tag === "li") out += "\n- " + inner.trim();
       else if (tag === "a" && kid.getAttribute("href")) {
         /* a ")" or a space in the address ended the Markdown link */
-        out += "[" + inner + "](" + kid.href.replace(/ /g, "%20")
+        var href = kid.href;
+        if (typeof href !== "string") {
+          href = kid.getAttribute("href");
+          try { href = String(new URL(href, document.baseURI)); }
+          catch (e) {}
+        }
+        out += "[" + inner + "](" + href.replace(/ /g, "%20")
                .replace(/\)/g, "%29") + ")";
       } else if (tag === "td" || tag === "th") {
         out += inner.trim() + " | ";

@@ -22823,6 +22823,93 @@ check("345 the proxy page's buttons and choices are translated",
       and "S.proxySystem" in _set345 and "proxyDirect ||" in _set345
       and B.UI_STRINGS["de"].get("proxyAddRule") == "Regel hinzufügen")
 
+# ---- 346: reading and translation, third look ----
+# 346a: translating with the language already chosen leaves config and own pages alone
+_calls346 = []
+br.__dict__["apply_language"] = lambda *a, **k: _calls346.append("apply")
+br.__dict__["save_config"] = lambda *a, **k: _calls346.append("save")
+_fv346 = type("FV346", (), {"url": lambda self: B.QUrl("https://example.com/"),
+                            "load": lambda self, u: None, "private": False})()
+_lang346 = br.config.get("translateLang", "de")
+br.config["translateLang"] = _lang346
+br._translate_page(_lang346, view=_fv346)
+_same346 = list(_calls346)
+br._translate_page("fr" if _lang346 != "fr" else "es", view=_fv346)
+_diff346 = list(_calls346)
+br.config["translateLang"] = _lang346
+br.__dict__.pop("apply_language", None)
+br.__dict__.pop("save_config", None)
+check("346 translating with the same language does not save or reload own pages",
+      _same346 == [] and "apply" in _diff346, (_same346, _diff346))
+
+# 346b: read aloud speaks in the page's language
+class _Sig346:
+    def connect(self, fn):
+        pass
+
+
+class _Proc346:
+    ExitStatus = B.QProcess.ExitStatus
+    made = []
+
+    def __init__(self, parent=None):
+        self.finished = _Sig346()
+        _Proc346.made.append(self)
+
+    def start(self, prog, args):
+        self.args = (prog, list(args))
+
+    def kill(self):
+        pass
+
+    def deleteLater(self):
+        pass
+
+    def state(self):
+        return 0
+
+    @staticmethod
+    def startDetached(*a, **k):
+        return True
+
+
+_qp346 = B.QProcess
+B.QProcess = _Proc346
+br.__dict__["say_tool"] = lambda *a, **k: True
+br.__dict__["flash"] = lambda *a, **k: None
+_page288("t346r", "<html lang='fr-FR'><title>t346r</title>"
+         "<p>Bonjour tout le monde, voici un texte.</p></html>")
+_v346 = _tab288("/t346r")
+H.spin(400)
+br.config["translateLang"] = "de"
+br.read_aloud(_v346)
+H.wait_for(lambda: any(getattr(p, "args", ("",))[0] == "spd-say"
+                       for p in _Proc346.made), 4000)
+_args346 = [p.args for p in _Proc346.made if getattr(p, "args", ("",))[0] == "spd-say"]
+br.stop_aloud() if hasattr(br, "stop_aloud") else None
+br._say = None
+B.QProcess = _qp346
+br.config["translateLang"] = _lang346
+br.__dict__.pop("say_tool", None)
+br.__dict__.pop("flash", None)
+_close_if_open(_v346)
+check("346 read aloud uses the page's own language",
+      bool(_args346) and _args346[0][1][:2] == ["-l", "fr"], _args346)
+
+# 346c: articletext keeps an article inside a page-wide form and survives an SVG link
+_page288("t346f", "<title>t346f</title><form action='/x'>"
+         "<p>" + _LONG288 + "one</p><p>" + _LONG288 + "two</p>"
+         "<p>" + _LONG288 + "three</p></form>"
+         "<form><input name=q><button>Search</button></form>"
+         "<p>tail <svg><a href='#z'><text>svg link</text></a></svg>"
+         "<a href='/real'>real link</a></p>")
+_v346f = _tab288("/t346f")
+_t346 = _text288(_v346f).get("text", "")
+_close_if_open(_v346f)
+check("346 articletext unwraps a page-wide form and does not throw on an SVG link",
+      "two" in _t346 and "three" in _t346 and "Search" not in _t346
+      and "real link" in _t346, _t346[:300])
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

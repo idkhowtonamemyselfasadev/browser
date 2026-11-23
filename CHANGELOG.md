@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 15 (part seventy: reading and translation, third look)
+
+- **Read aloud speaks the page's language.** It used the language you
+  translate into, so a French page was read with a German voice.
+- **Translating no longer reloads your own pages.** Each translation saved
+  the settings and reloaded Settings, Notes and every other own page in
+  every window, even with the language unchanged; unsaved typing there
+  could be lost.
+- **Saving a page as text works on more sites.** Pages that wrap
+  everything in one big form (common on older business sites) came out
+  empty, and a link inside an SVG picture stopped the save altogether.
+
 ## 2026-11-23 — two months on the browser, round 14 (part sixty-nine: Settings, looked at page by page)
 
 All 25 Settings pages were photographed in the light theme and looked at.
