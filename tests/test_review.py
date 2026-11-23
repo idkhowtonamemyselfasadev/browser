@@ -22141,6 +22141,114 @@ finally:
 check("331 a pinned private tab on the same page does not keep the set's "
       "page from opening", len(_plain331d) == 1, len(_plain331d))
 
+# ---- 332: the password vault, third look (the 97th pass) ----
+import tempfile as _tf332
+from pathlib import Path as _P332
+# 332a: a token is not written in the clear beside a locked vault
+class _Lock332:
+    def enabled(self): return True
+    def can_seal(self): return False
+    def locked(self): return True
+_d332 = _P332(_tf332.mkdtemp())
+_op332 = B.OnePasswordProvider(_d332, lock=_Lock332())
+_w332 = _op332.write_token("ops_secret_token_332")
+check("332 a token is refused, not written in the clear, while the vault is locked",
+      _w332 is False and not _op332.token_file.exists(),
+      (_w332, _op332.token_file.exists()))
+# 332b: the file vault's access log comes back from the meta file
+_acc_was332 = list(br.vault.data.get("access") or [])
+try:
+    br.vault.note_access("item332", "password")
+    br.vault._load()
+    _first332 = (br.vault.access_log(1) or [{}])[0].get("id")
+finally:
+    br.vault.data["access"] = _acc_was332
+    br.vault._save_meta()
+check("332 a reveal is still in the file vault's access log after a reload",
+      _first332 == "item332", _first332)
+# 332c/d (source): HTTP auth and generated passwords
+_src332 = __import__("inspect").getsource
+check("332 (source) an HTTP-auth login is not offered with Vault Password off",
+      "and self.vault_password_on()\n                and not self.vault_locked()"
+      in _src332(B.Browser._http_auth))
+_gen332 = _src332(B.Browser.generate_for_page)
+check("332 (source) a generated password is filed only under the site it went into, "
+      "and a remote store saves off the GUI thread",
+      "now_host != host" in _gen332 and "self.vault_job(" in _gen332)
+# 332e: a Bitwarden JSON export with a byte-order mark
+_bw332 = _d332 / "bw.json"
+_bw332.write_bytes(b"\xef\xbb\xbf" + json.dumps({"items": [
+    {"type": 1, "name": "bom332", "login": {"username": "u332",
+     "password": "pw-332-x", "uris": [{"uri": "https://bom332.example/"}]}}
+]}).encode())
+_n_before332 = len(br.vault.rows())
+_got332 = br.import_vault_file(path=str(_bw332))
+check("332 a JSON export with a byte-order mark is imported",
+      _got332 == 1, (_got332, len(br.vault.rows()) - _n_before332))
+for _e in [e for e in list(br.vault.rows()) if e.get("host") == "bom332.example"]:
+    br.vault.rows().remove(_e)
+br.vault._save()
+# 332f: an over-long typed password is held cut to 501, so it is refused
+class _Pg332:
+    def url(self): return B.QUrl("https://long332.example/login")
+_pg332 = _Pg332()
+_vp_was332 = br.config.get(B.VAULT_PASSWORD_KEY, "__absent__")
+br.config[B.VAULT_PASSWORD_KEY] = True
+br._login_attempt(_pg332, {"host": "long332.example", "scheme": "https",
+                           "username": "u", "password": "x" * 600})
+_len332 = len(((getattr(br, "_pw_attempts", {}) or {}).get(id(_pg332)) or {})
+               .get("data", {}).get("password", ""))
+(getattr(br, "_pw_attempts", {}) or {}).pop(id(_pg332), None)
+if _vp_was332 == "__absent__":
+    br.config.pop(B.VAULT_PASSWORD_KEY, None)
+else:
+    br.config[B.VAULT_PASSWORD_KEY] = _vp_was332
+check("332 an over-long typed password is not cut to a savable 500",
+      _len332 == 501, _len332)
+# 332g (source): a revealed value leaves a hidden passwords pane
+_ph332 = (HERE_ROOT / "passwords.html").read_text() if "HERE_ROOT" in dir() else \
+    open(B.__file__.replace("browser.py", "passwords.html")).read()
+check("332 (source) the passwords page hides revealed values when it is hidden",
+      "visibilitychange" in _ph332 and "revealedCount" in _ph332)
+# 332h: a generated password is not filed under a site the tab left
+_gp332 = br.new_tab(); H.spin(300)
+H.load(_gp332, srv.url("/pwform"))
+H.wait_for(lambda: "/pwform" in _gp332.url().toString(), 8000)
+_saved332, _flash332, _g332 = [], [], {}
+if br.vault is not None and not br.vault_locked():
+    _vpw332 = br.config.get(B.VAULT_PASSWORD_KEY, "__absent__")
+    br.config[B.VAULT_PASSWORD_KEY] = True
+    _real_ft332 = br.form_tool
+    _away332 = srv.url("/twhome").replace("127.0.0.1", "localhost")
+
+    def _ft332(name, view=None, then=None, arg=None, **kw):
+        if name != "fillnew":
+            return _real_ft332(name, view=view, then=then, arg=arg, **kw)
+        # the fill lands, and the tab is somewhere else by the time
+        # the answer comes back
+        view.setUrl(B.QUrl(_away332))
+        B.QTimer.singleShot(2500, lambda: then("1"))
+        return True
+    br.form_tool = _ft332
+    br.flash = lambda msg, *a, **k: _flash332.append(str(msg))
+    br.vault.set_entry = lambda *a, **k: _saved332.append(a) or {"id": "x"}
+    try:
+        br.generate_for_page(view=_gp332, then=lambda s: _g332.update(v=s))
+        H.wait_for(lambda: _flash332, 8000)
+        H.spin(200)
+    finally:
+        br.vault.__dict__.pop("set_entry", None)
+        br.__dict__.pop("flash", None)
+        br.__dict__.pop("form_tool", None)
+        if _vpw332 == "__absent__":
+            br.config.pop(B.VAULT_PASSWORD_KEY, None)
+        else:
+            br.config[B.VAULT_PASSWORD_KEY] = _vpw332
+check("332 a generated password is not saved under a site the tab has left",
+      _saved332 == [] and br._ui_str("genNotSaved") in _flash332
+      and "v" not in _g332, (len(_saved332), _flash332, _g332))
+_close_if_open(_gp332)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

@@ -14103,6 +14103,11 @@ class OnePasswordProvider(VaultProvider):
         blob = text.encode()
         if self.lock is not None and self.lock.can_seal():
             blob = self.lock.seal_token(blob)
+        elif self.lock is not None and self.lock.enabled():
+            # a vault with a master password that is locked right now
+            # (it locked itself while the paste box was open): the token
+            # cannot be sealed, and is not written in the clear instead
+            return False
         try:
             _write_private(self.token_file, blob)
         except OSError:
@@ -14589,6 +14594,8 @@ class PasswordVault:
         self.data = self.migrate(snapshot or {})
         if not provider.eager:
             self._take_meta()
+        else:
+            self._take_meta_access()
         return True
 
     def _take_meta(self):
@@ -14676,6 +14683,20 @@ class PasswordVault:
         self.data = self.migrate(self.provider.load())
         if not self.provider.eager:
             self._take_meta()
+        else:
+            self._take_meta_access()
+
+    def _take_meta_access(self):
+        """The access log of a store written whole (the file vault).
+        note_access and clear_access_log write only the meta file (so a
+        reveal does not rewrite every password), but it was read back
+        from the encrypted blob: a reveal before quitting was lost, and
+        a cleared log came back. The meta file's copy is the newer one
+        whenever it has one."""
+        access = self._load_meta().get("access")
+        if isinstance(access, list):
+            self.data["access"] = [r for r in access
+                                   if isinstance(r, dict)][:200]
 
     def _load_meta(self):
         """The meta file: the never-list and the access log.
@@ -45832,9 +45853,33 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     self.flash(self._ui_str("genNoField"))
                     return
                 self._copy_secret_text(secret)
-                if host and not private and self.vault_password_on():
-                    if self.vault.set_entry(host, url.scheme(), user,
-                                            secret) is None:
+
+                def finish():
+                    self.clear_clipboard_later()
+                    self.flash(self._ui_str("genMade")
+                               % password_strength(secret))
+                    if then:
+                        then(secret)
+
+                if not (host and not private and self.vault_password_on()):
+                    finish()
+                    return
+                try:
+                    now_host = PasswordVault.normalize_host(
+                        view.url().host())
+                except RuntimeError:
+                    now_host = ""
+                vault = self.vault
+                if now_host != host or vault is None:
+                    # the tab moved on while the form was being filled:
+                    # the password is not filed under the site it was
+                    # read from. It stays on the clipboard (not
+                    # cleared): it is the only copy
+                    self.flash(self._ui_str("genNotSaved"))
+                    return
+
+                def saved(result):
+                    if result is None:
                         # the store refused it (full disk, locked since):
                         # saying "saved" sent him off with a password
                         # nothing kept. It stays on the clipboard, which
@@ -45842,11 +45887,16 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         self.flash(self._ui_str("genNotSaved"))
                         return
                     self._push_all("vaultChanged")
-                self.clear_clipboard_later()
-                self.flash(self._ui_str("genMade")
-                           % password_strength(secret))
-                if then:
-                    then(secret)
+                    finish()
+
+                if vault.provider.eager:
+                    saved(vault.set_entry(host, url.scheme(), user, secret))
+                else:
+                    # a remote store is a subprocess: not on the GUI
+                    # thread (as _pw_save_pending does it)
+                    self.vault_job(
+                        lambda: vault.set_entry(host, url.scheme(), user,
+                                                secret), saved)
 
             self.form_tool("fillnew", view=view, then=filled, arg=secret)
 
@@ -46890,7 +46940,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         authenticator.setUser(name)
         authenticator.setPassword(word)
-        if (not private and self.vault is not None
+        if (not private and host and self.vault is not None
+                and self.vault_password_on()
                 and not self.vault_locked()
                 and self.config.get("savePasswords", True)
                 and not self.vault.is_never(host)):
@@ -47322,7 +47373,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if not path:
                 return 0
         try:
-            text = Path(str(path)).read_text(encoding="utf-8",
+            # utf-8-sig: a JSON export saved by a Windows tool starts
+            # with a byte-order mark, lstrip keeps it, and the file was
+            # read as a CSV with no password column ("nothing imported")
+            text = Path(str(path)).read_text(encoding="utf-8-sig",
                                              errors="replace")
         except OSError:
             return 0
@@ -58623,7 +58677,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         QTimer.singleShot(31000, self._prune_attempts)
         self._pw_attempts[id(page)] = {
             "page": page, "url": url, "at": time.monotonic(),
-            "data": {k: str(data.get(k, ""))[:500]
+            # the password is cut to 501, not 500: one cut to exactly
+            # 500 passed _password_submitted's "> 500" check and a
+            # truncated password was offered for saving
+            "data": {k: str(data.get(k, ""))[:501 if k == "password"
+                                             else 500]
                      for k in ("host", "scheme", "username", "password")}}
 
     def _prune_attempts(self):
@@ -77407,7 +77465,17 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             QLineEdit.EchoMode.Password, "")
         if not ok:
             return {"cancelled": True}
-        provider.write_token(text)
+        # the vault may have locked itself while the box was open (the
+        # idle timer runs under a modal dialog): unlock again, or keep
+        # nothing -- write_token refuses to store it unsealed
+        if self.vault_lock.enabled() and self.vault_lock.locked() \
+                and not self.ask_unlock_vault():
+            del text
+            return {"cancelled": True}
+        if not provider.write_token(text):
+            del text
+            self.flash(self._ui_str("pwSaveFailed"), 5000)
+            return {"cancelled": True}
         del text
         if self.vault_provider_name() == "1password":
             self.vault = self.make_vault()   # the check runs in the

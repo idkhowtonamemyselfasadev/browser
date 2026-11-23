@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 2 (part fifty-seven: the password vault, third look)
+
+- **A 1Password token is never stored unencrypted.** If the vault
+  locked itself while the token box was open, the token was written in
+  the clear beside a vault that promises it never is. Now it asks to
+  unlock again, or keeps nothing.
+- **Vault Password off means off for server logins too.** A name and
+  password typed into a site's HTTP sign-in box were still offered for
+  saving with Vault Password switched off.
+- **A generated password goes only where it was made.** If the tab
+  moved to another site while the password was being filled in, it was
+  saved under the new site; now it is not saved (it stays on the
+  clipboard as the only copy). With a 1Password store the save no
+  longer freezes the window.
+- **The access log keeps what happened.** With the built-in vault, a
+  password revealed just before quitting was missing from the log
+  afterwards, and a cleared log could come back.
+- **Imports and sign-ins.** A Bitwarden JSON export saved by a Windows
+  tool (with a byte-order mark) imports instead of saying "nothing
+  imported", and a sign-in with an absurdly long password is no longer
+  offered for saving cut short.
+- **A revealed password does not wait in a closed pane.** The Passwords
+  pane is kept alive when it closes; a value revealed and then left with
+  Esc stayed in it. Now it is covered again when the pane is hidden.
+
 ## 2026-11-23 — two months on the browser, round 1 (part fifty-six: memory and test health)
 
 - **The start page no longer leaks.** Its clock built two new date
