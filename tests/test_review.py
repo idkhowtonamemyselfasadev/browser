@@ -20570,7 +20570,7 @@ try:
     for _r in br.config.get("snoozed") or []:
         if "/t315" in str(_r.get("url")):
             _r["at"] = 0
-    br.open_tab_state = lambda entries, switch=False, lazy=True: (
+    br.open_tab_state = lambda entries, switch=False, lazy=True, **_k: (
         _cap315.extend(entries) or [])
     br.wake_snoozed()
     H.spin(200)
@@ -20654,7 +20654,7 @@ _snz_was315 = list(br.config.get("snoozed") or [])
 _cap315e = []
 br.config["snoozed"] = [{"url": "http://main315.example/", "title": "m",
                          "at": 0}]
-br.open_tab_state = lambda entries, switch=False, lazy=True: (
+br.open_tab_state = lambda entries, switch=False, lazy=True, **_k: (
     _cap315e.extend(entries) or [])
 try:
     br.wake_snoozed()
@@ -22530,6 +22530,45 @@ check("339 (source) one other site's frame does not end the named-frame scan",
       "try {\n            if (window.frames[f].name === t)" in _pg339)
 check("339 (source) address rules are matched whatever case they were typed in",
       "pattern.lower() not in text_l" in _src339(B.RequestWatch._work))
+
+# ---- 340: tab lifecycle, third look (the 101st pass) ----
+_src340 = __import__("inspect").getsource
+check("340 (source) game mode is dropped from the config at start",
+      'self.config.pop("gameMode", None)' in _src340(B.Browser.__init__))
+# 340b: a tab looked at a moment ago keeps its renderer at full priority
+check("340 (source) only a tab unseen for ten minutes is turned down",
+      "< 600" in _src340(B.Browser.renice_background))
+# 340c: a snoozed tab comes back in its group, in its colour
+_snz_was340 = list(br.config.get("snoozed") or [])
+_g340 = br.ensure_group("Snooze340", "#a1b2c3")
+_st340 = br.new_tab(url=srv.url("/twhome?snooze340"), switch=False)
+H.spin(400)
+br._move_tab_to_group(br.tabs.indexOf(_st340), _g340)
+H.spin(200)
+_back340 = None
+try:
+    br.snooze_tab(br.tabs.indexOf(_st340), minutes=1)
+    H.spin(200)
+    _row340 = [r for r in br.config.get("snoozed") or []
+               if "snooze340" in r.get("url", "")]
+    for _r in _row340:
+        _r["at"] = 0                       # due now
+    if "Snooze340" in br.groups:
+        br.delete_group("Snooze340")
+    br.wake_snoozed()
+    H.spin(400)
+    _back340 = [v for _i, v in br._real_tabs()
+                if "snooze340" in br._tab_url(v)]
+    _bg340 = [br._group_of(v) for v in _back340]
+    _bc340 = [br.group_colors.get(g) for g in _bg340]
+finally:
+    for _v in _back340 or []:
+        _close_if_open(_v)
+    if "Snooze340" in br.groups:
+        br.delete_group("Snooze340")
+    br.config["snoozed"] = _snz_was340
+check("340 a snoozed tab comes back in its group, in its colour",
+      _bg340 == ["Snooze340"] and _bc340 == ["#a1b2c3"], (_bg340, _bc340))
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

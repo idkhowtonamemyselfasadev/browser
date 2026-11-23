@@ -25395,6 +25395,12 @@ class Browser(QMainWindow):
                    else self.config.pop("cookiesWipePending", False))
         crashed = (False if share is not None
                    else _run_was_crash(self.config.pop("runOpen", None)))
+        # game mode is for the game being played now: kept over a quit, the
+        # next start refused every notification ask with no tab asleep,
+        # and the next press of the key turned it OFF (unmuting the tabs
+        # he had muted himself)
+        if share is None:
+            self.config.pop("gameMode", None)
         # True: every jar (clear cookies on exit); a list: those jars
         # only (one virtual browser's own setting); nothing otherwise
         if pending is True or (crashed
@@ -40224,6 +40230,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             row["l"] = 1
         if getattr(view, "tab_name", None):
             row["n"] = view.tab_name
+        # and its group, name and colour: close_tab took the header away
+        # with its last tab, and the tab woke loose
+        group = self._group_of(view)
+        if group:
+            row["g"] = group
+            colour = self.group_colors.get(group)
+            if isinstance(colour, str):
+                row["gc"] = colour
         rows.append(row)
         self.save_config(quiet=True)
         self.close_tab(index, ask=False)
@@ -40269,8 +40283,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         home.open_tab_state(
             [{"u": row["url"], "t": row.get("title") or "",
               "s": row.get("s") or "main", "p": row.get("p"),
-              "l": row.get("l"), "n": row.get("n")} for row in due],
-            switch=False, lazy=True)
+              "l": row.get("l"), "n": row.get("n"), "g": row.get("g")}
+             for row in due],
+            switch=False, lazy=True,
+            colours={row["g"]: row["gc"] for row in due
+                     if row.get("g") and isinstance(row.get("gc"), str)})
         home.flash(self._ui_str("snoozeBack") % len(due))
         return len(due)
 
@@ -68814,9 +68831,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # a nice value is shared: a process the front tab (or a
         # kept-awake tab) lives in is left alone whatever else is in it.
         spare = set()
+        now = time.monotonic()
         for index, pid in pids.items():
             view = self.tabs.widget(index)
             if view is self.current() or self.is_kept_awake(view):
+                spare.add(pid)
+            # a nice value cannot be taken back: a tab left a moment ago
+            # (and likely gone back to) stayed slow for good once it was
+            # in front again. Only ten minutes unseen counts as background
+            elif now - float(getattr(view, "_seen_at", now) or now) < 600:
                 spare.add(pid)
         # ...and the one another window has in front: the same site in
         # two windows shares a renderer, and a nice value cannot be taken

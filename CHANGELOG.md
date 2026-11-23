@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 9 (part sixty-four: sleeping tabs, third look)
+
+- **Game mode ends with the game.** Quitting the browser while game mode
+  was on left it half on at the next start: every site's notification
+  request was quietly refused, no tab was asleep, and the next press of
+  the key turned game mode off instead of on (and unmuted tabs you had
+  muted yourself). It now always starts off.
+- **A snoozed tab comes back where it was.** A tab snoozed out of a tab
+  group woke up loose, and the group's name and colour were gone. It now
+  returns to its group, in its colour.
+- **"Lower priority for background tabs" waits a little.** It turned a
+  tab down the moment you looked away, and that cannot be undone while
+  its process lives, so a tab you went straight back to stayed slow. Only
+  tabs unseen for ten minutes are turned down now.
+- **The whole test run is green on the new machine** (117 suites), apart
+  from the screen-sharing test, which needs a real screen.
+
 ## 2026-11-23 — two months on the browser, round 8 (part sixty-three: page guards, third look)
 
 - **"Blocked" means blocked for the battery, USB and MIDI too.** Refusing
