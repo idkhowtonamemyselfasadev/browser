@@ -22478,6 +22478,59 @@ check("338 ...and that write carries the last title",
       bool(_row338) and _row338[-1].get("title") == "tick 5",
       [r.get("title") for r in _row338])
 
+# ---- 339: page guards, third look (the 100th pass) ----
+_ba_was339 = json.dumps(br.config.get("blockApis", {}))
+_pop_was339 = br.config.get("guardPopups", "__absent__")
+_ws_was339 = br.config.get("guardWsLog", "__absent__")
+try:
+    br.toggle_api_block("127.0.0.1", "battery")
+    br.config["guardPopups"] = True
+    br.config["guardWsLog"] = True
+    br.refresh_guard_scripts()
+    _gv339 = br.new_tab(); H.spin(300)
+    H.load(_gv339, srv.url("/twhome?guard339")); H.spin(800)
+    H.js(_gv339, "window.__bat339 = 'pending';"
+         "(navigator.getBattery ? navigator.getBattery() : Promise.reject('none'))"
+         ".then(function(){ window.__bat339 = 'answered'; },"
+         "      function(){ window.__bat339 = 'refused'; }); 1")
+    H.spin(500)
+    _bat339 = H.js(_gv339, "window.__bat339")
+    _self339 = H.js(_gv339, "(function(){ var before = location.href;"
+                    " window.open('#self339', '_self');"
+                    " return location.hash; })()")
+    _blank339 = H.js(_gv339, "String(window.open('/x339', '_blank'))")
+    _ws339 = H.js(_gv339, "(function(){"
+                  " class W extends WebSocket { mine() { return 7; } }"
+                  " var w; try { w = new W('ws://127.0.0.1:9/'); }"
+                  " catch (e) { return 'threw ' + e; }"
+                  " var r = (w instanceof W) && w.mine && w.mine();"
+                  " try { w.close(); } catch (e) {}"
+                  " var plain; try { WebSocket('ws://127.0.0.1:9/'); plain = 'opened'; }"
+                  " catch (e) { plain = 'TypeError' === e.name ? 'threw' : String(e); }"
+                  " return [r, plain].join(','); })()")
+    _close_if_open(_gv339)
+finally:
+    br.config["blockApis"] = json.loads(_ba_was339)
+    for _k, _o in (("guardPopups", _pop_was339), ("guardWsLog", _ws_was339)):
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+    br.refresh_guard_scripts()
+check("339 a site refused the battery gets no battery from navigator.getBattery()",
+      _bat339 == "refused", _bat339)
+check("339 the popup guard lets window.open(..., '_self') move the page itself",
+      _self339 == "#self339", _self339)
+check("339 ...and still holds back a new window", _blank339 == "null", _blank339)
+check("339 the socket note keeps WebSocket subclassable and new-only",
+      _ws339 == "7,threw", _ws339)
+_src339 = __import__("inspect").getsource
+_pg339 = (_Path(B.__file__).parent / "page_guard.py").read_text()
+check("339 (source) one other site's frame does not end the named-frame scan",
+      "try {\n            if (window.frames[f].name === t)" in _pg339)
+check("339 (source) address rules are matched whatever case they were typed in",
+      "pattern.lower() not in text_l" in _src339(B.RequestWatch._work))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

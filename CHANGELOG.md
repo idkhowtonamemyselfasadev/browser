@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 8 (part sixty-three: page guards, third look)
+
+- **"Blocked" means blocked for the battery, USB and MIDI too.** Refusing
+  a site the battery, USB devices, Bluetooth, serial ports, game
+  controllers (HID) or MIDI only took away the constructor's name: the
+  page could still call `navigator.getBattery()` and get the real battery
+  level while the menu said it was blocked. The ways in on `navigator`
+  are closed now as well.
+- **The popup guard leaves a page's own navigation alone.** With "write
+  down the windows a page tried to open" on, a page that moves itself with
+  `window.open(…, "_self")` (checkouts, app links) went dead. Only a new
+  window is held back now.
+- **The connection note no longer breaks sites.** With "note the live
+  connections a page opens" on, a site that builds its own socket class on
+  top of WebSocket lost its methods.
+- **Address rules ignore case.** A block or redirect rule typed as
+  "Tracker.Example" never matched.
+
 ## 2026-11-23 — two months on the browser, round 7 (part sixty-two: a ticking title costs nothing)
 
 - **No more disk write every second for a busy tab.** A page whose title

@@ -434,6 +434,26 @@ _JS = r"""
     try { delete window[gone[g]]; } catch (e) {}
     try { window[gone[g]] = undefined; } catch (e) {}
   }
+  /* the constructor is only the name: the way in is on navigator
+     (navigator.getBattery(), navigator.usb.requestDevice(), ...), and
+     with only the name taken the page still got the battery and the
+     devices while the menu said "blocked" */
+  var navProto = window.Navigator && Navigator.prototype;
+  var doors = {USB: "usb", Bluetooth: "bluetooth", Serial: "serial",
+               HID: "hid"};
+  for (var dn in doors) {
+    if (gone.indexOf(dn) >= 0) {
+      keep(navigator, doors[dn], undefined);
+      if (navProto) keep(navProto, doors[dn], undefined);
+    }
+  }
+  var refuse = function () {
+    return Promise.reject(new DOMException("Blocked", "NotAllowedError"));
+  };
+  if (gone.indexOf("BatteryManager") >= 0)
+    pin(navigator, navProto, "getBattery", refuse);
+  if (gone.indexOf("MIDIAccess") >= 0)
+    pin(navigator, navProto, "requestMIDIAccess", refuse);
   if (gone.indexOf("WebGLRenderingContext") >= 0) {
     var realCtx = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function (kind) {
@@ -472,7 +492,21 @@ _JS = r"""
      list is not touched at all. */
   if (on("popups") && !under(R.allow)) {
     window.__guardPopups = [];
-    window.open = function (url) {
+    var realOpen = window.open;
+    window.open = function (url, target) {
+      /* only a NEW window is a popup: "_self", "_top", "_parent" and a
+         frame of this page are the page moving itself, which the
+         engine allows and which went dead here (checkouts, app links) */
+      var t = String(target === undefined ? "" : target);
+      var mine = t === "_self" || t === "_top" || t === "_parent";
+      if (!mine && t && t !== "_blank") {
+        for (var f = 0; f < window.frames.length; f++) {
+          try {
+            if (window.frames[f].name === t) { mine = true; break; }
+          } catch (e) {}      /* another site's frame: not readable */
+        }
+      }
+      if (mine) return realOpen.apply(window, arguments);
       try {
         window.__guardPopups.push({url: String(url || ""), t: Date.now()});
       } catch (e) {}
@@ -636,8 +670,13 @@ _JS = r"""
     window.__guardWs = [];
     var RealWS = window.WebSocket;
     var Wrapped = function (url, protocols) {
-      var sock = protocols === undefined ? new RealWS(url)
-                                         : new RealWS(url, protocols);
+      /* a class that extends WebSocket gets its own prototype (it lost
+         its methods), and a call without new throws as the real one
+         does instead of opening a socket */
+      if (!new.target)
+        throw new TypeError("Failed to construct 'WebSocket': " +
+                            "Please use the 'new' operator");
+      var sock = Reflect.construct(RealWS, arguments, new.target);
       try {
         var row = {url: String(url), open: true, t: Date.now()};
         window.__guardWs.push(row);

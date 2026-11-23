@@ -79297,8 +79297,11 @@ class RequestWatch(QWebEngineUrlRequestInterceptor):
 
         # 1. blocked and mapped addresses
         rules = browser.url_rules()
+        # the host Qt hands over is lower case: a rule typed as
+        # "Tracker.Example" never matched it
+        text_l = text.lower()
         for pattern, where in rules:
-            if pattern not in text:
+            if pattern.lower() not in text_l:
                 continue
             if not where or where == "block":
                 info.block(True)
