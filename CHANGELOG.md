@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-23 — two months on the browser, round 3 (part fifty-eight: an idle browser stays idle)
+
+- **No more script in the front page four times a second.** The poll
+  that picks up vim keys, sideways swipes and dragged links ran in the
+  tab in front all the time, even with all three switched off (the
+  default), and slowly grew that page's memory. It now only runs when
+  one of them is on. Measured on an idle start page: about 36 MB an hour
+  of growth before, essentially flat after.
+
 ## 2026-11-23 — two months on the browser, round 2 (part fifty-seven: the password vault, third look)
 
 - **A 1Password token is never stored unencrypted.** If the vault

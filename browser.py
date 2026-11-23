@@ -33869,8 +33869,22 @@ class Browser(QMainWindow):
         timer.start(max(80, int(every)))
         return True
 
+    def _gesture_wanted(self):
+        """Whether anything the poll collects can be there at all: gt/gT
+        and "/" come only with vim keys, a swipe only with swipeNav, a
+        dragged link only with superDrag."""
+        if self.config.get("vimKeys", False):
+            return True
+        try:
+            mouse = self.mouse_config()
+        except Exception:
+            mouse = {}
+        return bool(mouse.get("swipeNav") or mouse.get("superDrag"))
+
     def _gesture_tick(self):
         """One look at what the page has for us."""
+        if not self._gesture_wanted():
+            return False
         view = self.current()
         page = self._live_page(view) if view is not None else None
         if page is None:

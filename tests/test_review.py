@@ -22249,6 +22249,32 @@ check("332 a generated password is not saved under a site the tab has left",
       and "v" not in _g332, (len(_saved332), _flash332, _g332))
 _close_if_open(_gp332)
 
+# ---- 333: the gesture poll stays out of pages when nothing can be there ----
+_gw333 = {k: br.config.get(k, "__absent__") for k in ("vimKeys", "mouse")}
+_gv333 = br.new_tab(); H.spin(300)
+H.load(_gv333, srv.url("/urltext")); H.spin(400)
+br.tabs.setCurrentWidget(_gv333); H.spin(100)
+try:
+    br.config["vimKeys"] = False
+    br.config["mouse"] = {}
+    _off333 = br._gesture_tick()
+    br.config["vimKeys"] = True
+    _on333 = br._gesture_tick()
+    br.config["vimKeys"] = False
+    br.config["mouse"] = {"swipeNav": True}
+    _sw333 = br._gesture_tick()
+finally:
+    for _k, _o in _gw333.items():
+        if _o == "__absent__":
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _o
+    _close_if_open(_gv333)
+check("333 with vim keys, swipe and super drag off the poll runs nothing in the page",
+      _off333 is False, _off333)
+check("333 ...and with vim keys or swipe on it looks again",
+      _on333 is True and _sw333 is True, (_on333, _sw333))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 
