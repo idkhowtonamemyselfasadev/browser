@@ -3388,6 +3388,14 @@ def looks_like_search(text):
         return False
     if "@" in text and " " not in text:
         return False               # an address or a login, not a search
+    if re.match(r"^(about|mailto|view-source|tel|data|file|javascript"
+                r"|chrome|blob|ftp|ws|wss):", text, re.I):
+        return False               # an address in all but the "//"
+    if " " not in text and re.fullmatch(
+            r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+\.?", text):
+        # a dotted name, whatever its ending: nas.lab, pi.hole and
+        # wiki.acme open as addresses on Enter, so they are addresses
+        return False
     if " " not in text:
         # an address of his own network or machine: an IP (v4 or v6), a
         # host with a port, a one-word host with a path -- 10.0.0.1,
@@ -51024,10 +51032,14 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         rows = self.typed_history(view)
         if not rows:
             return ""
-        at = getattr(self, "_typed_at", len(rows))
+        tab = view if view is not None else self.current()
+        at = getattr(tab, "_typed_at", len(rows))
         at = at - 1 if back else at + 1
         at = max(0, min(len(rows), at))
-        self._typed_at = at
+        try:
+            tab._typed_at = at
+        except (AttributeError, RuntimeError):
+            pass
         text = rows[at] if at < len(rows) else ""
         self.urlbar.setText(text)
         self.urlbar.setCursorPosition(len(text))
@@ -55188,8 +55200,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 return
             if kind == "url":
                 text = payload
+        # Enter on a highlighted suggestion arrives twice (returnPressed
+        # and the completer): the first one ends a site search, so the
+        # second resolved to a plain search and replaced the site's one
+        now = time.monotonic()
+        key = (text, id(self.current()), bool(new_tab))
+        if getattr(self, "_last_typed", None) == key \
+                and now - getattr(self, "_last_typed_t", 0) < 0.5:
+            return
+        self._last_typed, self._last_typed_t = key, now
         self.note_typed(text)
-        self._typed_at = len(self.typed_history())
+        try:
+            self.current()._typed_at = len(self.typed_history())
+        except (AttributeError, RuntimeError):
+            pass
         url = self._resolve_typed(text)
         if new_tab:
             self.new_tab(url=url, private=self._private_of())

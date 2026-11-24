@@ -23024,6 +23024,32 @@ finally:
 check("349 (source) clearing history takes the corrupt copies too",
       '".corrupt-*"' in _src344(B.Browser._wipe_history_store))
 
+# ---- 350: address bar, third look ----
+check("350 dotted names and scheme-only addresses are not sent for suggestions",
+      not any(B.looks_like_search(t) for t in
+              ("nas.lab", "pi.hole", "wiki.acme", "view-source:10.0.0.5/admin",
+               "about:config"))
+      and B.looks_like_search("cats") and B.looks_like_search("how to cook pasta"))
+_src350 = _src344(B.Browser._navigate)
+check("350 (source) the second Enter of a suggestion is dropped before the site search ends",
+      _src350.index("_last_typed") < _src350.index("self._resolve_typed(text)"))
+_va350 = br.new_tab(url=None)
+_va350._typed = ["one350", "two350", "three350"]
+_va350._typed_at = 3
+_vb350 = br.new_tab(url=None)
+_vb350._typed = ["only350"]
+H.spin(100)
+br.__dict__["typed_history"] = lambda view=None: list(
+    getattr(view if view is not None else br.current(), "_typed", []))
+try:
+    _got350 = br.step_typed(True, view=_vb350)
+finally:
+    br.__dict__.pop("typed_history", None)
+_close_if_open(_va350)
+_close_if_open(_vb350)
+check("350 Up in another tab starts at that tab's own last line",
+      _got350 == "only350", _got350)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

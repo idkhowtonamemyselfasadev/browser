@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-24 — two months on the browser, round 19 (part seventy-four: the address bar, third look)
+
+- **Names on your own network stay at home.** Typing nas.lab, pi.hole,
+  wiki.acme or view-source:10.0.0.5 asked Google for suggestions about
+  them; now any dotted name and any address without "//" is left alone.
+- **A site search stays a site search.** Tab on a site, type, then Enter
+  on a highlighted suggestion: a second, plain search replaced the
+  site's own one.
+- **Up and Down in the bar remember their place per tab.** The first Up
+  in another tab could show an empty bar.
+
 ## 2026-11-24 — two months on the browser, round 18 (part seventy-three: history, third look)
 
 - **A site you never record stays out of the history.** Clicking a link
