@@ -23000,6 +23000,30 @@ finally:
 check("348 (source) bookmark-all-tabs drops a folder it put nothing in",
       "self._forget_bookmark(folder)" in _src344(B.Browser.bookmark_all_tabs))
 
+# ---- 349: history, third look ----
+br.__dict__["never_record"] = lambda host, session=None: host == "secret349.example"
+check("349 a never-recorded page is not named as where the next one came from",
+      br._came_may_note("https://secret349.example/a?q=1") is False
+      and br._came_may_note("https://ok349.example/") is True
+      and br._came_may_note("file:///x") is False)
+br.__dict__.pop("never_record", None)
+_hist349 = list(br.history)
+try:
+    br.history[:] = [
+        {"url": "https://a349.example/secret", "title": "a", "t": 100},
+        {"url": "https://b349.example/x", "title": "b", "t": 200,
+         "f": "https://a349.example/secret"}]
+    br.delete_history_entries(["https://a349.example/secret"])
+    _b349 = [e for e in br.history if e.get("url") == "https://b349.example/x"]
+    check("349 a deleted page is not kept as another row's 'came from'",
+          _b349 and "f" not in _b349[0], _b349)
+finally:
+    br.history[:] = _hist349
+    br._history_undo = None
+    br.save_history()
+check("349 (source) clearing history takes the corrupt copies too",
+      '".corrupt-*"' in _src344(B.Browser._wipe_history_store))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

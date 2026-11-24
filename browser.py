@@ -56752,6 +56752,26 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         QTimer.singleShot(2500, lambda v=view, u=view.url(), t=title:
                           self.index_page_text(v, u, t))
 
+    def _came_may_note(self, came):
+        """Whether the page a tab came from may be named in the next
+        row: only one that would have been written down itself. A
+        never-record site, a no-history site or one of our own pages
+        was kept, path and query and all, as the next page's "f"."""
+        where = QUrl(came)
+        if where.scheme() not in ("http", "https"):
+            return False
+        host = where.host()
+        if self.site_rule_on("noHistorySites", host):
+            return False
+        tab = getattr(self, "_history_view", None)
+        try:
+            if self.never_record(host, session=getattr(tab, "session", None)
+                                 or self.active_session):
+                return False
+        except (TypeError, AttributeError):
+            pass
+        return True
+
     # ---- history ----
     def _record_history(self, url, title):
         if not self.config.get("history", True):
@@ -56773,7 +56793,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         # record of its own tab.
         came = str(getattr(self._history_view, "_came_from", "") or "") \
             if getattr(self, "_history_view", None) is not None else ""
-        if came and came != entry["url"]:
+        if came and came != entry["url"] and self._came_may_note(came):
             entry["f"] = came
         # which virtual browser the page was read in, so the history
         # can be shown one browser at a time. "main" is left out: it is
@@ -57027,7 +57047,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         for a "clear" made while the vault is shut, when it could not be
         written over and every page came back the moment it opened."""
         doomed = list(HISTORY_FILE.parent.glob(
-            HISTORY_FILE.name + ".unreadable-*"))
+            HISTORY_FILE.name + ".unreadable-*")) + list(
+            HISTORY_FILE.parent.glob(HISTORY_FILE.name + ".corrupt-*"))
         if sealed_too:
             doomed.append(HISTORY_FILE)
         for one in doomed:
@@ -75035,6 +75056,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         gone = {str(e.get("url", "")) for e in (before or [])
                 if isinstance(e, dict)} - still
         gone.discard("")
+        # ...and the rows that remain do not keep it as where they came
+        # from: "forget this site" left every page of it in the "f"s
+        scrubbed = False
+        for e in self.history:
+            if isinstance(e, dict) and e.get("f") in gone:
+                e.pop("f", None)
+                scrubbed = True
+        if scrubbed:
+            self.save_history()
         return self._forget_history_extras(gone) if gone else False
 
     def delete_history_entries(self, urls):

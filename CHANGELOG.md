@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-24 — two months on the browser, round 18 (part seventy-three: history, third look)
+
+- **A site you never record stays out of the history.** Clicking a link
+  away from it wrote its full address into the next page's entry as
+  "where you came from".
+- **A deleted page is gone from the other entries too.** Deleting a page
+  (or forgetting a whole site) left its address in the "came from" of
+  the page you opened next.
+- **"Clear history" takes the damaged copies too.** A history file that
+  could not be read was set aside as a copy, and clearing left it there.
+
 ## 2026-11-24 — two months on the browser, round 17 (part seventy-two: bookmarks, third look)
 
 - **A bookmark kept for one virtual browser stays there.** The star,
