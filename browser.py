@@ -25494,6 +25494,8 @@ class Browser(QMainWindow):
                     if isinstance(entry, dict) and entry.get("u"):
                         row = kept(entry, (group or {}).get("session"))
                         row["g"] = group.get("name")
+                        if isinstance(group.get("color"), str):
+                            row["gc"] = group["color"]
                         self._crash_state.append(row)
         if crashed and self.config.get("clearHistoryExit"):
             # with the vault shut, save_history writes nothing and the
@@ -28174,7 +28176,9 @@ class Browser(QMainWindow):
             return
         if (self._group_of(occupant) != self._group_of(view)
                 or getattr(occupant, "session", "main")
-                != getattr(view, "session", "main")):
+                != getattr(view, "session", "main")
+                or bool(getattr(occupant, "pinned", False))
+                != bool(getattr(view, "pinned", False))):
             return
         self.tabs.tabBar().moveTab(here, want)
 
@@ -30753,8 +30757,19 @@ class Browser(QMainWindow):
             # the config is not sealed: dropped when sealing began (see
             # encrypt_history) and not written again while it is on
             return 0
-        # never a site he said must not be written down for restoring
-        state = self._kept_state(self.tab_state())
+        # never a site he said must not be written down for restoring.
+        # Every ordinary window: only the first one's timer runs, and a
+        # second window's tabs were never in a snapshot
+        rows = list(self.tab_state())
+        for win in self.windows():
+            if win is self or getattr(win, "_app_url", None) \
+                    or getattr(win, "_all_private", False):
+                continue
+            try:
+                rows.extend(win.tab_state())
+            except RuntimeError:
+                continue
+        state = self._kept_state(rows)
         if not state:
             return 0
         kept = [s for s in self.config.get("tabSnapList", [])
@@ -31138,7 +31153,9 @@ class Browser(QMainWindow):
         col.addWidget(buttons)
         box._boxes = boxes
         box._bring_back = lambda: self.open_tab_state(
-            [e for tick, e in boxes if tick.isChecked()], switch=True)
+            [e for tick, e in boxes if tick.isChecked()], switch=True,
+            colours={e["g"]: e["gc"] for _t, e in boxes
+                     if e.get("g") and e.get("gc")})
         buttons.accepted.connect(lambda: box._bring_back())
         return box
 
@@ -69289,12 +69306,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
 
         def put_back(ok=True):
-            if not ok:
-                return
             try:
                 view.loadFinished.disconnect(put_back)
-            except TypeError:
+            except (TypeError, RuntimeError):
                 pass
+            if not ok:
+                return
             if at:
                 page = self._live_page(view)
                 if page is not None:

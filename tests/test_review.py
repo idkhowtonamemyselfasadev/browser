@@ -22910,6 +22910,40 @@ check("346 articletext unwraps a page-wide form and does not throw on an SVG lin
       "two" in _t346 and "three" in _t346 and "Search" not in _t346
       and "real link" in _t346, _t346[:300])
 
+# ---- 347: session file and crash recovery, third look ----
+import inspect as _insp347
+_snap347 = _insp347.getsource(B.Browser.snapshot_tabs)
+check("347 (source) a snapshot takes every ordinary window's tabs",
+      "for win in self.windows():" in _snap347
+      and "rows.extend(win.tab_state())" in _snap347
+      and "_all_private" in _snap347)
+_rec347 = _insp347.getsource(B.Browser.recover_crashed_tab)
+check("347 (source) a failed crash reload lets go of the scroll-back",
+      _rec347.index("loadFinished.disconnect(put_back)")
+      < _rec347.index("if not ok:"))
+_dlg347 = _insp347.getsource(B.Browser.crash_recovery_dialog)
+check("347 (source) tabs picked after a crash keep their group's colour",
+      'colours={e["g"]: e["gc"]' in _dlg347
+      and 'row["gc"] = group["color"]' in _insp347.getsource(B))
+# 347d: a reopened loose tab is not moved in among the pinned ones
+_pv347 = br.new_tab(url=None)
+_lv347 = br.new_tab(url=None)
+H.spin(200)
+_pin347 = br.tabs.indexOf(_pv347)
+br.pin_tab(_pin347, True)
+H.spin(100)
+_pi347 = br.tabs.indexOf(_pv347)
+_li347 = br.tabs.indexOf(_lv347)
+br._restore_tab_index(_lv347, _pi347)
+H.spin(100)
+_after347 = br.tabs.indexOf(_lv347)
+br.pin_tab(br.tabs.indexOf(_pv347), False)
+_close_if_open(_pv347)
+_close_if_open(_lv347)
+check("347 a reopened loose tab does not go into the pinned block",
+      getattr(_pv347, "pinned", None) is not None and _after347 == _li347,
+      (_pi347, _li347, _after347))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

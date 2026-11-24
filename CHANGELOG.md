@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-24 — two months on the browser, round 16 (part seventy-one: session and crash recovery, third look)
+
+- **Tab snapshots cover every window.** Only the first window's tabs were
+  in a snapshot, so a second window's tabs could not be brought back.
+- **Tabs picked after a crash keep their group colours.** They all came
+  back in the default colour.
+- **A crashed tab that fails to reload** no longer makes the next page
+  in that tab jump to the old page's scroll spot.
+- **A reopened tab stays out of the pinned tabs.** Ctrl+Shift+T could put
+  a loose tab in among the pinned ones.
+
 ## 2026-11-23 — two months on the browser, round 15 (part seventy: reading and translation, third look)
 
 - **Read aloud speaks the page's language.** It used the language you
