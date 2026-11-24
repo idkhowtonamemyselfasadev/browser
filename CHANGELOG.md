@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-24 — two months on the browser, round 17 (part seventy-two: bookmarks, third look)
+
+- **A bookmark kept for one virtual browser stays there.** The star,
+  Ctrl+D and the Favourites search saw bookmarks marked for another
+  virtual browser, and Ctrl+D could delete one this browser does not
+  even show.
+- **Locked folders stay locked.** Taking a moved site's new address and
+  moving bookmarks to https changed bookmarks inside a locked folder.
+- **Importing your own export brings back the tags, notes and
+  nicknames.** They were dropped.
+- **Big imports are fast.** Every imported bookmark saved the whole file
+  and redrew every window; now it is saved once. An import that brings
+  nothing in no longer takes away the Undo of a bookmark you just
+  deleted.
+- **"Bookmark all tabs" with nothing to keep** no longer leaves an empty
+  folder behind.
+
 ## 2026-11-24 — two months on the browser, round 16 (part seventy-one: session and crash recovery, third look)
 
 - **Tab snapshots cover every window.** Only the first window's tabs were

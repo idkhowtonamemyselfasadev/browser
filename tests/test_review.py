@@ -22944,6 +22944,62 @@ check("347 a reopened loose tab does not go into the pinned block",
       getattr(_pv347, "pinned", None) is not None and _after347 == _li347,
       (_pi347, _li347, _after347))
 
+# ---- 348: bookmarks, third look ----
+import tempfile as _tf348
+_bm348 = list(br.bookmarks)
+_sess348 = br.active_session
+_saves348 = []
+_real_write348 = br.write_bookmarks
+br.__dict__["write_bookmarks"] = lambda *a, **k: _saves348.append(1)
+try:
+    _f348 = br.add_bookmark_folder("F348", 0)
+    _w348 = {"id": br._new_bookmark_id(), "type": "link", "title": "work only",
+             "url": "https://w348.example/", "icon": "", "parent": 0,
+             "t": 1, "sid": "work348"}
+    br.bookmarks.append(_w348)
+    check("348 a bookmark marked for another browser is not this one's",
+          br._bookmark_for("https://w348.example/") is None
+          and not any(e.get("id") == _w348["id"]
+                      for e in br.search_bookmarks("w348")),
+          br._bookmark_for("https://w348.example/"))
+    # locked folders keep their addresses
+    _lk348 = {"id": br._new_bookmark_id(), "type": "link", "title": "kept",
+              "url": "http://l348.example/", "icon": "", "parent": _f348, "t": 1}
+    br.bookmarks.append(_lk348)
+    br.lock_folder(_f348, True)
+    br.apply_moved_bookmarks([{"id": _lk348["id"], "to": "https://moved348.example/"}])
+    check("348 a moved-address fix leaves a locked folder alone",
+          _lk348["url"] == "http://l348.example/", _lk348["url"])
+    br.lock_folder(_f348, False)
+    # our own export comes back with its tags and notes, saved once
+    _d348 = _Path(_tf348.mkdtemp())
+    (_d348 / "own348.json").write_text(json.dumps([
+        {"id": 1, "type": "folder", "title": "sub", "parent": 0},
+        {"id": 2, "type": "link", "title": "a", "url": "https://a348.example/",
+         "parent": 1, "tags": ["x348"], "note": "n348", "nick": "k348"},
+        {"id": 3, "type": "link", "title": "b", "url": "https://b348.example/",
+         "parent": 1}]))
+    br._bookmark_undo = ["sentinel"]
+    (_d348 / "empty348.html").write_text("<p>nothing</p>")
+    br.import_bookmarks(str(_d348 / "empty348.html"))
+    _undo348 = br._bookmark_undo
+    del _saves348[:]
+    _n348 = br.import_bookmarks(str(_d348 / "own348.json"))
+    _a348 = br._bookmark_for("https://a348.example/") or {}
+    check("348 an empty import keeps the pending undo",
+          _undo348 == ["sentinel"], str(_undo348)[:80])
+    check("348 our own export imports back with tags, note and nickname, in one save",
+          _n348 == 2 and _a348.get("tags") == ["x348"]
+          and _a348.get("note") == "n348" and _a348.get("nick") == "k348"
+          and len(_saves348) == 1, (_n348, _a348, len(_saves348)))
+finally:
+    br.__dict__.pop("write_bookmarks", None)
+    br.bookmarks[:] = _bm348
+    br._bookmark_undo = None
+    br.save_bookmarks()
+check("348 (source) bookmark-all-tabs drops a folder it put nothing in",
+      "self._forget_bookmark(folder)" in _src344(B.Browser.bookmark_all_tabs))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

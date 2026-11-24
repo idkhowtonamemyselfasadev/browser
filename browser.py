@@ -29930,6 +29930,8 @@ class Browser(QMainWindow):
                 "icon": _icon_data(view.icon()), "parent": folder,
                 "t": int(time.time())})
             made += 1
+        if not made:
+            self._forget_bookmark(folder)
         self.save_bookmarks()
         self.flash(self._ui_str("tabsBookmarked") % made)
         return made
@@ -59545,7 +59547,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         key = _bookmark_key(url)
         if not key:
             return None
-        for entry in self.bookmarks:
+        for entry in self.session_bookmarks():
             if (entry.get("type") == "link"
                     and entry.get("parent") == parent
                     and _bookmark_key(entry.get("url", "")) == key):
@@ -75507,7 +75509,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 words.append(word)
         now = time.time()
         found = []
-        for entry in self.bookmarks:
+        for entry in self.session_bookmarks():
             if entry.get("type") != "link":
                 continue
             if tags and not all(t in entry.get("tags", []) for t in tags):
@@ -76112,19 +76114,29 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 tree = json.loads(text)
             except ValueError:
                 tree = None
-        self._bookmark_undo = list(self.bookmarks)
-        self._bookmark_undo_at = time.monotonic()
-        self._bookmark_undo_taken = None    # worked out at the save after
-        fid = _sane_number(self.add_bookmark_folder(
-            path.stem[:60] or "Imported", parent))
-        if not fid:
-            return 0
-        if isinstance(tree, list):
-            added = self._import_own_bookmarks(tree, fid)   # our export
-        elif isinstance(tree, dict):
-            added = self._import_json_bookmarks(tree, fid)
-        else:
-            added = self._import_html_bookmarks(text, fid)
+        before = list(self.bookmarks)
+        # one save at the end: every entry saved, mirrored and redrew
+        # every window's bar, 2000 times for a big file
+        self._bm_hold = True
+        try:
+            fid = _sane_number(self.add_bookmark_folder(
+                path.stem[:60] or "Imported", parent))
+            if not fid:
+                return 0
+            if isinstance(tree, list):
+                added = self._import_own_bookmarks(tree, fid)  # our export
+            elif isinstance(tree, dict):
+                added = self._import_json_bookmarks(tree, fid)
+            else:
+                added = self._import_html_bookmarks(text, fid)
+        finally:
+            self._bm_hold = False
+        if added:
+            # only an import that brought something takes the undo: an
+            # empty one took a delete's undo away and gave nothing back
+            self._bookmark_undo = before
+            self._bookmark_undo_at = time.monotonic()
+            self._bookmark_undo_taken = None  # worked out at the save
         if not added:
             # nothing came in: no empty folder named after the file, and
             # none of the empty folders made inside it either
@@ -76165,9 +76177,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         walk(row.get("id"), fid, depth + 1)
                 elif kind == "link":
                     url = str(row.get("url") or "")
-                    if QUrl(url).scheme() in ("http", "https") and \
-                            self._add_link(url, str(row.get("title") or ""),
-                                           parent=new_parent) is not None:
+                    made = self._add_link(url, str(row.get("title") or ""),
+                                          parent=new_parent) \
+                        if QUrl(url).scheme() in ("http", "https") else None
+                    if made is not None:
+                        tags = row.get("tags")
+                        if isinstance(tags, list) and not made.get("tags"):
+                            clean = [str(t).strip()[:40] for t in tags[:20]
+                                     if str(t).strip()]
+                            if clean:
+                                made["tags"] = clean
+                        for key, cap in (("note", 4000), ("nick", 40),
+                                         ("colour", 9)):
+                            value = str(row.get(key) or "").strip()
+                            if value and not made.get(key):
+                                made[key] = value[:cap]
                         added += 1
 
         walk(TOP, parent)
@@ -76393,7 +76417,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         changed = 0
         for row in moved or []:
             entry = self._bookmark_by_id(row.get("id"))
-            if entry is None or not row.get("to"):
+            if entry is None or not row.get("to") \
+                    or self._under_lock(entry):
                 continue
             if QUrl(row["to"]).scheme() not in ("http", "https"):
                 continue
@@ -76410,7 +76435,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         answered."""
         rows = [e for e in self.bookmarks
                 if e.get("type") == "link"
-                and str(e.get("url", "")).startswith("http://")]
+                and str(e.get("url", "")).startswith("http://")
+                and not self._under_lock(e)]
         result = {"asked": len(rows), "upgraded": 0}
         if not rows:
             if then is not None:
@@ -76447,6 +76473,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         """A change worth showing everywhere: to disk, then the bar, the
         star and any manager page that is open — and the folder he
         mirrors them to, if he set one."""
+        if getattr(self, "_bm_hold", False):
+            return          # an import in progress saves once at its end
         if getattr(self, "_bookmark_undo", None) \
                 and getattr(self, "_bookmark_undo_taken", 0) is None:
             # the ids the delete just took: what its undo may bring back
@@ -76529,7 +76557,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         key = _bookmark_key(url)
         if not key:
             return None
-        for entry in self.bookmarks:
+        for entry in self.session_bookmarks():
             if entry["type"] == "link" and _bookmark_key(entry["url"]) == key:
                 return entry
         return None
