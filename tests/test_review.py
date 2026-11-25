@@ -23076,6 +23076,46 @@ check("351 the client waits for timeout_ms and past the browser's ask timer, and
       and _AG351._wait_for({"op": "ask"}) == 90.0
       and "one = dict(one)" in __import__("inspect").getsource(_AG351.run))
 
+# 352: a tab whose page is swapped (moved to another jar) takes its
+# permission card with it, and a dead card stores nothing
+_perm_was352 = dict(br.config.get("permissions") or {})
+v352 = br.new_tab(); H.spin(300)
+H.load(v352, srv.url("/notif")); H.spin(1500)
+_c352 = getattr(br, "_perm_widget", None)
+_had352 = _c352 is not None and getattr(_c352, "_page", None) is v352.page()
+v352.attach_profile(v352.page().profile()); H.spin(600)
+_after352 = getattr(br, "_perm_widget", None)
+_new352 = [k for k in (br.config.get("permissions") or {})
+           if k not in _perm_was352]
+check("352 swapping a tab's page takes its permission card along",
+      _had352 and _after352 is not _c352 and not _new352,
+      str((_had352, _after352, _new352)))
+_close_if_open(v352)
+_full352 = __import__("inspect").getsource(B)
+check("352 (source) a card whose page is gone returns before storing",
+      "if not self._request_is_live(page):\n                # its page is gone"
+      in _full352)
+_cfg352 = {k: br.config.get(k) for k in
+           ("permissions", "permissionTimes", "permissionLog")}
+br.config["permissions"] = {"https://a352.example|1": True,
+                            "https://b352.example|1": False}
+_save352 = br.save_config
+br.save_config = lambda *a, **k: None
+try:
+    _n352 = br.revoke_all_permissions()
+    _log352 = [e for e in br.config.get("permissionLog") or []
+               if "352" in e.get("key", "")]
+finally:
+    br.save_config = _save352
+    for _k, _v in _cfg352.items():
+        if _v is None:
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+check("352 revoke all logs each grant it takes back, and counts only grants",
+      _n352 == 1 and [e["what"] for e in _log352] == ["revoked"],
+      str((_n352, _log352)))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

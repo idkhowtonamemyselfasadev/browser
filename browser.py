@@ -20012,6 +20012,9 @@ class WebView(QWebEngineView):
 
     def attach_profile(self, profile):
         self.browser._drop_share(self)  # the page below is about to go
+        # and so do its unanswered permission cards: left up, a click on
+        # Allow answered nothing yet still stored "always allow" (352)
+        self.browser._drop_permission_asks(self)
         old = self.page()
         page = self.page_class(self.browser, profile, self)
         page.fullScreenRequested.connect(self._fullscreen)
@@ -28801,8 +28804,14 @@ class Browser(QMainWindow):
             # the tab may have navigated away or closed while the card
             # sat there; the copy then refers to a request that is no
             # longer live and answering it would be meaningless
-            if self._request_is_live(page):
-                permission.grant() if granted else permission.deny()
+            if not self._request_is_live(page):
+                # its page is gone: nothing asked, so nothing is stored
+                card.hide()
+                card.deleteLater()
+                self._perm_widget = None
+                self._next_permission()
+                return
+            permission.grant() if granted else permission.deny()
             book = self._private_perms if private else self._session_perms
             # "this time" is not written into the book at all: the next
             # time the page asks, it is asked again. Anything else would
@@ -38053,7 +38062,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         return True
 
     def revoke_all_permissions(self):
-        gone = len(self.config.get("permissions") or {})
+        table = self.config.get("permissions") or {}
+        gone = sum(1 for v in table.values() if v)
+        # one "revoked" line each, like revoke_permission: the log
+        # otherwise kept showing grants that no longer exist
+        for key in [k for k, v in table.items() if v]:
+            self.log_permission(str(key), "revoked")
         self.config["permissions"] = {}
         self.config["permissionTimes"] = {}
         self._session_perms.clear()

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-25 — two months on the browser, round 21 (part seventy-six: site permissions, third look)
+
+- **A card left behind by a moved tab no longer stores "always allow".** When a tab
+  moved to another group or virtual browser while a permission card was up, its page
+  was swapped but the card stayed. Clicking Allow then answered nothing yet still wrote
+  a permanent grant. The swap now takes the tab's cards and queued asks with it, and a
+  card whose page is gone stores nothing.
+- **"Revoke all" shows up in the permission log.** It wiped every grant silently, so the
+  log kept showing grants that no longer existed. Each one now gets a "revoked" line.
+
 ## 2026-11-25 — two months on the browser, round 20 (part seventy-five: agent control, third look)
 
 - **An agent can only open tabs in virtual browsers you have.** Any name
