@@ -23050,6 +23050,32 @@ _close_if_open(_vb350)
 check("350 Up in another tab starts at that tab's own last line",
       _got350 == "only350", _got350)
 
+# ---- 351: agent control, third look ----
+import agent_bridge as _AB351
+import agent as _AG351
+_ab351 = _AB351.AgentBridge(br)
+_tabs351 = br.tabs.count()
+_errs351 = []
+for _s351 in ("private", "nosuch351", "../../x351"):
+    try:
+        _ab351.op_open(None, {"url": "https://x351.example/", "session": _s351})
+        _errs351.append("opened")
+    except ValueError as _e:
+        _errs351.append(str(_e))
+check("351 an agent cannot open a tab in a made-up or the private session",
+      _errs351 == ["no-such-session"] * 3 and br.tabs.count() == _tabs351
+      and "nosuch351" not in (getattr(br, "session_profiles", {}) or {}),
+      _errs351)
+_pv351 = type("PV351", (), {"private": True,
+                             "url": lambda self: B.QUrl("https://p351.example/")})()
+_ab351._view_url = lambda v: v.url().toString()
+check("351 a private tab's pages are not streamed as events",
+      _ab351._tab_seen(_pv351) is False)
+check("351 the client waits for timeout_ms and past the browser's ask timer, and leaves his steps alone",
+      _AG351._wait_for({"op": "wait", "timeout_ms": 120000}) == 150.0
+      and _AG351._wait_for({"op": "ask"}) == 90.0
+      and "one = dict(one)" in __import__("inspect").getsource(_AG351.run))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

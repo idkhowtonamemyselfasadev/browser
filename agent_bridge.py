@@ -1066,6 +1066,17 @@ class AgentBridge:
         view = self.win.tabs.widget(index) if index >= 0 else None
         return getattr(view, "_agent_id", None) if view is not None else None
 
+    def _tab_seen(self, view):
+        """Whether a tab's loads and titles may go out as events: never
+        a private tab's, and only a site on his list when there is one
+        (the events op names no tab, so the site gate never saw it)."""
+        try:
+            if getattr(view, "private", False):
+                return False
+            return self.site_ok(self._view_url(view))
+        except RuntimeError:
+            return False
+
     def _hook_new_tabs(self):
         """Any tab we have not hooked yet gets its signals connected."""
         held = getattr(self, "_hooked", None)
@@ -1081,11 +1092,11 @@ class AgentBridge:
             held.add(id(v))
             try:
                 v.loadFinished.connect(
-                    lambda ok, v=v: self.emit(
+                    lambda ok, v=v: self._tab_seen(v) and self.emit(
                         "loaded", tab=getattr(v, "_agent_id", None),
                         url=self._view_url(v), ok=bool(ok)))
                 v.titleChanged.connect(
-                    lambda text, v=v: self.emit(
+                    lambda text, v=v: self._tab_seen(v) and self.emit(
                         "title", tab=getattr(v, "_agent_id", None),
                         title=str(text)[:200]))
             except (AttributeError, RuntimeError):
@@ -1101,6 +1112,15 @@ class AgentBridge:
         # only ever open in the main jar cannot sign in as anybody else
         session = req.get("session")
         private = bool(req.get("private", False))
+        if session and str(session) != "main":
+            known = {str(e.get("sid")) for e in
+                     (getattr(self.win, "sessions", None) or [])
+                     if isinstance(e, dict)}
+            # only a virtual browser he has: any other name made a jar
+            # of its own on disk, and "private" took the private one's
+            # place, so every private tab after it kept its cookies
+            if str(session) not in known or str(session) == "private":
+                raise ValueError("no-such-session")
         before = {id(v) for _i, v in self._views()}
         self.win.new_tab(url=url, switch=switch,
                          session=str(session) if session else None,

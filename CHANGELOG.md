@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-25 — two months on the browser, round 20 (part seventy-five: agent control, third look)
+
+- **An agent can only open tabs in virtual browsers you have.** Any name
+  it sent made a new cookie jar on disk, and the name "private" took the
+  private jar's place, so every private tab after it kept its cookies.
+- **Private tabs stay out of the event stream.** A program listening for
+  events heard the address and title of every page a private tab loaded,
+  and of sites outside your bridge site list.
+- **The agent client waits as long as it asked the browser to.** A wait
+  given in milliseconds, and an "ask" for a page that never loads, were
+  cut off at 60 s; and a batch of steps no longer changes the list it
+  was given.
+
 ## 2026-11-24 — two months on the browser, round 19 (part seventy-four: the address bar, third look)
 
 - **Names on your own network stay at home.** Typing nas.lab, pi.hole,

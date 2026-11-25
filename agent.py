@@ -287,7 +287,7 @@ def _wait_for(req, given=None):
     if given:
         return float(given)
     try:
-        server = float(req.get("timeout") or 0)
+        server = float(req.get("timeout") or req.get("timeout_ms") or 0)
     except (TypeError, ValueError):
         server = 0.0
     # download's timeout is in seconds (the browser waits up to 1800 s
@@ -297,6 +297,10 @@ def _wait_for(req, given=None):
         server /= 1000.0
     elif not server:
         server = 120.0    # the browser's own default for a download
+    if req.get("op") == "ask":
+        # the browser gives up on a page that never loads after 60 s and
+        # says so; a client that also gave up at 60 s never heard it
+        server = max(server, 60.0)
     return max(60.0, server + 30.0)
 
 
@@ -345,6 +349,7 @@ def run(steps, stop_on_error=True):
             if stop_on_error:
                 break
             continue
+        one = dict(one)       # his list stays as he wrote it
         given = one.pop("timeout_s", None)
         answer = call(one, timeout=_wait_for(one, given))
         out.append(answer)
