@@ -67129,9 +67129,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not url.lower().split("#")[0].endswith(".pdf"):
             return False
         at = self.pdf_place(url=url, view=view)
-        if at and at > 1 and "#page=" not in url:
+        base, _, frag = url.partition("#")
+        # a link's own #zoom=100 or #view=FitH stays, after the page:
+        # tacked on behind it, "zoom=100#page=12" was one odd parameter
+        # and the page never came back (353)
+        asks = [p.split("=")[0].lower() for p in frag.split("&") if p]
+        if at and at > 1 and "page" not in asks:
             try:
-                view.load(QUrl(url + "#page=%d" % at))
+                view.load(QUrl(base + "#page=%d" % at
+                               + ("&" + frag if frag else "")))
             except RuntimeError:
                 return False
             self.flash(self._ui_str("pdfBackTo") % at)
@@ -78469,15 +78475,23 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 page.pdfPrintingFinished.disconnect(done)
             except TypeError:
                 pass
+            # a huge page that finished after the timer gave up: the PDF
+            # is there, so the row says so instead of "failed" (353)
+            if late and ok and entry.get("state") == "failed":
+                entry["state"] = "active"
             self._pdf_finished(entry, path, ok, widget)
+
+        late = []
+
+        def timed_out():
+            late.append(True)
+            self._pdf_finished(entry, path, False, widget)
 
         page.pdfPrintingFinished.connect(done)
         view.printToPdf(str(path))
         # a print that never reports back would hold this record on
         # "active" forever: unremovable, unclearable, name reserved
-        QTimer.singleShot(PDF_TIMEOUT_MS,
-                          lambda: self._pdf_finished(entry, path, False,
-                                                     widget))
+        QTimer.singleShot(PDF_TIMEOUT_MS, timed_out)
         return entry
 
     def _pdf_finished(self, entry, path, ok, widget):

@@ -22260,7 +22260,9 @@ if br.vault is not None and not br.vault_locked():
     br.vault.set_entry = lambda *a, **k: _saved332.append(a) or {"id": "x"}
     try:
         br.generate_for_page(view=_gp332, then=lambda s: _g332.update(v=s))
-        H.wait_for(lambda: _flash332, 8000)
+        # the page's own "came over http" note can flash first: wait
+        # for the one this check is about
+        H.wait_for(lambda: br._ui_str("genNotSaved") in _flash332, 8000)
         H.spin(200)
     finally:
         br.vault.__dict__.pop("set_entry", None)
@@ -23104,7 +23106,7 @@ br.save_config = lambda *a, **k: None
 try:
     _n352 = br.revoke_all_permissions()
     _log352 = [e for e in br.config.get("permissionLog") or []
-               if "352" in e.get("key", "")]
+               if "352.example" in e.get("key", "")]
 finally:
     br.save_config = _save352
     for _k, _v in _cfg352.items():
@@ -23115,6 +23117,41 @@ finally:
 check("352 revoke all logs each grant it takes back, and counts only grants",
       _n352 == 1 and [e["what"] for e in _log352] == ["revoked"],
       str((_n352, _log352)))
+
+# 353: a PDF link's own #zoom= stays, and the saved page still comes back
+class _View353:
+    def __init__(self, u):
+        self.u, self.loaded = u, []
+    def url(self):
+        return B.QUrl(self.u)
+    def load(self, q):
+        self.loaded.append(q.toString())
+_cfg353 = {k: br.config.get(k) for k in ("pdfPlace", "pdfRemember")}
+_save353 = br.save_config
+br.save_config = lambda *a, **k: None
+try:
+    br.config["pdfRemember"] = True
+    br.config["pdfPlace"] = {"https://x353.example/doc.pdf": 12}
+    _vz353 = _View353("https://x353.example/doc.pdf#zoom=100")
+    _r1 = br.restore_pdf_place(_vz353)
+    _vp353 = _View353("https://x353.example/doc.pdf#page=3")
+    _r2 = br.restore_pdf_place(_vp353)
+finally:
+    br.save_config = _save353
+    for _k, _v in _cfg353.items():
+        if _v is None:
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+check("353 a PDF opened with #zoom= goes back to its page, the zoom kept",
+      _r1 == 12 and _vz353.loaded ==
+      ["https://x353.example/doc.pdf#page=12&zoom=100"]
+      and _r2 is False and not _vp353.loaded,
+      str((_r1, _vz353.loaded, _r2, _vp353.loaded)))
+_ssrc353 = __import__("inspect").getsource(B.Browser.save_as_pdf)
+check("353 (source) a PDF finished after the timeout is marked done",
+      "if late and ok and entry.get(\"state\") == \"failed\"" in _ssrc353
+      and "QTimer.singleShot(PDF_TIMEOUT_MS, timed_out)" in _ssrc353)
 
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-25 — two months on the browser, round 22 (part seventy-seven: the PDF viewer, third look)
+
+- **Back to your page, even from a #zoom link.** Opening a PDF you had read before
+  through a link like `doc.pdf#zoom=100` stuck `#page=12` on behind the zoom, so the
+  viewer read it as one odd setting and stayed on page 1. The page now goes first and
+  the link's own settings follow it.
+- **A slow Save as PDF that finishes late says done.** A huge page that took longer
+  than two minutes was marked failed, and stayed failed after the PDF was written. A
+  late success now turns the row to done.
+- Tests: two checks made steady (one waited for the wrong message, one matched the
+  test server's port number).
+
 ## 2026-11-25 — two months on the browser, round 21 (part seventy-six: site permissions, third look)
 
 - **A card left behind by a moved tab no longer stores "always allow".** When a tab
