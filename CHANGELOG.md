@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-26 — two months on the browser, round 27 (part eighty-one: backups, third look)
+
+- **A bookmark backup that cannot be read says so.** Picking a cut-off or unreadable
+  backup changed nothing (correctly), then flashed "0 bookmarks restored ✓" as if it
+  had worked. It now says the backup could not be read and that the bookmarks are
+  unchanged. A real, empty backup still restores as before.
+
 ## 2026-11-26 — two months on the browser, round 26 (part eighty: virtual browsers, third look)
 
 - **Closing a virtual browser cleans up after its tabs.** Its tabs were dropped without

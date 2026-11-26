@@ -23251,6 +23251,26 @@ check("356 (source) closing a browser stops a recording of its tab",
       "self.stop_recording()" in
       __import__("inspect").getsource(B.Browser._close_session_here))
 
+# 357: a backup that cannot be read is not reported as "0 restored"
+_bd357 = br.bookmark_backup_dir(); _bd357.mkdir(parents=True, exist_ok=True)
+_bf357 = _bd357 / "bookmarks-2001-03-57.json"
+_bf357.write_text("[{\"id\": \"x\", cut off", encoding="utf-8")
+_bm357 = list(br.bookmarks)
+_q357 = B.QMessageBox.question
+_fl357 = []
+try:
+    B.QMessageBox.question = staticmethod(
+        lambda *a, **k: B.QMessageBox.StandardButton.Yes)
+    br.flash = lambda msg, *a, **k: _fl357.append(str(msg))
+    _r357 = br.ask_restore_backup("bookmarks-2001-03-57.json")
+finally:
+    B.QMessageBox.question = _q357
+    br.__dict__.pop("flash", None)
+    _bf357.unlink()
+check("357 a backup that cannot be read says so and changes nothing",
+      _r357 == 0 and _fl357 == [br._ui_str("bmRestoreFailed")]
+      and br.bookmarks == _bm357, str((_r357, _fl357)))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 
