@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-26 — two months on the browser, round 25 (part seventy-nine: tab groups, third look)
+
+- **A kept group whose browser is gone reopens whole.** Its tabs carried the closed
+  browser's id, which turned into the main browser, so they opened in a new
+  "Work 2" there and left "Work" an empty header. Every tab now goes to the group
+  that was reopened.
+- **Two kept groups of the same name stay apart.** Keeping "Work" from one virtual
+  browser while another browser's "Work" was already kept merged the two and moved
+  the first one's tabs into the second one's cookie jar, logins and all. The second
+  is now kept beside it as "Work 2".
+- **Merged windows keep group colours.** A group that arrived as "Work 2" lost its
+  colour and its folded state.
+
 ## 2026-11-26 — two months on the browser, round 24 (part seventy-eight: reader mode and printing, third look)
 
 - **Every reader tab follows a changed option.** A new width, font size or picture

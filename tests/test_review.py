@@ -23185,6 +23185,39 @@ check("354 a reader option restyles the other reader tab too",
       str([c[:0] + str("max-width: 133ch" in c) for c in _css354]))
 _close_if_open(_a354); _close_if_open(_b354)
 
+# 355: a kept group of another virtual browser is not merged into, a
+# group renamed on arrival keeps its colour, and reopen uses the
+# group's own browser
+_sg355 = br.saved_groups()
+_sg355["Kept355"] = {"colour": "#111111", "session": "other355", "t": 1,
+                     "tabs": [{"u": "https://a355.example/", "t": "a"}]}
+_page288("t355", "<title>t355</title><p>355</p>")
+_v355 = _tab288("/t355"); H.spin(300)
+_g355 = br.ensure_group("Kept355", "#222222", session="main")
+br._move_tab_to_group(br.tabs.indexOf(_v355), _g355); H.spin(300)
+_n355 = br.save_group(_g355, close=True); H.spin(400)
+_a355 = dict(_sg355.get("Kept355") or {})
+_b355 = dict(_sg355.get("Kept355 2") or {})
+check("355 keeping a group beside another browser's kept one of that name "
+      "leaves that one alone",
+      _g355 == "Kept355" and _n355 == 1
+      and _a355.get("session") == "other355" and len(_a355.get("tabs")) == 1
+      and _b355.get("session") == "main"
+      and [e.get("u") for e in _b355.get("tabs", [])] == [srv.url("/t355")],
+      str((_g355, _n355, _a355, _b355)))
+_sg355.pop("Kept355", None); _sg355.pop("Kept355 2", None)
+_close_if_open(_v355)
+_before355 = set(br.groups)
+_r355 = br.ensure_group("Fold355 2", "#333333", session="main")
+br._carry_groups(_before355, {"Fold355": "#abcdef"}, {"Fold355": True})
+check("355 a group renamed on arrival keeps its colour and its fold",
+      br.group_colors.get(_r355) == "#abcdef" and br.collapsed.get(_r355),
+      str((br.group_colors.get(_r355), br.collapsed.get(_r355))))
+br.delete_group(_r355)
+check("355 (source) a reopened group's tabs go to the group's own browser",
+      "home = self.group_sessions.get(group, self.active_session)"
+      in __import__("inspect").getsource(B.Browser.reopen_saved_group))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

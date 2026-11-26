@@ -30917,17 +30917,26 @@ class Browser(QMainWindow):
             self.flash(self._ui_str("groupNothingKept"))
             return 0
         saved = self.saved_groups()
-        old = saved.get(group)
+        here = self.group_sessions.get(group, "main")
+        # a kept "Work" of ANOTHER virtual browser is not this one's: added
+        # to it, its tabs came back in this browser's jar, their logins
+        # gone (355). This one is kept beside it as "Work 2".
+        key, n = group, 1
+        while isinstance(saved.get(key), dict) and str(
+                saved[key].get("session") or "main") != here:
+            n += 1
+            key = "%s %d" % (group, n)
+        old = saved.get(key)
         if isinstance(old, dict) and isinstance(old.get("tabs"), list):
             # kept again under the same name: added to, not replaced
             have = {str(e.get("u")) for e in state if isinstance(e, dict)}
             state = [e for e in old["tabs"] if isinstance(e, dict)
                      and str(e.get("u")) not in have] + state
-        saved[group] = {
+        saved[key] = {
             "colour": self.group_colors.get(group, "#6c7086"),
             # its virtual browser: reopened from another one it came back
             # as an empty header there and its tabs loose
-            "session": self.group_sessions.get(group, "main"),
+            "session": here,
             "t": int(time.time()), "tabs": state}
         self.save_config(quiet=True)
         if close:
@@ -30949,7 +30958,11 @@ class Browser(QMainWindow):
         self.saved_groups().pop(str(name), None)
         self.save_config(quiet=True)
         here = {self._tab_url(w) for _i, w in self._real_tabs(group=group)}
-        rows = [dict(e, g=group, s=session or e.get("s"))
+        # the group's own browser for every row: with its browser gone,
+        # each row's dead sid turned into "main", where the tabs made a
+        # "Work 2" and left "Work" empty (355)
+        home = self.group_sessions.get(group, self.active_session)
+        rows = [dict(e, g=group, s=home)
                 for e in entry.get("tabs", [])
                 if isinstance(e, dict) and str(e.get("u")) not in here]
         return self.open_tab_state(rows)
@@ -31450,10 +31463,16 @@ class Browser(QMainWindow):
         when gathering windows, the fold) they had there. Made here by
         name alone, they took the next colour on the palette."""
         for name in [g for g in self.groups if g not in before]:
-            colour = (colours or {}).get(name)
+            # "Work" may arrive as "Work 2" (another browser's "Work" is
+            # here already): looked up by the new name alone, it lost
+            # its colour and its fold (355)
+            base = re.sub(r" \d+$", "", name)
+            colour = (colours or {}).get(name) or (colours or {}).get(base)
             if colour:
                 self.group_colors[name] = colour
-            if (folded or {}).get(name) and not self.collapsed.get(name):
+            if ((folded or {}).get(name) if name in (folded or {})
+                    else (folded or {}).get(base)) \
+                    and not self.collapsed.get(name):
                 self._toggle_collapse(name)
         self.tabs.tabBar().update()
 
