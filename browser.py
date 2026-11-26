@@ -28595,6 +28595,19 @@ class Browser(QMainWindow):
                 self._drop_share(w)
                 if not self._is_header(w):
                     self._drop_permission_asks(w)   # as close_tab does
+                    # and the rest delete_group does: a recording of this
+                    # tab kept going on a deleted page and lost its frames,
+                    # and fullscreen and the find bar held on to it (356)
+                    if w is getattr(self, "_fs_view", None):
+                        self._exit_page_fullscreen()
+                    if w is getattr(self, "_win_full_view", None):
+                        self._drop_win_full()
+                    bar = getattr(self, "_findbar", None)
+                    if bar is not None:
+                        bar.forget(w)
+                    rec = self.recording_now()
+                    if rec is not None and getattr(rec, "view", None) is w:
+                        self.stop_recording()
                 self.tabs.removeTab(i)
                 w._closed = True
                 w.deleteLater()
@@ -63513,7 +63526,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                         return entry["sid"]
         if not self.config.get("outsideAsk", False):
             return self.active_session
-        names = [entry["name"] for entry in self.sessions]
+        names = self._outside_names()
         if len(names) < 2:
             return self.active_session
         pick, ok = QInputDialog.getItem(
@@ -63521,10 +63534,22 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self._ui_str("outsideAsk") % (host or "?"), names, 0, False)
         if not ok:
             return self.active_session
-        for entry in self.sessions:
-            if entry["name"] == pick:
-                return entry["sid"]
+        # by place, not by name: two "Throwaway" browsers sent the link
+        # to the first whichever one was picked (356)
+        if pick in names:
+            return self.sessions[names.index(pick)]["sid"]
         return self.active_session
+
+    def _outside_names(self):
+        """The browsers' names for the outside-link question, a repeated
+        name numbered ("Throwaway (2)") so each line is one browser."""
+        out, seen = [], {}
+        for entry in self.sessions:
+            name = str(entry.get("name") or entry.get("sid"))
+            seen[name] = seen.get(name, 0) + 1
+            out.append(name if seen[name] == 1
+                       else "%s (%d)" % (name, seen[name]))
+        return out
 
     # ---- a window that comes back as it was ----
     def window_state(self):

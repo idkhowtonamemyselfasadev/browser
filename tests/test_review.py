@@ -23218,6 +23218,39 @@ check("355 (source) a reopened group's tabs go to the group's own browser",
       "home = self.group_sessions.get(group, self.active_session)"
       in __import__("inspect").getsource(B.Browser.reopen_saved_group))
 
+# 356: the outside-link question tells same-named browsers apart, and
+# closing a browser stops a recording of its tab
+_ss356 = br.sessions
+_oc356 = {k: br.config.get(k) for k in ("outsideAsk", "outsideRules")}
+_gi356 = B.QInputDialog.getItem
+_shown356 = []
+try:
+    br.sessions = [{"name": "Browser 1", "sid": "main"},
+                   {"name": "Throwaway", "sid": "t1x356"},
+                   {"name": "Throwaway", "sid": "t2x356"}]
+    br.config["outsideAsk"], br.config["outsideRules"] = True, []
+
+    def _pick356(parent, title, label, items, *a, **k):
+        _shown356.append(list(items))
+        return items[2], True
+    B.QInputDialog.getItem = staticmethod(_pick356)
+    _got356 = br.outside_link_session("https://x356.example/")
+finally:
+    B.QInputDialog.getItem = _gi356
+    br.sessions = _ss356
+    for _k, _v in _oc356.items():
+        if _v is None:
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+check("356 picking the second of two same-named browsers opens the link there",
+      _got356 == "t2x356" and _shown356
+      and _shown356[0] == ["Browser 1", "Throwaway", "Throwaway (2)"],
+      str((_got356, _shown356)))
+check("356 (source) closing a browser stops a recording of its tab",
+      "self.stop_recording()" in
+      __import__("inspect").getsource(B.Browser._close_session_here))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

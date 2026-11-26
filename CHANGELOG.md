@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-26 — two months on the browser, round 26 (part eighty: virtual browsers, third look)
+
+- **Closing a virtual browser cleans up after its tabs.** Its tabs were dropped without
+  the rest of what closing a tab does, so a screen recording of one kept running on a
+  deleted page and lost its frames, and fullscreen and the find bar held on to it.
+- **Two browsers with the same name can be told apart.** With "ask where outside links
+  open" on, two "Throwaway" (or two "Clean room") browsers looked the same, and picking
+  the second sent the link to the first. A repeated name is now numbered, and the pick
+  goes to that exact browser.
+
 ## 2026-11-26 — two months on the browser, round 25 (part seventy-nine: tab groups, third look)
 
 - **A kept group whose browser is gone reopens whole.** Its tabs carried the closed
