@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-26 — two months on the browser, round 24 (part seventy-eight: reader mode and printing, third look)
+
+- **Every reader tab follows a changed option.** A new width, font size or picture
+  setting restyled only the tab it was picked in; a second tab already in reader mode
+  kept the old look until the reader was switched off and on.
+- **The selection reader keeps the same limits.** Reading just a selection used the raw
+  size and width, so a hand-edited font size of 400 came out 400px there while the
+  whole-page reader stayed sane. Both now share one clamp.
+- (Round 23, downloads, third look: nothing confirmed, nothing to change.)
+
 ## 2026-11-25 — two months on the browser, round 22 (part seventy-seven: the PDF viewer, third look)
 
 - **Back to your page, even from a #zoom link.** Opening a PDF you had read before

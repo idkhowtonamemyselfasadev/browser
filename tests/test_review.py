@@ -23153,6 +23153,38 @@ check("353 (source) a PDF finished after the timeout is marked done",
       "if late and ok and entry.get(\"state\") == \"failed\"" in _ssrc353
       and "QTimer.singleShot(PDF_TIMEOUT_MS, timed_out)" in _ssrc353)
 
+# 354: reader numbers are clamped in one place, and a changed option
+# restyles every tab that has the reader on
+_rc354 = {k: br.config.get(k) for k in ("readerWidth", "readerSize")}
+_save354 = br.save_config
+br.save_config = lambda *a, **k: None
+try:
+    br.config["readerSize"], br.config["readerWidth"] = 400, 5
+    _o354 = br.reader_options()
+    _page288("t354", "<title>t354</title><p>reader 354</p>")
+    _a354, _b354 = _tab288("/t354"), _tab288("/t354")
+    _mk354 = ("var s=document.createElement('style');s.id='__readercss';"
+              "document.head.appendChild(s);1")
+    H.js(_a354, _mk354, B.MAIN_WORLD_ID); H.js(_b354, _mk354, B.MAIN_WORLD_ID)
+    br.tabs.setCurrentWidget(_a354); H.spin(200)
+    br.set_reader_option("width", 133); H.spin(800)
+    _css354 = [str(H.js(v, "document.getElementById('__readercss')"
+                           ".textContent", B.MAIN_WORLD_ID))
+               for v in (_a354, _b354)]
+finally:
+    br.save_config = _save354
+    for _k, _v in _rc354.items():
+        if _v is None:
+            br.config.pop(_k, None)
+        else:
+            br.config[_k] = _v
+check("354 reader size and width are clamped where they are read",
+      _o354["size"] == 48 and _o354["width"] == 20, str(_o354))
+check("354 a reader option restyles the other reader tab too",
+      all("max-width: 133ch" in c for c in _css354),
+      str([c[:0] + str("max-width: 133ch" in c) for c in _css354]))
+_close_if_open(_a354); _close_if_open(_b354)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

@@ -41885,9 +41885,13 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
     def reader_options(self):
         """What reader mode is set to: the width, whether pictures are
         shown, whether it hyphenates, and the progress line."""
+        # clamped here, once: the selection reader used the raw numbers
+        # and a hand-edited readerSize of 400 came out 400px there (354)
+        width = _sane_number(self.config.get("readerWidth", 70)) or 70
+        size = _sane_number(self.config.get("readerSize", 19)) or 19
         return {
-            "width": _sane_number(self.config.get("readerWidth", 70)) or 70,
-            "size": _sane_number(self.config.get("readerSize", 19)) or 19,
+            "width": min(max(width, 20), 200),
+            "size": min(max(size, 8), 48),
             "images": bool(self.config.get("readerImages", True)),
             "hyphens": bool(self.config.get("readerHyphens", False)),
             "serif": bool(self.config.get("readerSerif", True)),
@@ -41923,10 +41927,12 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return self.reader_options()
         self.config[table[key]] = value
         self.save_config(quiet=True)
-        view = self.current()
-        page = (self._live_page(view)
-                if view is not None and not self._is_header(view) else None)
-        if page is not None:
+        # every tab with the reader on, not just this one: a second
+        # reader tab kept the old width until toggled off and on (354)
+        for _win, view in self._windows_views():
+            page = self._live_page(view)
+            if page is None:
+                continue
             # redrawn where the reader is on, and left alone where it is
             # off: reader_mode is a toggle, so a new width or font size
             # switched the reader OFF, and from off switched it on
