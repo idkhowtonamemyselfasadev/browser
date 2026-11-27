@@ -23427,6 +23427,97 @@ check("360 the panel's page moves into a tab of the panel's own browser",
       _seen360.get("session") == "main" and _seen360.get("group") is None
       and _seen360.get("blank") == "about:blank", str(_seen360))
 
+# 361: side panel apps -- each app keeps its own view, the panel can
+# stay open across starts
+_cfg361 = {k: br.config.get(k) for k in ("panelApps", "panelApp",
+                                         "panelAlways", "panelUrl")}
+_save361 = br.save_config
+br.save_config = lambda *a, **k: None
+_page288("app361a", "<title>A361</title><p>a")
+_page288("app361b", "<title>B361</title><p>b")
+_ua361, _ub361 = srv.url("/app361a"), srv.url("/app361b")
+try:
+    br.config.pop("panelApps", None)
+    _def361 = [a["name"] for a in br.panel_apps()]
+    br.config["panelApps"] = [{"name": "A", "url": _ua361},
+                              {"name": "B", "url": _ub361}]
+    br.panel_app(_ua361)
+    H.wait_for(lambda: "app361a" in br._panel_view.url().toString(), 8000)
+    _va361 = br._panel_view
+    br.panel_app(_ub361)
+    H.wait_for(lambda: "app361b" in br._panel_view.url().toString(), 8000)
+    _vb361 = br._panel_view
+    br.panel_app(_ua361)
+    _back361 = br._panel_view is _va361 and _va361 is not _vb361
+    _kept361 = "app361b" in _vb361.url().toString()
+    _rail361 = sum(1 for b in br._panel_rail.findChildren(B.QToolButton)
+                   if b.objectName() == "panelapp")
+    check("361 the panel's apps each keep their own page behind the others",
+          _back361 and _kept361 and br.config.get("panelApp") == _ua361
+          and _rail361 >= 3,
+          str((_back361, _kept361, _rail361)))
+    check("361 the usual apps are there before he changes the list",
+          "Discord" in _def361 and "Twitch chat" not in _def361, str(_def361))
+    br.open_panel(_ub361 + "?site361")
+    check("361 a site from the menu goes into the panel's own view",
+          br._panel_view is br._panel_base
+          and br.config.get("panelApp") is None)
+    _t361 = _tab288("/app361a?tab")
+    br.config["panelApps"] = [{"name": "B", "url": _ub361}]
+    br.add_panel_app(_t361)
+    _urls361 = [a["url"] for a in br.panel_apps()]
+    check("361 the page in front can be put in the panel",
+          br._tab_url(_t361) in _urls361 and _ub361 in _urls361, str(_urls361))
+    br.remove_panel_app(br._tab_url(_t361))
+    check("361 an app taken out leaves the rail and its page closes",
+          br._tab_url(_t361) not in [a["url"] for a in br.panel_apps()]
+          and br._tab_url(_t361) not in br._panel_app_views
+          and br._panel_view is br._panel_base)
+    br.toggle_panel(False)
+    br.config["panelAlways"] = True
+    br.config["panelApp"] = _ub361
+    br._panel_at_start()
+    check("361 a panel kept open comes back with the app it had",
+          br._panel.isVisible() and br._panel_view is _vb361)
+    br.config["panelAlways"] = False
+    br.toggle_panel(False)
+    _n361 = 0
+    try:
+        br._app_url, _au361 = "https://app361.example/", br._app_url
+        br.config["panelAlways"] = True
+        _n361 = br._panel_at_start()
+    finally:
+        br._app_url = _au361
+    check("361 an app window does not open the panel at start", _n361 is False)
+finally:
+    for _u361 in list(br._panel_app_views):
+        br.remove_panel_app(_u361)
+    br.save_config = _save361
+    for _k361, _v361 in _cfg361.items():
+        if _v361 is None:
+            br.config.pop(_k361, None)
+        else:
+            br.config[_k361] = _v361
+    br.toggle_panel(False)
+    _close_if_open(_t361) if "_t361" in dir() else None
+
+# 362: at quit every page hears beforeunload / pagehide / unload, so
+# what it writes back there (Discord's login) is kept
+_page288("bye362", "<title>bye362</title><script>window.__bye362=[];"
+         "addEventListener('beforeunload',function(){__bye362.push('b');"
+         "localStorage.setItem('bye362','kept')});"
+         "addEventListener('pagehide',function(){__bye362.push('p')});"
+         "addEventListener('unload',function(){__bye362.push('u')});"
+         "</script>")
+_v362 = _tab288("/bye362")
+import gc as _gc362
+_n362 = B._say_goodbye(B.QApplication.instance(), _gc362)
+_got362 = H.js(_v362, "JSON.stringify([window.__bye362, "
+               "localStorage.getItem('bye362')])", B.MAIN_WORLD_ID)
+check("362 every page hears its goodbye before the browser quits",
+      _n362 >= 1 and _got362 == '[["b","p","u"],"kept"]', str((_n362, _got362)))
+_close_if_open(_v362)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

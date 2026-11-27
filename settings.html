@@ -1253,6 +1253,12 @@
           </span>
           <input type="checkbox" id="mousegestures"><span class="wsw"></span>
         </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_mouseButtonsName">Side mouse buttons go back and forward</span>
+          </span>
+          <input type="checkbox" id="mousebuttons"><span class="wsw"></span>
+        </label>
         <div class="wrow">
           <span class="wlabel">
             <span class="wname" id="t_mouseWheelStep">Wheel step</span>
@@ -1271,20 +1277,18 @@
         <div class="wsub" id="t_keyGlobalHint"></div>
         <div class="wsub" id="globalbinds" style="white-space:pre-wrap;font-family:monospace"></div>
       </div>
+
+    </section>
+
+    <section data-group="keys" data-desc="descShortcuts">
+      <h2 id="t_keysPage">Keyboard shortcuts</h2>
       <div class="panel">
-        <h2 class="sub" id="t_keysTitle">Keyboard shortcuts</h2>
-        <div class="group">
-                                <label class="wrow">
-          <span class="wlabel">
-            <span class="wname" id="t_mouseButtonsName">Side mouse buttons go back and forward</span>
-          </span>
-          <input type="checkbox" id="mousebuttons"><span class="wsw"></span>
-        </label>
+        <div class="wrow">
+          <input type="search" id="keysfilter" style="flex:1;min-width:200px">
+          <button id="keysreset" data-str="tbReset">Back to the usual set</button>
         </div>
         <div id="keyseditor" class="group"></div>
-        <div class="wrow"><button id="keysreset" data-str="tbReset">Back to the usual set</button></div>
       </div>
-
     </section>
 
     <section data-group="make" data-desc="descRecord">
@@ -2241,6 +2245,13 @@
             <span class="wsub" id="t_hoverLinkHint">A line at the bottom left with the real target.</span>
           </span>
           <input type="checkbox" id="hoverlink"><span class="wsw"></span>
+        </label>
+        <label class="wrow">
+          <span class="wlabel">
+            <span class="wname" id="t_panelAlwaysName">Keep the side panel open</span>
+            <span class="wsub" id="t_panelAlwaysHint">It comes back at every start.</span>
+          </span>
+          <input type="checkbox" id="panelalways"><span class="wsw"></span>
         </label>
         <label class="wrow">
           <span class="wlabel">
@@ -4985,6 +4996,7 @@
     document.getElementById("pinnedsite").checked = s.pinnedSite;
     document.getElementById("searchinbar").checked = s.searchInBar;
     document.getElementById("hoverlink").checked = s.hoverLink;
+    document.getElementById("panelalways").checked = !!s.panelAlways;
     document.getElementById("shotredact").checked = s.shotRedact;
     document.getElementById("sortdownloads").checked = s.sortDownloads;
     document.getElementById("openafter").checked = s.openAfterDownload;
@@ -5946,7 +5958,8 @@
             t_openAfterName:"openAfterName",
             t_indexPagesName:"indexPagesName", t_indexPagesHint:"indexPagesHint",
             t_blockNotifName:"blockNotifName", t_blockNotifHint:"blockNotifHint",
-            t_keysTitle:"actCheatSheet",
+            t_keysPage:"actCheatSheet",
+            t_panelAlwaysName:"panelAlwaysName", t_panelAlwaysHint:"panelAlwaysHint",
             t_mouseButtonsName:"mouseButtonsName",
             t_privTrackers:"privTrackers",
             t_privConnections:"privConnections",
@@ -6032,6 +6045,7 @@
           document.getElementById("savednote").textContent = S.setSaved;
           document.getElementById("nomatch").textContent = S.setNoMatch;
           document.getElementById("navfilter").placeholder = S.setFilterPh;
+          document.getElementById("keysfilter").placeholder = S.keysFilter || "";
           document.getElementById("newtaburl").placeholder = S.newTabUrlPh;
           document.getElementById("starturl").placeholder =
             S.startUrlPh || S.newTabUrlPh;
@@ -6506,6 +6520,7 @@
   bindSwitch("pinnedsite", "pinnedSite");
   bindSwitch("searchinbar", "searchInBar");
   bindSwitch("hoverlink", "hoverLink");
+  bindSwitch("panelalways", "panelAlways");
   bindSwitch("shotredact", "shotRedact");
   bindSwitch("sortdownloads", "sortDownloads");
   bindSwitch("openafter", "openAfterDownload");
@@ -6598,9 +6613,20 @@
       });
       row.appendChild(label);
       row.appendChild(input);
+      row.dataset.hay = (a.name + " " + (a.key || "") + " "
+                         + a.default).toLowerCase();
       box.appendChild(row);
     }
+    filterKeys();
   };
+  function filterKeys() {
+    const f = document.getElementById("keysfilter");
+    const want = ((f && f.value) || "").trim().toLowerCase();
+    for (const row of document.querySelectorAll("#keyseditor .wrow"))
+      row.style.display = (!want || (row.dataset.hay || "").includes(want))
+        ? "" : "none";
+  }
+  document.getElementById("keysfilter").addEventListener("input", filterKeys);
   document.getElementById("keysreset").addEventListener("click", () => {
     window._shortcutsNow = {};
     saveSetting("shortcuts", {});

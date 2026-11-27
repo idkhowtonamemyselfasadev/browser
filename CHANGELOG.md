@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-27 — side panel apps, a shortcuts page, and Discord staying signed in
+
+- **Discord no longer logs you out at every restart.** On quit the browser destroyed its
+  pages without the "leaving" events a normal close sends. Discord takes its login out of
+  local storage while it is open and writes it back right then, so it was lost every
+  time. Every page now gets its beforeunload / pagehide / unload before the engine shuts.
+- **Apps in the side panel.** A column of app icons runs down the panel (Discord, Amazon
+  Music, Claude, ChatGPT, Modrinth to start). Each app keeps its own page loaded behind
+  the others, so a chat stays connected and music plays on while you look at another.
+  "+" puts the page in front in the panel; right-click an app to reload or remove it.
+- **Keep the side panel open.** A new switch in Settings → Tabs: the panel comes back at
+  every start, with the app you had in it.
+- **Keyboard shortcuts get their own page in Settings**, with a search box.
+
 ## 2026-11-27 — two months on the browser, round 30 (part eighty-four: notes, side panel and tab sidebar, third look)
 
 - **A private window's panel takes no website, notes drawer or not.** With the notes
