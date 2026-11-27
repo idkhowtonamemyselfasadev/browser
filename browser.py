@@ -30266,6 +30266,10 @@ class Browser(QMainWindow):
         only rather than in a key of its own -- the side he actually
         settles on is in `tabStrip` already, and this is only about
         the half-second between the two presses."""
+        if self._app_url:
+            # no strip in an app window: F9 here wrote tabs-on-the-left
+            # into the shared config for every other window (360)
+            return False
         want = (not self.tab_sidebar_on()) if on is None else bool(on)
         here = str(self.config.get("tabStrip") or "top")
         if here in ("left", "right"):
@@ -30281,6 +30285,8 @@ class Browser(QMainWindow):
         title's 200. Folding it also brings it out, if it was not
         there: a key that folds something invisible does nothing, which
         reads as a broken key."""
+        if self._app_url:
+            return False
         want = (not self.config.get("sidebarFolded", False)) if on is None \
             else bool(on)
         if want and not self.tab_sidebar_on():
@@ -35880,7 +35886,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             total += self._split_size_of(w)
         return total
 
-    def _panel_private_window(self, filled=False):
+    def _panel_private_window(self, filled=False, site=False):
         """A private window shows no website in the side panel.
 
         The panel is the normal cookie jar and keeps its address in
@@ -35894,7 +35900,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             return False
         view = getattr(self, "_panel_view", None)
         try:
-            if view is not None and is_internal_page(view.url()):
+            # site: a website is about to be loaded -- the drawer being
+            # up was let through, and the site went into the normal jar
+            # under "Private window" (360)
+            if (not site and view is not None
+                    and is_internal_page(view.url())):
                 return False
         except RuntimeError:
             pass
@@ -35945,7 +35955,8 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         url = (url or "").strip()
         if not url:
             return False
-        if self._panel_private_window():
+        if (not is_internal_page(as_qurl(url))
+                and self._panel_private_window(site=True)):
             return False
         self._build_panel()
         # the new site first, then the panel: opened first, a panel with
@@ -35983,7 +35994,15 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if not url or url == "about:blank":
             return None
         self.toggle_panel(False)
-        tab = self.new_tab(url=url)
+        # the panel is the main browser's jar: opened in whichever
+        # virtual browser was in front, a signed-in page came up signed
+        # out (360). A private window's tabs stay private.
+        if getattr(self, "_all_private", False):
+            tab = self.new_tab(url=url)
+        else:
+            tab = self.new_tab(url=url, session="main", group=None)
+        if tab is None:
+            return None
         # moved, not copied: left loaded behind the hidden panel the
         # page went on running -- a stream or a call heard twice, its
         # session open in two places -- and the next time the panel
@@ -39699,7 +39718,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             # not written: closing the tab now would lose the page
             self._flash_unsaved(rows)
             return []
-        if close and index >= 0:
+        # a locked or game tab is filed but stays: closing it with
+        # ask=False went past the lock and the game's question (360)
+        if (close and index >= 0 and not getattr(view, "locked", False)
+                and not getattr(view, "_game", False)):
             self.close_tab(index, ask=False)
         self.flash(self._ui_str("todoAdded"))
         return rows

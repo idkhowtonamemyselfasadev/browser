@@ -23343,6 +23343,90 @@ check("359 a changed site rule reaches the other window's tabs too",
       _w359 in _seen359 and br in _seen359, str(len(_seen359)))
 _w359.close(); H.spin(400)
 
+# 360: a to-do's text cannot pose as its link or due date
+_N360 = B.notes
+_rt360 = []
+for _t360 in ("Read <https://a360.example/x> now", "Ship (due: 2026-12-01)"):
+    _l360 = _N360.Desk._todo_line({"text": _t360, "link": "https://r360.example/"})
+    _r360 = _N360.Desk._read_todo_line(_N360.Desk.__new__(_N360.Desk), _l360)
+    _rt360.append((_r360["text"] == _t360, _r360["link"], _r360["due"]))
+check("360 a page title with a link or a due date reads back as it was",
+      _rt360 == [(True, "https://r360.example/", 0)] * 2, str(_rt360))
+
+# 360: a locked tab filed as a to-do stays open
+_v360 = br.new_tab(url=None); H.spin(200)
+_v360.locked = True
+_desk360 = br.desk
+br.desk = lambda *a, **k: type("D", (), {"add_todo": lambda self, *a, **k: [{}]})()
+_fl360 = br.flash
+br.flash = lambda *a, **k: None
+try:
+    br.tab_to_todo(view=_v360); H.spin(200)
+    _still360 = br.tabs.indexOf(_v360) >= 0
+finally:
+    br.__dict__.pop("desk", None)
+    br.__dict__.pop("flash", None)
+    _v360.locked = False
+check("360 a locked tab made into a to-do is not closed", _still360)
+_close_if_open(_v360)
+
+# 360: F9 in an app window leaves the shared strip setting alone
+_strip360 = br.config.get("tabStrip")
+_app360 = br._app_url
+_save360 = br.save_config
+br.save_config = lambda *a, **k: None
+try:
+    br._app_url = "https://app360.example/"
+    _f9360 = (br.toggle_tab_sidebar(), br.fold_tab_sidebar())
+    _after360 = br.config.get("tabStrip")
+finally:
+    br._app_url = _app360
+    br.save_config = _save360
+check("360 F9 in an app window does not move every window's tabs",
+      _f9360 == (False, False) and _after360 == _strip360,
+      str((_f9360, _after360)))
+
+# 360: no site goes into a private window's panel while notes show there
+br._build_panel()
+_pv360 = br._panel_view
+_pu360 = br.config.get("panelUrl")
+_priv360 = br._all_private
+class _FakeView360:
+    def url(self):
+        return br.notes_url()
+br._panel_view = _FakeView360()
+br.flash = lambda *a, **k: None
+try:
+    br._all_private = True
+    _op360 = br.open_panel("https://site360.example/")
+    _pu2360 = br.config.get("panelUrl")
+finally:
+    br._all_private = _priv360
+    br._panel_view = _pv360
+    br.__dict__.pop("flash", None)
+check("360 a private window's panel takes no website over the notes",
+      _op360 is False and _pu2360 == _pu360, str((_op360, _pu2360)))
+
+# 360: the panel's page comes out as a tab of the main browser
+_seen360 = {}
+class _FakeView360b:
+    def url(self):
+        return B.QUrl("https://panel360.example/")
+    def setUrl(self, u):
+        _seen360["blank"] = u.toString()
+br._panel_view = _FakeView360b()
+br.toggle_panel = lambda *a, **k: False
+br.new_tab = lambda *a, **k: _seen360.update(k) or object()
+try:
+    br.panel_to_tab()
+finally:
+    br._panel_view = _pv360
+    br.__dict__.pop("toggle_panel", None)
+    br.__dict__.pop("new_tab", None)
+check("360 the panel's page moves into a tab of the panel's own browser",
+      _seen360.get("session") == "main" and _seen360.get("group") is None
+      and _seen360.get("blank") == "about:blank", str(_seen360))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

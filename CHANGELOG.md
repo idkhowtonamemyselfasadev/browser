@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-27 — two months on the browser, round 30 (part eighty-four: notes, side panel and tab sidebar, third look)
+
+- **A private window's panel takes no website, notes drawer or not.** With the notes
+  drawer open in a private window, picking a site from the panel's menu loaded it with
+  the normal logins under a "Private window" title and saved its address to disk.
+- **"Make a to-do of this tab" leaves a locked or game tab open.** It filed the to-do
+  and closed the tab straight past the lock and the game's "unsaved progress" question.
+- **A page title can no longer pose as a to-do's link or due date.** A title holding
+  `<https://...>` or `(due: ...)` read back with the wrong link, or with a due date
+  nobody set that later rang. Both are now written as Markdown escapes.
+- **The panel's page moves into a tab of the main browser.** With another virtual
+  browser in front, the arrow opened it there, in another cookie jar, signed out.
+- **F9 in an app window changes nothing.** It wrote "tabs on the left" (Shift+F9:
+  folded) into the shared settings, and the next normal window came up that way.
+
 ## 2026-11-27 — two months on the browser, round 29 (part eighty-three: zoom, site rules and forgetting a site, third look)
 
 - **A forgotten site is gone from Recently closed and the snapshots too.** "Forget this

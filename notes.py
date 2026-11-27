@@ -357,7 +357,7 @@ class Desk:
         url = re.search(r"<(https?://[^>]+)>", text)
         if url:
             link = url.group(1)
-            text = text.replace(url.group(0), "").strip()
+            text = text.replace(url.group(0), "", 1).strip()
         when = re.search(r"\(due:\s*([^)]+)\)", text)
         if when:
             due = self._parse_due(when.group(1))
@@ -365,7 +365,8 @@ class Desk:
             # dropped and the line rewritten without it the next
             # time any to-do in the file was ticked or moved
             if due:
-                text = text.replace(when.group(0), "").strip()
+                text = text.replace(when.group(0), "", 1).strip()
+        text = self._todo_unescape(text)
         return {"text": text, "done": found.group(1) != " ",
                 "link": link, "due": due}
 
@@ -417,9 +418,22 @@ class Desk:
                 continue
         return 0
 
+    # A page title like "Read <https://a.example> now" or "Ship (due:
+    # 2026-12-01)" filed as a to-do read back with the title's link as
+    # the row's link and a due date nobody set (360). In the text those
+    # are written as Markdown escapes, which every editor shows as typed.
+    @staticmethod
+    def _todo_escape(text):
+        text = re.sub(r"<(?=https?://)", "&lt;", text)
+        return re.sub(r"\(due:", r"(due\\:", text)
+
+    @staticmethod
+    def _todo_unescape(text):
+        return text.replace("&lt;http", "<http").replace("(due\\:", "(due:")
+
     @staticmethod
     def _todo_line(row):
-        text = " ".join(str(row.get("text", "")).split())
+        text = Desk._todo_escape(" ".join(str(row.get("text", "")).split()))
         if row.get("due"):
             text += " (due: %s)" % time.strftime(
                 "%Y-%m-%d %H:%M", time.localtime(row["due"]))
