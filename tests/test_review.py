@@ -23271,6 +23271,39 @@ check("357 a backup that cannot be read says so and changes nothing",
       _r357 == 0 and _fl357 == [br._ui_str("bmRestoreFailed")]
       and br.bookmarks == _bm357, str((_r357, _fl357)))
 
+# 358: find in all tabs stays in this virtual browser and goes to the
+# tab itself; find and replace writes into the field he is in
+_page288("t358", "<title>t358</title><p>zebra358 zebra358</p>")
+_mine358, _other358 = _tab288("/t358"), _tab288("/t358")
+_sess358 = getattr(_other358, "session", "main")
+_other358.session = "else358"
+_rows358 = []
+try:
+    br.find_in_all_tabs("zebra358", then=lambda r: _rows358.extend(r))
+    H.wait_for(lambda: _rows358, 5000); H.spin(300)
+finally:
+    _other358.session = _sess358
+check("358 find in all tabs leaves another virtual browser's tabs out",
+      [r.get("view") for r in _rows358] == [_mine358]
+      and _rows358[0].get("count") == 2,
+      str([(r.get("title"), r.get("count")) for r in _rows358]))
+_close_if_open(_other358)
+_page288("t358f", "<title>t358f</title><textarea id=a>cat a</textarea>"
+                  "<textarea id=b>cat b</textarea>")
+_f358 = _tab288("/t358f"); H.spin(300)
+H.js(_f358, "window.__deskField = document.getElementById('a');"
+            "document.getElementById('b').focus(); 1", B.MAIN_WORLD_ID)
+_ans358 = []
+br.read_page_tool("replace", view=_f358, then=_ans358.append,
+             arg={"from": "cat", "to": "dog"})
+H.wait_for(lambda: _ans358, 3000)
+_vals358 = H.js(_f358, "[document.getElementById('a').value,"
+                       " document.getElementById('b').value].join('|')",
+                B.MAIN_WORLD_ID)
+check("358 find and replace changes the field he is in, not a remembered one",
+      _vals358 == "cat a|dog b", str((_ans358, _vals358)))
+_close_if_open(_f358); _close_if_open(_mine358)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

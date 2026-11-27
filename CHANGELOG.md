@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-27 — two months on the browser, round 28 (part eighty-two: find in page, third look)
+
+- **Find in all tabs stays in this virtual browser.** It searched every tab in the
+  window, the other virtual browsers' hidden tabs too, and listed their titles with a
+  piece of their text: searching "invoice" in Work showed a mail tab from Personal.
+- **A find-in-all-tabs result goes to that tab.** A row remembered where its tab sat in
+  the strip, so a tab closed or moved while the list was open sent the click to another
+  one. It now goes to the tab itself, unfolding its group if needed.
+- **Find and replace works in the field you are in.** After "Edit in my editor" once,
+  every later find and replace (and the next editor) went on using that old field, and
+  the field you were typing in stayed unchanged. The remembered field is now used only
+  to write the editor's text back, then forgotten.
+
 ## 2026-11-26 — two months on the browser, round 27 (part eighty-one: backups, third look)
 
 - **A bookmark backup that cannot be read says so.** Picking a cut-off or unreadable

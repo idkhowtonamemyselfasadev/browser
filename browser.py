@@ -69870,7 +69870,9 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 then(rows)
             return False
         waiting = []
-        for index, view in self._real_tabs():
+        # this virtual browser's tabs only: another one's hidden mail or
+        # bank tab was searched and its title and text shown here (358)
+        for index, view in self._real_tabs(session=self.active_session):
             page = self._live_page(view)
             if page is None:
                 continue
@@ -69879,7 +69881,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             def got(raw, v=view, i=index):
                 found = self._as_json(raw) or {}
                 if found.get("count"):
-                    rows.append({"tab": i,
+                    rows.append({"tab": i, "view": v,
                                  "title": self._tab_label(v) or "",
                                  "url": self._tab_url(v) or "",
                                  "count": int(found.get("count", 0)),
@@ -69928,9 +69930,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                                       self._elide(row["title"] or row["url"],
                                                   46)))
                 action.setToolTip(row["first"])
+                # by the tab, not by where it was: a tab closed or moved
+                # while the list was open sent the click elsewhere (358)
                 action.triggered.connect(
-                    lambda _c=False, i=row["tab"]:
-                    self.tabs.setCurrentIndex(i))
+                    lambda _c=False, v=row["view"]: self.focus_tab(v))
         self.find_in_all_tabs(text, then=fill)
         return menu
 
@@ -81025,7 +81028,12 @@ DESK_TOOLS = {
 })()""",
 
 "bigeditor": r"""(function (text) {
-  var el = window.__deskField || document.activeElement;
+  /* the field he is in when it is read; the one read when it is written
+     back, and then forgotten: kept, every later tool went on writing
+     into that old field (358) */
+  var el = document.activeElement;
+  if (text !== null && window.__deskField && window.__deskField.isConnected)
+    el = window.__deskField;
   if (!el || (el.tagName !== "TEXTAREA" && el.tagName !== "INPUT")) {
     return "nofield";
   }
@@ -81033,6 +81041,7 @@ DESK_TOOLS = {
      editor puts it in a file, the big editor on the screen */
   if ((el.type || "").toLowerCase() === "password") return "nofield";
   if (text !== null) {
+    window.__deskField = null;
     el.value = text;
     el.dispatchEvent(new Event("input", {bubbles: true}));
     return "done";
@@ -81310,7 +81319,8 @@ READ_TOOLS = {
 })()""",
 
 "replace": r"""(function (what) {
-  var el = window.__deskField || document.activeElement;
+  /* the field he is in, not one an editor once read (358) */
+  var el = document.activeElement;
   if (!el || (el.tagName !== "TEXTAREA" && el.tagName !== "INPUT")) {
     return "nofield";
   }
