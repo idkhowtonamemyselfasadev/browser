@@ -6,6 +6,8 @@
   pages without the "leaving" events a normal close sends. Discord takes its login out of
   local storage while it is open and writes it back right then, so it was lost every
   time. Every page now gets its beforeunload / pagehide / unload before the engine shuts.
+- **Closing just the Discord tab keeps you signed in too.** A closed tab's page now gets
+  the same goodbye before it is deleted (muted at once, gone a moment later).
 - **Apps in the side panel.** A column of app icons runs down the panel (Discord, Amazon
   Music, Claude, ChatGPT, Modrinth to start). Each app keeps its own page loaded behind
   the others, so a chat stays connected and music plays on while you look at another.

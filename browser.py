@@ -28053,7 +28053,7 @@ class Browser(QMainWindow):
         was_front = self.tabs.currentWidget() is w
         self.tabs.removeTab(index)
         w._closed = True
-        w.deleteLater()
+        self._goodbye_then_delete(w)
         # a group whose last tab closes disappears, like in Chrome. The
         # split half is out of the strip but still its member: with only
         # that left the group (and its colour) was deleted under it, and
@@ -28078,6 +28078,48 @@ class Browser(QMainWindow):
             self._focus_after_close(index, back=back)
         self._update_tab_count()
         self._ensure_tab_or_quit()
+
+    def _goodbye_then_delete(self, w):
+        """A closed tab's page hears beforeunload / pagehide / unload
+        before it goes. Deleted outright it never did, and what a page
+        writes back there was lost: closing the Discord tab logged him
+        out of Discord (363, as 362 at quit). Muted at once, gone a
+        moment after its handlers ran, and at most 1.5 s later."""
+        page = None
+        try:
+            if isinstance(w, QWebEngineView):
+                page = w.page()
+                # a private page keeps nothing to write back, and its
+                # jar is deleted a turn after the last private tab
+                # closes: a page outliving it crashed the process
+                if (page is None or page.renderProcessPid() <= 0
+                        or page.profile().isOffTheRecord()
+                        or page.url().scheme() not in ("http", "https")):
+                    page = None
+        except RuntimeError:
+            page = None
+        if page is None:
+            w.deleteLater()
+            return False
+        done = [False]
+
+        def gone(*_args):
+            if done[0]:
+                return
+            done[0] = True
+            try:
+                w.deleteLater()
+            except RuntimeError:
+                pass
+        try:
+            page.setAudioMuted(True)
+            page.runJavaScript(_GOODBYE_JS, MAIN_WORLD_ID,
+                               lambda _r: QTimer.singleShot(300, gone))
+        except (RuntimeError, TypeError):
+            gone()
+            return False
+        QTimer.singleShot(1500, gone)
+        return True
 
     def _focus_after_close(self, closed_at, back=None):
         """Where to land after a tab closes.

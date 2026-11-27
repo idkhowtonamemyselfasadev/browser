@@ -23518,6 +23518,20 @@ check("362 every page hears its goodbye before the browser quits",
       _n362 >= 1 and _got362 == '[["b","p","u"],"kept"]', str((_n362, _got362)))
 _close_if_open(_v362)
 
+# 363: a closed tab's page hears its goodbye before it is deleted
+_page288("bye363", "<title>bye363</title><script>"
+         "addEventListener('beforeunload',function(){"
+         "localStorage.setItem('bye363','kept')});</script>")
+_v363 = _tab288("/bye363")
+H.js(_v363, "localStorage.removeItem('bye363');1", B.MAIN_WORLD_ID)
+_close_if_open(_v363)
+H.spin(1800)
+_v363b = _tab288("/bye363?again")
+_got363 = H.js(_v363b, "localStorage.getItem('bye363')", B.MAIN_WORLD_ID)
+check("363 a closed tab's page writes back what it keeps on the way out",
+      _got363 == "kept", str(_got363))
+_close_if_open(_v363b)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 
