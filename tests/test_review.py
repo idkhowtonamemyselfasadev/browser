@@ -23304,6 +23304,45 @@ check("358 find and replace changes the field he is in, not a remembered one",
       _vals358 == "cat a|dog b", str((_ans358, _vals358)))
 _close_if_open(_f358); _close_if_open(_mine358)
 
+# 359: forgetting a site takes it off the closed-tab list and out of the
+# snapshots; site rules reach every window's tabs
+_ct359 = list(br._closed_tabs)
+_sn359 = br.config.get("tabSnapList")
+_save359 = br.save_config
+br.save_config = lambda *a, **k: None
+try:
+    br._closed_tabs.append({"url": "https://gone359.example/p", "title": "g"})
+    br._closed_tabs.append({"url": "https://stay359.example/p", "title": "s"})
+    br.config["tabSnapList"] = [
+        {"t": 1, "tabs": [{"u": "https://gone359.example/a"}]},
+        {"t": 2, "tabs": [{"u": "https://gone359.example/b"},
+                          {"u": "https://stay359.example/c"}]}]
+    br.forget_site("gone359.example")
+    _left359 = [t.get("url") for t in br._closed_tabs if "359" in str(t.get("url"))]
+    _snaps359 = [[r["u"] for r in s["tabs"]] for s in br.config["tabSnapList"]]
+finally:
+    br.save_config = _save359
+    br._closed_tabs[:] = _ct359
+    if _sn359 is None:
+        br.config.pop("tabSnapList", None)
+    else:
+        br.config["tabSnapList"] = _sn359
+check("359 a forgotten site leaves the closed-tab list and the snapshots",
+      _left359 == ["https://stay359.example/p"]
+      and _snaps359 == [["https://stay359.example/c"]],
+      str((_left359, _snaps359)))
+_w359 = br.new_window(); H.spin(500)
+_seen359 = []
+_real359 = B.Browser.apply_site_privacy
+try:
+    B.Browser.apply_site_privacy = lambda self, v, *a, **k: _seen359.append(self)
+    br._reapply_site_rules()
+finally:
+    B.Browser.apply_site_privacy = _real359
+check("359 a changed site rule reaches the other window's tabs too",
+      _w359 in _seen359 and br in _seen359, str(len(_seen359)))
+_w359.close(); H.spin(400)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

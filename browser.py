@@ -32811,8 +32811,23 @@ class Browser(QMainWindow):
         return menu
 
     def _reapply_site_rules(self):
-        for _, view in self._real_tabs():
-            self.apply_site_privacy(view)
+        # every window's tabs, popped-out ones too: the config is shared,
+        # and a second window's tabs kept JavaScript on after "no
+        # JavaScript here" until they next loaded (359)
+        for win in self.windows() or [self]:
+            try:
+                views = [v for _, v in win._real_tabs()]
+                views += [getattr(m, "view", None)
+                          for m in list(getattr(win, "_popouts", None) or [])]
+            except RuntimeError:
+                continue
+            for view in views:
+                if view is None:
+                    continue
+                try:
+                    win.apply_site_privacy(view)
+                except RuntimeError:
+                    pass
 
     def clear_site_data(self, host, by_rule=False):
         """This site's cookies and storage, in every virtual browser,
@@ -32990,6 +33005,25 @@ class Browser(QMainWindow):
                 if isinstance(book, dict):
                     for key in [k for k in book if this_key(k)]:
                         book.pop(key, None)
+        # the closed-tab list and the saved snapshots: Ctrl+Shift+T and
+        # "Restore snapshot" brought the forgotten site back, and the
+        # snapshots kept its pages and titles in config.json (359)
+        for win in self.windows() or [self]:
+            closed = getattr(win, "_closed_tabs", None)
+            if isinstance(closed, list):
+                closed[:] = [t for t in closed if not (isinstance(t, dict)
+                             and this_site(as_qurl(t.get("url", "")).host()))]
+        snaps = []
+        for snap in self.config.get("tabSnapList") or []:
+            if not isinstance(snap, dict):
+                continue
+            tabs = [r for r in snap.get("tabs") or [] if not (
+                isinstance(r, dict)
+                and this_site(as_qurl(r.get("u", "")).host()))]
+            if tabs:
+                snaps.append(dict(snap, tabs=tabs))
+        if "tabSnapList" in self.config:
+            self.config["tabSnapList"] = snaps
         self.known_hosts = {h for h in self.known_hosts if not this_site(h)}
         try:
             _write_json(HOSTS_FILE, sorted(self.known_hosts))

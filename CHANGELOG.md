@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-27 — two months on the browser, round 29 (part eighty-three: zoom, site rules and forgetting a site, third look)
+
+- **A forgotten site is gone from Recently closed and the snapshots too.** "Forget this
+  site" cleared its history, cookies and permissions, but Ctrl+Shift+T and the
+  Recently closed menu still reopened its pages, and the saved tab snapshots kept its
+  addresses and titles in config.json until a full history wipe.
+- **A site rule reaches every window at once.** Turning JavaScript or images off (or
+  back on) for a site changed only the window it was set in; the same site's tabs in
+  another window or a popped-out tab kept the old setting until they next loaded.
+
 ## 2026-11-27 — two months on the browser, round 28 (part eighty-two: find in page, third look)
 
 - **Find in all tabs stays in this virtual browser.** It searched every tab in the
