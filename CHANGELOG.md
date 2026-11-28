@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-28 — two months on the browser, round 33 (part eighty-seven: downloads, third look)
+
+- **"Download again" goes out in the virtual browser the file came from.** It went
+  through whatever tab was in front, so a file behind a login in another virtual browser
+  came back as a login page (or not at all) and landed in the wrong folder.
+
 ## 2026-11-28 — two months on the browser, round 32 (part eighty-six: the Settings page, third look)
 
 - **"Keep these sites awake" takes a pasted address.** A whole link (a YouTube video, a

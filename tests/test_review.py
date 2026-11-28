@@ -23616,6 +23616,33 @@ finally:
 check("365 a new minimum text size reaches the other window's pages", _re365 == [1])
 _w365.close(); H.spin(400)
 
+# 366: "download again" fetches in the virtual browser the file came from
+_ss366 = list(br.sessions)
+br.sessions.append({"name": "W366", "sid": "s366"})
+_e366 = {"id": -366, "name": "r366.zip", "dir": "/nonexistent366",
+         "url": "https://dl366.example/r.zip", "state": "done", "session": "s366"}
+br.downloads.append(_e366)
+_seen366 = {}
+class _Pg366:
+    def download(self, url, name):
+        _seen366["url"] = url.toString()
+class _V366:
+    def page(self):
+        return _Pg366()
+br.new_tab = lambda *a, **k: _seen366.update(k) or _V366()
+br.flash = lambda *a, **k: None
+try:
+    br.download_again(-366)
+finally:
+    br.__dict__.pop("new_tab", None)
+    br.__dict__.pop("flash", None)
+    br.downloads.remove(_e366)
+    br.sessions[:] = _ss366
+    getattr(br, "_refetch_urls", set()).discard("https://dl366.example/r.zip")
+check("366 download again goes out in the virtual browser the file came from",
+      _seen366.get("session") == "s366" and _seen366.get("url", "").startswith("https://dl366"),
+      str(_seen366))
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

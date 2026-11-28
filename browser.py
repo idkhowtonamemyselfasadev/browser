@@ -48781,12 +48781,20 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.flash(self._ui_str("dlAgainNo"))
             return False
         view = self.current()
+        # in the virtual browser it came from: through whatever tab was
+        # in front it went out without that browser's login and landed
+        # in the wrong folder (366). One that was deleted since: main.
+        want = str(entry.get("session") or "main")
+        if not any(e.get("sid") == want for e in self.sessions):
+            want = "main"
         # a normal tab: from a private one the file came again without
         # its cookies, kept no row and was held under a private name
         if (view is None or self._is_header(view)
-                or getattr(view, "private", False)):
+                or getattr(view, "private", False)
+                or str(getattr(view, "session", "main") or "main") != want
+                or getattr(view, "group", None) is not None):
             view = self.new_tab(QUrl("about:blank"), switch=False,
-                                private=False)
+                                private=False, session=want, group=None)
         page = view.page() if view is not None else None
         if page is None:
             return False
@@ -75068,7 +75076,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         self.dllay.insertWidget(self.dllay.count() - 1, widget)
         self.dlbar.show()
         if not self._page_is_private(self._download_page(request)):
-            self._track_download(request, source=source)
+            # the virtual browser it came from, for "download again" (366)
+            came = self._download_view(self._download_page(request))
+            self._track_download(request, source=source,
+                                 session=str(getattr(came, "session", "")
+                                             or "main"))
         # the tab a target=_blank link to a .zip leaves behind: blank,
         # titleless, and never going anywhere
         self._close_download_tab(self._download_page(request))
@@ -75130,10 +75142,11 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             self.downloads.remove(oldest)
         return entry
 
-    def _track_download(self, request, source=""):
+    def _track_download(self, request, source="", session="main"):
         """Follow a running download until it lands, then keep the record."""
         entry = self._add_download_entry(
-            {"name": request.downloadFileName(),
+            {"session": str(session or "main"),
+             "name": request.downloadFileName(),
              "dir": request.downloadDirectory(),
              "url": request.url().toString(), "t": int(time.time()),
              "state": "active", "received": 0, "size": 0, "paused": False,
