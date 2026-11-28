@@ -23532,6 +23532,54 @@ check("363 a closed tab's page writes back what it keeps on the way out",
       _got363 == "kept", str(_got363))
 _close_if_open(_v363b)
 
+# 364: theme files, VS Code JSONC, theme export errors, history import
+import tempfile as _tf364, os as _os364, json as _js364
+_d364 = _tf364.mkdtemp()
+_fl364 = []
+br.flash = lambda m, *a, **k: _fl364.append(str(m))
+_save364 = br.save_config
+br.save_config = lambda *a, **k: None
+_sct364 = br.save_custom_theme
+_saved364 = []
+br.save_custom_theme = lambda name, seed, **k: _saved364.append(dict(seed)) or "custom364"
+try:
+    _p364 = _os364.path.join(_d364, "bad.json")
+    open(_p364, "w").write(_js364.dumps(
+        {"browserTheme": 1, "name": "b364", "colors": {"bg": 123, "text": "white"}}))
+    _bad364 = br.import_theme(_p364)
+    _p364b = _os364.path.join(_d364, "vs.json")
+    open(_p364b, "w").write('{\n  // dark\n  "colors": {\n    "editor.background": "#1e1e2e",\n'
+                            '    "editor.foreground": "#cdd6f4", /* x */\n  },\n}\n')
+    _vs364 = br.import_theme(_p364b)
+    check("364 a theme file with broken colours is refused, a VS Code one with comments taken",
+          _bad364 == "" and _vs364 == "custom364"
+          and _saved364 and _saved364[-1].get("bg") == "#1e1e2e",
+          str((_bad364, _vs364, _saved364)))
+    _fl364.clear()
+    _ex364 = br.export_theme(path=_os364.path.join(_d364, "no", "such", "t.json"))
+    check("364 a theme export that cannot be written says so",
+          _ex364 == "" and len(_fl364) == 1 and "{}" not in _fl364[0], str(_fl364))
+    _lk364 = br._history_locked
+    _n364 = len(br.history)
+    try:
+        br._history_locked = True
+        _fl364.clear()
+        _imp364 = br.import_history_from(path=_p364, which="chrome")
+    finally:
+        br._history_locked = _lk364
+    check("364 no history import while the sealed history is shut",
+          _imp364 is False and len(br.history) == _n364 and _fl364, str(_fl364))
+    _ff364 = _os364.path.join(_d364, "a.sqlite"), _os364.path.join(_d364, "b.sqlite")
+    for _i364, _f364 in enumerate(_ff364):
+        open(_f364, "w").write("x")
+        _os364.utime(_f364, (1000 + _i364 * 1000, 1000 + _i364 * 1000))
+    check("364 the Firefox profile used last comes first",
+          sorted(_ff364, key=B._newest_of_sqlite, reverse=True)[0] == _ff364[1])
+finally:
+    br.__dict__.pop("flash", None)
+    br.save_config = _save364
+    br.save_custom_theme = _sct364
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-28 — two months on the browser, round 31 (part eighty-five: import and export, third look)
+
+- **A theme file with broken colours is refused** instead of being saved with Mocha's
+  background or text in their place, which could leave dark text on a dark page.
+- **VS Code themes with comments or trailing commas import.** They are JSONC, and every
+  one of them was called a bad theme. A five-digit "#abcde" is no longer read as a colour.
+- **A theme export that cannot be written says so**, and a theme name with "/" in it no
+  longer points the save dialog at a folder that does not exist.
+- **Firefox history comes from the profile you use**, the one changed last, not
+  whichever folder the disk listed first.
+- **No history import while the encrypted history is locked.** With nothing to compare
+  against, every address looked new and came back twice at unlock.
+- **"N pages taken over" counts what was kept** after the history cap trimmed it.
+
 ## 2026-11-27 — side panel apps, a shortcuts page, and Discord staying signed in
 
 - **Discord no longer logs you out at every restart.** On quit the browser destroyed its

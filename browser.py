@@ -11693,6 +11693,56 @@ def theme_contrast(seed):
     return out
 
 
+def _hex6(value):
+    """'#rgb', '#rgba', '#rrggbb' or '#rrggbbaa' as '#rrggbb', else ''.
+    The old pattern also took a five-digit '#abcde' as '#aabbcc'."""
+    if not isinstance(value, str):
+        return ""
+    hit = re.fullmatch(r"#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})",
+                       value.strip())
+    if not hit:
+        return ""
+    digits = hit.group(1)
+    if len(digits) <= 4:
+        digits = "".join(c * 2 for c in digits[:3])
+    return "#" + digits[:6].lower()
+
+
+def _strip_jsonc(text):
+    """JSON with // and /* */ comments and trailing commas, as JSON.
+    Strings are walked over, so a "//" inside one stays."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        else:
+            out.append(ch)
+            i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+
+
+def _newest_of_sqlite(path):
+    """When a SQLite file (or its write-ahead log) last changed."""
+    best = 0.0
+    for one in (Path(path), Path(str(path) + "-wal")):
+        try:
+            best = max(best, one.stat().st_mtime)
+        except OSError:
+            pass
+    return best
+
+
 def kitty_colours(text):
     """The colours out of a kitty.conf, a base16 YAML or a VS Code
     theme JSON — whichever of the three this text is.
@@ -11707,7 +11757,12 @@ def kitty_colours(text):
         try:
             data = json.loads(raw)
         except ValueError:
-            data = {}
+            # VS Code themes are JSONC: comments and trailing commas
+            # made a good theme "bad" (364)
+            try:
+                data = json.loads(_strip_jsonc(raw))
+            except ValueError:
+                data = {}
         colours = data.get("colors") if isinstance(data, dict) else {}
         if isinstance(colours, dict):
             pick = {"bg": ("editor.background",),
@@ -11723,14 +11778,9 @@ def kitty_colours(text):
                     # colours; the short one used to come through as
                     # "#rgb", fail the theme's own check and quietly
                     # turn into Mocha's colour instead
-                    hit = re.fullmatch(
-                        r"#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?",
-                        value) if isinstance(value, str) else None
-                    if hit:
-                        six = hit.group(1)
-                        if len(six) == 3:
-                            six = "".join(c * 2 for c in six)
-                        found[token] = "#" + six.lower()
+                    six = _hex6(value)
+                    if six:
+                        found[token] = six
                         break
         return found
     # kitty.conf: "background #1e1e2e", "color4 #89b4fa"
@@ -65730,13 +65780,21 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         his history are left alone."""
         import shutil as _shutil
         import sqlite3
+        if getattr(self, "_history_locked", False):
+            # the sealed rows are not here to check against: every
+            # address looked new and came back twice at unlock (364)
+            self.flash(self._ui_str("vaultLockedShort"))
+            return False
         which = str(which or "chrome").lower()
         if path is None:
             tries = {
                 "chrome": [Path.home() / ".config/google-chrome/Default/History",
                            Path.home() / ".config/chromium/Default/History"],
-                "firefox": list(
-                    (Path.home() / ".mozilla/firefox").glob("*/places.sqlite"))
+                # the profile used last: glob order picked an old
+                # "xxxx.default" over the live "default-release" (364)
+                "firefox": sorted(
+                    (Path.home() / ".mozilla/firefox").glob("*/places.sqlite"),
+                    key=_newest_of_sqlite, reverse=True)
             }.get(which, [])
             path = next((one for one in tries if Path(one).is_file()), None)
         if path is None or not Path(str(path)).is_file():
@@ -65801,6 +65859,7 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                     pass
         have = {str(row.get("url") or "") for row in self.history}
         added = 0
+        fresh = []
         trimmed = None
         for url, title, when in rows:
             url = str(url or "")
@@ -65817,8 +65876,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
                 # the history, the address bar and the history page
                 continue
             have.add(url)
-            self.history.append({"url": url, "title": str(title or "")[:300],
-                                 "t": int(when or 0), "i": which})
+            row = {"url": url, "title": str(title or "")[:300],
+                   "t": int(when or 0), "i": which}
+            self.history.append(row)
+            fresh.append(row)
             added += 1
         if added:
             self.history.sort(key=lambda row: int(row.get("t") or 0))
@@ -65829,6 +65890,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             if trimmed is not None:
                 # the words and thumbnails of the rows that were cut
                 self._history_dropped(trimmed)
+                # counted before the cut: "500 pages taken over" when the
+                # cap kept none of them (364)
+                kept = {id(row) for row in self.history}
+                added = sum(1 for row in fresh if id(row) in kept)
         self.flash(self._ui_str("impHistDone") % added)
         return added
 
@@ -74236,14 +74301,19 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
         if path is None:
             path, _f = QFileDialog.getSaveFileName(
                 self, self._ui_str("themeExport"),
-                str(Path.home() / ((entry.get("name") or key) + ".json")),
+                str(Path.home() / (re.sub(r'[\\/:*?"<>|]+', "-",
+                                          entry.get("name") or key).strip()
+                                   or "theme") + ".json"),
                 "Themes (*.json)")
             if not path:
                 return ""
         try:
             Path(str(path)).write_text(json.dumps(payload, indent=2),
                                        encoding="utf-8")
-        except OSError:
+        except OSError as err:
+            # said nothing at all: he thought it had been written (364)
+            self.flash(self._ui_str("pwExportFailed").format(
+                err.strerror or err))
             return ""
         self.flash(self._ui_str("themeExported") % Path(str(path)).name)
         return str(path)
@@ -74272,8 +74342,10 @@ html.__reader .__readerbody pre, html.__reader .__readerbody code {
             data = None
         if isinstance(data, dict) and isinstance(data.get("colors"), dict) \
                 and data.get("browserTheme"):
-            seed = {k: v for k, v in data["colors"].items()
-                    if k in THEME_SEEDS}
+            # checked here like every other format: "#fff" or 123 for
+            # the background passed, and was saved as Mocha's (364)
+            seed = {k: _hex6(v) for k, v in data["colors"].items()
+                    if k in THEME_SEEDS and _hex6(v)}
             name = str(data.get("name") or name)
             note = str(data.get("note") or "")
         else:
