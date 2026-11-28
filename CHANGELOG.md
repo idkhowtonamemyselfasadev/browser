@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-28 — Discord really stays signed in now (fix 367)
+
+- **The goodbye is a real one.** The earlier fix sent each page script-made
+  beforeunload/pagehide/unload events. Discord takes its login out of local storage
+  while it is open and only writes it back on a real (trusted) beforeunload, so it
+  ignored them and still logged you out. Every web page is now sent to about:blank before
+  the engine shuts (and a closed tab before it is deleted), which fires the real events.
+  A "leave this site?" question during the quit is answered yes instead of shown.
+
 ## 2026-11-28 — two months on the browser, round 33 (part eighty-seven: downloads, third look)
 
 - **"Download again" goes out in the virtual browser the file came from.** It went

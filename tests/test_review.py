@@ -23501,26 +23501,25 @@ finally:
     br.toggle_panel(False)
     _close_if_open(_t361) if "_t361" in dir() else None
 
-# 362: at quit every page hears beforeunload / pagehide / unload, so
-# what it writes back there (Discord's login) is kept
-_page288("bye362", "<title>bye362</title><script>window.__bye362=[];"
-         "addEventListener('beforeunload',function(){__bye362.push('b');"
-         "localStorage.setItem('bye362','kept')});"
-         "addEventListener('pagehide',function(){__bye362.push('p')});"
-         "addEventListener('unload',function(){__bye362.push('u')});"
-         "</script>")
+# 362: at quit every page is sent away for real, so what it writes back
+# on a trusted beforeunload (Discord's login) is kept
+_page288("bye362", "<title>bye362</title><script>"
+         "addEventListener('beforeunload',function(e){if(e.isTrusted)"
+         "localStorage.setItem('bye362','kept')});</script>")
 _v362 = _tab288("/bye362")
+H.js(_v362, "localStorage.removeItem('bye362');1", B.MAIN_WORLD_ID)
 import gc as _gc362
-_n362 = B._say_goodbye(B.QApplication.instance(), _gc362)
-_got362 = H.js(_v362, "JSON.stringify([window.__bye362, "
-               "localStorage.getItem('bye362')])", B.MAIN_WORLD_ID)
-check("362 every page hears its goodbye before the browser quits",
-      _n362 >= 1 and _got362 == '[["b","p","u"],"kept"]', str((_n362, _got362)))
+_n362 = B._say_goodbye(B.QApplication.instance(), _gc362, only=[_v362.page()])
+_v362b = _tab288("/bye362?again")
+_got362 = H.js(_v362b, "localStorage.getItem('bye362')", B.MAIN_WORLD_ID)
+check("362 every page hears a real goodbye before the browser quits",
+      _n362 == 1 and _got362 == "kept" and not B._LEAVING, str((_n362, _got362)))
 _close_if_open(_v362)
+_close_if_open(_v362b)
 
 # 363: a closed tab's page hears its goodbye before it is deleted
 _page288("bye363", "<title>bye363</title><script>"
-         "addEventListener('beforeunload',function(){"
+         "addEventListener('beforeunload',function(e){if(e.isTrusted)"
          "localStorage.setItem('bye363','kept')});</script>")
 _v363 = _tab288("/bye363")
 H.js(_v363, "localStorage.removeItem('bye363');1", B.MAIN_WORLD_ID)

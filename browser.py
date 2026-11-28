@@ -19521,6 +19521,8 @@ class WebPage(QWebEnginePage):
         super().javaScriptAlert(origin, msg)
 
     def javaScriptConfirm(self, origin, msg):
+        if _LEAVING:
+            return True
         answer = self._dialog("confirm", msg)
         if answer is not None:
             return bool(answer)
@@ -28160,8 +28162,8 @@ class Browser(QMainWindow):
         """A closed tab's page hears beforeunload / pagehide / unload
         before it goes. Deleted outright it never did, and what a page
         writes back there was lost: closing the Discord tab logged him
-        out of Discord (363, as 362 at quit). Muted at once, gone a
-        moment after its handlers ran, and at most 1.5 s later."""
+        out of Discord (363, as 362 at quit). Muted at once, sent to
+        about:blank, gone a moment after that, and at most 2 s later."""
         page = None
         try:
             if isinstance(w, QWebEngineView):
@@ -28189,13 +28191,16 @@ class Browser(QMainWindow):
             except RuntimeError:
                 pass
         try:
+            # sent away for real: a scripted beforeunload is not trusted,
+            # and Discord only writes its login back on a trusted one
             page.setAudioMuted(True)
-            page.runJavaScript(_GOODBYE_JS, MAIN_WORLD_ID,
-                               lambda _r: QTimer.singleShot(300, gone))
+            page.loadFinished.connect(
+                lambda _ok: QTimer.singleShot(300, gone))
+            page.setUrl(QUrl("about:blank"))
         except (RuntimeError, TypeError):
             gone()
             return False
-        QTimer.singleShot(1500, gone)
+        QTimer.singleShot(2000, gone)
         return True
 
     def _focus_after_close(self, closed_at, back=None):
@@ -85679,41 +85684,46 @@ def _end_process(win):
     os._exit(0)
 
 
-_GOODBYE_JS = (
-    "(function(){"
-    "try{window.dispatchEvent(new Event('beforeunload',{cancelable:true}))}"
-    "catch(e){}"
-    "try{window.dispatchEvent(new PageTransitionEvent('pagehide',"
-    "{persisted:false}))}catch(e){}"
-    "try{window.dispatchEvent(new Event('unload'))}catch(e){}"
-    "return 1})()")
+#: set while the browser is on its way out: a "leave this site?" from a
+#: page being sent away then is answered yes, not put on screen (362)
+_LEAVING = []
 
 
-def _say_goodbye(app, gc, wait=1.5):
-    """beforeunload, pagehide and unload in every live page, and a
-    moment for what they write to reach the storage. No navigation: a
-    page that asks "leave this site?" would hold the quit on a dialog."""
+def _say_goodbye(app, gc, wait=2.0, only=None):
+    """Every live web page sent to about:blank before the engine goes,
+    and a moment for what its leaving handlers write to reach the
+    storage.
+
+    A real navigation, not events dispatched from a script: Discord
+    takes its login out of local storage while it is open and puts it
+    back only on a real (trusted) beforeunload, so a scripted one did
+    nothing and every restart still logged him out (362)."""
     pages = []
-    for page in [o for o in gc.get_objects()
-                 if isinstance(o, QWebEnginePage)]:
+    for page in (only if only is not None else
+                 [o for o in gc.get_objects()
+                  if isinstance(o, QWebEnginePage)]):
         try:
-            if not sip.isdeleted(page) and page.url().scheme() in (
-                    "http", "https"):
+            if (not sip.isdeleted(page) and page.renderProcessPid() > 0
+                    and page.url().scheme() in ("http", "https")):
                 pages.append(page)
         except RuntimeError:
             continue
+    if only is None:
+        _LEAVING.append(True)
     done = [0]
     for page in pages:
         try:
             # a closed window's pages are hidden, and a hidden page can
-            # be frozen: a frozen page runs no script at all
+            # be frozen: a frozen page runs no handler at all
             if page.lifecycleState() != QWebEnginePage.LifecycleState.Active:
                 page.setLifecycleState(QWebEnginePage.LifecycleState.Active)
         except (RuntimeError, AttributeError):
             pass
         try:
-            page.runJavaScript(_GOODBYE_JS, MAIN_WORLD_ID,
-                               lambda _r: done.__setitem__(0, done[0] + 1))
+            page.setAudioMuted(True)
+            page.loadFinished.connect(
+                lambda _ok: done.__setitem__(0, done[0] + 1))
+            page.setUrl(QUrl("about:blank"))
         except (RuntimeError, TypeError):
             done[0] += 1
     deadline = time.monotonic() + wait
