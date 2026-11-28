@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-28 — two months on the browser, round 32 (part eighty-six: the Settings page, third look)
+
+- **"Keep these sites awake" takes a pasted address.** A whole link (a YouTube video, a
+  player page) was saved as typed and never matched the site, so that tab was put to
+  sleep anyway. It is now kept as its site.
+- **A new minimum text size reaches every window**, split halves and popped-out tabs
+  too, not only the tabs of the window Settings was opened from.
+
 ## 2026-11-28 — two months on the browser, round 31 (part eighty-five: import and export, third look)
 
 - **A theme file with broken colours is refused** instead of being saved with Mocha's

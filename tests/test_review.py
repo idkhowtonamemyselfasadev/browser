@@ -23580,6 +23580,42 @@ finally:
     br.save_config = _save364
     br.save_custom_theme = _sct364
 
+# 365: keep-awake takes pasted addresses as sites; a new minimum text
+# size reloads every window's pages
+_ka365 = br.config.get("keepAwake")
+_save365 = br.save_config
+br.save_config = lambda *a, **k: None
+try:
+    br.bridge.setSetting("keepAwake", _js364.dumps(
+        ["https://www.YouTube.com/watch?v=x", "music.example.com/player", " "]))
+    _kept365 = list(br.config.get("keepAwake") or [])
+finally:
+    br.save_config = _save365
+    if _ka365 is None:
+        br.config.pop("keepAwake", None)
+    else:
+        br.config["keepAwake"] = _ka365
+check("365 a pasted address in keep-awake is kept as its site",
+      _kept365 == ["music.example.com", "youtube.com"], str(_kept365))
+_w365 = br.new_window(); H.spin(500)
+_v365 = _w365.new_tab(url=None); H.spin(200)
+H.load(_v365, srv.url("/app361a?w365"))
+_re365 = []
+_v365.reload = lambda *a: _re365.append(1)
+_mf365 = br.config.get("minFont")
+_af365 = br.apply_font_size
+br.apply_font_size = lambda *a, **k: None
+try:
+    br.bridge.setSetting("minFont", "0")
+finally:
+    br.__dict__.pop("apply_font_size", None)
+    if _mf365 is None:
+        br.config.pop("minFont", None)
+    else:
+        br.config["minFont"] = _mf365
+check("365 a new minimum text size reaches the other window's pages", _re365 == [1])
+_w365.close(); H.spin(400)
+
 check("the suite's own window stayed on the open-window list",
       br in B.WINDOWS)
 

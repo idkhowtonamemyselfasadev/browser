@@ -17626,9 +17626,19 @@ class Bridge(QObject):
             browser.save_config(quiet=True)
             browser.flash(browser._ui_str("gpuRestart"))
         elif key == "keepAwake":
-            browser.config["keepAwake"] = sorted(
-                {str(h).lower().removeprefix("www.")
-                 for h in (value or []) if str(h).strip()})
+            # a pasted address is kept as its site: stored whole, it
+            # never matched a host and the tab went to sleep anyway (365)
+            hosts = set()
+            for h in (value if isinstance(value, list) else []):
+                text = str(h).strip().lower()
+                if not text:
+                    continue
+                host = as_qurl(text if "//" in text
+                               else "http://" + text).host()
+                host = (host or "").removeprefix("www.")
+                if host:
+                    hosts.add(host)
+            browser.config["keepAwake"] = sorted(hosts)
             browser.save_config(quiet=True)
         elif key == "freezeAfter":
             for win in browser._all_windows():
@@ -18069,10 +18079,27 @@ class Bridge(QObject):
             browser.save_config(quiet=True)   # the cleared site levels too
         elif key == "minFont":
             browser.apply_font_size()
-            for i in range(browser.tabs.count()):
-                w = browser.tabs.widget(i)
-                if hasattr(w, "reload") and w.url().scheme() in ("http", "https"):
-                    w.reload()
+            # every window's pages, split halves and popped-out ones:
+            # only this window's strip was reloaded (365)
+            views = [v for _win, v in browser._windows_views()]
+            for win in browser._all_windows():
+                try:
+                    views += [getattr(m, "view", None)
+                              for m in list(getattr(win, "_popouts", None)
+                                            or [])]
+                except RuntimeError:
+                    continue
+            seen = set()
+            for w in views:
+                if w is None or id(w) in seen:
+                    continue
+                seen.add(id(w))
+                try:
+                    if hasattr(w, "reload") and w.url().scheme() in (
+                            "http", "https"):
+                        w.reload()
+                except RuntimeError:
+                    pass
 
     @pyqtSlot(str, str, result=str)
     def setPageUrl(self, which, text):
